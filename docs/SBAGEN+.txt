@@ -558,9 +558,15 @@ space:
   f<dur>        Set duration for cross-fades
   c<cnt>        Number of channels: 1 or 2
   w<bool>       Swap stereo on second channel? 0 no, or 1 yes
+  i             If this is the first char after SBAGEN_LOOPER= and is
+                followed by whitespace, play the
+                section from start-of-file up to d<min> once as an intro
   d<min>-<max>  Select section of OGG file data to use as source audio
   #<digits>     Following settings apply only to one section
   
+The optional intro mode ('i') only has an effect when d<min> is greater
+than zero.
+
 The default is something like "s99999999 f1 c1 w1 d0-99999999",
 i.e. segments are the full length of the audio, taken out of the whole
 of the audio file, repeated forever with a 1 second cross-fade at

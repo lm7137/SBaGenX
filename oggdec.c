@@ -26,6 +26,7 @@ void looper_term() ;
 int looper_read(int *dst, int dlen) ;
 static void looper_sched() ;
 static void looper_sched2() ;
+static int looper_read_intro(int *dst, int dlen) ;
 
 static OggVorbis_File oggfile;
 static short *ogg_buf0, *ogg_buf1, *ogg_rd, *ogg_end;
@@ -154,6 +155,9 @@ ogg_read(int *dst, int dlen) {
 //	  f<dur>	Set duration for cross-fades
 //	  c<cnt>	Number of channels: 1 or 2
 //	  w<bool>	Swap stereo on second channel? 0 no, or 1 yes
+//	  i		If present right after SBAGEN_LOOPER= and followed by
+//			whitespace, play intro once from start of file up to
+//			d<min>, before looping starts
 //	  d<min>-<max>	Set part of OGG file data to use as source audio (in seconds)
 //	  #<digits>	Following settings apply only to section <digits>
 //	  
@@ -187,6 +191,7 @@ static int seg0, seg1;	// Segment size range in samples (min/max) including fade
 static int ch2;		// Channel 2 mode: 0 off, 1 on
 static int ch2_swap;	// Channel 2 swapped-stereo?  0 off, 1 on
 static uint del_amp;	// Fade in/out delta in amplitude per sample
+static int looper_intro_cnt;  // Intro samples still to be played before looping starts
 
 typedef struct {
    OggVorbis_File ogg;	// File
@@ -331,6 +336,7 @@ looper_init() {
    ov_callbacks oc;
    vorbis_comment *vc;
    char *looper;
+   int intro= 0;
    int prev_flag= 0;
    int on;
 
@@ -389,6 +395,18 @@ looper_init() {
    ch2_swap= 1;
    on= 1;
    if (mix_cnt < 0) mix_cnt= 0;
+
+   // Optional intro mode: if 'i' is the very first character of the
+   // value and is followed by whitespace, play from start-of-file up
+   // to d<min> once before looping.
+   if (*looper == 'i') {
+      if (isspace((unsigned char)looper[1]))
+	 intro= 1;
+      else
+	 warn("Ignoring SBAGEN_LOOPER intro flag: 'i' must be followed by whitespace");
+      looper++;
+   }
+
    while (*looper) {
       char flag, *p;
       double val;
@@ -446,6 +464,10 @@ looper_init() {
    }
    if (seg1 < seg0) seg1= seg0;
 
+   looper_intro_cnt= (intro && datbase > 0) ? datbase : 0;
+   if (intro && !looper_intro_cnt)
+      warn("SBAGEN_LOOPER intro requested, but d-start is not positive; ignoring intro");
+
    // Calculate delta to use for fades
    del_amp= 0xFFFFFFFFU/fade_cnt;		// Rely on rounding down here
    if (del_amp * (uint)fade_cnt < 0xF0000000)	// Paranoid check
@@ -455,8 +477,14 @@ looper_init() {
    //   debug("Segment range %d-%d, fade %d, amp delta per sample %d", 
    //	      seg0, seg1, fade_cnt, del_amp);
 
-   // Init three streams and start off
-   looper_sched();
+   // Start with intro if requested; otherwise schedule looping immediately.
+   if (looper_intro_cnt) {
+      int rv= ov_pcm_seek(&str[0].ogg, 0);
+      if (rv) error("UNEXPECTED: Can't seek to start for SBAGEN_LOOPER intro: %d", rv);
+      str[0].b_rd= str[0].b_end= str[0].buf0;
+   } else {
+      looper_sched();
+   }
 
    // Start a thread to handle generation of the mix stream
    inbuf_start(looper_read, 256*1024);	// 1024K buffer: 3s@44.1kHz
@@ -469,6 +497,39 @@ looper_term() {
       ov_clear(&str[a].ogg);
       free(str[a].buf0);
    }
+}
+
+// Read intro samples (from start of file) before looping begins.
+static int
+looper_read_intro(int *dst, int dlen) {
+   AStream *aa= &str[0];
+   int out= 0;
+
+   while (out < dlen) {
+      if (aa->b_rd == aa->b_end) {
+	 int sect;
+	 char *buf= (char*)aa->buf0;
+	 int len= (aa->buf1-aa->buf0)*sizeof(aa->buf0[0]);
+	 int rv= ov_read(&aa->ogg, buf, len, &sect);
+	 if (rv < 0) {
+	    warn("Recoverable error in Ogg stream");
+	    continue;
+	 }
+	 if (rv == 0) break;
+	 if (rv & 3)
+	    error("UNEXPECTED: ov_read() returned a partial sample count: %d", rv);
+	 aa->b_rd= aa->buf0;
+	 aa->b_end= aa->buf0 + (rv/2);
+      }
+
+      while (out < dlen && aa->b_rd != aa->b_end) {
+	 *dst++ += *aa->b_rd++ * ogg_mult;
+	 *dst++ += *aa->b_rd++ * ogg_mult;
+	 out++;
+      }
+   }
+
+   return out;
 }
 
 int 
@@ -484,6 +545,24 @@ looper_read(int *dst, int dlen) {
       int a;
       int len= (dst1-dst0)/2;
       int resched= 0;
+
+      // If intro mode is active, play intro audio first, then switch to looping.
+      if (looper_intro_cnt > 0) {
+	 int got;
+
+	 if (len > looper_intro_cnt) len= looper_intro_cnt;
+	 got= looper_read_intro(dst0, len);
+	 dst0 += got * 2;
+	 looper_intro_cnt -= got;
+
+	 if (got < len) {
+	    warn("SBAGEN_LOOPER intro hit EOF before d-start; switching to looping");
+	    looper_intro_cnt= 0;
+	 }
+	 if (!looper_intro_cnt)
+	    looper_sched();
+	 continue;
+      }
 
       for (a= 0; a<3; a++) {
 	 AStream *aa= &str[a];
