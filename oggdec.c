@@ -192,6 +192,7 @@ static int ch2;		// Channel 2 mode: 0 off, 1 on
 static int ch2_swap;	// Channel 2 swapped-stereo?  0 off, 1 on
 static uint del_amp;	// Fade in/out delta in amplitude per sample
 static int looper_intro_cnt;  // Intro samples still to be played before looping starts
+static int looper_intro_first_seg; // Next scheduled segment starts at d<min> with no fade-in
 
 typedef struct {
    OggVorbis_File ogg;	// File
@@ -465,6 +466,7 @@ looper_init() {
    if (seg1 < seg0) seg1= seg0;
 
    looper_intro_cnt= (intro && datbase > 0) ? datbase : 0;
+   looper_intro_first_seg= looper_intro_cnt ? 1 : 0;
    if (intro && !looper_intro_cnt)
       warn("SBAGEN_LOOPER intro requested, but d-start is not positive; ignoring intro");
 
@@ -719,6 +721,17 @@ looper_sched() {
 
       // Select the segment length
       bb->cnt_all= cnt_all= zxrand(seg0, seg1+1);
+
+      // First segment after intro: start exactly at d<min> with no fade-in,
+      // so playback continues seamlessly from intro into the loop section.
+      if (!aa && looper_intro_first_seg) {
+	 bb->off= 0;
+	 bb->mode= 3;			// Hold mode (skip fade-in)
+	 bb->cnt= cnt_all - fade_cnt;
+	 bb->amp= 0xFFFFFFFFU;		// Full amplitude
+	 bb->del= 0;
+	 looper_intro_first_seg= 0;
+      }
       
       // Look for a segment starting-point which doesn't overlap the
       // segment playing on the other channel.  First range below is
@@ -808,6 +821,17 @@ looper_sched2() {
 	 } 
 	 bb->cnt_all= cnt_all;
 	 if (bb->cnt < 0) bb->cnt= 0;
+
+	 // First segment after intro: start exactly at d<min> with
+	 // no fade-in so the intro joins the loop section seamlessly.
+	 if (!aa && looper_intro_first_seg) {
+	    bb->off= 0;
+	    bb->mode= 3;		// Hold mode (skip fade-in)
+	    bb->cnt= cnt_all - fade_cnt;
+	    bb->amp= 0xFFFFFFFFU;	// Full amplitude
+	    bb->del= 0;
+	    looper_intro_first_seg= 0;
+	 }
 
 	 // Look for a segment starting-point which doesn't overlap
 	 // the segment playing on the other channel, or if that

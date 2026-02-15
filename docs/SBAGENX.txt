@@ -565,7 +565,9 @@ space:
   #<digits>     Following settings apply only to one section
   
 The optional intro mode ('i') only has an effect when d<min> is greater
-than zero.
+than zero.  When enabled, the first post-intro segment always starts
+at d<min> and begins immediately (without a fade-in) for a seamless
+intro-to-loop transition.
 
 The default is something like "s99999999 f1 c1 w1 d0-99999999",
 i.e. segments are the full length of the audio, taken out of the whole
