@@ -44,16 +44,16 @@ jobs:
           docker compose run --rm build
 
           # Copy generated artifacts
-          if [ -f "dist/sbagen+-linux64" ]; then
-            cp dist/sbagen+-linux64 artifacts/sbagen+-linux64
+          if [ -f "dist/sbagenx-linux64" ]; then
+            cp dist/sbagenx-linux64 artifacts/sbagenx-linux64
           fi
 
-          if [ -f "dist/sbagen+-linux32" ]; then
-            cp dist/sbagen+-linux32 artifacts/sbagen+-linux32
+          if [ -f "dist/sbagenx-linux32" ]; then
+            cp dist/sbagenx-linux32 artifacts/sbagenx-linux32
           fi
 
-          if [ -f "dist/sbagen+-windows-setup.exe" ]; then
-            cp dist/sbagen+-windows-setup.exe artifacts/sbagen+-windows-setup.exe
+          if [ -f "dist/sbagenx-windows-setup.exe" ]; then
+            cp dist/sbagenx-windows-setup.exe artifacts/sbagenx-windows-setup.exe
           fi
 
       - name: Generate SHA256 checksums
@@ -65,7 +65,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sbagen-plus-${{ steps.version.outputs.version }}
+          name: sbagenx-${{ steps.version.outputs.version }}
           path: |
             artifacts/
             checksums.txt
@@ -104,9 +104,9 @@ jobs:
         run: |
           ./macos-build-libs.sh
 
-      - name: Build SBaGen+ for macOS
+      - name: Build SBaGenX for macOS
         run: |
-          ./macos-build-sbagen+.sh
+          ./macos-build-sbagenx.sh
 
       - name: Create macOS installer
         run: |
@@ -117,8 +117,8 @@ jobs:
           mkdir -p artifacts
 
           # Copy DMG installer
-          if [ -f "dist/SBaGen+-Installer.dmg" ]; then
-            cp dist/SBaGen+-Installer.dmg artifacts/SBaGen+-Installer.dmg
+          if [ -f "dist/SBaGenX-Installer.dmg" ]; then
+            cp dist/SBaGenX-Installer.dmg artifacts/SBaGenX-Installer.dmg
           fi
 
       - name: Generate SHA256 checksums
@@ -130,7 +130,7 @@ jobs:
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sbagen-plus-macos-${{ steps.version.outputs.version }}
+          name: sbagenx-macos-${{ steps.version.outputs.version }}
           path: |
             artifacts/
             checksums-macos.txt
@@ -147,13 +147,13 @@ jobs:
       - name: Download Linux/Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          name: sbagen-plus-${{ needs.build-linux-windows.outputs.version }}
+          name: sbagenx-${{ needs.build-linux-windows.outputs.version }}
           path: linux-windows/
 
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
-          name: sbagen-plus-macos-${{ needs.build-macos.outputs.version }}
+          name: sbagenx-macos-${{ needs.build-macos.outputs.version }}
           path: macos/
 
       - name: Combine artifacts

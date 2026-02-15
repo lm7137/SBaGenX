@@ -1,5 +1,5 @@
 //
-//	SBaGen+ - Sequenced Brainwave Generator
+//	SBaGenX - Sequenced Brainwave Generator
 //
 //	Original version (c) 1999-2011 Jim Peters <jim@uazu.net>
 //	This fork maintained by Ruan <https://ruan.sh/>
@@ -248,14 +248,14 @@ void init_mac_audio();
 
 void 
 help() {
-   printf("SBaGen+ - Sequenced Brainwave Generator, version " VERSION
+   printf("SBaGenX - Sequenced Brainwave Generator, version " VERSION
      NL "Original version (c) 1999-2011 Jim Peters, http://uazu.net/"
      NL "This fork maintained by Ruan, https://ruan.sh/"
 	  NL "Released under the GNU GPL v2. See file COPYING."
 	  NL 
-	  NL "Usage: sbagen+ [options] seq-file ..."
-	  NL "       sbagen+ [options] -i tone-specs ..."
-	  NL "       sbagen+ [options] -p pre-programmed-sequence-specs ..."
+	  NL "Usage: sbagenx [options] seq-file ..."
+	  NL "       sbagenx [options] -i tone-specs ..."
+	  NL "       sbagenx [options] -p pre-programmed-sequence-specs ..."
 	  NL
 	  NL "Options:  -h        Display this help-text"
 	  NL "          -Q        Quiet - don't display running status"
@@ -314,26 +314,26 @@ help() {
 
 void 
 usage() {
-  error("SBaGen+ - Sequenced Brainwave Generator, version " VERSION 
+  error("SBaGenX - Sequenced Brainwave Generator, version " VERSION 
 	NL "Original version (c) 1999-2011 Jim Peters, http://uazu.net/"
 	NL "This fork maintained by Ruan, https://ruan.sh/"
 	NL "Released under the GNU GPL v2. See file COPYING."
 	NL 
-	NL "Usage: sbagen+ [options] seq-file ..."
-	NL "       sbagen+ [options] -i tone-specs ..."
-	NL "       sbagen+ [options] -p pre-programmed-sequence-specs ..."
+	NL "Usage: sbagenx [options] seq-file ..."
+	NL "       sbagenx [options] -i tone-specs ..."
+	NL "       sbagenx [options] -p pre-programmed-sequence-specs ..."
 	NL
-	NL "SBaGen+ is a fork of the original SBaGen with added features."
-	NL "For full usage help, type 'sbagen+ -h'."
+	NL "SBaGenX is a fork of the original SBaGen with added features."
+	NL "For full usage help, type 'sbagenx -h'."
 #ifdef EXIT_KEY
 	NL
 	NL "Windows users please note that this utility is designed to be run as the"
 	NL "associated application for SBG files.  This should have been set up for you by"
 	NL "the installer.  You can run all the SBG files directly from the desktop by"
 	NL "double-clicking on them, and edit them using NotePad from the right-click menu."
-	NL "Alternatively, SBaGen+ may be run from the command line, or from"
-	NL "BAT/PS1 files.  SBaGen+ is powerful software -- it is worth the effort of figuring"
-	NL "all this out.  See SBAGEN+.TXT for the full documentation."
+	NL "Alternatively, SBaGenX may be run from the command line, or from"
+	NL "BAT/PS1 files.  SBaGenX is powerful software -- it is worth the effort of figuring"
+	NL "all this out.  See SBAGENX.TXT for the full documentation."
 #endif
 	NL);
 }
@@ -948,7 +948,7 @@ scanOptions(int *acp, char ***avp) {
 		error("Expecting integer after -R");
 	     break;
 	  default:
-	     error("Option -%c not known; run 'sbagen+ -h' for help", opt);
+	     error("Option -%c not known; run 'sbagenx -h' for help", opt);
 	 }
       }
    }
@@ -2435,7 +2435,7 @@ setup_device(void) {
     
     if (!opt_Q) {
       if(rate != out_rate && out_rate_def)
-        warn("*** WARNING: Device output rate is %d Hz, but SBaGen+ is configured for %d Hz ***", rate, out_rate);
+        warn("*** WARNING: Device output rate is %d Hz, but SBaGenX is configured for %d Hz ***", rate, out_rate);
       warn("ALSA audio output %d-bit at %d Hz with period of %lu samples, %d ms per period",
            out_mode ? 16 : 8, out_rate, period_size, out_buf_ms);
     }
@@ -2589,7 +2589,7 @@ setup_device(void) {
     device_out_rate = (int)streamDesc.mSampleRate;
 
     if (streamDesc.mChannelsPerFrame != 2) 
-      error("SBaGen+ requires a stereo output device -- \n"
+      error("SBaGenX requires a stereo output device -- \n"
 	    "default output has %d channels",
 	    streamDesc.mChannelsPerFrame);
 
@@ -2624,7 +2624,7 @@ setup_device(void) {
     // Report settings      
     if (!opt_Q) {
        if (device_out_rate != out_rate && out_rate_def) 
-	      warn("*** WARNING: Device output rate is %d Hz, but SBaGen+ is configured for %d Hz ***", device_out_rate, out_rate);
+	      warn("*** WARNING: Device output rate is %d Hz, but SBaGenX is configured for %d Hz ***", device_out_rate, out_rate);
        warn("Outputting %d-bit audio at %d Hz to \"%s\",\n"
 	    "  using %d %d-sample fragments, %d ms per fragment",
 	    (int)streamDesc.mBitsPerChannel, out_rate, deviceName,

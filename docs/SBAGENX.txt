@@ -175,16 +175,16 @@ The following example commands should be typed at the
 shell prompt provided by your operating system, prepared as explained
 above.
 
->> sbagen+
+>> sbagenx
 
 This gives a brief usage information.
  
->> sbagen+ -h
+>> sbagenx -h
 
 This gives the full usage information, showing the version number and
 the full list of options.  Check this for any new features.
  
->> sbagen+ prog-chakras-1.sbg
+>> sbagenx prog-chakras-1.sbg
 
 This runs the sequence in file 'prog-chakras-1.sbg', starting playing
 whatever should be playing at the current moment, according to the
@@ -199,17 +199,17 @@ Windows, macOS and UNIX.  (Most UNIX users already know this, but
 it seems that many Windows users don't know about this standard DOS
 key combination).
 
->> sbagen+ -p drop 00ds+
+>> sbagenx -p drop 00ds+
 
 This runs one of the built-in pre-defined sequences called "drop" with
 the given parameters (see later for an explanation).
 
->> sbagen+ -m river1.ogg -p drop 00ds+ mix/99
+>> sbagenx -m river1.ogg -p drop 00ds+ mix/99
 
 This runs the same sequence, but mixes it with water sounds from the
 loopable OGG file river1.ogg.
 
->> sbagen+ -m river2.ogg -p slide 200+10/1 mix/99
+>> sbagenx -m river2.ogg -p slide 200+10/1 mix/99
 
 This runs another built-in pre-defined sequence and mixes it with
 other river sounds.  This particular sequence keeps you in alpha for a
@@ -218,7 +218,7 @@ half-hour session whilst dropping the carrier right down to zero.
 To test a sequence (without waiting the full 24 hours for it to play
 through), run with the -q 'quick' option:
 
->> sbagen+ -q 120 prog-chakras-1.sbg
+>> sbagenx -q 120 prog-chakras-1.sbg
 
 This example runs the sequence at 120 times the normal speed.  This is
 quite useful to check that a new sequence is going to do what you
@@ -228,7 +228,7 @@ To check that SBaGen+ has interpreted your sequence-file correctly, use
 the -D option, which dumps a listing of the interpreted sequence
 instead of playing it:
 
->> sbagen+ -D prog-chakras-1.sbg
+>> sbagenx -D prog-chakras-1.sbg
 
 To quickly test a particular tone-set continuously, use the -i
 immediate option.  This is good for experimenting with different
@@ -236,7 +236,7 @@ ideas.  If your shell lets you recall the previous command with
 up-arrow, you can quickly test and fine-tune a tone-set in this way
 before putting it into a sequence:
 
->> sbagen+ -i pink/40 100+1.5/20 200-4/36 400+8/2
+>> sbagenx -i pink/40 100+1.5/20 200-4/36 400+8/2
 
 This incidentally, is an example of a complex brain-state built from
 pink noise, to which is added three frequencies (1.5Hz, 4Hz and 8Hz)
@@ -247,7 +247,7 @@ correctly.
 
 To test isochronic tones, you can use the @ notation. For example:
 
->> sbagen+ -i 300@10/20
+>> sbagenx -i 300@10/20
 
 This creates an isochronic tone with a carrier frequency of 300Hz, pulsing at 
 10Hz (alpha range), with an amplitude of 20%. Unlike binaural beats, isochronic 
@@ -255,7 +255,7 @@ tones can be effective even without headphones.
 
 You can also combine isochronic tones with other sounds:
 
->> sbagen+ -i pink/40 300@10/20
+>> sbagenx -i pink/40 300@10/20
 
 This combines pink noise with an isochronic tone in the alpha range.
 
@@ -263,33 +263,33 @@ This combines pink noise with an isochronic tone in the alpha range.
 
 You can also test specific waveforms for individual tones using the waveform prefix:
 
->> sbagen+ -i square:200+10/20
->> sbagen+ -i triangle:300@8/15
->> sbagen+ -i sawtooth:150+6/25
+>> sbagenx -i square:200+10/20
+>> sbagenx -i triangle:300@8/15
+>> sbagenx -i sawtooth:150+6/25
 
 Or combine different waveforms in a single test:
 
->> sbagen+ -i sine:200+10/15 square:300@8/10
+>> sbagenx -i sine:200+10/15 square:300@8/10
 
 This creates a complex soundscape with a sine wave binaural beat, a square wave 
 isochronic tone, and triangle wave modulated pink noise.
 
 To test waveform-modulated spatial effects with background audio:
 
->> sbagen+ -m river1.ogg -i mix/80 triangle:mixspin:400+6.0/40
->> sbagen+ -m river1.ogg -i mix/75 square:mixpulse:8/50
+>> sbagenx -m river1.ogg -i mix/80 triangle:mixspin:400+6.0/40
+>> sbagenx -m river1.ogg -i mix/75 square:mixpulse:8/50
 
 These create spatial rotation and pulsing effects with waveform modulation.
 
 While you're at it, try the alternate 'spin' effect.  Not everyone
 likes this, but in any case it's there if you want to use it:
 
->> sbagen+ -i spin:300+4.2/80
+>> sbagenx -i spin:300+4.2/80
 
 You can also try the 'mixspin' effect, which applies a spatial rotation to
 audio input instead of to pink noise:
 
->> sbagen+ -m river1.ogg -i mix/80 mixspin:500+8.0/50
+>> sbagenx -m river1.ogg -i mix/80 mixspin:500+8.0/50
 
 The mixspin effect creates an immersive spatial experience where the sound
 appears to rotate around your head. The width parameter (500μs in this example)
@@ -299,7 +299,7 @@ fast it rotates, and the intensity (50%) controls the strength of the effect.
 You can also try the 'mixpulse' effect, which applies a pulse effect to the
 audio input instead of to pink noise:
 
->> sbagen+ -m river1.ogg -i mix/80 mixpulse:10/50
+>> sbagenx -m river1.ogg -i mix/80 mixpulse:10/50
 
 The mixpulse effect creates a rhythmic pulse effect where the sound intensity
 fluctuates at the given rate. The pulse rate is 10Hz and the intensity is 50%.
@@ -308,8 +308,8 @@ If you're having trouble with your soundcard or CPU usage on a very
 old machine, use the -r or -b options to run at a lower output rate or
 bit-width.  For example:
 
->> sbagen+ -r 8000 -i pink/40 100+1.5/20 200+6/30
->> sbagen+ -b 8 -i pink/40 100+1.5/20 200+6/30
+>> sbagenx -r 8000 -i pink/40 100+1.5/20 200+6/30
+>> sbagenx -b 8 -i pink/40 100+1.5/20 200+6/30
 
 SBaGen+ includes several additional options for enhanced control:
 
@@ -317,26 +317,26 @@ The -V option allows you to set a global volume level from 1 to 100
 (default is 100). This affects the final output volume without changing 
 the relative amplitudes between different tones in your sequence:
 
->> sbagen+ -V 50 -i 200+10/20
->> sbagen+ -V 25 -m river1.ogg -p drop 00ds+ mix/99
+>> sbagenx -V 50 -i 200+10/20
+>> sbagenx -V 25 -m river1.ogg -p drop 00ds+ mix/99
 
 The -w option allows you to select the waveform type for binaural beats 
 and isochronic tones. Available options are: sine (default), square, 
 triangle, and sawtooth. Note that sine waves are generally recommended 
 for binaural beats and isochronic tones as they produce the smoothest entrainment effect:
 
->> sbagen+ -w sine -i 200+10/20      # Default sine wave
->> sbagen+ -w square -i 200+10/20    # Square wave (more aggressive)
->> sbagen+ -w triangle -i 200+10/20  # Triangle wave (moderate)
->> sbagen+ -w sawtooth -i 200+10/20  # Sawtooth wave
+>> sbagenx -w sine -i 200+10/20      # Default sine wave
+>> sbagenx -w square -i 200+10/20    # Square wave (more aggressive)
+>> sbagenx -w triangle -i 200+10/20  # Triangle wave (moderate)
+>> sbagenx -w sawtooth -i 200+10/20  # Sawtooth wave
 
 The -N option disables automatic amplitude normalization. By default, 
 SBaGen+ automatically normalizes amplitudes when the total exceeds 100% 
 to prevent audio distortion. Using -N allows the original behavior where 
 amplitude totals exceeding 100% may cause clipping and distortion:
 
->> sbagen+ -N -i pink/60 200+10/50   # May cause distortion if total > 100%
->> sbagen+ -i pink/60 200+10/50      # Automatically normalized (default)
+>> sbagenx -N -i pink/60 200+10/50   # May cause distortion if total > 100%
+>> sbagenx -i pink/60 200+10/50      # Automatically normalized (default)
 
 
 For UNIX and macOS, you'll find that there are a set of short
@@ -357,15 +357,15 @@ the possibilities.
 For all platforms (UNIX, Windows and macOS), the sequence files
 (prog-*) can be used in the same way:
 
->> sbagen+ prog-NSDWS-example.sbg
+>> sbagenx prog-NSDWS-example.sbg
 
 Have a play with these sequences.  Some of them are designed to run at
 night, so you will hear nothing if you play them during the day.  You
 get around this by playing them immediately using '-q 1', or '-S' (run
 from start):
 
->> sbagen+ -q 1 prog-NSDWS-example.sbg
->> sbagen+ -S prog-NSDWS-example.sbg
+>> sbagenx -q 1 prog-NSDWS-example.sbg
+>> sbagenx -S prog-NSDWS-example.sbg
 
 On UNIX and macOS, there are also a few Perl-scripts which you can
 run (p-*).  These generate a sequence on the fly and then run it.  For
@@ -397,17 +397,17 @@ cases headerless raw data is output (to write a WAV file, see the -W
 option below).  For example, to pipe to bplay under UNIX, you could
 use the following:
 
->> sbagen+ -r 8000 -O -i 100+0.92/30 200+4.2/15 | bplay -S -s 8000 -b 16
+>> sbagenx -r 8000 -O -i 100+0.92/30 200+4.2/15 | bplay -S -s 8000 -b 16
 
 To output an isochronic tone to a file:
 
->> sbagen+ -r 44100 -o isochronic-alpha.raw -i 300@10/20
+>> sbagenx -r 44100 -o isochronic-alpha.raw -i 300@10/20
 
 The -L option allows a time-limit to be set on the output.  So, for
 example, to output 45 minutes of data to a file, and then play it with
 bplay, use:
 
->> sbagen+ -r 8000 -o out.raw -L 0:45 -i 100+0.92/30 200+4.2/15
+>> sbagenx -r 8000 -o out.raw -L 0:45 -i 100+0.92/30 200+4.2/15
 >> bplay -S -s 8000 -b 16 out.raw
 
 As an alternative to using -L, it is possible to use -S and -E to
@@ -422,11 +422,11 @@ options (-L or -SE) is also used to fix the length.  The -W option
 should be used in conjunction with -o or -O.  So, repeating the
 examples above using WAV files, we have:
 
->> sbagen+ -r 8000 -WO -L 1:00 -i 100+0.92/30 200+4.2/15 | bplay
+>> sbagenx -r 8000 -WO -L 1:00 -i 100+0.92/30 200+4.2/15 | bplay
 
 and:
 
->> sbagen+ -r 8000 -Wo out.wav -L 0:45 -i 100+0.92/30 200+4.2/15
+>> sbagenx -r 8000 -Wo out.wav -L 0:45 -i 100+0.92/30 200+4.2/15
 >> bplay out.wav
 
 The -Q option may be useful to turn off the information that the
@@ -436,7 +436,7 @@ If you are using another utility (perl or whatever) to generate the
 sequence-file, you can pipe it directly to the utility, and use '-' as
 the filename.  For example:
 
->> cat prog-chakras-1.sbg | sbagen+ -
+>> cat prog-chakras-1.sbg | sbagenx -
 
 For those pushing the utility past its design limits, you may wish to
 use the following options: 
@@ -468,11 +468,11 @@ file, a 16-bit stereo WAV file, or raw 16-bit little-endian stereo
 audio file.  By specifying the -m option, the given file is mixed with
 the generated binaural beats:
 
->> sbagen+ -m background.wav -i 200+4/1
+>> sbagenx -m background.wav -i 200+4/1
 
 or
  
->> sbagen+ -m river1.ogg -i 200+4/1
+>> sbagenx -m river1.ogg -i 200+4/1
 
 When the soundtrack file ends, sbagen will stop playing.  For loopable
 OGGs, though (see later), the soundtrack goes on forever.  By default
@@ -487,7 +487,7 @@ binaural beats might cause clipping.  However, you can reduce the
 amplitude of the soundtrack using "mix" to fit within the maximum
 total limit of 100.  For example:
 
->> sbagen+ -m soundtrack.mp3 -i mix/99 200+4/1
+>> sbagenx -m soundtrack.mp3 -i mix/99 200+4/1
 
 "Mix" entries may also be used in sequence files to fade the
 soundtrack in and out.
@@ -497,7 +497,7 @@ input.  This is useful in combination with other tools that generate
 audio.  For example, you can use 'splay' on UNIX as an external MP3
 player instead of using the built-in one, for example:
 
->> splay -d - background.mp3 | sbagen+ -M -i mix/99 200+4/1
+>> splay -d - background.mp3 | sbagenx -M -i mix/99 200+4/1
 
 Piping data in like this has the advantage of not requiring a huge WAV
 file to be stored on your disk.
@@ -511,17 +511,17 @@ endlessly in a random way that provides an endless stream of river
 sounds with no discernable pattern.  These are used with the -m
 option.  For example:
 
-  sbagen+ -m river1.ogg -i 200+10/1
-  sbagen+ -m river1.ogg#1 -i 200+10/1
-  sbagen+ -m river2.ogg -i 200+10/1
-  sbagen+ -m river2.ogg#1 -i 200+10/1
+  sbagenx -m river1.ogg -i 200+10/1
+  sbagenx -m river1.ogg#1 -i 200+10/1
+  sbagenx -m river2.ogg -i 200+10/1
+  sbagenx -m river2.ogg#1 -i 200+10/1
 
 The '#1' part allows you to select different looping setups from the
 file.  Each file may have several looping setups, on #0 (the default),
 #1, #2 and so on.  Adding a "mix" spec allows you to control the
 volume level, for example:
 
-  sbagen+ -m river1.ogg -i 200+10/1 mix/50
+  sbagenx -m river1.ogg -i 200+10/1 mix/50
 
 Please note that these sound files are released under the Creative
 Commons "Attribution-ShareAlike" licence:
@@ -642,11 +642,11 @@ may be able to measure this, but if not you could try a few
 frequencies and adjust the amplitude by ear until they sound okay.
 For example, you could try the following:
 
-  sbagen+ -i 160/1
-  sbagen+ -i 80/1
-  sbagen+ -i 40/1
-  sbagen+ -i 30/1
-  sbagen+ -i 20/1
+  sbagenx -i 160/1
+  sbagenx -i 80/1
+  sbagenx -i 40/1
+  sbagenx -i 30/1
+  sbagenx -i 20/1
 
 Now try adjusting the amplitudes of the lower tones to make them
 audible in some way.  Don't overdo it, though -- remember your ears
@@ -734,18 +734,18 @@ example, 00d is a good starting point.  To this you add "s+" to
 indicate sliding and an hour-long sequence.  It is best to also mix
 these with river sounds, for example:
 
-  sbagen+ -m river1.ogg -p drop 00ds+ mix/100
+  sbagenx -m river1.ogg -p drop 00ds+ mix/100
 
 If you are doing sessions in the middle of the day, you may want to
 add a 'wake-up' at the end using '^', which brings you up to alpha
 again at the end:
 
-  sbagen+ -m river1.ogg -p drop 00ds+^ mix/100
+  sbagenx -m river1.ogg -p drop 00ds+^ mix/100
 
 If you want to use a isochronic instead of a binaural tone, you can use
 '@' on the end of the level specification:
 
-  sbagen+ -m river1.ogg -p drop 00ds+@/3 white/10
+  sbagenx -m river1.ogg -p drop 00ds+@/3 white/10
 
 Once you have completed level 00, you can move onto the next (01, 02,
 03, etc).  However if you like, instead you can try increasing the
@@ -905,7 +905,7 @@ Usage:
 
 Example:
 
-  sbagen+ -B 2048 -i 200+10/1
+  sbagenx -B 2048 -i 200+10/1
   
   or in a sequence file:
   
@@ -930,7 +930,7 @@ If you're using Bluetooth headphones or wireless speakers and notice distortions
 crackling, or interruptions in the audio, try adding the -B option with a larger value.
 For example:
 
-  sbagen+ -m river1.ogg -B 2048 -p drop 00ds+ mix/99
+  sbagenx -m river1.ogg -B 2048 -p drop 00ds+ mix/99
 
 This option can also be included directly in sequence files, as shown in the example above.
 This is useful for creating sequences optimized for Bluetooth devices without having to specify
@@ -946,7 +946,7 @@ Usage:
 
 Example:
 
-  sbagen+ -r 44100 -i 200+10/1
+  sbagenx -r 44100 -i 200+10/1
 
 SBaGen+ was designed and optimized for a sample rate of 44.1kHz. While the program supports different
 sample rates through the -r option, using 44.1kHz is recommended for the following reasons:
@@ -1017,7 +1017,7 @@ These are described below.  Take a look at the example sequence-files
 3.1.1: Command-line options within the sequence file
 ----------------------------------------------------
 
-All of the command-line options reported by 'sbagen+ -h' can also be
+All of the command-line options reported by 'sbagenx -h' can also be
 included in sequence files.  They should appear at the top, before any
 tone-sets or whatever.  The purpose of these options are to permit
 soundtracks to be specified, and to indicate whether the sequence is a
@@ -1507,17 +1507,17 @@ The most commonly used predefined sequences are:
 
 1. **drop** - A sequence that gradually drops from a higher frequency to
    a lower one, useful for meditation and relaxation. Example:
-   `sbagen+ -p drop 00ds+`
+   `sbagenx -p drop 00ds+`
 
 2. **slide** - Similar to drop but with a smoother transition between frequencies.
-   Example: `sbagen+ -p slide 00ds+`
+   Example: `sbagenx -p slide 00ds+`
 
 These predefined sequences accept various parameters to customize their behavior.
 See sections 2.6 and 2.7 for detailed information on the parameters and options
 available for these sequences.
 
 You can also mix these predefined sequences with background sounds:
-   Example: `sbagen+ -m river1.ogg -p drop 00ds+ mix/99`
+   Example: `sbagenx -m river1.ogg -p drop 00ds+ mix/99`
 
 The program also includes several example sequence files (prog-*.sbg) and tone-set
 files (ts-*.sbg) that you can use as templates for creating your own sequences.

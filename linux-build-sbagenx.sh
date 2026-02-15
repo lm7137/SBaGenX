@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# SBaGen+ Linux build script
+# SBaGenX Linux build script
 # Builds 32-bit and 64-bit binaries with MP3, OGG and ALSA support on x86_64
 # Builds only ARM64 binary on aarch64 platforms
 
 # Source common library
 . ./lib.sh
 
-section_header "Building SBaGen+ for Linux with MP3, OGG and ALSA support..."
+section_header "Building SBaGenX for Linux with MP3, OGG and ALSA support..."
 
 # Check for required tools
 check_required_tools gcc
@@ -76,10 +76,10 @@ if [ $SKIP_32BIT = 0 ]; then
     info "Libraries: $LIBS_32"
 
     # Try to compile with 32-bit support
-    gcc $CFLAGS_32 sbagen+.c -o dist/sbagen+-linux32 $LIBS_32
+    gcc $CFLAGS_32 sbagenx.c -o dist/sbagenx-linux32 $LIBS_32
 
     if [ $? -eq 0 ]; then
-        success "32-bit compilation successful! Binary created: sbagen+-linux32"
+        success "32-bit compilation successful! Binary created: sbagenx-linux32"
     else
         error "32-bit compilation failed! You may need to install 32-bit development libraries."
     fi
@@ -153,25 +153,25 @@ info "Compiling 64-bit version with flags: $CFLAGS_64"
 info "Libraries: $LIBS_64"
 
 # Replace VERSION with the actual version number
-sed "s/__VERSION__/\"$VERSION\"/" sbagen+.c > sbagen+.tmp.c
+sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
 if [ "$HOST_ARCH" = "aarch64" ]; then
-    gcc $CFLAGS_64 sbagen+.tmp.c -o dist/sbagen+-linux-arm64 $LIBS_64
+    gcc $CFLAGS_64 sbagenx.tmp.c -o dist/sbagenx-linux-arm64 $LIBS_64
 else
-    gcc $CFLAGS_64 sbagen+.tmp.c -o dist/sbagen+-linux64 $LIBS_64
+    gcc $CFLAGS_64 sbagenx.tmp.c -o dist/sbagenx-linux64 $LIBS_64
 fi
 
 if [ $? -eq 0 ]; then
     if [ "$HOST_ARCH" = "aarch64" ]; then
-        success "64-bit compilation successful! Created ARM64 binary: sbagen+-linux-arm64"
+        success "64-bit compilation successful! Created ARM64 binary: sbagenx-linux-arm64"
     else
-        success "64-bit compilation successful! Created 64-bit binary: sbagen+-linux64"
+        success "64-bit compilation successful! Created 64-bit binary: sbagenx-linux64"
     fi
 else
     error "64-bit compilation failed!"
 fi
 
 # Remove the temporary file
-rm -f sbagen+.tmp.c
+rm -f sbagenx.tmp.c
 
 section_header "Build process completed!" 

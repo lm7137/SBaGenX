@@ -15,14 +15,14 @@
 1.5.4: Removed source code from the Windows installer. Added notes about source code availability in the initial setup.
 1.5.4: Fixed deprecation warnings on all platforms.
 1.5.4: Fixed bug with the 64-bit executable on Windows, and added it to the installer.
-1.5.4: Fixed sample rate issue on all platforms. SBaGen+ works only with a 44.1kHz sample rate (see docs/SBAGEN+.TXT for details).
+1.5.4: Fixed sample rate issue on all platforms. SBaGen+ works only with a 44.1kHz sample rate (see docs/SBAGENX.TXT for details).
 1.5.4: Default sample buffer size set to 4096 samples on macOS. This resolves distortion issues on many Bluetooth devices.
 
 1.5.3: Added an installer to easily install SBaGen+ on Windows.
 1.5.3: Removed OSS audio support. ALSA is now default on Linux 
 
 1.5.2: Added support for mixpulse and mixspin effects
-1.5.2: Added -B option for macOS to fix audio in Bluetooth devices (see SBAGEN+.TXT for details)
+1.5.2: Added -B option for macOS to fix audio in Bluetooth devices (see SBAGENX.TXT for details)
 1.5.2: Deprecated AudioHardware.h and Carbon removed, using AudioObject API instead
 
 1.5.1: Isochronic added to -p drop/slide option

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Common library for SBaGen+ build scripts
+# Common library for SBaGenX build scripts
 # Contains shared functions and variables for all build scripts
 
 # Define colors for terminal output

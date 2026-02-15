@@ -1,4 +1,4 @@
-# Docker for building SBaGen+ to Linux and Windows
+# Docker for building SBaGenX to Linux and Windows
 FROM debian:bookworm
 
 RUN apt-get update && apt-get install -y \

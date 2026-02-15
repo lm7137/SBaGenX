@@ -11,9 +11,9 @@ services:
       - -c
       - |
         ./linux-build-libs.sh
-        ./linux-build-sbagen+.sh
+        ./linux-build-sbagenx.sh
         ./windows-build-libs.sh
-        ./windows-build-sbagen+.sh
+        ./windows-build-sbagenx.sh
         ./windows-create-installer.sh
 
   build-arm64:
@@ -28,4 +28,4 @@ services:
       - -c
       - |
         ./linux-build-libs.sh
-        ./linux-build-sbagen+.sh
+        ./linux-build-sbagenx.sh

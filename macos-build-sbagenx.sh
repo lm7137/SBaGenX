@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# SBaGen+ macOS build script
+# SBaGenX macOS build script
 # Builds a universal binary (ARM64 + x86_64) with MP3 and OGG support
 
 # Source common library
 . ./lib.sh
 
-section_header "Building SBaGen+ universal binary (ARM64 + x86_64) with MP3 and OGG support..."
+section_header "Building SBaGenX universal binary (ARM64 + x86_64) with MP3 and OGG support..."
 
 # Create libs directory if it doesn't exist
 create_dir_if_not_exists "libs"
@@ -49,25 +49,25 @@ else
     warning "Run ./macos-build-libs.sh to build the required libraries"
 fi
 
-# Compile sbagen+
-section_header "Starting sbagen+ compilation..."
+# Compile sbagenx
+section_header "Starting sbagenx compilation..."
 info "Compilation flags: $CFLAGS"
 info "Libraries: $LIBS"
 
 # Replace VERSION with the actual version number
-sed "s/__VERSION__/\"$VERSION\"/" sbagen+.c > sbagen+.tmp.c
+sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
-gcc $CFLAGS sbagen+.tmp.c -o dist/sbagen+-macos-universal $LIBS
+gcc $CFLAGS sbagenx.tmp.c -o dist/sbagenx-macos-universal $LIBS
 
 if [ $? -eq 0 ]; then
-    success "Compilation successful! Universal binary created: dist/sbagen+-macos-universal"
+    success "Compilation successful! Universal binary created: dist/sbagenx-macos-universal"
     # info "Supported architectures:"
-    # lipo -info dist/sbagen+-macOS
+    # lipo -info dist/sbagenx-macOS
 else
     error "Compilation failed!"
 fi
 
 # Remove the temporary file
-rm -f sbagen+.tmp.c
+rm -f sbagenx.tmp.c
 
 section_header "Build process completed!" 

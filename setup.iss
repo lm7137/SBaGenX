@@ -1,13 +1,13 @@
-#define MyAppName "SBaGen+"
+#define MyAppName "SBaGenX"
 #define MyAppVersion "1.5.5"
 #define MyAppPublisher "Ruan Klein"
 #define MyAppURL "https://github.com/ruanklein/sbagen-plus"
-#define MyAppExeName "sbagen+.exe"
-#define MyAppIcon "assets\sbagen+.ico"
-#define MyAppAssocName "SBaGen+ Sequence File"
+#define MyAppExeName "sbagenx.exe"
+#define MyAppIcon "assets\sbagenx.ico"
+#define MyAppAssocName "SBaGenX Sequence File"
 #define MyAppAssocExt ".sbg"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
-#define MyAppUserDocsDir "{userdocs}\SBaGen+"
+#define MyAppUserDocsDir "{userdocs}\SBaGenX"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
@@ -22,7 +22,7 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=dist
-OutputBaseFilename=sbagen+-windows-setup
+OutputBaseFilename=sbagenx-windows-setup
 Compression=lzma2/fast
 LZMAUseSeparateProcess=yes
 LZMANumBlockThreads=1
@@ -65,8 +65,8 @@ Name: "addtopath"; Description: "Add {#MyAppName} to PATH environment variable";
 
 [Files]
 ; Include both 32-bit and 64-bit versions
-Source: "dist\sbagen+-win32.exe"; DestDir: "{app}"; DestName: "sbagen+-win32.exe"; Flags: ignoreversion
-Source: "dist\sbagen+-win64.exe"; DestDir: "{app}"; DestName: "sbagen+-win64.exe"; Flags: ignoreversion
+Source: "dist\sbagenx-win32.exe"; DestDir: "{app}"; DestName: "sbagenx-win32.exe"; Flags: ignoreversion
+Source: "dist\sbagenx-win64.exe"; DestDir: "{app}"; DestName: "sbagenx-win64.exe"; Flags: ignoreversion
 ; Documentation
 Source: "COPYING.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion dontcopy
@@ -97,7 +97,7 @@ Name: "{#MyAppUserDocsDir}"; Flags: uninsalwaysuninstall
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 
 ; Desktop shortcut to Documents folder
-Name: "{autodesktop}\SBaGen+ Files"; Filename: "{#MyAppUserDocsDir}"
+Name: "{autodesktop}\SBaGenX Files"; Filename: "{#MyAppUserDocsDir}"
 
 [Registry]
 ; File association for .sbg files (User Level)
@@ -128,7 +128,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "PATH"; ValueData: "{olddata};{app}"; Check: NeedsAddPath('{app}'); Tasks: addtopath
 
 [Run]
-Filename: "{win}\explorer.exe"; Parameters: """{#MyAppUserDocsDir}"""; Description: "Open SBaGen+ folder"; Flags: postinstall nowait skipifsilent shellexec
+Filename: "{win}\explorer.exe"; Parameters: """{#MyAppUserDocsDir}"""; Description: "Open SBaGenX folder"; Flags: postinstall nowait skipifsilent shellexec
 
 [Code]
 var
@@ -240,28 +240,28 @@ begin
     { Check system architecture and copy appropriate executable }
     if IsWin64 then
     begin
-      SourceFile := ExpandConstant('{app}\sbagen+-win64.exe');
-      DestFile := ExpandConstant('{app}\sbagen+.exe');
+      SourceFile := ExpandConstant('{app}\sbagenx-win64.exe');
+      DestFile := ExpandConstant('{app}\sbagenx.exe');
     end
     else
     begin
-      SourceFile := ExpandConstant('{app}\sbagen+-win32.exe');
-      DestFile := ExpandConstant('{app}\sbagen+.exe');
+      SourceFile := ExpandConstant('{app}\sbagenx-win32.exe');
+      DestFile := ExpandConstant('{app}\sbagenx.exe');
     end;
     
     { Copy the appropriate executable }
     if FileCopy(SourceFile, DestFile, False) then
     begin
       { Delete the original files }
-      DeleteFile(ExpandConstant('{app}\sbagen+-win32.exe'));
-      DeleteFile(ExpandConstant('{app}\sbagen+-win64.exe'));
+      DeleteFile(ExpandConstant('{app}\sbagenx-win32.exe'));
+      DeleteFile(ExpandConstant('{app}\sbagenx-win64.exe'));
     end;
     
     { Notify system about PATH changes }
     if WizardIsTaskSelected('addtopath') then
     begin
       { Broadcast WM_SETTINGCHANGE message }
-      MsgBox('SBaGen+ has been added to the PATH environment variable. ' +
+      MsgBox('SBaGenX has been added to the PATH environment variable. ' +
              'You may need to restart running applications for them to ' +
              'recognize the change.', mbInformation, MB_OK);
     end;
@@ -273,7 +273,7 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    { Remove the dynamically created sbagen+.exe file }
-    DeleteFile(ExpandConstant('{app}\sbagen+.exe'));
+    { Remove the dynamically created sbagenx.exe file }
+    DeleteFile(ExpandConstant('{app}\sbagenx.exe'));
   end;
 end; 

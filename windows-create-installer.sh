@@ -4,12 +4,12 @@
 . ./lib.sh
 
 # Check if 32-bit executable exists
-if [ ! -f dist/sbagen+-win32.exe ]; then
-    error "32-bit executable not found. Run ./windows-build-sbagen+.sh first."
+if [ ! -f dist/sbagenx-win32.exe ]; then
+    error "32-bit executable not found. Run ./windows-build-sbagenx.sh first."
     exit 1
 fi
 
-SETUP_NAME="sbagen+-windows-setup.exe"
+SETUP_NAME="sbagenx-windows-setup.exe"
 
 # Remove the existing installer if it exists
 rm -f dist/${SETUP_NAME}

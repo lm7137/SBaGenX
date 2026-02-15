@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# SBaGen+ Windows build script
+# SBaGenX Windows build script
 # Builds 32-bit and 64-bit Windows binaries with MP3 and OGG support using MinGW
 
 # Source common library
 . ./lib.sh
 
-section_header "Building SBaGen+ for Windows (32-bit and 64-bit) with MP3 and OGG support..."
+section_header "Building SBaGenX for Windows (32-bit and 64-bit) with MP3 and OGG support..."
 
 # Check for MinGW cross-compilers
 if ! command -v i686-w64-mingw32-gcc &> /dev/null || ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
@@ -44,7 +44,7 @@ cat > /tmp/sbagen.rc << EOF
 #include <windows.h>
 
 // Include icon
-1 ICON "assets/sbagen+.ico"
+1 ICON "assets/sbagenx.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     $VERSION_RC
@@ -59,13 +59,13 @@ BEGIN
     BEGIN
         BLOCK "040904E4"
         BEGIN
-            VALUE "CompanyName",      "SBaGen+"
-            VALUE "FileDescription",  "SBaGen+ Brainwave Generator"
+            VALUE "CompanyName",      "SBaGenX"
+            VALUE "FileDescription",  "SBaGenX Brainwave Generator"
             VALUE "FileVersion",      "$VERSION"
-            VALUE "InternalName",     "sbagen+"
+            VALUE "InternalName",     "sbagenx"
             VALUE "LegalCopyright",   "GPLv2"
-            VALUE "OriginalFilename", "sbagen+.exe"
-            VALUE "ProductName",      "SBaGen+"
+            VALUE "OriginalFilename", "sbagenx.exe"
+            VALUE "ProductName",      "SBaGenX"
             VALUE "ProductVersion",   "$VERSION"
         END
     END
@@ -123,12 +123,12 @@ info "Compiling 32-bit version with flags: $CFLAGS_32"
 info "Libraries: $LIBS_32"
 
 # Replace VERSION with the actual version number
-sed "s/__VERSION__/\"$VERSION\"/" sbagen+.c > sbagen+.tmp.c
+sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
-i686-w64-mingw32-gcc $CFLAGS_32 sbagen+.tmp.c /tmp/sbagen32.res -o dist/sbagen+-win32.exe $LIBS_32
+i686-w64-mingw32-gcc $CFLAGS_32 sbagenx.tmp.c /tmp/sbagen32.res -o dist/sbagenx-win32.exe $LIBS_32
 
 if [ $? -eq 0 ]; then
-    success "32-bit compilation successful! Created 32-bit binary: dist/sbagen+-win32.exe"
+    success "32-bit compilation successful! Created 32-bit binary: dist/sbagenx-win32.exe"
 else
     error "32-bit compilation failed!"
 fi
@@ -167,15 +167,15 @@ fi
 info "Compiling 64-bit version with flags: $CFLAGS_64"
 info "Libraries: $LIBS_64"
 
-x86_64-w64-mingw32-gcc $CFLAGS_64 sbagen+.tmp.c /tmp/sbagen64.res -o dist/sbagen+-win64.exe $LIBS_64
+x86_64-w64-mingw32-gcc $CFLAGS_64 sbagenx.tmp.c /tmp/sbagen64.res -o dist/sbagenx-win64.exe $LIBS_64
 
 if [ $? -eq 0 ]; then
-    success "64-bit compilation successful! Created 64-bit binary: dist/sbagen+-win64.exe"
+    success "64-bit compilation successful! Created 64-bit binary: dist/sbagenx-win64.exe"
 else
     error "64-bit compilation failed!"
 fi
 
 # Clean up temporary files
-rm -f /tmp/sbagen.rc /tmp/sbagen32.res /tmp/sbagen64.res sbagen+.tmp.c
+rm -f /tmp/sbagen.rc /tmp/sbagen32.res /tmp/sbagen64.res sbagenx.tmp.c
 
 section_header "Build process completed!" 

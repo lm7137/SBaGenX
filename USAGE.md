@@ -1,6 +1,6 @@
-# <img src="assets/sbagen+.png" alt="SBaGen+ Logo" width="32" height="32"> SBaGen+ Usage Guide
+# <img src="assets/sbagenx.png" alt="SBaGenX Logo" width="32" height="32"> SBaGenX Usage Guide
 
-This guide will help you get started with SBaGen+, a powerful tool for generating binaural beats and isochronic tones to assist with meditation, relaxation, and altering states of consciousness.
+This guide will help you get started with SBaGenX, a powerful tool for generating binaural beats and isochronic tones to assist with meditation, relaxation, and altering states of consciousness.
 
 ## 📑 Table of Contents
 
@@ -16,7 +16,7 @@ This guide will help you get started with SBaGen+, a powerful tool for generatin
 
 Brainwave entrainment is a method to stimulate the brain into entering a specific state by using a pulsing sound, light, or electromagnetic field. The pulses elicit the brain's 'frequency following' response, encouraging the brainwaves to align to the frequency of the given beat.
 
-SBaGen+ supports two main types of brainwave entrainment:
+SBaGenX supports two main types of brainwave entrainment:
 
 1. **Binaural Beats**: When two slightly different frequencies are played in each ear, the brain perceives a third "beat" frequency equal to the difference between the two tones. For example, if 200Hz is played in one ear and 210Hz in the other, the brain perceives a 10Hz beat. Binaural beats **require headphones** to be effective.
 
@@ -36,7 +36,7 @@ Different frequency ranges correspond to different mental states:
 
 ### 📝 Understanding the Syntax
 
-SBaGen+ uses a specific syntax to define tones:
+SBaGenX uses a specific syntax to define tones:
 
 - **Binaural beats**: `[carrier frequency]+[beat frequency]/[amplitude]`
 
@@ -106,22 +106,22 @@ Here are some basic commands to get started:
 
 ```bash
 # Play a simple binaural beat in the alpha range (10Hz)
-sbagen+ -i pink/40 200+10/20
+sbagenx -i pink/40 200+10/20
 
 # Play a simple isochronic tone in the theta range (6Hz)
-sbagen+ -i 300@6/20
+sbagenx -i 300@6/20
 
 # Create a spinning effect with brown noise for deep relaxation
-sbagen+ -i bspin:300+4/50
+sbagenx -i bspin:300+4/50
 
 # Combine different spin effects for complex spatial experience
-sbagen+ -i wspin:300+8/40 bspin:300+4/40
+sbagenx -i wspin:300+8/40 bspin:300+4/40
 
 # Create a spinning effect on background music
-sbagen+ -m ambient-music.mp3 -i mix/80 mixspin:500+8.0/50
+sbagenx -m ambient-music.mp3 -i mix/80 mixspin:500+8.0/50
 
 # Play a sequence file
-sbagen+ my-sequence.sbg
+sbagenx my-sequence.sbg
 ```
 
 ### 🔧 Common Options
@@ -168,7 +168,7 @@ Save this as `meditation.sbg`:
 For Windows and macOS users, you can run the sequence by double-clicking the file. For Linux users, you can run it from the command line:
 
 ```bash
-sbagen+ meditation.sbg
+sbagenx meditation.sbg
 ```
 
 This sequence will:
@@ -180,7 +180,7 @@ This sequence will:
 
 ## 📚 Example Sequences for Different Purposes
 
-Here are some example sequences for various purposes in the `examples/plus` directory. You can save these as `.sbg` files and run them with SBaGen+.
+Here are some example sequences for various purposes in the `examples/plus` directory. You can save these as `.sbg` files and run them with SBaGenX.
 
 - [Deep Sleep Aid](examples/plus/deep-sleep-aid.sbg) - Gradually transitions from alpha to delta to help you fall asleep
 - [Focus and Concentration (Using Isochronic Tones)](examples/plus/focus-and-concentration.sbg) - Helps you focus and concentrate
@@ -190,12 +190,12 @@ Here are some example sequences for various purposes in the `examples/plus` dire
 
 ## 🎵 Using Background Sounds
 
-You can enhance your experience by adding background sounds like nature recordings or ambient music. SBaGen+ supports MP3, OGG, and WAV files.
+You can enhance your experience by adding background sounds like nature recordings or ambient music. SBaGenX supports MP3, OGG, and WAV files.
 
 ### Command Line Example
 
 ```bash
-sbagen+ -m forest-sounds.mp3 -i pink/20 200+8/15
+sbagenx -m forest-sounds.mp3 -i pink/20 200+8/15
 ```
 
 ### In Sequence Files
@@ -223,7 +223,7 @@ off: -
 00:30:00 off
 ```
 
-Note the use of `mix/80` instead of `pink/40`. This tells SBaGen+ to mix the background sound at 80% amplitude.
+Note the use of `mix/80` instead of `pink/40`. This tells SBaGenX to mix the background sound at 80% amplitude.
 
 ## 🔍 Advanced Tips
 
@@ -259,10 +259,10 @@ Remember that brainwave entrainment is a tool to help you achieve certain mental
 
 ## 🎉 Conclusion
 
-SBaGen+ is a powerful tool for exploring altered states of consciousness, enhancing meditation, improving focus, and aiding relaxation. This guide covers the basics to get you started, but there's much more to explore. As you become more familiar with the program, you can create increasingly sophisticated sequences tailored to your specific needs.
+SBaGenX is a powerful tool for exploring altered states of consciousness, enhancing meditation, improving focus, and aiding relaxation. This guide covers the basics to get you started, but there's much more to explore. As you become more familiar with the program, you can create increasingly sophisticated sequences tailored to your specific needs.
 
-For more technical details, see the [SBaGen+ Manual](docs/SBAGEN+.txt).
+For more technical details, see the [SBaGenX Manual](docs/SBAGENX.txt).
 
-And for the scientific background behind SBaGen+, check out [RESEARCH.md](RESEARCH.md).
+And for the scientific background behind SBaGenX, check out [RESEARCH.md](RESEARCH.md).
 
 Happy exploring!

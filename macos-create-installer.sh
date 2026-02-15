@@ -3,11 +3,11 @@
 # Source common library
 . ./lib.sh
 
-APP_NAME="SBaGen+"
-SBAGEN_BINARY="dist/sbagen+-macos-universal"
+APP_NAME="SBaGenX"
+SBAGEN_BINARY="dist/sbagenx-macos-universal"
 PNG_SOURCE="assets/mac-icon.png"
 ICON_NAME="app_icon"
-DMG_NAME="SBaGen+-Installer.dmg"
+DMG_NAME="SBaGenX-Installer.dmg"
 
 section_header "Creating macOS Application Bundle..."
 
@@ -16,7 +16,7 @@ rm -rf build
 
 # Check if the binary exists
 if [ ! -f "$SBAGEN_BINARY" ]; then
-    error "$SBAGEN_BINARY not found. Execute ./macos-build-sbagen+.sh first."
+    error "$SBAGEN_BINARY not found. Execute ./macos-build-sbagenx.sh first."
     exit 1
 fi
 
@@ -43,10 +43,10 @@ end showAppNotInstalledAlert
 
 on initialize()
 	set documentsFolder to POSIX path of (path to documents folder)
-	set targetFolder to documentsFolder & "SBaGen+"
-	set appBase to "/Applications/SBaGen+.app/Contents/Resources"
+	set targetFolder to documentsFolder & "SBaGenX"
+	set appBase to "/Applications/SBaGenX.app/Contents/Resources"
     set desktopFolder to POSIX path of (path to desktop folder)
-    set linkPath to desktopFolder & "SBaGen+ Files"
+    set linkPath to desktopFolder & "SBaGenX Files"
 
     set folderExists to (do shell script "test -d " & quoted form of targetFolder & " && echo yes || echo no")
 	if folderExists is "yes" then return
@@ -105,7 +105,7 @@ on run
     initialize()
 
     set documentsFolder to POSIX path of (path to documents folder)
-    set examplesPath to documentsFolder & "SBaGen+/Examples"
+    set examplesPath to documentsFolder & "SBaGenX/Examples"
     set iconPath to ((POSIX path of (path to me)) & "Contents/Resources/app_icon.icns")
     set dialogText to "Please open a .sbg file using this application."
 
@@ -130,7 +130,7 @@ on open theFiles
 
     set filePath to POSIX path of (item 1 of theFiles)
     set appPath to POSIX path of (path to me)
-    set sbagenPath to quoted form of (appPath & "Contents/Resources/bin/sbagen+")
+    set sbagenPath to quoted form of (appPath & "Contents/Resources/bin/sbagenx")
     
     tell application "System Events"
         set fileName to name of (POSIX file filePath as alias)
@@ -235,8 +235,8 @@ cp -R scripts/* "build/$APP_NAME.app/Contents/Resources/scripts"
 # Copy the binary
 info "Copying binary to application bundle..."
 create_dir_if_not_exists "build/$APP_NAME.app/Contents/Resources/bin"
-cp "$SBAGEN_BINARY" "build/$APP_NAME.app/Contents/Resources/bin/sbagen+"
-chmod +x "build/$APP_NAME.app/Contents/Resources/bin/sbagen+"
+cp "$SBAGEN_BINARY" "build/$APP_NAME.app/Contents/Resources/bin/sbagenx"
+chmod +x "build/$APP_NAME.app/Contents/Resources/bin/sbagenx"
 
 # Generate the icon from the PNG file
 section_header "Generating application icon..."
@@ -268,7 +268,7 @@ cat > "build/$APP_NAME.app/Contents/Info.plist" <<EOF
     <key>CFBundleExecutable</key>
     <string>droplet</string>
     <key>CFBundleIdentifier</key>
-    <string>com.sbagen.plus</string>
+    <string>com.sbagenx</string>
     <key>CFBundleName</key>
     <string>$APP_NAME</string>
     <key>CFBundlePackageType</key>
@@ -290,7 +290,7 @@ cat > "build/$APP_NAME.app/Contents/Info.plist" <<EOF
             <string>Editor</string>
             <key>LSItemContentTypes</key>
             <array>
-                <string>com.sbagen.plus.sbg</string>
+                <string>com.sbagenx.sbg</string>
             </array>
             <key>CFBundleTypeOSTypes</key>
             <array>
@@ -304,7 +304,7 @@ cat > "build/$APP_NAME.app/Contents/Info.plist" <<EOF
             <string>app_icon</string>
             <key>CFBundleTypeMIMETypes</key>
             <array>
-                <string>application/x-sbagen-plus</string>
+                <string>application/x-sbagenx</string>
             </array>
         </dict>
     </array>
@@ -312,9 +312,9 @@ cat > "build/$APP_NAME.app/Contents/Info.plist" <<EOF
     <array>
         <dict>
             <key>UTTypeIdentifier</key>
-            <string>com.sbagen.plus.sbg</string>
+            <string>com.sbagenx.sbg</string>
             <key>UTTypeDescription</key>
-            <string>SBaGen+ Sequence File</string>
+            <string>SBaGenX Sequence File</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.data</string>
@@ -327,7 +327,7 @@ cat > "build/$APP_NAME.app/Contents/Info.plist" <<EOF
                 </array>
                 <key>public.mime-type</key>
                 <array>
-                    <string>application/x-sbagen-plus</string>
+                    <string>application/x-sbagenx</string>
                 </array>
             </dict>
         </dict>
@@ -336,9 +336,9 @@ cat > "build/$APP_NAME.app/Contents/Info.plist" <<EOF
     <array>
         <dict>
             <key>UTTypeIdentifier</key>
-            <string>com.sbagen.plus.sbg</string>
+            <string>com.sbagenx.sbg</string>
             <key>UTTypeDescription</key>
-            <string>SBaGen+ Sequence File</string>
+            <string>SBaGenX Sequence File</string>
             <key>UTTypeConformsTo</key>
             <array>
                 <string>public.data</string>
@@ -351,7 +351,7 @@ cat > "build/$APP_NAME.app/Contents/Info.plist" <<EOF
                 </array>
                 <key>public.mime-type</key>
                 <array>
-                    <string>application/x-sbagen-plus</string>
+                    <string>application/x-sbagenx</string>
                 </array>
             </dict>
         </dict>
