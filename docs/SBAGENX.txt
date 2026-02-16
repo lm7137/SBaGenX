@@ -1517,9 +1517,33 @@ The most commonly used predefined sequences are:
 2. **slide** - Similar to drop but with a smoother transition between frequencies.
    Example: `sbagenx -p slide 00ds+`
 
+3. **sigmoid** - Similar to drop, but in `s` mode the beat/pulse follows a
+   sigmoid curve over the drop period.  Example:
+   `sbagenx -p sigmoid 00ds+:l=0.125:h=0`
+
 These predefined sequences accept various parameters to customize their behavior.
-See sections 2.6 and 2.7 for detailed information on the parameters and options
-available for these sequences.
+See sections 2.6 and 2.7 for detailed information on existing parameters and
+options.  The sigmoid sequence accepts the same drop-style format plus optional
+shape parameters `:l=<value>` and `:h=<value>` (order does not matter), with
+defaults `l=0.125` and `h=0`.
+
+For `-p sigmoid ...s...`, the beat/pulse frequency follows:
+
+  f(t) = a * tanh( l * (t - D/2 - h) ) + b
+
+Where:
+  t = time in minutes from start of the drop
+  D = drop duration in minutes (default 30)
+  l, h = user shape parameters
+
+Boundary conditions:
+  f(0) = 10.0
+  f(D) = target from depth letter (a-l), same targets as `-p drop`
+
+`a` and `b` are solved automatically from those boundary conditions:
+  a = (f(D) - f(0)) /
+      ( tanh( l * ( D/2 - h) ) - tanh( l * (-D/2 - h) ) )
+  b = f(0) - a * tanh( l * (-D/2 - h) )
 
 You can also mix these predefined sequences with background sounds:
    Example: `sbagenx -m river1.ogg -p drop 00ds+ mix/99`

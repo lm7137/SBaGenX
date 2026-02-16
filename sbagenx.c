@@ -211,6 +211,7 @@ void handleOptions(char *p);
 void setupOptC(char *spec) ;
 extern int out_rate, out_rate_def;
 void create_drop(int ac, char **av);
+void create_sigmoid(int ac, char **av);
 void create_slide(int ac, char **av);
 void normalizeAmplitude(Voice *voices, int numChannels, const char *line, int lineNum);
 void printSequenceDuration();
@@ -454,6 +455,7 @@ double *mix_amp= NULL; // Amplitude of mix sound data to use with mixspin/mixpul
 
 typedef struct {
    int active;			// Function-driven modulation enabled?
+   int mode;			// 1 exponential drop, 2 sigmoid
    int chan;			// Channel index to apply to
    int typ;			// Voice type to apply to (1 binaural, 8 isochronic)
    int start_ms;		// Start time (ms from midnight)
@@ -463,6 +465,9 @@ typedef struct {
    double beat0, beat1;	// Beat/pulse start/end (Hz)
    double beat_span_s;		// Beat transition time in seconds
    double beat_log_ratio;	// Precomputed log(beat1/beat0)
+   double sig_a, sig_b;	// Sigmoid coefficients (beat = a*tanh(..)+b)
+   double sig_l, sig_h;	// Sigmoid shape parameters
+   double sig_d_min;		// Sigmoid drop duration (minutes)
 } FuncCurve;
 FuncCurve func_curve;		// Runtime function curve for pre-programmed sequences
 
@@ -728,6 +733,7 @@ setup_drop_func_curve(int chan, int typ, int start_ms,
       return;
 
    func_curve.active= 1;
+   func_curve.mode= 1;
    func_curve.chan= chan;
    func_curve.typ= typ;
    func_curve.start_ms= start_ms;
@@ -741,10 +747,48 @@ setup_drop_func_curve(int chan, int typ, int start_ms,
    func_curve.beat_log_ratio= log(beat1 / beat0);
 }
 
+// Register function-driven sigmoid beat/pulse drop for one channel.
+// l and h are defined in minutes.
+static int
+setup_sigmoid_func_curve(int chan, int typ, int start_ms,
+			 double carr0, double carr1, double carr_span_s,
+			 double beat0, double beat1, double beat_span_s,
+			 double sig_l, double sig_h) {
+   double d_min, u0, u1, den;
+
+   clear_func_curve();
+   if (carr_span_s <= 0 || beat_span_s <= 0) return 0;
+
+   d_min= beat_span_s / 60.0;
+   u0= tanh(sig_l * (0.0 - d_min/2 - sig_h));
+   u1= tanh(sig_l * (d_min - d_min/2 - sig_h));
+   den= u1 - u0;
+   if (fabs(den) < 1e-9) return 0;
+
+   func_curve.active= 1;
+   func_curve.mode= 2;
+   func_curve.chan= chan;
+   func_curve.typ= typ;
+   func_curve.start_ms= start_ms;
+   func_curve.end_ms= (start_ms + (int)(1000.0 * carr_span_s + 0.5)) % H24;
+   func_curve.carr0= carr0;
+   func_curve.carr1= carr1;
+   func_curve.carr_span_s= carr_span_s;
+   func_curve.beat0= beat0;
+   func_curve.beat1= beat1;
+   func_curve.beat_span_s= beat_span_s;
+   func_curve.sig_l= sig_l;
+   func_curve.sig_h= sig_h;
+   func_curve.sig_d_min= d_min;
+   func_curve.sig_a= (beat1 - beat0) / den;
+   func_curve.sig_b= beat0 - func_curve.sig_a * u0;
+   return 1;
+}
+
 // Apply the registered curve at the current runtime position.
 static void
 apply_func_curve(int now_ms, int chan, Voice *vv) {
-   double pos_s, carr_s;
+   double pos_s, carr_s, pos_min;
    double beat, carr;
    int elapsed_ms, total_ms;
 
@@ -759,10 +803,17 @@ apply_func_curve(int now_ms, int chan, Voice *vv) {
    carr_s= pos_s;
    if (carr_s > func_curve.carr_span_s) carr_s= func_curve.carr_span_s;
 
-   if (pos_s >= func_curve.beat_span_s) {
-      beat= func_curve.beat1;
+   if (func_curve.mode == 2) {
+      if (pos_s >= func_curve.beat_span_s) beat= func_curve.beat1;
+      else {
+	 pos_min= pos_s / 60.0;
+	 beat= func_curve.sig_a *
+	       tanh(func_curve.sig_l * (pos_min - func_curve.sig_d_min/2 - func_curve.sig_h)) +
+	       func_curve.sig_b;
+      }
    } else {
-      beat= func_curve.beat0 * exp(func_curve.beat_log_ratio * pos_s / func_curve.beat_span_s);
+      if (pos_s >= func_curve.beat_span_s) beat= func_curve.beat1;
+      else beat= func_curve.beat0 * exp(func_curve.beat_log_ratio * pos_s / func_curve.beat_span_s);
    }
    carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) * carr_s / func_curve.carr_span_s;
 
@@ -3970,6 +4021,7 @@ readPreProg(int ac, char **av) {
       error("Expecting a pre-programmed sequence description.  Examples:" 
 	    NL "  drop 25ds+ pink/30"
 	    NL "  drop 25gs+/2 mix/60"
+	    NL "  sigmoid 00ds+:l=0.125:h=0"
 	    );
    
    // Handle 'drop'
@@ -3986,6 +4038,13 @@ readPreProg(int ac, char **av) {
       return;
    }
 
+   // Handle 'sigmoid'
+   if (0 == strcmp(av[0], "sigmoid")) {
+      ac--; av++;
+      create_sigmoid(ac, av);
+      return;
+   }
+
    error("Unknown pre-programmed sequence type: %s", av[0]);
 }
 
@@ -3996,7 +4055,7 @@ readPreProg(int ac, char **av) {
 void 
 bad_drop() {
    error("Bad arguments: expecting -p drop [<time-spec>] <drop-spec> [<tone-specs...>]"
-	 NL "<drop-spec> is <digit><digit>[.<digit>...]<a-l>[s|k][+][^][/<amp>]"
+	 NL "<drop-spec> is <digit><digit>[.<digit>...]<a-l>[s|k][+][^][@][/<amp>]"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
@@ -4174,6 +4233,243 @@ create_drop(int ac, char **av) {
       formatTimeLine(end+len2, "== tswake ->");
       end += len2;
    } 
+   formatTimeLine(end+10, "== off");
+
+   correctPeriods();
+}
+
+//
+//	Error for bad p-sigmoid args
+//
+
+void
+bad_sigmoid() {
+   error("Bad arguments: expecting -p sigmoid [<time-spec>] <sigmoid-spec> [<tone-specs...>]"
+	 NL "<sigmoid-spec> is <digit><digit>[.<digit>...]<a-l>[s|k][+][^][@][/<amp>][:l=<val>][:h=<val>]"
+	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
+	 NL "  in minutes (the default is equivalent to 't30,30,3')."
+	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0)."
+	 NL "The optional <tone-specs...> let you mix other stuff with the sequence"
+	 NL "  like pink noise or a mix soundtrack, e.g 'pink/20' or 'mix/60'");
+}
+
+//
+//	Generate a p-sigmoid sequence
+//
+
+void
+create_sigmoid(int ac, char **av) {
+   char *fmt;
+   char *p, *q;
+   char signal;
+   int a;
+   int slide, n_step, islong, wakeup, isisochronic;
+   int have_step_mode;
+   double carr, amp, c0, c2;
+   double beat_target, beat_start= 10.0;
+   double beat[40];
+   static double beat_targets[]= {
+      4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
+   };
+   char extra[256];
+   int len, len0= 1800, len1= 1800, len2= 180;
+   int steplen, end;
+   double sig_l= 0.125, sig_h= 0.0;
+   double d_min, u0, u1, den, sig_a, sig_b;
+
+#define BAD bad_sigmoid()
+
+   // Pick up optional time-spec
+   if (ac < 1) BAD;
+   if (av[0][0] == 't') {
+      double v0, v1, v2;
+      char dmy;
+      if (3 != sscanf(av[0]+1, "%lf,%lf,%lf %c", &v0, &v1, &v2, &dmy)) BAD;
+      len0= 60 * (int)v0;	// Whole minutes only
+      len1= 60 * (int)v1;
+      len2= 60 * (int)v2;
+      ac--; av++;
+   }
+
+   // Handle argument list
+   if (ac < 1) BAD;
+   fmt= *av++; ac--;
+   p= extra; *p= 0;
+   while (ac > 0) {
+      if (p + strlen(av[0]) + 2 > extra + sizeof(extra))
+	 error("Too many extra tone-specs after -p sigmoid");
+      p += sprintf(p, " %s", av[0]);
+      ac--; av++;
+   }
+
+   // Scan the format
+   carr= 200 - 2 * strtod(fmt, &p);
+   if (p == fmt || carr < 0) BAD;
+
+   a= tolower(*p) - 'a'; p++;
+   if (a < 0 || a >= sizeof(beat_targets) / sizeof(beat_targets[0])) BAD;
+   beat_target= beat_targets[a];
+
+   slide= 0;
+   steplen= 180;
+   islong= 0;
+   wakeup= 0;
+   isisochronic= 0;
+   have_step_mode= 0;
+   amp= 1.0;
+
+   // Parse optional flags in any order, including :l= and :h=
+   while (1) {
+      if (*p == 's' || *p == 'k') {
+	 if (have_step_mode) BAD;
+	 have_step_mode= 1;
+	 if (*p == 's') { slide= 1; steplen= 60; }
+	 else steplen= 60;
+	 p++;
+	 continue;
+      }
+      if (*p == '+') { islong= 1; p++; continue; }
+      if (*p == '^') { wakeup= 1; p++; continue; }
+      if (*p == '@') { isisochronic= 1; p++; continue; }
+      if (*p == '/') {
+	 p++; q= p;
+	 amp= strtod(p, &p);
+	 if (p == q) BAD;
+	 continue;
+      }
+      if (*p == ':') {
+	 p++;
+	 if (p[0] == 'l' && p[1] == '=') {
+	    p += 2; q= p;
+	    sig_l= strtod(p, &p);
+	    if (p == q) BAD;
+	    continue;
+	 }
+	 if (p[0] == 'h' && p[1] == '=') {
+	    p += 2; q= p;
+	    sig_h= strtod(p, &p);
+	    if (p == q) BAD;
+	    continue;
+	 }
+	 BAD;
+      }
+      break;
+   }
+
+   while (isspace(*p)) p++;
+   if (*p) error("Trailing rubbish after -p sigmoid spec: \"%s\"", p);
+
+#undef BAD
+
+   // Tidy timings
+   if (len0 < 60)
+      error("Sigmoid drop-time must be at least 1 minute");
+   n_step= 1 + (len0-1) / steplen;	// Round up
+   if (n_step < 2) n_step= 2;
+   len0= n_step * steplen;
+   if (!slide) len1= (1 + (len1-1) / steplen) * steplen;
+
+   // Sort out carriers and sigmoid coefficients
+   len= islong ? len0 + len1 : len0;
+   c0= carr + 5.0;
+   c2= carr;
+   d_min= len0 / 60.0;
+   u0= tanh(sig_l * (0.0 - d_min/2 - sig_h));
+   u1= tanh(sig_l * (d_min - d_min/2 - sig_h));
+   den= u1 - u0;
+   if (fabs(den) < 1e-9)
+      error("Sigmoid parameters produce an invalid curve (try different l/h values)");
+   sig_a= (beat_target - beat_start) / den;
+   sig_b= beat_start - sig_a * u0;
+
+   // Calculate display/checkpoint beat values
+   for (a= 0; a<n_step; a++) {
+      double tim= a * len0 / (double)(n_step-1);
+      double t_min= tim / 60.0;
+      if (t_min >= d_min)
+	 beat[a]= beat_target;
+      else
+	 beat[a]= sig_a * tanh(sig_l * (t_min - d_min/2 - sig_h)) + sig_b;
+   }
+
+   if (slide) {
+      if (!setup_sigmoid_func_curve(0, isisochronic ? 8 : 1, 0,
+				    c0, c2, len,
+				    beat_start, beat_target, len0,
+				    sig_l, sig_h))
+	 error("Sigmoid parameters produce an invalid runtime curve");
+      warn(" Using function-driven curve for sliding sigmoid");
+   }
+
+   // Display summary
+   warn("SIGMOID summary:");
+   if (slide) {
+      warn(" Carrier slides from %gHz to %gHz over %d minutes",
+	   c0, c2, len/60);
+      warn(" %s frequency follows sigmoid from %gHz to %gHz over %d minutes",
+	   isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
+   } else {
+      warn(" Carrier steps from %gHz to %gHz over %d minutes",
+	   c0, c2, len/60);
+      warn(" %s frequency steps over sigmoid from %gHz to %gHz over %d minutes:",
+	   isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
+      fprintf(stderr, "   ");
+      for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
+      fprintf(stderr, "\n");
+   }
+   warn(" Sigmoid shape parameters: l=%g h=%g", sig_l, sig_h);
+   if (wakeup) {
+      warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
+   }
+
+   // Start generating sequence
+   handleOptions("-SE");
+   in_lin= 0;
+
+   formatNameDef("off: -");
+   formatTimeLine(86395, "== off ->");		// 23:59:55
+
+   signal= isisochronic ? '@' : '+';
+   if (slide) {
+      // Slide version
+      for (a= 0; a<n_step; a++) {
+	 int tim= a * len0 / (n_step-1);
+	 formatNameDef("ts%02d: %g%c%g/%g %s", a,
+		       c0 + (c2-c0) * tim * 1.0 / len,
+		       signal, beat[a], amp, extra);
+	 formatTimeLine(tim, "== ts%02d ->", a);
+      }
+
+      if (islong) {
+	 formatNameDef("tsend: %g%c%g/%g %s",
+		       c2, signal, beat[n_step-1], amp, extra);
+	 formatTimeLine(len, "== tsend ->");
+      }
+      end= len;
+   } else {
+      // Step version
+      int lim= len / steplen;
+      int stepslide= steplen < 90 ? 5 : 10;	// Seconds slide between steps
+      for (a= 0; a<lim; a++) {
+	 int tim0= a * steplen;
+	 int tim1= (a+1) * steplen;
+	 formatNameDef("ts%02d: %g%c%g/%g %s", a,
+		       c0 + (c2-c0) * tim1/len,
+		       signal, beat[(a>=n_step) ? n_step-1 : a],
+		       amp, extra);
+	 formatTimeLine(tim0, "== ts%02d ->", a);
+	 formatTimeLine(tim1-stepslide, "== ts%02d ->", a);
+      }
+      end= len-stepslide;
+   }
+
+   // Wake-up and ending
+   if (wakeup) {
+      formatNameDef("tswake: %g%c%g/%g %s",
+		    c0, signal, beat[0], amp, extra);
+      formatTimeLine(end+len2, "== tswake ->");
+      end += len2;
+   }
    formatTimeLine(end+10, "== off");
 
    correctPeriods();
