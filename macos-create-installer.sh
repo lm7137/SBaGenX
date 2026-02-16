@@ -72,11 +72,12 @@ on initialize()
 
 	do shell script "mkdir -p " & quoted form of targetFolder
 
-	set fileMap to {¬
-	    {"Documentation", appBase & "/docs"}, ¬
-	    {"Examples", appBase & "/examples"}, ¬
-	    {"Scripts", appBase & "/scripts"}, ¬
-	    {"License.txt", appBase & "/COPYING.txt"}, ¬
+		set fileMap to {¬
+		    {"Documentation", appBase & "/docs"}, ¬
+		    {"Licenses", appBase & "/licenses"}, ¬
+		    {"Examples", appBase & "/examples"}, ¬
+		    {"Scripts", appBase & "/scripts"}, ¬
+		    {"License.txt", appBase & "/COPYING.txt"}, ¬
         {"Notice.txt", appBase & "/NOTICE.txt"}, ¬
 	    {"Research.txt", appBase & "/RESEARCH.txt"}, ¬
 	    {"Usage.txt", appBase & "/USAGE.txt"}, ¬
@@ -205,6 +206,11 @@ fi
 info "Copying documentation to application bundle..."
 create_dir_if_not_exists "build/$APP_NAME.app/Contents/Resources/docs"
 cp -R docs/* "build/$APP_NAME.app/Contents/Resources/docs"
+
+# Copy third-party licenses
+info "Copying third-party licenses to application bundle..."
+create_dir_if_not_exists "build/$APP_NAME.app/Contents/Resources/licenses"
+cp -R licenses/* "build/$APP_NAME.app/Contents/Resources/licenses"
 
 # Copy COPYING.txt
 info "Copying COPYING.txt to application bundle..."

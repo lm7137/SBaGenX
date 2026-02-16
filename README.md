@@ -227,7 +227,11 @@ Run the script with the `platform` you use. This will create a installers and bi
 
 ## ⚖️ License
 
-SBaGenX is distributed under the GPL license. See the [COPYING.txt](COPYING.txt) file for details.
+SBaGenX is distributed under the GPL license. See [COPYING.txt](COPYING.txt) for details.
+
+Third-party dependency license texts are included in
+[`licenses/third_party`](licenses/third_party), with an index in
+[`licenses/third_party/README.txt`](licenses/third_party/README.txt).
 
 ## 👏 Credits
 

@@ -46,7 +46,7 @@ if [ $SKIP_32BIT = 0 ]; then
 
     # Set up compilation flags for 32-bit
     CFLAGS_32="-DT_LINUX -DFLAC_DECODE -m32 -Wall -O3 -I."
-    LIBS_32="-lm -lpthread -lasound"
+    LIBS_32="-lm -lpthread -lasound -ldl"
 
     # Check for MP3 support (32-bit)
     if [ -f "$LIB_PATH_32" ]; then
@@ -98,7 +98,7 @@ if [ "$HOST_ARCH" = "aarch64" ]; then
 else
     CFLAGS_64="-DT_LINUX -DFLAC_DECODE -m64 -Wall -O3 -I."
 fi
-LIBS_64="-lm -lpthread -lasound"
+LIBS_64="-lm -lpthread -lasound -ldl"
 
 # Check for MP3 support for 64-bit or ARM64
 if [ "$HOST_ARCH" = "aarch64" ]; then

@@ -1,13 +1,14 @@
-SBaGen+ -- Sequenced Brainwave Generator
+SBaGenX -- Sequenced Brainwave Generator
 ------------------------------------------
 
-SBaGen+ is a fork of the original SBaGen software (https://uazu.net/sbagen/),
+SBaGenX is a fork of SBaGen+ by Ruan, which is a fork of the original SBaGen software (https://uazu.net/sbagen/),
 distributed under the terms of the GNU General Public License v2.
 
 The full source code is available at:
 https://github.com/ruanklein/sbagen-plus
 
-For licensing information, see License.txt.
+For SBaGenX licensing information, see COPYING.txt.
+For third-party component licenses, see licenses/third_party/README.txt.
 
 Contents of this document:
 -------------------------
@@ -392,16 +393,24 @@ file or effect utility.  It is assumed that the eventual output device
 will use exactly the sampling frequency specified, or otherwise all
 the frequencies and timings will be out.
 
-The -o option can also be used to output directly to a file.  In both
-cases headerless raw data is output (to write a WAV file, see the -W
-option below).  For example, to pipe to bplay under UNIX, you could
-use the following:
+The -o option can also be used to output directly to a file.  By
+default this writes headerless raw data (to write a WAV file, see the
+-W option below).  If the filename given to -o ends with .mp3, .ogg or
+.flac, SBaGenX will encode directly to that format (using runtime
+encoder libraries).  The -O option remains raw PCM only.  For example,
+to pipe to bplay under UNIX, you could use the following:
 
 >> sbagenx -r 8000 -O -i 100+0.92/30 200+4.2/15 | bplay -S -s 8000 -b 16
 
 To output an isochronic tone to a file:
 
 >> sbagenx -r 44100 -o isochronic-alpha.raw -i 300@10/20
+
+To encode directly:
+
+>> sbagenx -r 44100 -o session.flac -L 0:20 -i 200+8/30
+>> sbagenx -r 44100 -o session.ogg  -L 0:20 -i 200+8/30
+>> sbagenx -r 44100 -o session.mp3  -L 0:20 -i 200+8/30
 
 The -L option allows a time-limit to be set on the output.  So, for
 example, to output 45 minutes of data to a file, and then play it with

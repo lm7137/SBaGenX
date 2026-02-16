@@ -127,8 +127,8 @@ sbagenx my-sequence.sbg
 ### 🔧 Common Options
 
 - `-i [tones]`: Play the specified tones immediately
-- `-m [file]`: Mix with a background sound file (MP3, OGG, WAV)
-- `-o [file]`: Output to a file instead of playing
+- `-m [file]`: Mix with a background sound file (FLAC, MP3, OGG, WAV)
+- `-o [file]`: Output to a file instead of playing (`.raw` by default, or encode with `.mp3`, `.ogg`, `.flac`)
 - `-L [time]`: Limit playback to the specified time (e.g., 0:30 for 30 minutes)
 
 ## 📝 Creating Simple Sequences

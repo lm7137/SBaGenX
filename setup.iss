@@ -67,9 +67,15 @@ Name: "addtopath"; Description: "Add {#MyAppName} to PATH environment variable";
 ; Include both 32-bit and 64-bit versions
 Source: "dist\sbagenx-win32.exe"; DestDir: "{app}"; DestName: "sbagenx-win32.exe"; Flags: ignoreversion
 Source: "dist\sbagenx-win64.exe"; DestDir: "{app}"; DestName: "sbagenx-win64.exe"; Flags: ignoreversion
+; Optional encoder runtime DLL bundles (added by windows-build-sbagenx.sh when available)
+Source: "dist\libsndfile-win32.dll"; DestDir: "{app}"; DestName: "libsndfile-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libsndfile-win64.dll"; DestDir: "{app}"; DestName: "libsndfile-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libmp3lame-win32.dll"; DestDir: "{app}"; DestName: "libmp3lame-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libmp3lame-win64.dll"; DestDir: "{app}"; DestName: "libmp3lame-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
 ; Documentation
 Source: "COPYING.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion dontcopy
+Source: "licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Example files
 Source: "examples\*"; DestDir: "{app}\examples"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -83,6 +89,7 @@ Source: "build\USAGE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\RESEARCH.txt"; DestDir: "{app}"; Flags: ignoreversion
 ; Documentation files in user's Documents folder
 Source: "docs\*"; DestDir: "{#MyAppUserDocsDir}\Documentation"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "licenses\*"; DestDir: "{#MyAppUserDocsDir}\Licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "examples\*"; DestDir: "{#MyAppUserDocsDir}\Examples"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "COPYING.txt"; DestDir: "{#MyAppUserDocsDir}"; DestName: "License.txt"; Flags: ignoreversion
 Source: "NOTICE.txt"; DestDir: "{#MyAppUserDocsDir}"; DestName: "Notice.txt"; Flags: ignoreversion
@@ -234,6 +241,10 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   SourceFile: String;
   DestFile: String;
+  SourceSndFile: String;
+  SourceMp3File: String;
+  DestSndFile: String;
+  DestMp3File: String;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -242,13 +253,17 @@ begin
     begin
       SourceFile := ExpandConstant('{app}\sbagenx-win64.exe');
       DestFile := ExpandConstant('{app}\sbagenx.exe');
+      SourceSndFile := ExpandConstant('{app}\libsndfile-win64.dll');
+      SourceMp3File := ExpandConstant('{app}\libmp3lame-win64.dll');
     end
     else
     begin
       SourceFile := ExpandConstant('{app}\sbagenx-win32.exe');
       DestFile := ExpandConstant('{app}\sbagenx.exe');
+      SourceSndFile := ExpandConstant('{app}\libsndfile-win32.dll');
+      SourceMp3File := ExpandConstant('{app}\libmp3lame-win32.dll');
     end;
-    
+
     { Copy the appropriate executable }
     if FileCopy(SourceFile, DestFile, False) then
     begin
@@ -256,7 +271,21 @@ begin
       DeleteFile(ExpandConstant('{app}\sbagenx-win32.exe'));
       DeleteFile(ExpandConstant('{app}\sbagenx-win64.exe'));
     end;
-    
+
+    { Promote bundled runtime DLLs to canonical names used by the loader }
+    DestSndFile := ExpandConstant('{app}\libsndfile-1.dll');
+    DestMp3File := ExpandConstant('{app}\libmp3lame-0.dll');
+    if FileExists(SourceSndFile) then
+      FileCopy(SourceSndFile, DestSndFile, False);
+    if FileExists(SourceMp3File) then
+      FileCopy(SourceMp3File, DestMp3File, False);
+
+    { Remove architecture-tagged DLL copies after promotion }
+    DeleteFile(ExpandConstant('{app}\libsndfile-win32.dll'));
+    DeleteFile(ExpandConstant('{app}\libsndfile-win64.dll'));
+    DeleteFile(ExpandConstant('{app}\libmp3lame-win32.dll'));
+    DeleteFile(ExpandConstant('{app}\libmp3lame-win64.dll'));
+
     { Notify system about PATH changes }
     if WizardIsTaskSelected('addtopath') then
     begin
@@ -275,5 +304,8 @@ begin
   begin
     { Remove the dynamically created sbagenx.exe file }
     DeleteFile(ExpandConstant('{app}\sbagenx.exe'));
+    { Remove dynamically promoted runtime encoder DLLs }
+    DeleteFile(ExpandConstant('{app}\libsndfile-1.dll'));
+    DeleteFile(ExpandConstant('{app}\libmp3lame-0.dll'));
   end;
 end; 

@@ -88,6 +88,57 @@ OGG_LIB_PATH_64="libs/windows-win64-libogg.a"
 TREMOR_LIB_PATH_32="libs/windows-win32-libvorbisidec.a"
 TREMOR_LIB_PATH_64="libs/windows-win64-libvorbisidec.a"
 
+find_mingw_dll() {
+    local target="$1"
+    shift
+    local gcc_bin="${target}-gcc"
+    local sysroot=""
+    local dll
+    local candidate
+
+    if command -v "$gcc_bin" >/dev/null 2>&1; then
+        sysroot=$($gcc_bin -print-sysroot 2>/dev/null)
+    fi
+
+    for dll in "$@"; do
+        for candidate in \
+            "/usr/${target}/bin/${dll}" \
+            "/usr/${target}/lib/${dll}" \
+            "${sysroot}/bin/${dll}" \
+            "${sysroot}/usr/bin/${dll}" \
+            "${sysroot}/${target}/bin/${dll}"; do
+            if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+                echo "$candidate"
+                return 0
+            fi
+        done
+
+        candidate=$(find /usr -maxdepth 7 -type f -name "$dll" -path "*${target}*" 2>/dev/null | head -n 1)
+        if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+copy_runtime_dll() {
+    local arch_tag="$1"
+    local target="$2"
+    local output_name="$3"
+    shift 3
+    local src
+
+    src=$(find_mingw_dll "$target" "$@")
+    if [ -n "$src" ] && [ -f "$src" ]; then
+        cp "$src" "dist/${output_name}-${arch_tag}.dll"
+        success "Bundled runtime DLL: dist/${output_name}-${arch_tag}.dll"
+    else
+        warning "Could not find ${output_name} runtime DLL for ${target}; installer will rely on system-provided runtime"
+    fi
+}
+
 # Build 32-bit version
 section_header "Building 32-bit version..."
 
@@ -174,6 +225,12 @@ if [ $? -eq 0 ]; then
 else
     error "64-bit compilation failed!"
 fi
+
+section_header "Bundling optional runtime encoder DLLs..."
+copy_runtime_dll "win32" "i686-w64-mingw32" "libsndfile" "libsndfile-1.dll" "sndfile.dll"
+copy_runtime_dll "win32" "i686-w64-mingw32" "libmp3lame" "libmp3lame-0.dll" "libmp3lame.dll"
+copy_runtime_dll "win64" "x86_64-w64-mingw32" "libsndfile" "libsndfile-1.dll" "sndfile.dll"
+copy_runtime_dll "win64" "x86_64-w64-mingw32" "libmp3lame" "libmp3lame-0.dll" "libmp3lame.dll"
 
 # Clean up temporary files
 rm -f /tmp/sbagen.rc /tmp/sbagen32.res /tmp/sbagen64.res sbagenx.tmp.c

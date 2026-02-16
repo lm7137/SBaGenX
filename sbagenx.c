@@ -58,6 +58,11 @@
 // Define OGG_DECODE to include OGG support code
 // Define MP3_DECODE to include MP3 support code
 // Define FLAC_DECODE to include FLAC support code
+//
+// Output encoding (selected from -o filename extension):
+//   *.mp3  -> MP3 (libmp3lame, dynamically loaded)
+//   *.ogg  -> OGG/Vorbis (libsndfile, dynamically loaded)
+//   *.flac -> FLAC (libsndfile, dynamically loaded)
 
 #ifdef T_LINUX
 #define ALSA_AUDIO
@@ -123,6 +128,7 @@
 #include <string.h>
 #include <errno.h>
 #include <ctype.h>
+#include <limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -143,6 +149,10 @@
  #define vsnprintf _vsnprintf
 #endif
 
+#ifdef T_MACOSX
+ #include <mach-o/dyld.h>
+#endif
+
 #ifdef ALSA_AUDIO
  #include <alsa/asoundlib.h>
 #endif
@@ -159,7 +169,9 @@
 #endif
 #ifdef UNIX_MISC
  #include <pthread.h>
+ #include <dlfcn.h>
 #endif
+#include "libs/sndfile.h"
 
 typedef struct Channel Channel;
 typedef struct Voice Voice;
@@ -224,6 +236,10 @@ void create_noise_spin_effect(
   int *left,
   int *right
 ); // Create a spin effect
+void detect_output_encoder();
+void init_output_encoder();
+void output_encoder_write(short *pcm, int frames);
+void finish_output_encoder();
 
 #define ALLOC_ARR(cnt, type) ((type*)Alloc((cnt) * sizeof(type)))
 #define uint unsigned int
@@ -290,8 +306,9 @@ help() {
 	  NL "                     instead of outputting forever."
 	  NL "          -T time   Start at the given clock-time (hh:mm)"
 	  NL
-	  NL "          -o file   Output raw data to the given file instead of default device"
-	  NL "          -O        Output raw data to the standard output"
+		  NL "          -o file   Output raw data to the given file instead of default device"
+		  NL "                     (or MP3/OGG/FLAC if file extension is .mp3/.ogg/.flac)"
+		  NL "          -O        Output raw data to the standard output"
 	  NL "          -W        Output a WAV-format file instead of raw data"
 	  NL "          -m file   Read audio data from the given file and mix it with"
 	  NL "                      generated brainwave tones; may be "
@@ -459,6 +476,54 @@ int mix_cnt;			// Version number from mix filename (#<digits>), or -1
 int bigendian;			// Is this platform Big-endian?
 int mix_flag= 0;		// Has 'mix/*' been used in the sequence?
 double *mix_amp= NULL; // Amplitude of mix sound data to use with mixspin/mixpulse. Default is 100%
+
+typedef enum {
+   OUT_ENC_NONE= 0,
+   OUT_ENC_MP3,
+   OUT_ENC_OGG,
+   OUT_ENC_FLAC
+} OutEncFmt;
+
+OutEncFmt out_enc_fmt= OUT_ENC_NONE;
+int out_enc_active= 0;
+int out_enc_finished= 0;
+int out_enc_atexit= 0;
+
+#ifdef WIN_MISC
+typedef HMODULE DLibHandle;
+#else
+typedef void *DLibHandle;
+#endif
+
+typedef struct {
+   DLibHandle lib;
+   SNDFILE *snd;
+   SNDFILE *(*sf_open_fn)(const char*, int, SF_INFO*);
+   sf_count_t (*sf_writef_short_fn)(SNDFILE*, const short*, sf_count_t);
+   int (*sf_close_fn)(SNDFILE*);
+   const char *(*sf_strerror_fn)(SNDFILE*);
+} SndEncState;
+SndEncState snd_enc;
+
+typedef struct lame_global_flags lame_global_flags;
+typedef lame_global_flags *lame_t;
+
+typedef struct {
+   DLibHandle lib;
+   lame_t gfp;
+   lame_t (*lame_init_fn)(void);
+   int (*lame_set_in_samplerate_fn)(lame_t, int);
+   int (*lame_set_num_channels_fn)(lame_t, int);
+   int (*lame_set_quality_fn)(lame_t, int);
+   int (*lame_set_brate_fn)(lame_t, int);
+   int (*lame_init_params_fn)(lame_t);
+   int (*lame_encode_buffer_interleaved_fn)(lame_t, short int*, int, unsigned char*, int);
+   int (*lame_encode_flush_fn)(lame_t, unsigned char*, int);
+   int (*lame_close_fn)(lame_t);
+   unsigned char *buf;
+   int buflen;
+} Mp3EncState;
+Mp3EncState mp3_enc;
 
 typedef struct {
    int active;			// Function-driven modulation enabled?
@@ -1543,6 +1608,401 @@ userTime() {
 int userTime() { return 0; }
 #endif
 
+static const char *
+output_encoder_name() {
+   switch (out_enc_fmt) {
+    case OUT_ENC_MP3: return "MP3";
+    case OUT_ENC_OGG: return "OGG/Vorbis";
+    case OUT_ENC_FLAC: return "FLAC";
+    default: return "raw";
+   }
+}
+
+static void
+write_out_fd_raw(const char *buf, int siz) {
+   int rv;
+   while (-1 != (rv= write(out_fd, buf, siz))) {
+      if (rv == 0) break;
+      siz -= rv;
+      if (!siz) return;
+      buf += rv;
+   }
+   error("Output error");
+}
+
+#ifdef WIN_MISC
+static DLibHandle
+dlib_open_one(const char *name) {
+   return LoadLibraryA(name);
+}
+static void *
+dlib_sym(DLibHandle lib, const char *name) {
+   return (void*)GetProcAddress(lib, name);
+}
+static void
+dlib_close(DLibHandle lib) {
+   if (lib) FreeLibrary(lib);
+}
+#else
+static DLibHandle
+dlib_open_one(const char *name) {
+   return dlopen(name, RTLD_LAZY);
+}
+static void *
+dlib_sym(DLibHandle lib, const char *name) {
+   return dlsym(lib, name);
+}
+static void
+dlib_close(DLibHandle lib) {
+   if (lib) dlclose(lib);
+}
+#endif
+
+#ifdef WIN_MISC
+#define DLIB_PATH_SEP '\\'
+#else
+#define DLIB_PATH_SEP '/'
+#endif
+
+static char dlib_exec_dir[1024];
+static int dlib_exec_dir_init;
+
+static void
+dlib_init_exec_dir() {
+   if (dlib_exec_dir_init) return;
+   dlib_exec_dir_init= 1;
+   dlib_exec_dir[0]= 0;
+
+#ifdef WIN_MISC
+   {
+      char path[1024];
+      DWORD len= GetModuleFileNameA(0, path, sizeof(path)-1);
+      if (len > 0 && len < sizeof(path)) {
+	 char *p1, *p2, *p;
+	 path[len]= 0;
+	 p1= strrchr(path, '/');
+	 p2= strrchr(path, '\\');
+	 p= p1 > p2 ? p1 : p2;
+	 if (p) *p= 0;
+	 else strcpy(path, ".");
+	 strncpy(dlib_exec_dir, path, sizeof(dlib_exec_dir)-1);
+	 dlib_exec_dir[sizeof(dlib_exec_dir)-1]= 0;
+      }
+   }
+#else
+   {
+      char path[PATH_MAX];
+      int ok= 0;
+#ifdef T_MACOSX
+      {
+	 uint32_t size= sizeof(path);
+	 if (_NSGetExecutablePath(path, &size) == 0)
+	    ok= 1;
+      }
+#endif
+      if (!ok) {
+	 ssize_t len= readlink("/proc/self/exe", path, sizeof(path)-1);
+	 if (len > 0 && len < sizeof(path)) {
+	    path[len]= 0;
+	    ok= 1;
+	 }
+      }
+      if (ok) {
+	 char *p1, *p2, *p;
+	 p1= strrchr(path, '/');
+	 p2= strrchr(path, '\\');
+	 p= p1 > p2 ? p1 : p2;
+	 if (p) *p= 0;
+	 else strcpy(path, ".");
+	 strncpy(dlib_exec_dir, path, sizeof(dlib_exec_dir)-1);
+	 dlib_exec_dir[sizeof(dlib_exec_dir)-1]= 0;
+      }
+   }
+#endif
+
+   if (!dlib_exec_dir[0])
+      strcpy(dlib_exec_dir, ".");
+}
+
+static DLibHandle
+dlib_open_best(const char **names) {
+   int a;
+   char cand[2048];
+
+   dlib_init_exec_dir();
+   for (a= 0; names[a]; a++) {
+      const char *name= names[a];
+      DLibHandle mod;
+
+      if (strchr(name, '/') || strchr(name, '\\')) {
+	 mod= dlib_open_one(name);
+	 if (mod) return mod;
+	 continue;
+      }
+
+      snprintf(cand, sizeof(cand), "%s%c%s%c%s", dlib_exec_dir, DLIB_PATH_SEP, "libs", DLIB_PATH_SEP, name);
+      mod= dlib_open_one(cand);
+      if (mod) return mod;
+
+      snprintf(cand, sizeof(cand), "%s%c%s", dlib_exec_dir, DLIB_PATH_SEP, name);
+      mod= dlib_open_one(cand);
+      if (mod) return mod;
+
+      snprintf(cand, sizeof(cand), ".%c%s%c%s", DLIB_PATH_SEP, "libs", DLIB_PATH_SEP, name);
+      mod= dlib_open_one(cand);
+      if (mod) return mod;
+
+      snprintf(cand, sizeof(cand), ".%c%s", DLIB_PATH_SEP, name);
+      mod= dlib_open_one(cand);
+      if (mod) return mod;
+
+      mod= dlib_open_one(name);
+      if (mod) return mod;
+   }
+   return 0;
+}
+
+#undef DLIB_PATH_SEP
+
+static int
+is_out_ext(const char *path, const char *ext) {
+   const char *p= strrchr(path, '.');
+   const char *slash= strrchr(path, '/');
+   const char *bslash= strrchr(path, '\\');
+   const char *sep= slash > bslash ? slash : bslash;
+   int a;
+
+   if (!p || (sep && p < sep) || !p[1]) return 0;
+   p++;
+   for (a= 0; ext[a] && p[a]; a++)
+      if (tolower((unsigned char)p[a]) != tolower((unsigned char)ext[a]))
+	 return 0;
+   return ext[a] == 0 && p[a] == 0;
+}
+
+void
+detect_output_encoder() {
+   out_enc_fmt= OUT_ENC_NONE;
+   if (!opt_o || opt_W) return;
+
+   if (is_out_ext(opt_o, "mp3"))
+      out_enc_fmt= OUT_ENC_MP3;
+   else if (is_out_ext(opt_o, "ogg"))
+      out_enc_fmt= OUT_ENC_OGG;
+   else if (is_out_ext(opt_o, "flac"))
+      out_enc_fmt= OUT_ENC_FLAC;
+}
+
+static void
+init_snd_encoder(int format) {
+   const char *names[] = {
+#ifdef WIN_MISC
+      "libsndfile-1.dll",
+      "sndfile.dll",
+#elif defined(T_MACOSX)
+      "libsndfile.1.dylib",
+      "libsndfile.dylib",
+#else
+      "libsndfile.so.1",
+      "libsndfile.so",
+#endif
+      0
+   };
+   SF_INFO info;
+
+   memset(&snd_enc, 0, sizeof(snd_enc));
+   snd_enc.lib= dlib_open_best(names);
+   if (!snd_enc.lib)
+      error("%s output requested, but libsndfile runtime library is not available", output_encoder_name());
+
+   snd_enc.sf_open_fn= (SNDFILE*(*)(const char*, int, SF_INFO*))dlib_sym(snd_enc.lib, "sf_open");
+   snd_enc.sf_writef_short_fn= (sf_count_t(*)(SNDFILE*, const short*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_short");
+   snd_enc.sf_close_fn= (int(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_close");
+   snd_enc.sf_strerror_fn= (const char*(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_strerror");
+   if (!snd_enc.sf_open_fn || !snd_enc.sf_writef_short_fn || !snd_enc.sf_close_fn || !snd_enc.sf_strerror_fn)
+      error("Failed to load required libsndfile symbols for %s output", output_encoder_name());
+
+   memset(&info, 0, sizeof(info));
+   info.channels= 2;
+   info.samplerate= out_rate;
+   info.format= format;
+
+   snd_enc.snd= snd_enc.sf_open_fn(opt_o, SFM_WRITE, &info);
+   if (!snd_enc.snd)
+      error("Failed to open output file for %s encoding: %s",
+	    output_encoder_name(),
+	    snd_enc.sf_strerror_fn(0));
+
+   out_enc_active= 1;
+}
+
+static void
+ensure_mp3_buf(int frames) {
+   int need= 7200 + (int)(1.25 * frames + 0.5);
+   if (need > mp3_enc.buflen) {
+      if (!mp3_enc.buf) {
+	 mp3_enc.buf= ALLOC_ARR(need, unsigned char);
+      } else {
+	 mp3_enc.buf= (unsigned char*)realloc(mp3_enc.buf, need);
+	 if (!mp3_enc.buf) error("Out of memory");
+      }
+      mp3_enc.buflen= need;
+   }
+}
+
+static void
+init_mp3_encoder() {
+   const char *names[] = {
+#ifdef WIN_MISC
+      "libmp3lame-0.dll",
+      "libmp3lame.dll",
+#elif defined(T_MACOSX)
+      "libmp3lame.0.dylib",
+      "libmp3lame.dylib",
+#else
+      "libmp3lame.so.0",
+      "libmp3lame.so",
+#endif
+      0
+   };
+
+   memset(&mp3_enc, 0, sizeof(mp3_enc));
+   mp3_enc.lib= dlib_open_best(names);
+   if (!mp3_enc.lib)
+      error("MP3 output requested, but libmp3lame runtime library is not available");
+
+   mp3_enc.lame_init_fn= (lame_t(*)(void))dlib_sym(mp3_enc.lib, "lame_init");
+   mp3_enc.lame_set_in_samplerate_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_in_samplerate");
+   mp3_enc.lame_set_num_channels_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_num_channels");
+   mp3_enc.lame_set_quality_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_quality");
+   mp3_enc.lame_set_brate_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_brate");
+   mp3_enc.lame_init_params_fn= (int(*)(lame_t))dlib_sym(mp3_enc.lib, "lame_init_params");
+   mp3_enc.lame_encode_buffer_interleaved_fn=
+      (int(*)(lame_t, short int*, int, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_buffer_interleaved");
+   mp3_enc.lame_encode_flush_fn=
+      (int(*)(lame_t, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_flush");
+   mp3_enc.lame_close_fn= (int(*)(lame_t))dlib_sym(mp3_enc.lib, "lame_close");
+   if (!mp3_enc.lame_init_fn ||
+       !mp3_enc.lame_set_in_samplerate_fn ||
+       !mp3_enc.lame_set_num_channels_fn ||
+       !mp3_enc.lame_set_quality_fn ||
+       !mp3_enc.lame_set_brate_fn ||
+       !mp3_enc.lame_init_params_fn ||
+       !mp3_enc.lame_encode_buffer_interleaved_fn ||
+       !mp3_enc.lame_encode_flush_fn ||
+       !mp3_enc.lame_close_fn)
+      error("Failed to load required libmp3lame symbols");
+
+   mp3_enc.gfp= mp3_enc.lame_init_fn();
+   if (!mp3_enc.gfp) error("lame_init() failed");
+
+   if (mp3_enc.lame_set_num_channels_fn(mp3_enc.gfp, 2) < 0 ||
+       mp3_enc.lame_set_in_samplerate_fn(mp3_enc.gfp, out_rate) < 0 ||
+       mp3_enc.lame_set_quality_fn(mp3_enc.gfp, 2) < 0 ||
+       mp3_enc.lame_set_brate_fn(mp3_enc.gfp, 192) < 0)
+      error("Failed to configure MP3 encoder");
+
+   if (mp3_enc.lame_init_params_fn(mp3_enc.gfp) < 0)
+      error("Failed to initialize MP3 encoder parameters");
+
+   out_enc_active= 1;
+}
+
+void
+init_output_encoder() {
+   out_enc_active= 0;
+   out_enc_finished= 0;
+   if (out_enc_fmt == OUT_ENC_NONE) return;
+
+   if (!opt_o)
+      error("%s encoding requires -o <file>", output_encoder_name());
+   if (out_mode != 1) {
+      if (!opt_Q)
+	 warn("%s output requires 16-bit PCM input; forcing 16-bit mode", output_encoder_name());
+      out_mode= 1;
+   }
+
+   switch (out_enc_fmt) {
+    case OUT_ENC_MP3:
+      init_mp3_encoder();
+      break;
+    case OUT_ENC_OGG:
+      init_snd_encoder(SF_FORMAT_OGG | SF_FORMAT_VORBIS);
+      break;
+    case OUT_ENC_FLAC:
+      init_snd_encoder(SF_FORMAT_FLAC | SF_FORMAT_PCM_16);
+      break;
+    default:
+      break;
+   }
+
+   if (out_enc_active && !out_enc_atexit) {
+      atexit(finish_output_encoder);
+      out_enc_atexit= 1;
+   }
+
+   if (!opt_Q && out_enc_active)
+      warn("Outputting %s encoded audio at %d Hz", output_encoder_name(), out_rate);
+}
+
+void
+output_encoder_write(short *pcm, int frames) {
+   if (!out_enc_active || !frames) return;
+
+   if (out_enc_fmt == OUT_ENC_MP3) {
+      int rv;
+      ensure_mp3_buf(frames);
+      rv= mp3_enc.lame_encode_buffer_interleaved_fn(mp3_enc.gfp, pcm, frames, mp3_enc.buf, mp3_enc.buflen);
+      if (rv < 0)
+	 error("MP3 encoding failed with error code %d", rv);
+      if (rv > 0)
+	 write_out_fd_raw((char*)mp3_enc.buf, rv);
+      return;
+   }
+
+   if (out_enc_fmt == OUT_ENC_OGG || out_enc_fmt == OUT_ENC_FLAC) {
+      sf_count_t wr= snd_enc.sf_writef_short_fn(snd_enc.snd, pcm, frames);
+      if (wr != (sf_count_t)frames)
+	 error("%s encoding failed while writing frame data", output_encoder_name());
+      return;
+   }
+}
+
+void
+finish_output_encoder() {
+   if (!out_enc_active || out_enc_finished) return;
+   out_enc_finished= 1;
+
+   if (out_enc_fmt == OUT_ENC_MP3) {
+      int rv;
+      ensure_mp3_buf(4096);
+      rv= mp3_enc.lame_encode_flush_fn(mp3_enc.gfp, mp3_enc.buf, mp3_enc.buflen);
+      if (rv < 0)
+	 error("MP3 encoder flush failed with error code %d", rv);
+      if (rv > 0)
+	 write_out_fd_raw((char*)mp3_enc.buf, rv);
+      if (mp3_enc.gfp) {
+	 mp3_enc.lame_close_fn(mp3_enc.gfp);
+	 mp3_enc.gfp= 0;
+      }
+      if (mp3_enc.buf) { free(mp3_enc.buf); mp3_enc.buf= 0; }
+      mp3_enc.buflen= 0;
+      dlib_close(mp3_enc.lib);
+      mp3_enc.lib= 0;
+      return;
+   }
+
+   if (out_enc_fmt == OUT_ENC_OGG || out_enc_fmt == OUT_ENC_FLAC) {
+      if (snd_enc.snd) {
+	 snd_enc.sf_close_fn(snd_enc.snd);
+	 snd_enc.snd= 0;
+      }
+      dlib_close(snd_enc.lib);
+      snd_enc.lib= 0;
+      return;
+   }
+}
+
 //
 //	Simple random number generator.  Generates a repeating
 //	sequence of 65536 odd numbers in the range -65535->65535.
@@ -1744,6 +2204,7 @@ loop() {
 
   // Do byte-swapping if bigendian and outputting to a file or stream
   if ((opt_O || opt_o) &&
+      out_enc_fmt == OUT_ENC_NONE &&
       out_mode == 1 && bigendian)
      out_mode= 2;
 
@@ -2104,6 +2565,13 @@ outChunk() {
 void 
 writeOut(char *buf, int siz) {
   int rv;
+
+  if (out_enc_active) {
+     if (siz & 3)
+	error("Internal error: encoded output chunk is not frame-aligned (%d bytes)", siz);
+     output_encoder_write((short*)buf, siz/4);
+     return;
+  }
 
 #ifdef WIN_AUDIO
   if (out_fd == -9999) {
@@ -2472,6 +2940,11 @@ corrVal(int running) {
 void 
 setup_device(void) {
 
+  detect_output_encoder();
+  if (opt_O && out_enc_fmt != OUT_ENC_NONE)
+     error("%s output requires a filename with -o (stdout is not supported for this format yet)",
+	   output_encoder_name());
+
   if (!opt_Q && opt_V != 100) {
     warn("Global volume level set to %d%%", opt_V);
   }
@@ -2485,11 +2958,18 @@ setup_device(void) {
     if (opt_O)
       out_fd= 1;		// stdout
     else {
-      FILE *out;		// Need to create a stream to set binary mode for DOS
-      if (!(out= fopen(opt_o, "wb")))
-	error("Can't open \"%s\", errno %d", opt_o, errno);
-      out_fd= fileno(out);
+      if (out_enc_fmt == OUT_ENC_OGG || out_enc_fmt == OUT_ENC_FLAC) {
+	 out_fd= -1;		// libsndfile opens and manages the file internally
+      } else {
+	 FILE *out;		// Need to create a stream to set binary mode for DOS
+	 if (!(out= fopen(opt_o, "wb")))
+	    error("Can't open \"%s\", errno %d", opt_o, errno);
+	 out_fd= fileno(out);
+      }
     }
+
+    init_output_encoder();
+
     out_blen= out_rate * 2 / out_prate;		// 10 fragments a second by default
     while (out_blen & (out_blen-1)) out_blen &= out_blen-1;		// Make power of two
     out_bsiz= out_blen * (out_mode ? 2 : 1);
@@ -2500,7 +2980,7 @@ setup_device(void) {
     out_buf_lo &= 0xFFFF;
     tmp_buf= (int*)Alloc(out_blen * sizeof(int));
 
-    if (!opt_Q && !opt_W)		// Informational message for opt_W is written later
+    if (!opt_Q && !opt_W && !out_enc_active)		// Informational message for opt_W/encoded is written later
        warn("Outputting %d-bit raw audio data at %d Hz with %d-sample blocks, %d ms per block",
 	    out_mode ? 16 : 8, out_rate, out_blen/2, out_buf_ms);
     return;

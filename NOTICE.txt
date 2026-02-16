@@ -4,8 +4,20 @@ distributed under the terms of the GNU General Public License v2.
 The full source code is available at:
 https://github.com/ruanklein/sbagen-plus
 
-For licensing information, see License.txt.
+For SBaGenX licensing information, see COPYING.txt.
 
 This fork bundles dr_flac (https://github.com/mackron/dr_libs) for FLAC
-decoding. dr_flac is available under public domain or MIT-0 terms
-(see libs/dr_flac.h).
+decoding. dr_flac is available under public domain or MIT-0 terms.
+
+This fork also bundles libsndfile's public header (libs/sndfile.h),
+which is provided under the GNU LGPL v2.1+ by the libsndfile project.
+
+At runtime, SBaGenX may load libsndfile and libmp3lame dynamically
+to encode .ogg/.flac/.mp3 output files when selected.
+
+Optional decode support may also use libogg, Tremor (libvorbisidec), and
+libmad static libraries built by the project scripts.
+
+Third-party license texts are included under:
+licenses/third_party/
+See licenses/third_party/README.txt for component-to-license mapping.
