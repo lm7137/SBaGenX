@@ -452,6 +452,20 @@ int bigendian;			// Is this platform Big-endian?
 int mix_flag= 0;		// Has 'mix/*' been used in the sequence?
 double *mix_amp= NULL; // Amplitude of mix sound data to use with mixspin/mixpulse. Default is 100%
 
+typedef struct {
+   int active;			// Function-driven modulation enabled?
+   int chan;			// Channel index to apply to
+   int typ;			// Voice type to apply to (1 binaural, 8 isochronic)
+   int start_ms;		// Start time (ms from midnight)
+   int end_ms;			// End time for function-driven carrier path
+   double carr0, carr1;	// Carrier start/end (Hz)
+   double carr_span_s;		// Carrier transition time in seconds
+   double beat0, beat1;	// Beat/pulse start/end (Hz)
+   double beat_span_s;		// Beat transition time in seconds
+   double beat_log_ratio;	// Precomputed log(beat1/beat0)
+} FuncCurve;
+FuncCurve func_curve;		// Runtime function curve for pre-programmed sequences
+
 int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
    double freq, adj;
@@ -696,6 +710,64 @@ int t_per0(int t0, int t1) {		// Length of period starting at t0, ending at t1.
 }
 int t_mid(int t0, int t1) {		// Midpoint of period from t0 to t1
    return ((t1 < t0) ? (H24 + t0 + t1) / 2 : (t0 + t1) / 2) % H24;
+}
+
+// Clear any runtime function-driven curve override.
+static void
+clear_func_curve() {
+   memset(&func_curve, 0, sizeof(func_curve));
+}
+
+// Register function-driven exponential beat/pulse drop for one channel.
+static void
+setup_drop_func_curve(int chan, int typ, int start_ms,
+		      double carr0, double carr1, double carr_span_s,
+		      double beat0, double beat1, double beat_span_s) {
+   clear_func_curve();
+   if (carr_span_s <= 0 || beat_span_s <= 0 || beat0 <= 0 || beat1 <= 0)
+      return;
+
+   func_curve.active= 1;
+   func_curve.chan= chan;
+   func_curve.typ= typ;
+   func_curve.start_ms= start_ms;
+   func_curve.end_ms= (start_ms + (int)(1000.0 * carr_span_s + 0.5)) % H24;
+   func_curve.carr0= carr0;
+   func_curve.carr1= carr1;
+   func_curve.carr_span_s= carr_span_s;
+   func_curve.beat0= beat0;
+   func_curve.beat1= beat1;
+   func_curve.beat_span_s= beat_span_s;
+   func_curve.beat_log_ratio= log(beat1 / beat0);
+}
+
+// Apply the registered curve at the current runtime position.
+static void
+apply_func_curve(int now_ms, int chan, Voice *vv) {
+   double pos_s, carr_s;
+   double beat, carr;
+   int elapsed_ms, total_ms;
+
+   if (!func_curve.active) return;
+   if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
+
+   elapsed_ms= t_per0(func_curve.start_ms, now_ms);
+   total_ms= t_per0(func_curve.start_ms, func_curve.end_ms);
+   if (elapsed_ms > total_ms) return;
+
+   pos_s= elapsed_ms * 0.001;
+   carr_s= pos_s;
+   if (carr_s > func_curve.carr_span_s) carr_s= func_curve.carr_span_s;
+
+   if (pos_s >= func_curve.beat_span_s) {
+      beat= func_curve.beat1;
+   } else {
+      beat= func_curve.beat0 * exp(func_curve.beat_log_ratio * pos_s / func_curve.beat_span_s);
+   }
+   carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) * carr_s / func_curve.carr_span_s;
+
+   vv->carr= carr;
+   vv->res= beat;
 }
 
 //
@@ -2203,11 +2275,15 @@ corrVal(int running) {
          vv->waveform= v0->waveform;
          break;
        default:		// Waveform based binaural
-	  vv->amp= rat0 * v0->amp + rat1 * v1->amp;
-	  vv->carr= rat0 * v0->carr + rat1 * v1->carr;
-	  vv->res= rat0 * v0->res + rat1 * v1->res;
-	  break;
+	 vv->amp= rat0 * v0->amp + rat1 * v1->amp;
+	 vv->carr= rat0 * v0->carr + rat1 * v1->carr;
+	 vv->res= rat0 * v0->res + rat1 * v1->res;
+	 break;
       }
+
+      // For selected built-in modes, evaluate carrier/beat directly
+      // from a function instead of segment-to-segment interpolation.
+      apply_func_curve(now, a, vv);
    }
    
    // Check and limit amplitudes if -c option in use
@@ -3888,6 +3964,8 @@ void sinc_interpolate(double *dp, int np, int *arr) {
 
 void 
 readPreProg(int ac, char **av) {
+   clear_func_curve();
+
    if (ac < 1) 
       error("Expecting a pre-programmed sequence description.  Examples:" 
 	    NL "  drop 25ds+ pink/30"
@@ -4020,6 +4098,13 @@ create_drop(int ac, char **av) {
    // Calculate beats
    for (a= 0; a<n_step; a++)
       beat[a]= 10 * exp(log(beat_target/10) * a / (n_step-1));
+
+   if (slide) {
+      setup_drop_func_curve(0, isisochronic ? 8 : 1, 0,
+			    c0, c2, len,
+			    beat[0], beat[n_step-1], len0);
+      warn(" Using function-driven curve for sliding drop");
+   }
 
    // Display summary
    warn("DROP summary:");

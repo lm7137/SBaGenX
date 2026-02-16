@@ -800,7 +800,10 @@ session.  By default (00d+) the frequencies go down in steps, changing
 every 3 minutes.  With 'k' added (00dk+) the frequencies go down in
 shorter 1 minute steps.  With 's' added (00ds+) there are no steps,
 and the frequencies smoothly and gradually change throughout the whole
-session, which gives less experience of specifics.  The two stepping
+session, which gives less experience of specifics.  In SBaGenX, this
+sliding mode is evaluated from a runtime function-driven curve for
+carrier and beat/pulse frequencies rather than from coarse piecewise
+interpolation.  The two stepping
 options are interesting because if you get into a dreaming state you
 may notice that the dream-scene changes for every step.  It is as if
 that scene is somehow attached to those frequencies, and by being held
