@@ -21,8 +21,8 @@ Contents of this document:
 2.1: Outputting to a pipe or a file
 2.2: Mixing in background sounds
 2.3: Standard background sounds
-2.4: Creating loopable OGGs
-2.4.1: Using ReplayGain with OGG files
+2.4: Creating loopable OGG/FLAC mixes
+2.4.1: Using ReplayGain with OGG/FLAC files
 2.5: Compensating for headphone low frequency roll-off
 2.6: The 'drop' sequences
 2.6.1: More detailed notes on -p drop options
@@ -536,19 +536,23 @@ However, possibly other licensing arrangements could be arranged if
 you contact me.
 
 
-2.4: Creating loopable OGGs
----------------------------
+2.4: Creating loopable OGG/FLAC mixes
+-------------------------------------
 
 This section will be of interest only to those people who want to
-create special loopable OGG files to use with SBaGen, like the
+create special loopable OGG or FLAC files to use with SBaGen, like the
 provided river1.ogg and river2.ogg files.
 
-The cross-fading and looping settings for any particular OGG file are
+The cross-fading and looping settings for any particular OGG/FLAC file are
 controlled by a spec-string embedded in the file with the tag
 "SBAGEN_LOOPER".  This may be set using the standard OGG
 'vorbiscomment' tool, for example:
 
   vorbiscomment -a in.ogg out.ogg -t "SBAGEN_LOOPER=s4-16 f0.2" 
+
+For native FLAC files, set the same tag with:
+
+  metaflac --set-tag="SBAGEN_LOOPER=s4-16 f0.2" in.flac
 
 The tag contains entries as follows, optionally separated by white
 space:
@@ -561,7 +565,7 @@ space:
   i             If this is the first char after SBAGEN_LOOPER= and is
                 followed by whitespace, play the
                 section from start-of-file up to d<min> once as an intro
-  d<min>-<max>  Select section of OGG file data to use as source audio
+  d<min>-<max>  Select section of OGG/FLAC file data to use as source audio
   #<digits>     Following settings apply only to one section
   
 The optional intro mode ('i') only has an effect when d<min> is greater
@@ -586,12 +590,12 @@ The scheduling required to select random segments of audio that won't
 interfere with one another or repeat anything already heard recently
 is quite complex, but it should all work without problem so long as
 the maximum segment size is no more than around 25% of the total
-length of the OGG file.  If the maximum segment size is longer, then
+length of the source file.  If the maximum segment size is longer, then
 everything will still work, but there is a very small chance that you
 may get 'echo' effects at times (e.g. when the same segment is played
 on both channels at nearly the same time).
 
-The # part of the spec-string works as follows.  The .ogg filename on
+The # part of the spec-string works as follows.  The .ogg/.flac filename on
 the command line may be followed by #<digits>.  If this is missing, it
 is equivalent to #0.  This allows different groups of settings to be
 selected out of the SBAGEN_LOOPER string.  As an example (spaced to
@@ -603,17 +607,17 @@ The initial part is read in all cases, and then #0, #1 and #2 can be
 used to select different cross-fade times.
 
 
-2.4.1: Using ReplayGain with OGG files
---------------------------------------
+2.4.1: Using ReplayGain with OGG/FLAC files
+-------------------------------------------
 
-SBaGen+ supports ReplayGain tags in the OGG header.  What this means is
-that if you run 'vorbisgain' on your OGG file to add this tag, your
-OGG file should come out sounding around about the same loudness level
-as everyone else's OGG files (including river1.ogg and river2.ogg).
-It does this by recording the necessary volume adjustment in the OGG
-header, and then SBaGen picks this up and adjusts the volume level
-accordingly.  This makes it easier for people to substitute one OGG
-for another in their sequences.  (Thanks to Dylan Carlson for
+SBaGen+ supports ReplayGain tags in OGG/FLAC metadata.  What this means
+is that if you run 'vorbisgain' on your OGG file, or set the
+REPLAYGAIN_TRACK_GAIN tag in FLAC metadata, your file should come out
+sounding around about the same loudness level as everyone else's files
+(including river1.ogg and river2.ogg).  SBaGen picks this up and
+adjusts the volume level accordingly.  This makes it easier for people
+to substitute one soundtrack for another in their sequences.  (Thanks
+to Dylan Carlson for
 suggesting this.)
 
 
@@ -1039,7 +1043,7 @@ follows:
   -T time   Start at the given clock-time (hh:mm)
   -L time   Select the length of time (hh:mm or hh:mm:ss) to output for
   -m file   Read audio data from the given file and mix it with the
-              generated binaural beats; may be ogg/mp3/wav/raw format
+              generated binaural beats; may be flac/ogg/mp3/wav/raw format
   -i ...    Generate the whole sequence from an 'immediate' spec
   -p ...    Generate the whole sequence from a prodefined sequence type,
               e.g. -p drop or -p slide

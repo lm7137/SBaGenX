@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # SBaGenX Linux build script
-# Builds 32-bit and 64-bit binaries with MP3, OGG and ALSA support on x86_64
+# Builds 32-bit and 64-bit binaries with FLAC, MP3, OGG and ALSA support on x86_64
 # Builds only ARM64 binary on aarch64 platforms
 
 # Source common library
 . ./lib.sh
 
-section_header "Building SBaGenX for Linux with MP3, OGG and ALSA support..."
+section_header "Building SBaGenX for Linux with FLAC, MP3, OGG and ALSA support..."
 
 # Check for required tools
 check_required_tools gcc
@@ -45,7 +45,7 @@ if [ $SKIP_32BIT = 0 ]; then
     section_header "Building 32-bit version..."
 
     # Set up compilation flags for 32-bit
-    CFLAGS_32="-DT_LINUX -m32 -Wall -O3 -I."
+    CFLAGS_32="-DT_LINUX -DFLAC_DECODE -m32 -Wall -O3 -I."
     LIBS_32="-lm -lpthread -lasound"
 
     # Check for MP3 support (32-bit)
@@ -93,10 +93,10 @@ section_header "Building 64-bit version..."
 # Set up compilation flags for 64-bit
 if [ "$HOST_ARCH" = "aarch64" ]; then
     # On ARM64, don't use -m64 flag as it's not supported
-    CFLAGS_64="-DT_LINUX -Wall -O3 -I."
+    CFLAGS_64="-DT_LINUX -DFLAC_DECODE -Wall -O3 -I."
     info "Running on ARM64, using native gcc for 64-bit compilation"
 else
-    CFLAGS_64="-DT_LINUX -m64 -Wall -O3 -I."
+    CFLAGS_64="-DT_LINUX -DFLAC_DECODE -m64 -Wall -O3 -I."
 fi
 LIBS_64="-lm -lpthread -lasound"
 

@@ -50,7 +50,7 @@ docker run --rm -v ./sbg:/sbg ruanklein/sbagen-plus -m river1.ogg -Wo out.wav Sl
 
 This will generate a WAV file in your sbg directory.
 
-If you want to use media files (ogg/mp3/wav) with the -m parameter, make sure they are in the same folder as your .sbg file.
+If you want to use media files (flac/ogg/mp3/wav) with the -m parameter, make sure they are in the same folder as your .sbg file.
 
 ### ⬇️ Download Pre-built Binaries
 
@@ -177,7 +177,7 @@ For the scientific background behind SBaGenX, check out [RESEARCH.md](RESEARCH.m
 
 SBaGenX can be compiled for macOS, Linux and Windows. The build process is divided into two steps:
 
-1. **Building the libraries**: This step is only necessary if you want MP3 and OGG support
+1. **Building the libraries**: This step is only necessary if you want MP3 and OGG support (FLAC support is built in)
 2. **Building the main program**: This step compiles SBaGenX using the libraries built in the previous step
 
 ### 📁 Build Scripts Structure

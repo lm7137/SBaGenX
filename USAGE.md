@@ -190,7 +190,7 @@ Here are some example sequences for various purposes in the `examples/plus` dire
 
 ## 🎵 Using Background Sounds
 
-You can enhance your experience by adding background sounds like nature recordings or ambient music. SBaGenX supports MP3, OGG, and WAV files.
+You can enhance your experience by adding background sounds like nature recordings or ambient music. SBaGenX supports FLAC, MP3, OGG, and WAV files.
 
 ### Command Line Example
 

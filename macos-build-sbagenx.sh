@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # SBaGenX macOS build script
-# Builds a universal binary (ARM64 + x86_64) with MP3 and OGG support
+# Builds a universal binary (ARM64 + x86_64) with FLAC, MP3 and OGG support
 
 # Source common library
 . ./lib.sh
 
-section_header "Building SBaGenX universal binary (ARM64 + x86_64) with MP3 and OGG support..."
+section_header "Building SBaGenX universal binary (ARM64 + x86_64) with FLAC, MP3 and OGG support..."
 
 # Create libs directory if it doesn't exist
 create_dir_if_not_exists "libs"
@@ -20,7 +20,7 @@ OGG_LIB_PATH="libs/macos-universal-libogg.a"
 TREMOR_LIB_PATH="libs/macos-universal-libvorbisidec.a"
 
 # Define compilation flags
-CFLAGS="-DT_MACOSX -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -I."
+CFLAGS="-DT_MACOSX -DFLAC_DECODE -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -I."
 LIBS="-framework CoreAudio"
 
 # Get the version number from the VERSION file

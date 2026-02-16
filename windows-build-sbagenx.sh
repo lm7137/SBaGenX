@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # SBaGenX Windows build script
-# Builds 32-bit and 64-bit Windows binaries with MP3 and OGG support using MinGW
+# Builds 32-bit and 64-bit Windows binaries with FLAC, MP3 and OGG support using MinGW
 
 # Source common library
 . ./lib.sh
 
-section_header "Building SBaGenX for Windows (32-bit and 64-bit) with MP3 and OGG support..."
+section_header "Building SBaGenX for Windows (32-bit and 64-bit) with FLAC, MP3 and OGG support..."
 
 # Check for MinGW cross-compilers
 if ! command -v i686-w64-mingw32-gcc &> /dev/null || ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
@@ -92,7 +92,7 @@ TREMOR_LIB_PATH_64="libs/windows-win64-libvorbisidec.a"
 section_header "Building 32-bit version..."
 
 # Set up compilation flags for 32-bit
-CFLAGS_32="-DT_MINGW -Wall -O3 -I. -Ilibs"
+CFLAGS_32="-DT_MINGW -DFLAC_DECODE -Wall -O3 -I. -Ilibs"
 LIBS_32="-lwinmm"
 
 # Check for MP3 support (32-bit)
@@ -137,7 +137,7 @@ fi
 section_header "Building 64-bit version..."
 
 # Set up compilation flags for 64-bit
-CFLAGS_64="-DT_MINGW -Wall -O3 -I. -Ilibs"
+CFLAGS_64="-DT_MINGW -DFLAC_DECODE -Wall -O3 -I. -Ilibs"
 LIBS_64="-lwinmm"
 
 # Check for MP3 support (64-bit)

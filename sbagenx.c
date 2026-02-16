@@ -42,7 +42,7 @@
 //  T_MACOSX	To build for MacOSX using CoreAudio
 //  T_POSIX	To build for simple file output on any Posix-compliant OS
 //
-// Ogg and MP3 support is handled separately from the T_* macros.
+// Ogg, MP3 and FLAC support are handled separately from the T_* macros.
 
 // Define ALSA_AUDIO to use ALSA for audio output
 // Define WIN_AUDIO to use Win32 calls
@@ -57,6 +57,7 @@
 
 // Define OGG_DECODE to include OGG support code
 // Define MP3_DECODE to include MP3 support code
+// Define FLAC_DECODE to include FLAC support code
 
 #ifdef T_LINUX
 #define ALSA_AUDIO
@@ -233,6 +234,9 @@ void create_noise_spin_effect(
 #ifdef MP3_DECODE
 #include "mp3dec.c"
 #endif
+#ifdef FLAC_DECODE
+#include "flacdec.c"
+#endif
 
 #ifdef WIN_AUDIO
 void CALLBACK win32_audio_callback(HWAVEOUT, UINT, DWORD, DWORD, DWORD);
@@ -295,9 +299,12 @@ help() {
 	  "ogg/"
 #endif
 #ifdef MP3_DECODE
-	  "mp3/"
+		  "mp3/"
 #endif
-	  "wav/raw format"
+#ifdef FLAC_DECODE
+		  "flac/"
+#endif
+		  "wav/raw format"
 	  NL "          -M        Read raw audio data from the standard input and mix it"
 	  NL "                      with the generated brainwave tones (raw only)"
 	  NL
@@ -871,8 +878,9 @@ main(int argc, char **argv) {
    mix_in= 0;
    if (opt_M || opt_m) {
       char *p;
-      char tmp[4];
+      char tmp[8];
       int raw= 1;
+      tmp[0]= 0;
       if (opt_M) {
 	 mix_in= stdin; 
 	 tmp[0]= 0;
@@ -908,11 +916,19 @@ main(int argc, char **argv) {
 	    error("Can't open -m option mix input file: %s", opt_m);
 
 	 // Pick up extension
-	 if (p-opt_m >= 4 && p[-4] == '.') {
-	    tmp[0]= tolower(p[-3]);
-	    tmp[1]= tolower(p[-2]);
-	    tmp[2]= tolower(p[-1]);
-	    tmp[3]= 0;
+	 {
+	    char *dot= strrchr(opt_m, '.');
+	    char *slash= strrchr(opt_m, '/');
+	    char *bslash= strrchr(opt_m, '\\');
+	    char *sep= slash > bslash ? slash : bslash;
+	    if (dot && (!sep || dot > sep) && dot + 1 < p) {
+	       int a, len= p - (dot + 1);
+	       if (len >= (int)sizeof(tmp))
+		  len= sizeof(tmp)-1;
+	       for (a= 0; a<len; a++)
+		  tmp[a]= tolower((unsigned char)dot[1+a]);
+	       tmp[len]= 0;
+	    }
 	 }
       }
       if (0 == strcmp(tmp, "wav"))	// Skip header on WAV files
@@ -929,6 +945,13 @@ main(int argc, char **argv) {
 	 mp3_init(); raw= 0;
 #else
 	 error("Sorry: MP3 support wasn't compiled into this executable");
+#endif
+      }
+      if (0 == strcmp(tmp, "flac")) {
+#ifdef FLAC_DECODE
+	 flac_init(); raw= 0;
+#else
+	 error("Sorry: FLAC support wasn't compiled into this executable");
 #endif
       }
       // If this is a raw/wav data stream, setup a 256*1024-int

@@ -5,3 +5,7 @@ The full source code is available at:
 https://github.com/ruanklein/sbagen-plus
 
 For licensing information, see License.txt.
+
+This fork bundles dr_flac (https://github.com/mackron/dr_libs) for FLAC
+decoding. dr_flac is available under public domain or MIT-0 terms
+(see libs/dr_flac.h).
