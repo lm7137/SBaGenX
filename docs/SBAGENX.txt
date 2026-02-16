@@ -1,8 +1,15 @@
 SBaGenX -- Sequenced Brainwave Generator
 ------------------------------------------
 
-SBaGenX is a fork of SBaGen+ by Ruan, which is a fork of the original SBaGen software (https://uazu.net/sbagen/),
-distributed under the terms of the GNU General Public License v2.
+SBaGenX is a fork of SBaGen+ by Ruan, which is a fork of the
+original SBaGen software (https://uazu.net/sbagen/), distributed under
+the terms of the GNU General Public License v2.
+
+This project acknowledges the existence of SynapSeq, the de facto
+successor to SBaGEN+ in the broader ecosystem. SBaGenX follows a
+different direction, preserving a classic old-school workflow and
+offering advanced control for technical users. Users can choose
+whichever project best fits their preferences.
 
 The full source code is available at:
 https://github.com/ruanklein/sbagen-plus
