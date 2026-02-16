@@ -4558,7 +4558,9 @@ readPreProg(int ac, char **av) {
 void 
 bad_drop() {
    error("Bad arguments: expecting -p drop [<time-spec>] <drop-spec> [<tone-specs...>]"
-	 NL "<drop-spec> is <digit><digit>[.<digit>...]<a-l>[s|k][+][^][@][/<amp>]"
+	 NL "<drop-spec> is <signed-level><a-l>[s|k][+][^][@][/<amp>]"
+	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
+	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
@@ -4748,7 +4750,9 @@ create_drop(int ac, char **av) {
 void
 bad_sigmoid() {
    error("Bad arguments: expecting -p sigmoid [<time-spec>] <sigmoid-spec> [<tone-specs...>]"
-	 NL "<sigmoid-spec> is <digit><digit>[.<digit>...]<a-l>[s|k][+][^][@][/<amp>][:l=<val>][:h=<val>]"
+	 NL "<sigmoid-spec> is <signed-level><a-l>[s|k][+][^][@][/<amp>][:l=<val>][:h=<val>]"
+	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
+	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
 	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0)."

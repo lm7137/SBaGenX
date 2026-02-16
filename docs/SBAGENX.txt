@@ -750,11 +750,13 @@ too much going on in your head or other problems like that.  In this
 case, take a rest from the sequences and wait for things to get back
 to normal.  Then you can approach them again a little more carefully.
 
-The levels are labelled with two digits (the level number from 00 to
-99) and a letter indicating how deep the sequence takes you.  For
-example, 00d is a good starting point.  To this you add "s+" to
-indicate sliding and an hour-long sequence.  It is best to also mix
-these with river sounds, for example:
+The levels are labelled with a numeric level and a letter indicating
+how deep the sequence takes you.  Non-negative levels are usually
+written with two digits (00 to 99).  Negative levels are written with
+a leading minus sign (for example -01).  For example, 00d is a good
+starting point.  To this you add "s+" to indicate sliding and an
+hour-long sequence.  It is best to also mix these with river sounds,
+for example:
 
   sbagenx -m river1.ogg -p drop 00ds+ mix/100
 
@@ -764,8 +766,8 @@ again at the end:
 
   sbagenx -m river1.ogg -p drop 00ds+^ mix/100
 
-If you want to use a isochronic instead of a binaural tone, you can use
-'@' on the end of the level specification:
+If you want to use an isochronic instead of a binaural tone, you can
+use '@' on the end of the level specification:
 
   sbagenx -m river1.ogg -p drop 00ds+@/3 white/10
 
@@ -775,7 +777,7 @@ depth of the session.  In 00ds+, the 'd' indicates that it goes down
 to 2.5Hz (a delta frequency).  The lightest is 'a' (e.g. 00as+), which
 only goes down to 4.4Hz (theta), whilst the deepest is 'l', which goes
 right down to 0.3Hz (sub-delta).  The aim is to go as far as you can
-with both the levels (00-99) and the depth (a-l).  You have to judge
+with both the levels and the depth (a-l).  You have to judge
 your progress for yourself, though -- trying very deep levels to start
 with won't work, because you won't be able to entrain that low without
 lots of practice.
@@ -786,7 +788,7 @@ lots of practice.
 
 Usage: 
 
-  -p drop <digit><digit>[.<digit>...]<a-l>[s|k][+][^][@][/<amp>] <tone-specs> ...
+  -p drop <signed-level><a-l>[s|k][+][^][@][/<amp>] <tone-specs> ...
 
 Examples:
 
@@ -794,17 +796,21 @@ Examples:
   -p drop 00ds+
   -p drop 20fs+^/2 mix/98
   -p drop 34.5dk+/1.5 pink/30
+  -p drop -01ds+ white/10
   -p drop 00d@/3 brown/15
 
 The argument after the "drop" gives the level and depth of the
-sequence to run.  The digits 00 to 99 select the level, based on
-carrier frequencies from 200Hz (00) down to 2Hz (99).  The idea is to
-work from level 00 to 99, waiting for each to become 'boring' before
-moving on.  (In theory, the whole set could take several years to work
-through.)  Later levels require headphones that can reproduce really
-deep bass frequencies, ideally down to 10Hz or lower.  If you want to
-fine-tune the level, you can include a decimal point (e.g. 20.5a for
-halfway between 20a and 21a).
+sequence to run.  `<signed-level>` may be non-negative (00, 01, ...,
+99) or negative (-01, -02, ...), and it may include a decimal point
+for fine tuning (for example 20.5a).  The starting carrier is
+205 - 2*level (Hz), so 00 starts at 205Hz, 99 starts at 7Hz, and -01
+starts at 207Hz.  During the drop phase, the carrier still falls by
+5Hz at t=D.  If '+' is used, it falls by a further 5Hz by the end of
+the hold phase (before any wake-up '^' segment).  The idea is usually
+to work upward through levels, waiting for each to become 'boring'
+before moving on.  (In theory, the whole set could take several years
+to work through.)  Later deep levels require headphones that can
+reproduce really low bass frequencies, ideally down to 10Hz or lower.
 
 The letter a-l (or A-L if you prefer) selects the depth of the beat
 frequencies.  Beat/Pulse frequencies always start at 10Hz, and then drop
