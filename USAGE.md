@@ -122,6 +122,9 @@ sbagenx -m ambient-music.mp3 -i mix/80 mixspin:500+8.0/50
 
 # Play a sequence file
 sbagenx my-sequence.sbg
+
+# Render a sigmoid beat/pulse curve as PNG (no audio playback)
+sbagenx -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
 ```
 
 ### 🔧 Common Options
@@ -130,6 +133,7 @@ sbagenx my-sequence.sbg
 - `-m [file]`: Mix with a background sound file (FLAC, MP3, OGG, WAV)
 - `-o [file]`: Output to a file instead of playing (`.raw` by default, or encode with `.mp3`, `.ogg`, `.flac`)
 - `-L [time]`: Limit playback to the specified time (e.g., 0:30 for 30 minutes)
+- `-G`: With `-p sigmoid`, render the beat/pulse sigmoid curve as PNG and exit
 
 ## 📝 Creating Simple Sequences
 

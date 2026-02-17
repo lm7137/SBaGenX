@@ -12,6 +12,9 @@ decoding. dr_flac is available under public domain or MIT-0 terms.
 This fork also bundles libsndfile's public header (libs/sndfile.h),
 which is provided under the GNU LGPL v2.1+ by the libsndfile project.
 
+This fork also bundles stb_image_write.h (from the stb project) to
+write PNG curve images for -G sigmoid graph output.
+
 At runtime, SBaGenX may load libsndfile and libmp3lame dynamically
 to encode .ogg/.flac/.mp3 output files when selected.
 

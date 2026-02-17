@@ -172,6 +172,8 @@
  #include <dlfcn.h>
 #endif
 #include "libs/sndfile.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "libs/stb_image_write.h"
 
 typedef struct Channel Channel;
 typedef struct Voice Voice;
@@ -240,6 +242,11 @@ void detect_output_encoder();
 void init_output_encoder();
 void output_encoder_write(short *pcm, int frames);
 void finish_output_encoder();
+void write_sigmoid_graph_png(const char *fmt, double level,
+			     char depth_ch, int len0, int len1, int len2,
+			     double beat_start, double beat_target,
+			     double sig_l, double sig_h,
+			     double sig_a, double sig_b);
 
 #define ALLOC_ARR(cnt, type) ((type*)Alloc((cnt) * sizeof(type)))
 #define uint unsigned int
@@ -281,6 +288,7 @@ help() {
 	  NL "Options:  -h        Display this help-text"
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
+	  NL "          -G        With -p sigmoid, render beat/pulse sigmoid graph as PNG and exit"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -454,6 +462,7 @@ int tty_erase;			// Chars to erase from current line (for ESC[K emulation)
 
 int opt_Q;			// Quiet mode
 int opt_D;
+int opt_G;			// Graph mode for -p sigmoid: write PNG and exit
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -893,6 +902,424 @@ apply_func_curve(int now_ms, int chan, Voice *vv) {
    vv->res= beat;
 }
 
+static void
+plot_set_px(unsigned char *img, int w, int h, int x, int y,
+	    unsigned char r, unsigned char g, unsigned char b) {
+   int o;
+   if (x < 0 || y < 0 || x >= w || y >= h) return;
+   o= (y*w + x) * 3;
+   img[o+0]= r;
+   img[o+1]= g;
+   img[o+2]= b;
+}
+
+static void
+plot_line(unsigned char *img, int w, int h,
+	  int x0, int y0, int x1, int y1,
+	  unsigned char r, unsigned char g, unsigned char b) {
+   int dx= abs(x1-x0), sx= x0 < x1 ? 1 : -1;
+   int dy= -abs(y1-y0), sy= y0 < y1 ? 1 : -1;
+   int err= dx + dy;
+
+   while (1) {
+      plot_set_px(img, w, h, x0, y0, r, g, b);
+      if (x0 == x1 && y0 == y1) break;
+      {
+	 int e2= 2 * err;
+	 if (e2 >= dy) { err += dy; x0 += sx; }
+	 if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+   }
+}
+
+static void
+plot_hline(unsigned char *img, int w, int h, int x0, int x1, int y,
+	   unsigned char r, unsigned char g, unsigned char b) {
+   int x;
+   if (x0 > x1) { int t= x0; x0= x1; x1= t; }
+   for (x= x0; x<=x1; x++)
+      plot_set_px(img, w, h, x, y, r, g, b);
+}
+
+static void
+plot_vline(unsigned char *img, int w, int h, int x, int y0, int y1,
+	   unsigned char r, unsigned char g, unsigned char b) {
+   int y;
+   if (y0 > y1) { int t= y0; y0= y1; y1= t; }
+   for (y= y0; y<=y1; y++)
+      plot_set_px(img, w, h, x, y, r, g, b);
+}
+
+static void
+font5x7_glyph(char ch, unsigned char g[7]) {
+   int a;
+   for (a= 0; a<7; a++) g[a]= 0;
+
+   switch (toupper((unsigned char)ch)) {
+    case '0':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x13; g[3]= 0x15;
+      g[4]= 0x19; g[5]= 0x11; g[6]= 0x0E; break;
+    case '1':
+      g[0]= 0x04; g[1]= 0x0C; g[2]= 0x04; g[3]= 0x04;
+      g[4]= 0x04; g[5]= 0x04; g[6]= 0x0E; break;
+    case '2':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x01; g[3]= 0x02;
+      g[4]= 0x04; g[5]= 0x08; g[6]= 0x1F; break;
+    case '3':
+      g[0]= 0x1E; g[1]= 0x01; g[2]= 0x01; g[3]= 0x0E;
+      g[4]= 0x01; g[5]= 0x01; g[6]= 0x1E; break;
+    case '4':
+      g[0]= 0x02; g[1]= 0x06; g[2]= 0x0A; g[3]= 0x12;
+      g[4]= 0x1F; g[5]= 0x02; g[6]= 0x02; break;
+    case '5':
+      g[0]= 0x1F; g[1]= 0x10; g[2]= 0x10; g[3]= 0x1E;
+      g[4]= 0x01; g[5]= 0x01; g[6]= 0x1E; break;
+    case '6':
+      g[0]= 0x0E; g[1]= 0x10; g[2]= 0x10; g[3]= 0x1E;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x0E; break;
+    case '7':
+      g[0]= 0x1F; g[1]= 0x01; g[2]= 0x02; g[3]= 0x04;
+      g[4]= 0x08; g[5]= 0x08; g[6]= 0x08; break;
+    case '8':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x0E;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x0E; break;
+    case '9':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x0F;
+      g[4]= 0x01; g[5]= 0x01; g[6]= 0x0E; break;
+    case '-':
+      g[0]= 0x00; g[1]= 0x00; g[2]= 0x00; g[3]= 0x1F;
+      g[4]= 0x00; g[5]= 0x00; g[6]= 0x00; break;
+    case '.':
+      g[0]= 0x00; g[1]= 0x00; g[2]= 0x00; g[3]= 0x00;
+      g[4]= 0x00; g[5]= 0x06; g[6]= 0x06; break;
+    case 'A':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x1F;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x11; break;
+    case 'E':
+      g[0]= 0x1F; g[1]= 0x10; g[2]= 0x10; g[3]= 0x1E;
+      g[4]= 0x10; g[5]= 0x10; g[6]= 0x1F; break;
+    case 'F':
+      g[0]= 0x1F; g[1]= 0x10; g[2]= 0x10; g[3]= 0x1E;
+      g[4]= 0x10; g[5]= 0x10; g[6]= 0x10; break;
+    case 'H':
+      g[0]= 0x11; g[1]= 0x11; g[2]= 0x11; g[3]= 0x1F;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x11; break;
+    case 'I':
+      g[0]= 0x1F; g[1]= 0x04; g[2]= 0x04; g[3]= 0x04;
+      g[4]= 0x04; g[5]= 0x04; g[6]= 0x1F; break;
+    case 'M':
+      g[0]= 0x11; g[1]= 0x1B; g[2]= 0x15; g[3]= 0x15;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x11; break;
+    case 'N':
+      g[0]= 0x11; g[1]= 0x19; g[2]= 0x15; g[3]= 0x13;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x11; break;
+    case 'Q':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x11;
+      g[4]= 0x15; g[5]= 0x12; g[6]= 0x0D; break;
+    case 'R':
+      g[0]= 0x1E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x1E;
+      g[4]= 0x14; g[5]= 0x12; g[6]= 0x11; break;
+    case 'T':
+      g[0]= 0x1F; g[1]= 0x04; g[2]= 0x04; g[3]= 0x04;
+      g[4]= 0x04; g[5]= 0x04; g[6]= 0x04; break;
+    case 'Z':
+      g[0]= 0x1F; g[1]= 0x01; g[2]= 0x02; g[3]= 0x04;
+      g[4]= 0x08; g[5]= 0x10; g[6]= 0x1F; break;
+    default:
+      break;
+   }
+}
+
+static void
+font5x7_draw_char(unsigned char *img, int w, int h, int x, int y, char ch,
+		  int scale, int rot90,
+		  unsigned char r, unsigned char g, unsigned char b) {
+   unsigned char glyph[7];
+   int row, col, sx, sy;
+
+   if (scale < 1) scale= 1;
+   font5x7_glyph(ch, glyph);
+
+   for (row= 0; row<7; row++) {
+      for (col= 0; col<5; col++) {
+	 if (!(glyph[row] & (1 << (4-col)))) continue;
+	 for (sy= 0; sy<scale; sy++) {
+	    for (sx= 0; sx<scale; sx++) {
+	       int px, py;
+	       if (!rot90) {
+		  px= x + col*scale + sx;
+		  py= y + row*scale + sy;
+	       } else {
+		  int rx= 6-row;
+		  int ry= col;
+		  px= x + rx*scale + sx;
+		  py= y + ry*scale + sy;
+	       }
+	       plot_set_px(img, w, h, px, py, r, g, b);
+	    }
+	 }
+      }
+   }
+}
+
+static int
+font5x7_text_width(const char *txt, int scale) {
+   int n= (int)strlen(txt);
+   if (n <= 0) return 0;
+   if (scale < 1) scale= 1;
+   return n * 6 * scale - scale;
+}
+
+static int
+font5x7_text_height_rot90(const char *txt, int scale) {
+   int n= (int)strlen(txt);
+   if (n <= 0) return 0;
+   if (scale < 1) scale= 1;
+   return n * 6 * scale - scale;
+}
+
+static void
+font5x7_draw_text(unsigned char *img, int w, int h, int x, int y,
+		  const char *txt, int scale, int rot90,
+		  unsigned char r, unsigned char g, unsigned char b) {
+   int a;
+   int cx= x, cy= y;
+   int adv= 6 * (scale < 1 ? 1 : scale);
+
+   for (a= 0; txt[a]; a++) {
+      char ch= txt[a];
+      if (ch != ' ')
+	 font5x7_draw_char(img, w, h, cx, cy, ch, scale, rot90, r, g, b);
+      if (!rot90) cx += adv;
+      else cy += adv;
+   }
+}
+
+static void
+format_tick_value(double val, char *out, int out_sz) {
+   char tmp[64];
+   int len;
+
+   if (out_sz < 2) return;
+   if (fabs(val) < 0.0005) val= 0.0;
+   snprintf(tmp, sizeof(tmp), "%.2f", val);
+
+   len= (int)strlen(tmp);
+   while (len > 0 && tmp[len-1] == '0')
+      tmp[--len]= 0;
+   if (len > 0 && tmp[len-1] == '.')
+      tmp[--len]= 0;
+   if (!strcmp(tmp, "-0")) {
+      tmp[0]= '0';
+      tmp[1]= 0;
+   }
+
+   strncpy(out, tmp, out_sz-1);
+   out[out_sz-1]= 0;
+}
+
+static void
+sanitize_filename_token(const char *in, char *out, int out_sz) {
+   int a, b= 0, und= 0;
+   if (out_sz < 2) return;
+   for (a= 0; in[a] && b < out_sz-1; a++) {
+      unsigned char c= (unsigned char)in[a];
+      if (isalnum(c) || c == '.' || c == '_' || c == '-') {
+	 out[b++]= in[a];
+	 und= 0;
+      } else {
+	 if (!und && b < out_sz-1) {
+	    out[b++]= '_';
+	    und= 1;
+	 }
+      }
+   }
+   while (b > 0 && out[b-1] == '_') b--;
+   if (!b) out[b++]= 'x';
+   out[b]= 0;
+}
+
+static void
+double_to_token(double val, char *out, int out_sz) {
+   char tmp[64];
+   int a, b= 0;
+   if (out_sz < 2) return;
+   snprintf(tmp, sizeof(tmp), "%.6g", val);
+   for (a= 0; tmp[a] && b < out_sz-1; a++) {
+      char c= tmp[a];
+      if (isdigit((unsigned char)c) || c == 'e' || c == 'E')
+	 out[b++]= c;
+      else if (c == '.')
+	 out[b++]= 'p';
+      else if (c == '-')
+	 out[b++]= 'm';
+      else if (c == '+')
+	 ;
+      else if (c == '_')
+	 out[b++]= '_';
+   }
+   if (!b) out[b++]= '0';
+   out[b]= 0;
+}
+
+static double
+sigmoid_eval(double t_min, double d_min, double beat_target,
+	     double sig_l, double sig_h, double sig_a, double sig_b) {
+   if (t_min >= d_min) return beat_target;
+   return sig_a * tanh(sig_l * (t_min - d_min/2 - sig_h)) + sig_b;
+}
+
+void
+write_sigmoid_graph_png(const char *fmt, double level,
+			char depth_ch, int len0, int len1, int len2,
+			double beat_start, double beat_target,
+			double sig_l, double sig_h,
+			double sig_a, double sig_b) {
+   int w= 1200, h= 700;
+   int ml= 150, mr= 40, mt= 40, mb= 120;
+   int pw= w - ml - mr, ph= h - mt - mb;
+   int a;
+   unsigned char *img;
+   double d_min= len0 / 60.0;
+   double y_min= 1e30, y_max= -1e30;
+   double y_pad, y_span;
+   double y_tick_step, y_tick_first, y_tick_last;
+   int start_y= -1, end_y= -1;
+   int label_scale= 3;
+   int tick_scale= 2;
+   int prev_x= -1, prev_y= -1;
+   char fmt_tok[256], lvl_tok[64], l_tok[64], h_tok[64];
+   char tick_txt[64];
+   char fname[512];
+   const char *x_label= "TIME MIN";
+   const char *y_label= "FREQ HZ";
+
+   if (pw < 10 || ph < 10)
+      error("Graph dimensions are invalid");
+
+   img= ALLOC_ARR(w*h*3, unsigned char);
+   memset(img, 255, w*h*3);
+
+   for (a= 0; a<=10; a++) {
+      int gx= ml + (pw-1) * a / 10;
+      plot_vline(img, w, h, gx, mt, mt+ph-1, 236, 236, 236);
+   }
+
+   for (a= 0; a<=2000; a++) {
+      double t_min= d_min * a / 2000.0;
+      double y= sigmoid_eval(t_min, d_min, beat_target, sig_l, sig_h, sig_a, sig_b);
+      if (y < y_min) y_min= y;
+      if (y > y_max) y_max= y;
+   }
+   if (beat_start < y_min) y_min= beat_start;
+   if (beat_start > y_max) y_max= beat_start;
+   if (beat_target < y_min) y_min= beat_target;
+   if (beat_target > y_max) y_max= beat_target;
+
+   if (y_max - y_min < 1e-6) {
+      y_min -= 1.0;
+      y_max += 1.0;
+   }
+   y_pad= (y_max - y_min) * 0.08;
+   if (y_pad < 0.1) y_pad= 0.1;
+   y_min -= y_pad;
+   y_max += y_pad;
+   y_span= y_max - y_min;
+   y_tick_step= y_span / 8.0;
+   if (y_tick_step < 0.5) y_tick_step= 0.5;
+   y_tick_step= floor(y_tick_step * 2.0 + 0.5) / 2.0;
+   if (y_tick_step < 0.5) y_tick_step= 0.5;
+   y_tick_first= ceil((y_min - 1e-9) / y_tick_step) * y_tick_step;
+   y_tick_last= floor((y_max + 1e-9) / y_tick_step) * y_tick_step;
+
+   {
+      double yv;
+      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
+	 int gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+	 plot_hline(img, w, h, ml, ml+pw-1, gy, 236, 236, 236);
+      }
+   }
+
+   plot_hline(img, w, h, ml, ml+pw-1, mt, 90, 90, 90);
+   plot_hline(img, w, h, ml, ml+pw-1, mt+ph-1, 90, 90, 90);
+   plot_vline(img, w, h, ml, mt, mt+ph-1, 90, 90, 90);
+   plot_vline(img, w, h, ml+pw-1, mt, mt+ph-1, 90, 90, 90);
+
+   for (a= 0; a<pw; a++) {
+      double t_min= d_min * a / (double)(pw-1);
+      double y= sigmoid_eval(t_min, d_min, beat_target, sig_l, sig_h, sig_a, sig_b);
+      int px= ml + a;
+      int py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
+      if (a == 0) start_y= py;
+      if (a == pw-1) end_y= py;
+      if (prev_x >= 0)
+	 plot_line(img, w, h, prev_x, prev_y, px, py, 34, 94, 224);
+      prev_x= px;
+      prev_y= py;
+   }
+
+   for (a= 0; a<=10; a++) {
+      int gx= ml + (pw-1) * a / 10;
+      int tw, tx, ty;
+      double xv= d_min * a / 10.0;
+      format_tick_value(xv, tick_txt, sizeof(tick_txt));
+      plot_vline(img, w, h, gx, mt+ph-1, mt+ph+4, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= gx - tw/2;
+      ty= mt + ph + 10;
+      font5x7_draw_text(img, w, h, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   {
+      double yv;
+      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
+	 int gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+	 int tw, tx, ty;
+	 format_tick_value(yv, tick_txt, sizeof(tick_txt));
+	 plot_hline(img, w, h, ml-4, ml, gy, 90, 90, 90);
+	 tw= font5x7_text_width(tick_txt, tick_scale);
+	 tx= ml - 8 - tw;
+	 ty= gy - (7 * tick_scale) / 2;
+	 font5x7_draw_text(img, w, h, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+      }
+   }
+
+   for (a= -4; a<=4; a++) {
+      plot_set_px(img, w, h, ml + a, start_y, 220, 40, 40);
+      plot_set_px(img, w, h, ml + pw - 1 + a, end_y, 220, 40, 40);
+   }
+
+   {
+      int xw= font5x7_text_width(x_label, label_scale);
+      int x0= ml + (pw - xw) / 2;
+      int y0= h - 7*label_scale - 8;
+      font5x7_draw_text(img, w, h, x0, y0, x_label, label_scale, 0, 30, 30, 30);
+   }
+
+   {
+      int yh= font5x7_text_height_rot90(y_label, label_scale);
+      int x0= 20;
+      int y0= mt + (ph - yh) / 2;
+      font5x7_draw_text(img, w, h, x0, y0, y_label, label_scale, 1, 30, 30, 30);
+   }
+
+   sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
+   double_to_token(level, lvl_tok, sizeof(lvl_tok));
+   double_to_token(sig_l, l_tok, sizeof(l_tok));
+   double_to_token(sig_h, h_tok, sizeof(h_tok));
+   snprintf(fname, sizeof(fname),
+	    "sigmoid_%s_L%s_d%c_t%d_%d_%d_l%s_h%s.png",
+	    fmt_tok, lvl_tok, tolower((unsigned char)depth_ch),
+	    len0/60, len1/60, len2/60, l_tok, h_tok);
+
+   if (!stbi_write_png(fname, w, h, 3, img, w*3))
+      error("Failed to write sigmoid graph PNG file");
+   if (!opt_Q)
+      warn("Sigmoid graph saved to: %s", fname);
+
+   free(img);
+}
+
 //
 //	M A I N
 //
@@ -917,13 +1344,18 @@ main(int argc, char **argv) {
    
    if (rv == 'i') {
       // Immediate mode
+      if (opt_G)
+	 error("-G is only supported with -p sigmoid");
       readSeqImm(argc, argv);
    } else if (rv == 'p') {
       // Pre-programmed sequence
       readPreProg(argc, argv);
+      if (opt_G) return 0;
    } else {
       // Sequenced mode -- sequence may include options, so options
       // are not settled until below this point
+      if (opt_G)
+	 error("-G is only supported with -p sigmoid");
       if (argc < 1) usage();
       readSeq(argc, argv);
    }
@@ -1116,6 +1548,7 @@ scanOptions(int *acp, char ***avp) {
 	  case 'p': rv= 'p'; break;
 	  case 'h': help(); break;
 	  case 'D': opt_D= 1; break;
+	  case 'G': opt_G= 1; break;
 	  case 'M': opt_M= 1; break;
 	  case 'O': opt_O= 1;
 	     if (!fast_mult) fast_mult= 1; 		// Don't try to sync with real time
@@ -4526,6 +4959,9 @@ readPreProg(int ac, char **av) {
 	    NL "  drop 25gs+/2 mix/60"
 	    NL "  sigmoid 00ds+:l=0.125:h=0"
 	    );
+
+   if (opt_G && strcmp(av[0], "sigmoid") != 0)
+      error("-G is only supported with -p sigmoid");
    
    // Handle 'drop'
    if (0 == strcmp(av[0], "drop")) {
@@ -4769,9 +5205,11 @@ create_sigmoid(int ac, char **av) {
    char *fmt;
    char *p, *q;
    char signal;
+   char depth_ch;
    int a;
    int slide, n_step, islong, wakeup, isisochronic;
    int have_step_mode;
+   double level;
    double carr, amp, c0, c2;
    double beat_target, beat_start= 10.0;
    double beat[40];
@@ -4810,10 +5248,12 @@ create_sigmoid(int ac, char **av) {
    }
 
    // Scan the format
-   carr= 200 - 2 * strtod(fmt, &p);
+   level= strtod(fmt, &p);
+   carr= 200 - 2 * level;
    if (p == fmt || carr < 0) BAD;
 
-   a= tolower(*p) - 'a'; p++;
+   depth_ch= tolower((unsigned char)*p);
+   a= depth_ch - 'a'; p++;
    if (a < 0 || a >= sizeof(beat_targets) / sizeof(beat_targets[0])) BAD;
    beat_target= beat_targets[a];
 
@@ -4888,6 +5328,12 @@ create_sigmoid(int ac, char **av) {
       error("Sigmoid parameters produce an invalid curve (try different l/h values)");
    sig_a= (beat_target - beat_start) / den;
    sig_b= beat_start - sig_a * u0;
+
+   if (opt_G) {
+      write_sigmoid_graph_png(fmt, level, depth_ch, len0, len1, len2,
+			      beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
+      return;
+   }
 
    // Calculate display/checkpoint beat values
    for (a= 0; a<n_step; a++) {

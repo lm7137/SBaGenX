@@ -1,7 +1,7 @@
 Third-party licenses used by SBaGenX
 ====================================
 
-Retrieved on: 2026-02-16
+Retrieved on: 2026-02-17
 
 This directory stores upstream license texts for libraries used by SBaGenX
 (either bundled in source form, built as optional static decode libs, or
@@ -42,3 +42,8 @@ Files and source locations:
    License files: libmad-COPYING.txt, libmad-COPYRIGHT.txt
    Source archive:
    https://downloads.sourceforge.net/project/mad/libmad/0.15.1b/libmad-0.15.1b.tar.gz
+
+9) stb_image_write (from stb) - bundled PNG writer used for -G
+   sigmoid graph output
+   License file: stb-LICENSE.txt
+   Source: https://github.com/nothings/stb
