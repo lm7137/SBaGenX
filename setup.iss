@@ -72,6 +72,21 @@ Source: "dist\libsndfile-win32.dll"; DestDir: "{app}"; DestName: "libsndfile-win
 Source: "dist\libsndfile-win64.dll"; DestDir: "{app}"; DestName: "libsndfile-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "dist\libmp3lame-win32.dll"; DestDir: "{app}"; DestName: "libmp3lame-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "dist\libmp3lame-win64.dll"; DestDir: "{app}"; DestName: "libmp3lame-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libFLAC-win32.dll"; DestDir: "{app}"; DestName: "libFLAC-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libFLAC-win64.dll"; DestDir: "{app}"; DestName: "libFLAC-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libmpg123-0-win32.dll"; DestDir: "{app}"; DestName: "libmpg123-0-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libmpg123-0-win64.dll"; DestDir: "{app}"; DestName: "libmpg123-0-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libogg-0-win32.dll"; DestDir: "{app}"; DestName: "libogg-0-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libogg-0-win64.dll"; DestDir: "{app}"; DestName: "libogg-0-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libopus-0-win32.dll"; DestDir: "{app}"; DestName: "libopus-0-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libopus-0-win64.dll"; DestDir: "{app}"; DestName: "libopus-0-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libvorbis-0-win32.dll"; DestDir: "{app}"; DestName: "libvorbis-0-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libvorbis-0-win64.dll"; DestDir: "{app}"; DestName: "libvorbis-0-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libvorbisenc-2-win32.dll"; DestDir: "{app}"; DestName: "libvorbisenc-2-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libvorbisenc-2-win64.dll"; DestDir: "{app}"; DestName: "libvorbisenc-2-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libwinpthread-1-win32.dll"; DestDir: "{app}"; DestName: "libwinpthread-1-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libwinpthread-1-win64.dll"; DestDir: "{app}"; DestName: "libwinpthread-1-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "dist\libgcc_s_dw2-1-win32.dll"; DestDir: "{app}"; DestName: "libgcc_s_dw2-1-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
 ; Documentation
 Source: "COPYING.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion dontcopy
@@ -237,31 +252,43 @@ begin
   end;
 end;
 
+procedure PromoteBundledRuntimeDll(const ArchTag: String; const SourceBase: String; const DestName: String);
+var
+  SourceFile: String;
+  DestFile: String;
+begin
+  SourceFile := ExpandConstant('{app}\' + SourceBase + '-' + ArchTag + '.dll');
+  DestFile := ExpandConstant('{app}\' + DestName);
+  if FileExists(SourceFile) then
+    FileCopy(SourceFile, DestFile, False);
+end;
+
+procedure DeleteBundledRuntimeDllCopies(const SourceBase: String);
+begin
+  DeleteFile(ExpandConstant('{app}\' + SourceBase + '-win32.dll'));
+  DeleteFile(ExpandConstant('{app}\' + SourceBase + '-win64.dll'));
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   SourceFile: String;
   DestFile: String;
-  SourceSndFile: String;
-  SourceMp3File: String;
-  DestSndFile: String;
-  DestMp3File: String;
+  ArchTag: String;
 begin
   if CurStep = ssPostInstall then
   begin
     { Check system architecture and copy appropriate executable }
     if IsWin64 then
     begin
+      ArchTag := 'win64';
       SourceFile := ExpandConstant('{app}\sbagenx-win64.exe');
       DestFile := ExpandConstant('{app}\sbagenx.exe');
-      SourceSndFile := ExpandConstant('{app}\libsndfile-win64.dll');
-      SourceMp3File := ExpandConstant('{app}\libmp3lame-win64.dll');
     end
     else
     begin
+      ArchTag := 'win32';
       SourceFile := ExpandConstant('{app}\sbagenx-win32.exe');
       DestFile := ExpandConstant('{app}\sbagenx.exe');
-      SourceSndFile := ExpandConstant('{app}\libsndfile-win32.dll');
-      SourceMp3File := ExpandConstant('{app}\libmp3lame-win32.dll');
     end;
 
     { Copy the appropriate executable }
@@ -273,18 +300,29 @@ begin
     end;
 
     { Promote bundled runtime DLLs to canonical names used by the loader }
-    DestSndFile := ExpandConstant('{app}\libsndfile-1.dll');
-    DestMp3File := ExpandConstant('{app}\libmp3lame-0.dll');
-    if FileExists(SourceSndFile) then
-      FileCopy(SourceSndFile, DestSndFile, False);
-    if FileExists(SourceMp3File) then
-      FileCopy(SourceMp3File, DestMp3File, False);
+    PromoteBundledRuntimeDll(ArchTag, 'libsndfile', 'libsndfile-1.dll');
+    PromoteBundledRuntimeDll(ArchTag, 'libmp3lame', 'libmp3lame-0.dll');
+    PromoteBundledRuntimeDll(ArchTag, 'libFLAC', 'libFLAC.dll');
+    PromoteBundledRuntimeDll(ArchTag, 'libmpg123-0', 'libmpg123-0.dll');
+    PromoteBundledRuntimeDll(ArchTag, 'libogg-0', 'libogg-0.dll');
+    PromoteBundledRuntimeDll(ArchTag, 'libopus-0', 'libopus-0.dll');
+    PromoteBundledRuntimeDll(ArchTag, 'libvorbis-0', 'libvorbis-0.dll');
+    PromoteBundledRuntimeDll(ArchTag, 'libvorbisenc-2', 'libvorbisenc-2.dll');
+    PromoteBundledRuntimeDll(ArchTag, 'libwinpthread-1', 'libwinpthread-1.dll');
+    if ArchTag = 'win32' then
+      PromoteBundledRuntimeDll(ArchTag, 'libgcc_s_dw2-1', 'libgcc_s_dw2-1.dll');
 
     { Remove architecture-tagged DLL copies after promotion }
-    DeleteFile(ExpandConstant('{app}\libsndfile-win32.dll'));
-    DeleteFile(ExpandConstant('{app}\libsndfile-win64.dll'));
-    DeleteFile(ExpandConstant('{app}\libmp3lame-win32.dll'));
-    DeleteFile(ExpandConstant('{app}\libmp3lame-win64.dll'));
+    DeleteBundledRuntimeDllCopies('libsndfile');
+    DeleteBundledRuntimeDllCopies('libmp3lame');
+    DeleteBundledRuntimeDllCopies('libFLAC');
+    DeleteBundledRuntimeDllCopies('libmpg123-0');
+    DeleteBundledRuntimeDllCopies('libogg-0');
+    DeleteBundledRuntimeDllCopies('libopus-0');
+    DeleteBundledRuntimeDllCopies('libvorbis-0');
+    DeleteBundledRuntimeDllCopies('libvorbisenc-2');
+    DeleteBundledRuntimeDllCopies('libwinpthread-1');
+    DeleteBundledRuntimeDllCopies('libgcc_s_dw2-1');
 
     { Notify system about PATH changes }
     if WizardIsTaskSelected('addtopath') then
@@ -307,5 +345,13 @@ begin
     { Remove dynamically promoted runtime encoder DLLs }
     DeleteFile(ExpandConstant('{app}\libsndfile-1.dll'));
     DeleteFile(ExpandConstant('{app}\libmp3lame-0.dll'));
+    DeleteFile(ExpandConstant('{app}\libFLAC.dll'));
+    DeleteFile(ExpandConstant('{app}\libmpg123-0.dll'));
+    DeleteFile(ExpandConstant('{app}\libogg-0.dll'));
+    DeleteFile(ExpandConstant('{app}\libopus-0.dll'));
+    DeleteFile(ExpandConstant('{app}\libvorbis-0.dll'));
+    DeleteFile(ExpandConstant('{app}\libvorbisenc-2.dll'));
+    DeleteFile(ExpandConstant('{app}\libwinpthread-1.dll'));
+    DeleteFile(ExpandConstant('{app}\libgcc_s_dw2-1.dll'));
   end;
 end; 

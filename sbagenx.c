@@ -60,9 +60,11 @@
 // Define FLAC_DECODE to include FLAC support code
 //
 // Output encoding (selected from -o filename extension):
-//   *.mp3  -> MP3 (libmp3lame, dynamically loaded)
-//   *.ogg  -> OGG/Vorbis (libsndfile, dynamically loaded)
-//   *.flac -> FLAC (libsndfile, dynamically loaded)
+//   *.mp3  -> MP3 (libmp3lame, dynamically loaded by default)
+//   *.ogg  -> OGG/Vorbis (libsndfile, dynamically loaded by default)
+//   *.flac -> FLAC (libsndfile, dynamically loaded by default)
+// Define STATIC_OUTPUT_ENCODERS to link output encoders at build-time
+// (used by Windows build script when static encoder libs are available)
 
 #ifdef T_LINUX
 #define ALSA_AUDIO
@@ -316,6 +318,11 @@ help() {
 	  NL
 		  NL "          -o file   Output raw data to the given file instead of default device"
 		  NL "                     (or MP3/OGG/FLAC if file extension is .mp3/.ogg/.flac)"
+		  NL "          -K kbps   MP3 bitrate in kbps (8-320, default 192)"
+		  NL "          -J q      MP3 quality (0-9, lower is better, default 2)"
+		  NL "          -X q      MP3 VBR quality (0-9, lower is better; enables VBR)"
+		  NL "          -U q      OGG Vorbis quality (0-10, default library setting)"
+		  NL "          -Z lvl    FLAC compression level (0-12, default library setting)"
 		  NL "          -O        Output raw data to the standard output"
 	  NL "          -W        Output a WAV-format file instead of raw data"
 	  NL "          -m file   Read audio data from the given file and mix it with"
@@ -497,6 +504,16 @@ OutEncFmt out_enc_fmt= OUT_ENC_NONE;
 int out_enc_active= 0;
 int out_enc_finished= 0;
 int out_enc_atexit= 0;
+int opt_mp3_bitrate= 192;	// MP3 CBR bitrate in kbps
+int opt_mp3_quality= 2;		// LAME quality (0 best .. 9 fastest)
+int opt_mp3_bitrate_set;
+int opt_mp3_quality_set;
+double opt_mp3_vbr_quality= 0.0;	// LAME VBR quality scale 0..9 (lower is better)
+int opt_mp3_vbr_quality_set;
+double opt_ogg_quality= 0.0;	// Vorbis quality scale 0..10
+int opt_ogg_quality_set;
+double opt_flac_compression= 0.0; // FLAC compression level scale 0..12
+int opt_flac_compression_set;
 
 #ifdef WIN_MISC
 typedef HMODULE DLibHandle;
@@ -511,11 +528,28 @@ typedef struct {
    sf_count_t (*sf_writef_short_fn)(SNDFILE*, const short*, sf_count_t);
    int (*sf_close_fn)(SNDFILE*);
    const char *(*sf_strerror_fn)(SNDFILE*);
+   int (*sf_command_fn)(SNDFILE*, int, void*, int);
 } SndEncState;
 SndEncState snd_enc;
 
 typedef struct lame_global_flags lame_global_flags;
 typedef lame_global_flags *lame_t;
+
+#ifdef STATIC_OUTPUT_ENCODERS
+extern lame_t lame_init(void);
+extern int lame_set_in_samplerate(lame_t gfp, int in_samplerate);
+extern int lame_set_num_channels(lame_t gfp, int num_channels);
+extern int lame_set_quality(lame_t gfp, int quality);
+extern int lame_set_VBR(lame_t gfp, int vbr_mode);
+extern int lame_set_VBR_q(lame_t gfp, int quality);
+extern int lame_set_VBR_quality(lame_t gfp, float quality);
+extern int lame_set_brate(lame_t gfp, int bitrate);
+extern int lame_init_params(lame_t gfp);
+extern int lame_encode_buffer_interleaved(lame_t gfp, short int pcm[], int num_samples,
+					  unsigned char *mp3buf, int mp3buf_size);
+extern int lame_encode_flush(lame_t gfp, unsigned char *mp3buf, int size);
+extern int lame_close(lame_t gfp);
+#endif
 
 typedef struct {
    DLibHandle lib;
@@ -524,6 +558,9 @@ typedef struct {
    int (*lame_set_in_samplerate_fn)(lame_t, int);
    int (*lame_set_num_channels_fn)(lame_t, int);
    int (*lame_set_quality_fn)(lame_t, int);
+   int (*lame_set_VBR_fn)(lame_t, int);
+   int (*lame_set_VBR_q_fn)(lame_t, int);
+   int (*lame_set_VBR_quality_fn)(lame_t, float);
    int (*lame_set_brate_fn)(lame_t, int);
    int (*lame_init_params_fn)(lame_t);
    int (*lame_encode_buffer_interleaved_fn)(lame_t, short int*, int, unsigned char*, int);
@@ -1479,6 +1516,7 @@ scanOptions(int *acp, char ***avp) {
    int argc= *acp;
    char **argv= *avp;
    int val;
+   double dval;
    char dmy;
    int rv= 0;
 
@@ -1580,6 +1618,44 @@ scanOptions(int *acp, char ***avp) {
 	     if (argc-- < 1) error("Expecting filename after -o");
 	     opt_o= *argv++;
 	     if (!fast_mult) fast_mult= 1;		// Don't try to sync with real time
+	     break;
+	  case 'K':
+	     if (argc-- < 1 || 1 != sscanf(*argv++, "%d %c", &opt_mp3_bitrate, &dmy))
+		error("-K expects MP3 bitrate in kbps (8-320)");
+	     if (opt_mp3_bitrate < 8 || opt_mp3_bitrate > 320)
+		error("MP3 bitrate must be in range 8..320 kbps");
+	     opt_mp3_bitrate_set= 1;
+	     break;
+	  case 'J':
+	     if (argc-- < 1 || 1 != sscanf(*argv++, "%d %c", &opt_mp3_quality, &dmy))
+		error("-J expects MP3 quality integer (0-9)");
+	     if (opt_mp3_quality < 0 || opt_mp3_quality > 9)
+		error("MP3 quality must be in range 0..9 (lower is better)");
+	     opt_mp3_quality_set= 1;
+	     break;
+	  case 'X':
+	     if (argc-- < 1 || 1 != sscanf(*argv++, "%lf %c", &dval, &dmy))
+		error("-X expects MP3 VBR quality in range 0..9");
+	     if (dval < 0.0 || dval > 9.0)
+		error("MP3 VBR quality must be in range 0..9 (lower is better)");
+	     opt_mp3_vbr_quality= dval;
+	     opt_mp3_vbr_quality_set= 1;
+	     break;
+	  case 'U':
+	     if (argc-- < 1 || 1 != sscanf(*argv++, "%lf %c", &dval, &dmy))
+		error("-U expects OGG quality in range 0..10");
+	     if (dval < 0.0 || dval > 10.0)
+		error("OGG quality must be in range 0..10");
+	     opt_ogg_quality= dval;
+	     opt_ogg_quality_set= 1;
+	     break;
+	  case 'Z':
+	     if (argc-- < 1 || 1 != sscanf(*argv++, "%lf %c", &dval, &dmy))
+		error("-Z expects FLAC compression level in range 0..12");
+	     if (dval < 0.0 || dval > 12.0)
+		error("FLAC compression level must be in range 0..12");
+	     opt_flac_compression= dval;
+	     opt_flac_compression_set= 1;
 	     break;
 #ifdef ALSA_AUDIO
 	  case 'd':
@@ -2228,6 +2304,7 @@ detect_output_encoder() {
 
 static void
 init_snd_encoder(int format) {
+#ifndef STATIC_OUTPUT_ENCODERS
    const char *names[] = {
 #ifdef WIN_MISC
       "libsndfile-1.dll",
@@ -2241,9 +2318,17 @@ init_snd_encoder(int format) {
 #endif
       0
    };
+#endif
    SF_INFO info;
 
    memset(&snd_enc, 0, sizeof(snd_enc));
+#ifdef STATIC_OUTPUT_ENCODERS
+   snd_enc.sf_open_fn= sf_open;
+   snd_enc.sf_writef_short_fn= sf_writef_short;
+   snd_enc.sf_close_fn= sf_close;
+   snd_enc.sf_strerror_fn= sf_strerror;
+   snd_enc.sf_command_fn= sf_command;
+#else
    snd_enc.lib= dlib_open_best(names);
    if (!snd_enc.lib)
       error("%s output requested, but libsndfile runtime library is not available", output_encoder_name());
@@ -2252,8 +2337,11 @@ init_snd_encoder(int format) {
    snd_enc.sf_writef_short_fn= (sf_count_t(*)(SNDFILE*, const short*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_short");
    snd_enc.sf_close_fn= (int(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_close");
    snd_enc.sf_strerror_fn= (const char*(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_strerror");
-   if (!snd_enc.sf_open_fn || !snd_enc.sf_writef_short_fn || !snd_enc.sf_close_fn || !snd_enc.sf_strerror_fn)
+   snd_enc.sf_command_fn= (int(*)(SNDFILE*, int, void*, int))dlib_sym(snd_enc.lib, "sf_command");
+   if (!snd_enc.sf_open_fn || !snd_enc.sf_writef_short_fn || !snd_enc.sf_close_fn ||
+       !snd_enc.sf_strerror_fn || !snd_enc.sf_command_fn)
       error("Failed to load required libsndfile symbols for %s output", output_encoder_name());
+#endif
 
    memset(&info, 0, sizeof(info));
    info.channels= 2;
@@ -2265,6 +2353,22 @@ init_snd_encoder(int format) {
       error("Failed to open output file for %s encoding: %s",
 	    output_encoder_name(),
 	    snd_enc.sf_strerror_fn(0));
+
+   if (out_enc_fmt == OUT_ENC_OGG && opt_ogg_quality_set) {
+      double q= opt_ogg_quality / 10.0;
+      if (snd_enc.sf_command_fn(snd_enc.snd, SFC_SET_VBR_ENCODING_QUALITY, &q, sizeof(q)) <= 0)
+	 error("Failed to set OGG Vorbis quality to %.2f (range 0..10)", opt_ogg_quality);
+      if (!opt_Q)
+	 warn("Using OGG Vorbis quality %.2f/10", opt_ogg_quality);
+   }
+
+   if (out_enc_fmt == OUT_ENC_FLAC && opt_flac_compression_set) {
+      double c= opt_flac_compression / 12.0;
+      if (snd_enc.sf_command_fn(snd_enc.snd, SFC_SET_COMPRESSION_LEVEL, &c, sizeof(c)) <= 0)
+	 error("Failed to set FLAC compression level to %.2f (range 0..12)", opt_flac_compression);
+      if (!opt_Q)
+	 warn("Using FLAC compression level %.2f/12", opt_flac_compression);
+   }
 
    out_enc_active= 1;
 }
@@ -2285,6 +2389,10 @@ ensure_mp3_buf(int frames) {
 
 static void
 init_mp3_encoder() {
+   int mp3_bitrate= opt_mp3_bitrate_set ? opt_mp3_bitrate : 192;
+   int mp3_quality= opt_mp3_quality_set ? opt_mp3_quality : 2;
+   double mp3_vbr_quality= opt_mp3_vbr_quality_set ? opt_mp3_vbr_quality : 0.0;
+#ifndef STATIC_OUTPUT_ENCODERS
    const char *names[] = {
 #ifdef WIN_MISC
       "libmp3lame-0.dll",
@@ -2298,8 +2406,23 @@ init_mp3_encoder() {
 #endif
       0
    };
+#endif
 
    memset(&mp3_enc, 0, sizeof(mp3_enc));
+#ifdef STATIC_OUTPUT_ENCODERS
+   mp3_enc.lame_init_fn= lame_init;
+   mp3_enc.lame_set_in_samplerate_fn= lame_set_in_samplerate;
+   mp3_enc.lame_set_num_channels_fn= lame_set_num_channels;
+   mp3_enc.lame_set_quality_fn= lame_set_quality;
+   mp3_enc.lame_set_VBR_fn= lame_set_VBR;
+   mp3_enc.lame_set_VBR_q_fn= lame_set_VBR_q;
+   mp3_enc.lame_set_VBR_quality_fn= lame_set_VBR_quality;
+   mp3_enc.lame_set_brate_fn= lame_set_brate;
+   mp3_enc.lame_init_params_fn= lame_init_params;
+   mp3_enc.lame_encode_buffer_interleaved_fn= lame_encode_buffer_interleaved;
+   mp3_enc.lame_encode_flush_fn= lame_encode_flush;
+   mp3_enc.lame_close_fn= lame_close;
+#else
    mp3_enc.lib= dlib_open_best(names);
    if (!mp3_enc.lib)
       error("MP3 output requested, but libmp3lame runtime library is not available");
@@ -2308,6 +2431,9 @@ init_mp3_encoder() {
    mp3_enc.lame_set_in_samplerate_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_in_samplerate");
    mp3_enc.lame_set_num_channels_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_num_channels");
    mp3_enc.lame_set_quality_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_quality");
+   mp3_enc.lame_set_VBR_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_VBR");
+   mp3_enc.lame_set_VBR_q_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_VBR_q");
+   mp3_enc.lame_set_VBR_quality_fn= (int(*)(lame_t,float))dlib_sym(mp3_enc.lib, "lame_set_VBR_quality");
    mp3_enc.lame_set_brate_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_brate");
    mp3_enc.lame_init_params_fn= (int(*)(lame_t))dlib_sym(mp3_enc.lib, "lame_init_params");
    mp3_enc.lame_encode_buffer_interleaved_fn=
@@ -2315,11 +2441,14 @@ init_mp3_encoder() {
    mp3_enc.lame_encode_flush_fn=
       (int(*)(lame_t, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_flush");
    mp3_enc.lame_close_fn= (int(*)(lame_t))dlib_sym(mp3_enc.lib, "lame_close");
+#endif
    if (!mp3_enc.lame_init_fn ||
        !mp3_enc.lame_set_in_samplerate_fn ||
        !mp3_enc.lame_set_num_channels_fn ||
        !mp3_enc.lame_set_quality_fn ||
-       !mp3_enc.lame_set_brate_fn ||
+       !(opt_mp3_vbr_quality_set
+	 ? (mp3_enc.lame_set_VBR_fn && (mp3_enc.lame_set_VBR_quality_fn || mp3_enc.lame_set_VBR_q_fn))
+	 : (mp3_enc.lame_set_brate_fn != 0)) ||
        !mp3_enc.lame_init_params_fn ||
        !mp3_enc.lame_encode_buffer_interleaved_fn ||
        !mp3_enc.lame_encode_flush_fn ||
@@ -2331,12 +2460,41 @@ init_mp3_encoder() {
 
    if (mp3_enc.lame_set_num_channels_fn(mp3_enc.gfp, 2) < 0 ||
        mp3_enc.lame_set_in_samplerate_fn(mp3_enc.gfp, out_rate) < 0 ||
-       mp3_enc.lame_set_quality_fn(mp3_enc.gfp, 2) < 0 ||
-       mp3_enc.lame_set_brate_fn(mp3_enc.gfp, 192) < 0)
+       mp3_enc.lame_set_quality_fn(mp3_enc.gfp, mp3_quality) < 0)
       error("Failed to configure MP3 encoder");
+
+   if (opt_mp3_vbr_quality_set) {
+      // 4 = vbr_mtrh in LAME's vbr_mode enum.
+      if (mp3_enc.lame_set_VBR_fn(mp3_enc.gfp, 4) < 0)
+	 error("Failed to configure MP3 VBR mode");
+      if (mp3_enc.lame_set_VBR_quality_fn) {
+	 if (mp3_enc.lame_set_VBR_quality_fn(mp3_enc.gfp, (float)mp3_vbr_quality) < 0)
+	    error("Failed to configure MP3 VBR quality %.2f (range 0..9)", mp3_vbr_quality);
+      } else {
+	 int q_i= (int)(mp3_vbr_quality + 0.5);
+	 if (q_i < 0) q_i= 0;
+	 if (q_i > 9) q_i= 9;
+	 if (mp3_enc.lame_set_VBR_q_fn(mp3_enc.gfp, q_i) < 0)
+	    error("Failed to configure MP3 VBR quality %d (range 0..9)", q_i);
+	 if (!opt_Q && fabs(mp3_vbr_quality - q_i) > 1e-9)
+	    warn("MP3 runtime supports integer VBR quality only; -X %.2f rounded to %d", mp3_vbr_quality, q_i);
+      }
+      if (!opt_Q && opt_mp3_bitrate_set)
+	 warn("MP3 bitrate setting (-K) is ignored when MP3 VBR mode (-X) is used");
+   } else {
+      if (mp3_enc.lame_set_brate_fn(mp3_enc.gfp, mp3_bitrate) < 0)
+	 error("Failed to configure MP3 bitrate %d kbps", mp3_bitrate);
+   }
 
    if (mp3_enc.lame_init_params_fn(mp3_enc.gfp) < 0)
       error("Failed to initialize MP3 encoder parameters");
+
+   if (!opt_Q) {
+      if (opt_mp3_vbr_quality_set)
+	 warn("Using MP3 VBR quality %.2f (0 best .. 9 fastest), LAME quality %d", mp3_vbr_quality, mp3_quality);
+      else
+	 warn("Using MP3 bitrate %d kbps, quality %d", mp3_bitrate, mp3_quality);
+   }
 
    out_enc_active= 1;
 }
@@ -2354,6 +2512,14 @@ init_output_encoder() {
 	 warn("%s output requires 16-bit PCM input; forcing 16-bit mode", output_encoder_name());
       out_mode= 1;
    }
+
+   if (!opt_Q && out_enc_fmt != OUT_ENC_MP3 &&
+       (opt_mp3_bitrate_set || opt_mp3_quality_set || opt_mp3_vbr_quality_set))
+      warn("MP3 settings (-K/-J/-X) are ignored unless output filename ends with .mp3");
+   if (!opt_Q && out_enc_fmt != OUT_ENC_OGG && opt_ogg_quality_set)
+      warn("OGG setting (-U) is ignored unless output filename ends with .ogg");
+   if (!opt_Q && out_enc_fmt != OUT_ENC_FLAC && opt_flac_compression_set)
+      warn("FLAC setting (-Z) is ignored unless output filename ends with .flac");
 
    switch (out_enc_fmt) {
     case OUT_ENC_MP3:
@@ -3377,6 +3543,9 @@ setup_device(void) {
   if (opt_O && out_enc_fmt != OUT_ENC_NONE)
      error("%s output requires a filename with -o (stdout is not supported for this format yet)",
 	   output_encoder_name());
+  if (!opt_Q && out_enc_fmt == OUT_ENC_NONE &&
+      (opt_mp3_bitrate_set || opt_mp3_quality_set || opt_mp3_vbr_quality_set || opt_ogg_quality_set || opt_flac_compression_set))
+     warn("Encoder settings (-K/-J/-X/-U/-Z) are ignored unless -o uses .mp3/.ogg/.flac");
 
   if (!opt_Q && opt_V != 100) {
     warn("Global volume level set to %d%%", opt_V);

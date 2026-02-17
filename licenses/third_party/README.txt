@@ -47,3 +47,22 @@ Files and source locations:
    sigmoid graph output
    License file: stb-LICENSE.txt
    Source: https://github.com/nothings/stb
+
+10) mpg123 - runtime dependency for bundled Windows libsndfile DLL
+    License file: mpg123-COPYING.txt
+    Source: https://github.com/madebr/mpg123
+
+11) opus - runtime dependency for bundled Windows libsndfile DLL
+    License file: opus-COPYING.txt
+    Source: https://github.com/xiph/opus
+
+12) libwinpthread (mingw-w64) - runtime dependency for bundled Windows
+    codec DLLs
+    License file: libwinpthread-COPYING.txt
+    Source: https://github.com/mingw-w64/mingw-w64
+
+13) GCC runtime libraries (mingw-w64) - runtime dependency for bundled
+    Windows codec DLLs
+    License files: gcc-libs-COPYING.RUNTIME.txt,
+    gcc-libs-COPYING3.txt, gcc-libs-COPYING.LIB.txt
+    Source: https://gcc.gnu.org/

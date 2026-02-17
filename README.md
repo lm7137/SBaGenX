@@ -225,6 +225,38 @@ The build scripts are:
 
 Run the script with the `platform` you use. This will create a installers and binaries in the `dist` directory.
 
+For Windows builds, `windows-build-sbagenx.sh` supports two encoder
+integration modes:
+
+1. Dynamic runtime loading (default fallback): searches and bundles
+   `libsndfile` / `libmp3lame` runtime DLLs into `dist/` for the
+   installer.
+   You can keep these in-repo at:
+   - `libs/windows-win32-runtime/`
+   - `libs/windows-win64-runtime/`
+   Required runtime DLL set:
+   - `libsndfile-1.dll`
+   - `libmp3lame-0.dll`
+   - `libFLAC.dll`
+   - `libmpg123-0.dll`
+   - `libogg-0.dll`
+   - `libopus-0.dll`
+   - `libvorbis-0.dll`
+   - `libvorbisenc-2.dll`
+   - `libwinpthread-1.dll`
+   - `libgcc_s_dw2-1.dll` (Win32 only)
+2. Static output encoder link path: if both of these files exist for an
+   architecture, the script enables `STATIC_OUTPUT_ENCODERS` and links
+   them into the executable:
+   - `libs/windows-win32-libsndfile.a`
+   - `libs/windows-win32-libmp3lame.a`
+   - `libs/windows-win64-libsndfile.a`
+   - `libs/windows-win64-libmp3lame.a`
+
+If extra static link dependencies are needed, pass them via:
+- `SBAGENX_STATIC_ENCODER_DEPS_WIN32`
+- `SBAGENX_STATIC_ENCODER_DEPS_WIN64`
+
 ## ⚖️ License
 
 SBaGenX is distributed under the GPL license. See [COPYING.txt](COPYING.txt) for details.

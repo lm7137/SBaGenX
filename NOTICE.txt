@@ -16,7 +16,9 @@ This fork also bundles stb_image_write.h (from the stb project) to
 write PNG curve images for -G sigmoid graph output.
 
 At runtime, SBaGenX may load libsndfile and libmp3lame dynamically
-to encode .ogg/.flac/.mp3 output files when selected.
+to encode .ogg/.flac/.mp3 output files when selected. Bundled Windows
+runtime codec distributions may also include their required dependency
+DLLs (for example FLAC/Vorbis/Opus/mpg123/mingw runtime components).
 
 Optional decode support may also use libogg, Tremor (libvorbisidec), and
 libmad static libraries built by the project scripts.

@@ -1,0 +1,47 @@
+Windows runtime DLL provenance for bundled encoder support
+=========================================================
+
+Retrieved: 2026-02-17
+Source repository: https://repo.msys2.org/mingw/
+
+i686 packages used:
+- mingw-w64-i686-libsndfile-1.2.2-1-any.pkg.tar.zst
+- mingw-w64-i686-lame-3.100-3-any.pkg.tar.zst
+- mingw-w64-i686-flac-1.5.0-1-any.pkg.tar.zst
+- mingw-w64-i686-mpg123-1.33.4-1-any.pkg.tar.zst
+- mingw-w64-i686-libogg-1.3.6-1-any.pkg.tar.zst
+- mingw-w64-i686-opus-1.6.1-1-any.pkg.tar.zst
+- mingw-w64-i686-libvorbis-1.3.7-2-any.pkg.tar.zst
+- mingw-w64-i686-libwinpthread-13.0.0.r388.gbb8673e5f-1-any.pkg.tar.zst
+- mingw-w64-i686-gcc-libs-15.2.0-11-any.pkg.tar.zst
+
+x86_64 packages used:
+- mingw-w64-x86_64-libsndfile-1.2.2-1-any.pkg.tar.zst
+- mingw-w64-x86_64-lame-3.100-3-any.pkg.tar.zst
+- mingw-w64-x86_64-flac-1.5.0-1-any.pkg.tar.zst
+- mingw-w64-x86_64-mpg123-1.33.4-1-any.pkg.tar.zst
+- mingw-w64-x86_64-libogg-1.3.6-1-any.pkg.tar.zst
+- mingw-w64-x86_64-opus-1.6.1-1-any.pkg.tar.zst
+- mingw-w64-x86_64-libvorbis-1.3.7-2-any.pkg.tar.zst
+- mingw-w64-x86_64-libwinpthread-13.0.0.r388.gbb8673e5f-1-any.pkg.tar.zst
+
+Bundled files and SHA256:
+5dbf17530e4dd8277d44e82b10146ba685ead407f155af261ab791ea41beffd7  libs/windows-win32-runtime/libFLAC.dll
+717accb4973dd6c737169823b3a3e7520e174b9f91cff7d0101ab91fad15f38e  libs/windows-win32-runtime/libgcc_s_dw2-1.dll
+cdaf16d59bf563b7c3e41c5bbccdd6249cf478b8c0ea3420d5e86316db6e3e74  libs/windows-win32-runtime/libmp3lame-0.dll
+33e75377da4628725795dc23bcd3469ca0be9770d0d186806f9e4919c72240b1  libs/windows-win32-runtime/libmpg123-0.dll
+d6bb3205e5957b85923ae290495cf95f75708544f4a19c2276c06bed3424311a  libs/windows-win32-runtime/libogg-0.dll
+e68b68f25823886f06b9190d47fb833612596942ea78736fadd24603a0d531c9  libs/windows-win32-runtime/libopus-0.dll
+ad45eabc7221ba9a4495853c516e4c499eb4f1dd5ed14422cb2f48abf5bcb953  libs/windows-win32-runtime/libsndfile-1.dll
+bb22468af17a78e59dae84476b99a4683b693242b83dc690692481603efac53f  libs/windows-win32-runtime/libvorbis-0.dll
+64a9fea643695bbcc5a3fbacda425999e9aba939430cc50bc25776c3c1866601  libs/windows-win32-runtime/libvorbisenc-2.dll
+baab23b7dfba318e59e6a92acb111635402b4473415ce14f227ebf69fd4ec962  libs/windows-win32-runtime/libwinpthread-1.dll
+ac07e2f494ebf61e238c6c7e11850214ee135b111d39c76c651cac121e7a4bea  libs/windows-win64-runtime/libFLAC.dll
+f40c566b56a97e32036f3d5263fd7dc2dafa6fc7ded326045dd637dd55d68c24  libs/windows-win64-runtime/libmp3lame-0.dll
+34fe34c5ff1575f11b56e59727211e9119ca93000e2800b8f24e37381d9de152  libs/windows-win64-runtime/libmpg123-0.dll
+3038ce8d161324a6349bf7c83b78493857ff6a3501e3adb3d541c6a07bd94a57  libs/windows-win64-runtime/libogg-0.dll
+90aa25a0a6525d7da48a7ae8dd3306e45b0c28ce09a73d2a02b56cd95418d5be  libs/windows-win64-runtime/libopus-0.dll
+9c9928feb89472a2b0ceb9d100141321492bbfbd24ba43c3998090854a1db794  libs/windows-win64-runtime/libsndfile-1.dll
+73db4516d49e0571f80d0f802f7bc0477f8a14067d1da00f340332f6c0303a08  libs/windows-win64-runtime/libvorbis-0.dll
+f7bbf43700c26bdadccb838e44bee13690c01142797cdb69ff3b9bf58b9b90d1  libs/windows-win64-runtime/libvorbisenc-2.dll
+f86a16f265ac20e3a2cff05f7251956d69c9ecc3375b35edbb73c449d644a79f  libs/windows-win64-runtime/libwinpthread-1.dll

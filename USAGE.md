@@ -132,6 +132,11 @@ sbagenx -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
 - `-i [tones]`: Play the specified tones immediately
 - `-m [file]`: Mix with a background sound file (FLAC, MP3, OGG, WAV)
 - `-o [file]`: Output to a file instead of playing (`.raw` by default, or encode with `.mp3`, `.ogg`, `.flac`)
+- `-K [kbps]`: MP3 bitrate (8-320, default 192)
+- `-J [q]`: MP3 quality (0-9, lower is better, default 2)
+- `-X [q]`: MP3 VBR quality (0-9, lower is better; enables VBR mode)
+- `-U [q]`: OGG Vorbis quality (0-10)
+- `-Z [lvl]`: FLAC compression level (0-12, still lossless)
 - `-L [time]`: Limit playback to the specified time (e.g., 0:30 for 30 minutes)
 - `-G`: With `-p sigmoid`, render the beat/pulse sigmoid curve as PNG and exit
 

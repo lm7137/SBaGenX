@@ -422,6 +422,23 @@ To encode directly:
 >> sbagenx -r 44100 -o session.ogg  -L 0:20 -i 200+8/30
 >> sbagenx -r 44100 -o session.mp3  -L 0:20 -i 200+8/30
 
+Encoding tuning options:
+
+  -K <kbps>   MP3 bitrate in kbps (8..320, default 192)
+  -J <q>      MP3 quality (0..9, lower is better, default 2)
+  -X <q>      MP3 VBR quality (0..9, lower is better; enables VBR mode)
+  -U <q>      OGG Vorbis quality (0..10; e.g. 6 is a typical value)
+  -Z <lvl>    FLAC compression level (0..12; lossless in all cases)
+
+If -X is provided, MP3 variable bitrate mode is used and -K is ignored.
+
+Examples:
+
+>> sbagenx -r 44100 -o session.mp3 -K 224 -J 2 -L 0:20 -i 200+8/30
+>> sbagenx -r 44100 -o session.mp3 -X 2.5 -J 2 -L 0:20 -i 200+8/30
+>> sbagenx -r 44100 -o session.ogg -U 6 -L 0:20 -i 200+8/30
+>> sbagenx -r 44100 -o session.flac -Z 8 -L 0:20 -i 200+8/30
+
 The -L option allows a time-limit to be set on the output.  So, for
 example, to output 45 minutes of data to a file, and then play it with
 bplay, use:
