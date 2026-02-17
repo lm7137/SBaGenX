@@ -802,15 +802,30 @@ Examples:
 The argument after the "drop" gives the level and depth of the
 sequence to run.  `<signed-level>` may be non-negative (00, 01, ...,
 99) or negative (-01, -02, ...), and it may include a decimal point
-for fine tuning (for example 20.5a).  The starting carrier is
-205 - 2*level (Hz), so 00 starts at 205Hz, 99 starts at 7Hz, and -01
-starts at 207Hz.  During the drop phase, the carrier still falls by
-5Hz at t=D.  If '+' is used, it falls by a further 5Hz by the end of
-the hold phase (before any wake-up '^' segment).  The idea is usually
-to work upward through levels, waiting for each to become 'boring'
-before moving on.  (In theory, the whole set could take several years
-to work through.)  Later deep levels require headphones that can
-reproduce really low bass frequencies, ideally down to 10Hz or lower.
+for fine tuning (for example 20.5a).
+
+Carrier formula (for quick reference):
+  Let L = signed level value
+  Starting carrier (Hz):   f_start = 205 - 2*L
+  Reverse lookup:          L = (205 - f_start) / 2
+
+Examples:
+  L=00  -> f_start=205Hz
+  L=20  -> f_start=165Hz
+  L=-01 -> f_start=207Hz
+
+Negative levels are important if you want carriers above the 00
+baseline, because many binaural-beat study protocols use carriers
+around 200Hz and above.  Values such as -01, -02, ... make this range
+easy to target while keeping the same drop-session behavior.
+
+During the drop phase, the carrier still falls by 5Hz at t=D.  If '+'
+is used, it falls by a further 5Hz by the end of the hold phase
+(before any wake-up '^' segment).  The idea is usually to work upward
+through levels, waiting for each to become 'boring' before moving on.
+(In theory, the whole set could take several years to work through.)
+Later deep levels require headphones that can reproduce really low
+bass frequencies, ideally down to 10Hz or lower.
 
 The letter a-l (or A-L if you prefer) selects the depth of the beat
 frequencies.  Beat/Pulse frequencies always start at 10Hz, and then drop
