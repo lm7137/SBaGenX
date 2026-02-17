@@ -38,6 +38,9 @@ Contents of this document:
 2.7: The 'slide' sequences
 2.8: Buffer Size Configuration for Bluetooth Devices on macOS
 2.9: Sample Rate Considerations
+2.10: The 'sigmoid' sequences
+2.10.1: More detailed notes on -p sigmoid options
+2.10.2: Adjusting the length of a -p sigmoid session
 
 3: Writing sequence files
 3.1: The sequence-file format
@@ -1019,6 +1022,122 @@ If you need to use a different sample rate (e.g., for compatibility with specifi
 For best results and accurate timing, it is recommended to use the default 44.1kHz sample rate.
 
 
+2.10: The 'sigmoid' sequences
+-----------------------------
+
+The `-p sigmoid` sequences are similar to `-p drop`, but with an
+important difference in how beat/pulse frequencies are shaped in
+sliding mode.  In `...s...` mode, the beat/pulse follows a sigmoid
+curve over the drop interval.  This allows a gentler entry and exit,
+with more change through the middle of the drop period.
+
+Like `-p drop`, these sessions use a level/depth code.  For example:
+
+  sbagenx -m river1.ogg -p sigmoid 00ds+:l=0.125:h=0 mix/100
+
+You can also use isochronic pulse mode by adding `@`:
+
+  sbagenx -m river1.ogg -p sigmoid 00ds+@/3:l=0.125:h=0 white/10
+
+And you can use signed levels, including negative values, exactly as
+with `-p drop`:
+
+  sbagenx -p sigmoid -01ds+:l=0.125:h=0
+
+
+2.10.1: More detailed notes on -p sigmoid options
+-------------------------------------------------
+
+Usage:
+
+  -p sigmoid [t<drop>,<hold>,<wake>]
+      <signed-level><a-l>[s|k][+][^][@][/<amp>][:l=<val>][:h=<val>] <tone-specs> ...
+
+Examples:
+
+  -p sigmoid 00a
+  -p sigmoid 00ds+:l=0.125:h=0
+  -p sigmoid 20fs+^/2:h=0:l=0.125 mix/98
+  -p sigmoid 34.5dk+/1.5:l=0.20:h=-2 pink/30
+  -p sigmoid -01ds+@/3:l=0.125:h=0 brown/15
+
+Level and carrier behavior:
+
+  Let L = signed level value
+  Starting carrier (Hz):   f_start = 205 - 2*L
+  Reverse lookup:          L = (205 - f_start) / 2
+
+As with `-p drop`, the carrier falls by 5Hz at t=D, and by a further
+5Hz over the hold period if `+` is present (before any wake-up `^`).
+
+Beat/pulse depth behavior:
+
+The letter `a-l` selects the same target beat/pulse values used by
+`-p drop` (from 4.4 down to 0.3).  The beat/pulse always starts at
+10Hz and moves to the selected target over the drop period.
+
+Sigmoid shape parameters:
+
+The optional shape parameters are:
+  :l=<value>   (default 0.125)
+  :h=<value>   (default 0)
+
+Order does not matter.  Either can be omitted, and both can be used
+together.  Time for these parameters is interpreted in minutes.
+
+For `-p sigmoid ...s...`, the beat/pulse follows:
+
+  f(t) = a * tanh( l * (t - D/2 - h) ) + b
+
+Where:
+  t = time in minutes from start of drop
+  D = drop duration in minutes
+  l, h = user shape parameters
+
+Boundary conditions:
+  f(0) = 10.0
+  f(D) = target from depth letter (a-l)
+
+`a` and `b` are solved automatically from those boundary conditions.
+
+Step/slide options:
+
+By default, frequencies step every 3 minutes.  With `k`, they step
+every 1 minute.  With `s`, the frequencies slide continuously and the
+sigmoid shape is applied directly over time.
+
+Other options:
+
+  +   add hold period after drop
+  ^   add wake-up segment at end
+  @   use isochronic pulse instead of binaural beat
+  /x  set amplitude (default 1.0)
+
+Extra tone-specs after the sigmoid spec are supported (for example
+mix/pink/white/brown overlays), just like in `-p drop`.
+
+
+2.10.2: Adjusting the length of a -p sigmoid session
+----------------------------------------------------
+
+You can put an optional time specification between `sigmoid` and the
+sigmoid spec:
+
+  t<drop-time>,<hold-time>,<wake-time>
+
+For example:
+
+  t40,10,5
+
+This gives a 40-minute drop, optional 10-minute hold (if `+` is used),
+and optional 5-minute wake-up (if `^` is used).  Example:
+
+  sbagenx -m river2.ogg -p sigmoid t40,10,5 20ds+^/2:l=0.125:h=0 mix/98
+
+As with `-p drop`, lengths are whole-minute based and may be rounded
+further depending on step mode.
+
+
 3: Writing sequence files
 -------------------------
 
@@ -1563,10 +1682,11 @@ The most commonly used predefined sequences are:
    `sbagenx -p sigmoid 00ds+:l=0.125:h=0`
 
 These predefined sequences accept various parameters to customize their behavior.
-See sections 2.6 and 2.7 for detailed information on existing parameters and
-options.  The sigmoid sequence accepts the same drop-style format plus optional
-shape parameters `:l=<value>` and `:h=<value>` (order does not matter), with
-defaults `l=0.125` and `h=0`.
+See sections 2.6, 2.7 and 2.10 for detailed information on existing
+parameters and options.  The sigmoid sequence accepts the same
+drop-style format plus optional shape parameters `:l=<value>` and
+`:h=<value>` (order does not matter), with defaults `l=0.125` and
+`h=0`.
 
 For `-p sigmoid ...s...`, the beat/pulse frequency follows:
 
