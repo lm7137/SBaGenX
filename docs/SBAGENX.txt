@@ -848,7 +848,11 @@ around 200Hz and above.  Values such as -01, -02, ... make this range
 easy to target while keeping the same drop-session behavior.
 
 During the drop phase, the carrier still falls by 5Hz at t=D.  If '+'
-is used, it falls by a further 5Hz by the end of the hold phase
+is used, the carrier keeps dropping during hold at the same linear rate
+as in the drop phase.  So the extra hold drop is:
+
+  5 * (hold-time / drop-time) Hz
+
 (before any wake-up '^' segment).  The idea is usually to work upward
 through levels, waiting for each to become 'boring' before moving on.
 (In theory, the whole set could take several years to work through.)
@@ -1154,8 +1158,13 @@ Level and carrier behavior:
   Starting carrier (Hz):   f_start = 205 - 2*L
   Reverse lookup:          L = (205 - f_start) / 2
 
-As with `-p drop`, the carrier falls by 5Hz at t=D, and by a further
-5Hz over the hold period if `+` is present (before any wake-up `^`).
+As with `-p drop`, the carrier falls by 5Hz at t=D.  If `+` is present,
+it continues to drop over hold at the same linear rate as in drop, for
+an extra hold drop of:
+
+  5 * (hold-time / drop-time) Hz
+
+(before any wake-up `^`).
 
 Beat/pulse depth behavior:
 

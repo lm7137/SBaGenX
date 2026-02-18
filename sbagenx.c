@@ -5454,7 +5454,9 @@ create_drop(int ac, char **av) {
    // Sort out carriers
    len= islong ? len0 + len1 : len0;
    c0= carr + 5.0;
-   c2= carr;
+   // Keep the same linear carrier drop rate in hold as in drop.
+   // Drop phase always drops 5Hz over len0 seconds.
+   c2= islong ? (carr - (5.0 * len1 / len0)) : carr;
 
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
@@ -5688,7 +5690,9 @@ create_sigmoid(int ac, char **av) {
    // Sort out carriers and sigmoid coefficients
    len= islong ? len0 + len1 : len0;
    c0= carr + 5.0;
-   c2= carr;
+   // Keep the same linear carrier drop rate in hold as in drop.
+   // Drop phase always drops 5Hz over len0 seconds.
+   c2= islong ? (carr - (5.0 * len1 / len0)) : carr;
    d_min= len0 / 60.0;
    u0= tanh(sig_l * (0.0 - d_min/2 - sig_h));
    u1= tanh(sig_l * (d_min - d_min/2 - sig_h));
