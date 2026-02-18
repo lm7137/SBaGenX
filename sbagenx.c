@@ -230,6 +230,12 @@ extern int out_rate, out_rate_def;
 void create_drop(int ac, char **av);
 void create_sigmoid(int ac, char **av);
 void create_slide(int ac, char **av);
+int is_mix_mod_option_spec(const char *spec);
+void parse_mix_mod_option_spec(const char *spec);
+void clear_mix_mod_curve(void);
+void setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level,
+			 double main_len_min, double wake_len_min, int wake_enabled);
+double mix_mod_multiplier(int now_ms);
 void normalizeAmplitude(Voice *voices, int numChannels, const char *line, int lineNum);
 void printSequenceDuration();
 void checkMixInSequence(); // Check if mix/<amp> is specified
@@ -339,6 +345,9 @@ help() {
 		  "wav/raw format"
 	  NL "          -M        Read raw audio data from the standard input and mix it"
 	  NL "                      with the generated brainwave tones (raw only)"
+	  NL "          -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid"
+	  NL "                      with mix input; spec is d=<v>:e=<v>:k=<v>:E=<v>"
+	  NL "                      defaults: d=0.3:e=0.3:k=10:E=0.7"
 	  NL
 	  NL "          -R rate   Select rate in Hz that frequency changes are recalculated"
 	  NL "                     (for file/pipe output only, default is 10Hz)"
@@ -485,6 +494,11 @@ int opt_B= -1;		// Buffer size override (-1 = auto)
 int opt_N= 1;			// Enable automatic amplitude normalization (default)
 int opt_V= 100;			// Global volume level (default 100%)
 int opt_w= 0;			// Waveform type (0 = sine, 1 = square, 2 = triangle, 3 = sawtooth)
+int opt_A;			// Enable mix amplitude modulation for pre-programmed sequences
+double opt_A_d= 0.3;		// d parameter for mix modulation
+double opt_A_e= 0.3;		// e parameter for mix modulation
+double opt_A_k= 10.0;		// k parameter (minutes) for mix modulation
+double opt_A_E= 0.7;		// E parameter for mix modulation
 char *waveform_name[] = {"sine", "square", "triangle", "sawtooth"}; // To be used for messages
 
 FILE *mix_in;			// Input stream for mix sound data, or 0
@@ -492,6 +506,19 @@ int mix_cnt;			// Version number from mix filename (#<digits>), or -1
 int bigendian;			// Is this platform Big-endian?
 int mix_flag= 0;		// Has 'mix/*' been used in the sequence?
 double *mix_amp= NULL; // Amplitude of mix sound data to use with mixspin/mixpulse. Default is 100%
+double mix_amp_current= 4096.0; // Current mix/<amp> value (0-4096)
+
+typedef struct {
+   int active;
+   double delta;		// d
+   double epsilon;		// e
+   double period_min;		// k (minutes)
+   double end_level;		// E
+   double main_len_min;		// T, includes hold if present, excludes wake
+   double wake_len_min;		// U
+   int wake_enabled;
+} MixModCurve;
+MixModCurve mix_mod_curve;
 
 typedef enum {
    OUT_ENC_NONE= 0,
@@ -839,6 +866,125 @@ int t_mid(int t0, int t1) {		// Midpoint of period from t0 to t1
 static void
 clear_func_curve() {
    memset(&func_curve, 0, sizeof(func_curve));
+}
+
+void
+clear_mix_mod_curve(void) {
+   memset(&mix_mod_curve, 0, sizeof(mix_mod_curve));
+}
+
+void
+setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level,
+		    double main_len_min, double wake_len_min, int wake_enabled) {
+   mix_mod_curve.active= 1;
+   mix_mod_curve.delta= delta;
+   mix_mod_curve.epsilon= epsilon;
+   mix_mod_curve.period_min= k_min;
+   mix_mod_curve.end_level= end_level;
+   mix_mod_curve.main_len_min= main_len_min;
+   mix_mod_curve.wake_len_min= wake_len_min;
+   mix_mod_curve.wake_enabled= wake_enabled ? 1 : 0;
+}
+
+double
+mix_mod_multiplier(int now_ms) {
+   double t_min, mod_2k, x, g, v, two_k;
+
+   if (!mix_mod_curve.active || mix_mod_curve.main_len_min <= 0.0 || fast_tim0 < 0)
+      return 1.0;
+
+   t_min= t_per0(fast_tim0, now_ms) / 60000.0;
+
+   if (t_min < mix_mod_curve.main_len_min) {
+      two_k= 2.0 * mix_mod_curve.period_min;
+      mod_2k= fmod(t_min, two_k);
+      if (mod_2k < 0.0) mod_2k += two_k;
+      x= mod_2k - mix_mod_curve.period_min;
+      g= 1.0 - mix_mod_curve.delta * exp(-mix_mod_curve.epsilon * x * x);
+      v= 1.0 - ((1.0 - mix_mod_curve.end_level) / mix_mod_curve.main_len_min) * t_min;
+      if (g < 0.0) g= 0.0;
+      if (v < 0.0) v= 0.0;
+      return g * v;
+   }
+
+   if (mix_mod_curve.wake_enabled && mix_mod_curve.wake_len_min > 0.0) {
+      double tw= t_min - mix_mod_curve.main_len_min;
+      double w;
+      if (tw < 0.0) tw= 0.0;
+      if (tw <= mix_mod_curve.wake_len_min) {
+	 w= (1.0 - mix_mod_curve.end_level) + (mix_mod_curve.end_level / mix_mod_curve.wake_len_min) * tw;
+	 if (w < 0.0) w= 0.0;
+	 return w;
+      }
+   }
+
+   return 1.0;
+}
+
+int
+is_mix_mod_option_spec(const char *spec) {
+   const char *p= spec;
+   if (!p || !*p) return 0;
+   if (*p == '-') return 0;
+   if (!strchr(p, '=')) return 0;
+   if (*p == ':') p++;
+   return (*p == 'd' || *p == 'e' || *p == 'k' || *p == 'E');
+}
+
+void
+parse_mix_mod_option_spec(const char *spec) {
+   char tmp[256];
+   char *p, *q;
+   if (!spec || !*spec) return;
+   if (strlen(spec) >= sizeof(tmp))
+      error("-A spec is too long");
+   strcpy(tmp, spec);
+   p= tmp;
+
+   while (*p) {
+      while (*p == ':') p++;
+      if (!*p) break;
+      switch (*p++) {
+       case 'd':
+	  if (*p++ != '=') error("-A expects d=<val>:e=<val>:k=<val>:E=<val>");
+	  opt_A_d= strtod(p, &q);
+	  if (q == p) error("-A parameter d requires a numeric value");
+	  p= q;
+	  break;
+       case 'e':
+	  if (*p++ != '=') error("-A expects d=<val>:e=<val>:k=<val>:E=<val>");
+	  opt_A_e= strtod(p, &q);
+	  if (q == p) error("-A parameter e requires a numeric value");
+	  p= q;
+	  break;
+       case 'k':
+	  if (*p++ != '=') error("-A expects d=<val>:e=<val>:k=<val>:E=<val>");
+	  opt_A_k= strtod(p, &q);
+	  if (q == p) error("-A parameter k requires a numeric value");
+	  p= q;
+	  break;
+       case 'E':
+	  if (*p++ != '=') error("-A expects d=<val>:e=<val>:k=<val>:E=<val>");
+	  opt_A_E= strtod(p, &q);
+	  if (q == p) error("-A parameter E requires a numeric value");
+	  p= q;
+	  break;
+       default:
+	  error("-A only supports d=, e=, k= and E= parameters");
+      }
+
+      if (*p == ':') p++;
+      else if (*p) error("-A expects colon-separated parameters");
+   }
+
+   if (opt_A_d < 0.0 || opt_A_d > 1.0)
+      error("-A parameter d must be in range 0..1");
+   if (opt_A_e <= 0.0)
+      error("-A parameter e must be > 0");
+   if (opt_A_k <= 0.0)
+      error("-A parameter k must be > 0");
+   if (opt_A_E < 0.0 || opt_A_E > 1.0)
+      error("-A parameter E must be in range 0..1");
 }
 
 // Register function-driven exponential beat/pulse drop for one channel.
@@ -1492,6 +1638,9 @@ main(int argc, char **argv) {
       // buffer (3s@44.1kHz)
       if (raw) inbuf_start(raw_mix_in, 256*1024);
    }
+
+   if (opt_A && !mix_in)
+      error("-A requires a mix input stream; use -m <file> or -M");
    
    loop();
    
@@ -1532,6 +1681,18 @@ scanOptions(int *acp, char ***avp) {
 	     if (argc-- < 1) error("-m option expects filename");
 	     // Earliest takes precedence, so command-line overrides sequence file
 	     if (!opt_m) opt_m= *argv++;
+	     break;
+	  case 'A':
+	     opt_A= 1;
+	     if (*p) {
+		if (!is_mix_mod_option_spec(p))
+		   error("-A optional spec must be d=<v>:e=<v>:k=<v>:E=<v>");
+		parse_mix_mod_option_spec(p);
+		p += strlen(p);
+	     } else if (argc > 0 && is_mix_mod_option_spec(argv[0])) {
+		parse_mix_mod_option_spec(*argv++);
+		argc--;
+	     }
 	     break;
 	  case 'S': opt_S= 1;
 	     if (!fast_mult) fast_mult= 1; 		// Don't try to sync with real time
@@ -2865,6 +3026,7 @@ int rand0, rand1;
 void 
 outChunk() {
    int off= 0;
+   double mix_mod_mul= mix_mod_multiplier(now);
 
    if (mix_in) {
       int rv= inbuf_read(tmp_buf, out_blen);
@@ -2888,8 +3050,8 @@ outChunk() {
 
       // Do default mixing at 100% if no mix/* stuff is present
       if (!mix_flag) {
-	 tot1= mix1 << 12;
-	 tot2= mix2 << 12;
+	 tot1= (int)((mix1 << 12) * mix_mod_mul);
+	 tot2= (int)((mix2 << 12) * mix_mod_mul);
       } else {
 	 tot1= tot2= 0;
       }
@@ -2949,8 +3111,8 @@ outChunk() {
     }
 	  break;
        case 5:	// Mix level
-	  tot1 += mix1 * ch->amp;
-	  tot2 += mix2 * ch->amp;
+	  tot1 += (int)(mix1 * (ch->amp * mix_mod_mul));
+	  tot2 += (int)(mix2 * (ch->amp * mix_mod_mul));
 	  break;
        case 6:	// Mixspin - spinning mix stream
 	  ch->off1 += ch->inc1;
@@ -2989,9 +3151,9 @@ outChunk() {
 	    }
 
 	    // Apply base volume (using 70% of amplitude for volume)
-	    int base_amp = (int) (mix_amp != NULL ? *mix_amp : 4096.0) * 0.7;
-	    tot1 += base_amp * mix_l;
-	    tot2 += base_amp * mix_r;
+	    double base_amp = mix_amp_current * 0.7 * mix_mod_mul;
+	    tot1 += (int)(base_amp * mix_l);
+	    tot2 += (int)(base_amp * mix_r);
 	  }
 	  break;
        case 7:	// Mixpulse - mix stream with pulse effect
@@ -3015,7 +3177,7 @@ outChunk() {
             
             // Apply the modulation factor to the audio stream
             // Use base_amp as in mixspin (70% of amplitude for volume)
-            int base_amp = (int) (mix_amp != NULL ? *mix_amp : 4096.0) * 0.7;
+            double base_amp = mix_amp_current * 0.7 * mix_mod_mul;
             
             // Calculate the intensity of the effect based on amplitude (ch->amp)
             // When ch->amp is 0, there is no effect (only the original audio)
@@ -3026,8 +3188,8 @@ outChunk() {
             // When effect_intensity is 0, only the original audio is reproduced
             // When effect_intensity is 1, the audio is fully modulated by the pulse
             double gain = (1.0 - effect_intensity) + (effect_intensity * mod_factor);
-            tot1 += base_amp * mix1 * gain;
-            tot2 += base_amp * mix2 * gain;
+            tot1 += (int)(base_amp * mix1 * gain);
+            tot2 += (int)(base_amp * mix2 * gain);
           }
           break;
        case 8:  // Isochronic tones
@@ -3528,6 +3690,15 @@ corrVal(int running) {
 	  else 
 	     ch->inc1= -ch->inc1;
 	  break;
+      }
+   }
+
+   // Track current mix/<amp> value for mixspin/mixpulse base volume logic.
+   mix_amp_current= 4096.0;
+   for (a= 0; a<N_CH; a++) {
+      if (chan[a].typ == 5) {
+	 mix_amp_current= chan[a].amp;
+	 break;
       }
    }
 }       
@@ -4150,6 +4321,9 @@ readSeq(int ac, char **av) {
 
 void 
 correctPeriods() {
+  if (opt_A && !opt_m && !opt_M)
+    error("-A requires a mix input stream; use -m <file> or -M");
+
   // Get times all correct
   {
     Period *pp= per;
@@ -5121,6 +5295,7 @@ void sinc_interpolate(double *dp, int np, int *arr) {
 void 
 readPreProg(int ac, char **av) {
    clear_func_curve();
+   clear_mix_mod_curve();
 
    if (ac < 1) 
       error("Expecting a pre-programmed sequence description.  Examples:" 
@@ -5128,6 +5303,9 @@ readPreProg(int ac, char **av) {
 	    NL "  drop 25gs+/2 mix/60"
 	    NL "  sigmoid 00ds+:l=0.125:h=0"
 	    );
+
+   if (opt_A && !opt_m && !opt_M)
+      error("-A requires a mix input stream; use -m <file> or -M");
 
    if (opt_G && strcmp(av[0], "sigmoid") != 0)
       error("-G is only supported with -p sigmoid");
@@ -5141,6 +5319,8 @@ readPreProg(int ac, char **av) {
 
    // Handle 'slide'
    if (0 == strcmp(av[0], "slide")) {
+      if (opt_A && !opt_Q)
+	 warn("-A mix modulation currently applies only to -p drop/-p sigmoid; ignoring for -p slide");
       ac--; av++;
       create_slide(ac, av);
       return;
@@ -5168,6 +5348,7 @@ bad_drop() {
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
+	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
 	 NL "  sequence like pink noise or a mix soundtrack, e.g 'pink/20' or 'mix/60'");
 }
@@ -5187,6 +5368,7 @@ create_drop(int ac, char **av) {
    char signal;
    int a;
    int slide, n_step, islong, wakeup, isisochronic;
+   int have_step_mode;
    double carr, amp, c0, c2;
    double beat_target;
    double beat[40];
@@ -5232,26 +5414,32 @@ create_drop(int ac, char **av) {
 
    slide= 0;
    steplen= 180;
-   if (*p == 's') { p++; slide= 1; steplen= 60; }
-   else if (*p == 'k') { p++; steplen= 60; }
-   n_step= 1 + (len0-1) / steplen;	// Round up
-   len0= n_step * steplen;
-   if (!slide) len1= (1 + (len1-1) / steplen) * steplen;
-
    islong= 0;
-   if (*p == '+') { islong= 1; p++; }
-
    wakeup= 0;
-   if (*p == '^') { wakeup= 1; p++; }
-
    isisochronic= 0;
-   if (*p == '@') { isisochronic= 1; p++; }
-
+   have_step_mode= 0;
    amp= 1.0;
-   if (*p == '/') {
-      p++; q= p;
-      amp= strtod(p, &p);
-      if (p == q) BAD;
+
+   // Parse optional flags in any order
+   while (1) {
+      if (*p == 's' || *p == 'k') {
+	 if (have_step_mode) BAD;
+	 have_step_mode= 1;
+	 if (*p == 's') { slide= 1; steplen= 60; }
+	 else steplen= 60;
+	 p++;
+	 continue;
+      }
+      if (*p == '+') { islong= 1; p++; continue; }
+      if (*p == '^') { wakeup= 1; p++; continue; }
+      if (*p == '@') { isisochronic= 1; p++; continue; }
+      if (*p == '/') {
+	 p++; q= p;
+	 amp= strtod(p, &p);
+	 if (p == q) BAD;
+	 continue;
+      }
+      break;
    }
 
    while (isspace(*p)) p++;
@@ -5259,10 +5447,17 @@ create_drop(int ac, char **av) {
 
 #undef BAD
       
+   n_step= 1 + (len0-1) / steplen;	// Round up
+   len0= n_step * steplen;
+   if (!slide) len1= (1 + (len1-1) / steplen) * steplen;
+
    // Sort out carriers
    len= islong ? len0 + len1 : len0;
    c0= carr + 5.0;
    c2= carr;
+
+   if (opt_A)
+      setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
 
    // Calculate beats
    for (a= 0; a<n_step; a++)
@@ -5293,6 +5488,10 @@ create_drop(int ac, char **av) {
    }
    if (wakeup) {
       warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
+   }
+   if (opt_A) {
+      warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
+	   opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
    }
 
    // Start generating sequence
@@ -5361,6 +5560,7 @@ bad_sigmoid() {
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
 	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0)."
+	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the sequence"
 	 NL "  like pink noise or a mix soundtrack, e.g 'pink/20' or 'mix/60'");
 }
@@ -5498,6 +5698,9 @@ create_sigmoid(int ac, char **av) {
    sig_a= (beat_target - beat_start) / den;
    sig_b= beat_start - sig_a * u0;
 
+   if (opt_A)
+      setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
+
    if (opt_G) {
       write_sigmoid_graph_png(fmt, level, depth_ch, len0, len1, len2,
 			      beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
@@ -5542,6 +5745,10 @@ create_sigmoid(int ac, char **av) {
    warn(" Sigmoid shape parameters: l=%g h=%g", sig_l, sig_h);
    if (wakeup) {
       warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
+   }
+   if (opt_A) {
+      warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
+	   opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
    }
 
    // Start generating sequence

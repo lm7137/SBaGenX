@@ -818,6 +818,8 @@ Examples:
   -p drop 34.5dk+/1.5 pink/30
   -p drop -01ds+ white/10
   -p drop 00d@/3 brown/15
+  -A -p drop 00ds+/3 mix/97
+  -A d=0.3:e=0.3:k=10:E=0.7 -p drop 00ds+/3 mix/97
 
 The argument after the "drop" gives the level and depth of the
 sequence to run.  `<signed-level>` may be non-negative (00, 01, ...,
@@ -856,6 +858,17 @@ letters) are supposed to be better, so long as you really are
 entraining to them.  Like the carriers, this is something to build up
 over time.
 
+Reference (lowest beat/pulse target by letter):
+  +--------+-----+-----+-----+-----+-----+-----+
+  | Letter |  a  |  b  |  c  |  d  |  e  |  f  |
+  +--------+-----+-----+-----+-----+-----+-----+
+  | Hz     | 4.4 | 3.7 | 3.1 | 2.5 | 2.0 | 1.5 |
+  +--------+-----+-----+-----+-----+-----+-----+
+  | Letter |  g  |  h  |  i  |  j  |  k  |  l  |
+  +--------+-----+-----+-----+-----+-----+-----+
+  | Hz     | 1.2 | 0.9 | 0.7 | 0.5 | 0.4 | 0.3 |
+  +--------+-----+-----+-----+-----+-----+-----+
+
 You have three options regarding how the frequencies change during the
 session.  By default (00d+) the frequencies go down in steps, changing
 every 3 minutes.  With 'k' added (00dk+) the frequencies go down in
@@ -888,6 +901,37 @@ you up.
 
 The optional '/<amp>' on the end lets you change the amplitude of the
 waves if necessary (e.g. 00ds+/2).  By default, the level is set to 1.
+
+Mix modulation parameters (via `-A`):
+
+Rationale (conjectural): the linear decay term `V(t)` provides gradual
+quietening that may feel soothing, while the periodic dip term `G(t)`
+can intermittently heighten awareness.
+
+With `-A`, the mix amplitude is multiplied by:
+
+  G(t) = 1 - d * exp( -e * ((t mod 2k) - k)^2 )
+  V(t) = 1 - ((1 - E) / T) * t
+  F(t) = G(t) * V(t)
+
+Where:
+  t = minutes from start of session (excluding wake phase)
+  T = total main session length in minutes (drop + hold if `+` is used)
+  d, e, k, E are user parameters
+
+Defaults (when `-A` is used without a spec):
+  d=0.3, e=0.3, k=10, E=0.7
+
+Optional overrides are provided via `-A` as colon-separated tokens:
+
+  -A d=<val>:e=<val>:k=<val>:E=<val>
+
+If `^` wake-up is present, wake mix amplitude uses:
+
+  W(t) = (1 - E) + (E/U) * t
+
+Where `t` is minutes from wake start, and `U` is wake length in
+minutes.
 
 After the spec comes an optional list of normal tone-sets.  These can
 be used to add mix sounds (e.g. mix/100) or pink noise (pink/30), or
@@ -1093,6 +1137,8 @@ Examples:
   -p sigmoid 20fs+^/2:h=0:l=0.125 mix/98
   -p sigmoid 34.5dk+/1.5:l=0.20:h=-2 pink/30
   -p sigmoid -01ds+@/3:l=0.125:h=0 brown/15
+  -A -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
+  -A d=0.3:e=0.3:k=10:E=0.7 -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
 
 Level and carrier behavior:
 
@@ -1108,6 +1154,17 @@ Beat/pulse depth behavior:
 The letter `a-l` selects the same target beat/pulse values used by
 `-p drop` (from 4.4 down to 0.3).  The beat/pulse always starts at
 10Hz and moves to the selected target over the drop period.
+
+Reference (lowest beat/pulse target by letter):
+  +--------+-----+-----+-----+-----+-----+-----+
+  | Letter |  a  |  b  |  c  |  d  |  e  |  f  |
+  +--------+-----+-----+-----+-----+-----+-----+
+  | Hz     | 4.4 | 3.7 | 3.1 | 2.5 | 2.0 | 1.5 |
+  +--------+-----+-----+-----+-----+-----+-----+
+  | Letter |  g  |  h  |  i  |  j  |  k  |  l  |
+  +--------+-----+-----+-----+-----+-----+-----+
+  | Hz     | 1.2 | 0.9 | 0.7 | 0.5 | 0.4 | 0.3 |
+  +--------+-----+-----+-----+-----+-----+-----+
 
 Sigmoid shape parameters:
 
@@ -1145,6 +1202,27 @@ Other options:
   ^   add wake-up segment at end
   @   use isochronic pulse instead of binaural beat
   /x  set amplitude (default 1.0)
+
+Mix modulation parameters (via `-A`):
+
+Rationale (conjectural): the linear decay term `V(t)` provides gradual
+quietening that may feel soothing, while the periodic dip term `G(t)`
+can intermittently heighten awareness.
+
+  -A                 use defaults: d=0.3 e=0.3 k=10 E=0.7
+  -A d=<v>:e=<v>:k=<v>:E=<v>   override selected parameters
+
+For main session time (`drop + hold`, excluding wake):
+
+  G(t) = 1 - d * exp( -e * ((t mod 2k) - k)^2 )
+  V(t) = 1 - ((1 - E) / T) * t
+  F(t) = G(t) * V(t)
+
+For wake-up time (if `^` is present):
+
+  W(t) = (1 - E) + (E/U) * t
+
+All times in these equations are in minutes.
 
 Extra tone-specs after the sigmoid spec are supported (for example
 mix/pink/white/brown overlays), just like in `-p drop`.
@@ -1233,6 +1311,9 @@ follows:
   -L time   Select the length of time (hh:mm or hh:mm:ss) to output for
   -m file   Read audio data from the given file and mix it with the
               generated binaural beats; may be flac/ogg/mp3/wav/raw format
+  -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid.
+              Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
+              Requires a mix input stream via -m or -M.
   -i ...    Generate the whole sequence from an 'immediate' spec
   -p ...    Generate the whole sequence from a prodefined sequence type,
               e.g. -p drop or -p slide

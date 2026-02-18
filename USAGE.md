@@ -131,6 +131,7 @@ sbagenx -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
 
 - `-i [tones]`: Play the specified tones immediately
 - `-m [file]`: Mix with a background sound file (FLAC, MP3, OGG, WAV)
+- `-A [spec]`: Mix amplitude modulation for `-p drop`/`-p sigmoid` (`d=<v>:e=<v>:k=<v>:E=<v>`, optional)
 - `-o [file]`: Output to a file instead of playing (`.raw` by default, or encode with `.mp3`, `.ogg`, `.flac`)
 - `-K [kbps]`: MP3 bitrate (8-320, default 192)
 - `-J [q]`: MP3 quality (0-9, lower is better, default 2)
