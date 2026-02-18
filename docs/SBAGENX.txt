@@ -907,6 +907,8 @@ Mix modulation parameters (via `-A`):
 Rationale (conjectural): the linear decay term `V(t)` provides gradual
 quietening that may feel soothing, while the periodic dip term `G(t)`
 can intermittently heighten awareness.
+Reference graph: assets/example-mix-amplitude-modulation.png
+(generated for t30,30,0 with defaults d=0.3, e=0.3, k=10, E=0.7).
 
 With `-A`, the mix amplitude is multiplied by:
 
@@ -1208,6 +1210,8 @@ Mix modulation parameters (via `-A`):
 Rationale (conjectural): the linear decay term `V(t)` provides gradual
 quietening that may feel soothing, while the periodic dip term `G(t)`
 can intermittently heighten awareness.
+Reference graph: assets/example-mix-amplitude-modulation.png
+(generated for t30,30,0 with defaults d=0.3, e=0.3, k=10, E=0.7).
 
   -A                 use defaults: d=0.3 e=0.3 k=10 E=0.7
   -A d=<v>:e=<v>:k=<v>:E=<v>   override selected parameters
