@@ -3,82 +3,276 @@
 # Source common library
 . ./lib.sh
 
-# Check if 32-bit executable exists
-if [ ! -f dist/sbagenx-win32.exe ]; then
-    error "32-bit executable not found. Run ./windows-build-sbagenx.sh first."
+SETUP_NAME="sbagenx-windows-setup.exe"
+ISCC_URL="https://files.jrsoftware.org/is/6/innosetup-6.4.2.exe"
+AUTO_INSTALL_DEPS="${SBAGENX_AUTO_INSTALL_DEPS:-1}"
+PKG_MANAGER=""
+PKG_RUNNER=""
+TEMP_DIR=""
+XVFB_PID=""
+STARTED_XVFB=0
+WINEPREFIX_DEFAULT="/tmp/wineprefix"
+WINEPREFIX="${WINEPREFIX:-$WINEPREFIX_DEFAULT}"
+DISPLAY="${DISPLAY:-:99}"
+
+cleanup() {
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+        rm -rf "$TEMP_DIR"
+    fi
+    if [ "$STARTED_XVFB" -eq 1 ] && [ -n "$XVFB_PID" ]; then
+        kill "$XVFB_PID" >/dev/null 2>&1 || true
+    fi
+}
+
+detect_package_manager() {
+    if command -v apt-get >/dev/null 2>&1; then
+        PKG_MANAGER="apt-get"
+    elif command -v dnf >/dev/null 2>&1; then
+        PKG_MANAGER="dnf"
+    elif command -v pacman >/dev/null 2>&1; then
+        PKG_MANAGER="pacman"
+    elif command -v zypper >/dev/null 2>&1; then
+        PKG_MANAGER="zypper"
+    else
+        PKG_MANAGER=""
+    fi
+}
+
+set_pkg_runner() {
+    if [ "$(id -u)" -eq 0 ]; then
+        PKG_RUNNER=""
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1; then
+        PKG_RUNNER="sudo"
+        return 0
+    fi
+    return 1
+}
+
+append_pkg_unique() {
+    local pkg="$1"
+    local existing
+    for existing in "${INSTALL_PKGS[@]}"; do
+        if [ "$existing" = "$pkg" ]; then
+            return 0
+        fi
+    done
+    INSTALL_PKGS+=("$pkg")
+}
+
+pkg_for_cmd() {
+    local cmd="$1"
+    case "$cmd" in
+        pgrep)
+            case "$PKG_MANAGER" in
+                apt-get|zypper) echo "procps" ;;
+                dnf|pacman) echo "procps-ng" ;;
+            esac
+            ;;
+        Xvfb)
+            case "$PKG_MANAGER" in
+                apt-get) echo "xvfb" ;;
+                dnf|zypper) echo "xorg-x11-server-Xvfb" ;;
+                pacman) echo "xorg-server-xvfb" ;;
+            esac
+            ;;
+        wine|wineserver|wineboot)
+            case "$PKG_MANAGER" in
+                apt-get) echo "wine" ;;
+                dnf|pacman|zypper) echo "wine" ;;
+            esac
+            ;;
+        curl) echo "curl" ;;
+        pandoc) echo "pandoc" ;;
+    esac
+}
+
+run_package_install() {
+    case "$PKG_MANAGER" in
+        apt-get)
+            # Keep this non-interactive for CI and headless environments.
+            export DEBIAN_FRONTEND=noninteractive
+            if printf '%s\n' "${INSTALL_PKGS[@]}" | grep -qx "wine"; then
+                if command -v dpkg >/dev/null 2>&1 && ! dpkg --print-foreign-architectures | grep -qx "i386"; then
+                    info "Enabling i386 multiarch (required for 32-bit Wine prefix)..."
+                    ${PKG_RUNNER:+$PKG_RUNNER }dpkg --add-architecture i386
+                fi
+                append_pkg_unique "wine32"
+                append_pkg_unique "wine64"
+            fi
+            info "Updating apt package metadata..."
+            ${PKG_RUNNER:+$PKG_RUNNER }apt-get update
+            info "Installing packages: ${INSTALL_PKGS[*]}"
+            ${PKG_RUNNER:+$PKG_RUNNER }apt-get install -y "${INSTALL_PKGS[@]}"
+            ;;
+        dnf)
+            info "Installing packages: ${INSTALL_PKGS[*]}"
+            ${PKG_RUNNER:+$PKG_RUNNER }dnf install -y "${INSTALL_PKGS[@]}"
+            ;;
+        pacman)
+            info "Installing packages: ${INSTALL_PKGS[*]}"
+            ${PKG_RUNNER:+$PKG_RUNNER }pacman -Sy --noconfirm "${INSTALL_PKGS[@]}"
+            ;;
+        zypper)
+            info "Installing packages: ${INSTALL_PKGS[*]}"
+            ${PKG_RUNNER:+$PKG_RUNNER }zypper --non-interactive install "${INSTALL_PKGS[@]}"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+ensure_required_commands() {
+    local required=("$@")
+    local cmd
+    local pkg
+    local missing=()
+
+    for cmd in "${required[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [ "${#missing[@]}" -eq 0 ]; then
+        return 0
+    fi
+
+    warning "Missing required tools: ${missing[*]}"
+
+    if [ "$AUTO_INSTALL_DEPS" = "0" ]; then
+        error "Automatic dependency install is disabled (SBAGENX_AUTO_INSTALL_DEPS=0)."
+        return 1
+    fi
+
+    detect_package_manager
+    if [ -z "$PKG_MANAGER" ]; then
+        error "Could not detect a supported package manager (apt-get/dnf/pacman/zypper)."
+        return 1
+    fi
+    if ! set_pkg_runner; then
+        error "Need root privileges or sudo to auto-install dependencies."
+        return 1
+    fi
+
+    INSTALL_PKGS=()
+    for cmd in "${missing[@]}"; do
+        pkg=$(pkg_for_cmd "$cmd")
+        if [ -z "$pkg" ]; then
+            error "No package mapping available for missing tool '$cmd' on $PKG_MANAGER."
+            return 1
+        fi
+        append_pkg_unique "$pkg"
+    done
+
+    section_header "Installing missing dependencies..."
+    if ! run_package_install; then
+        error "Failed to install required dependencies automatically."
+        return 1
+    fi
+
+    for cmd in "${missing[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            error "Tool '$cmd' is still missing after installation."
+            return 1
+        fi
+    done
+
+    success "Dependencies installed successfully."
+    return 0
+}
+
+trap cleanup EXIT
+
+# Check if Windows executables exist
+if [ ! -f dist/sbagenx-win32.exe ] || [ ! -f dist/sbagenx-win64.exe ]; then
+    error "Windows executables not found. Run ./windows-build-sbagenx.sh first."
     exit 1
 fi
 
-SETUP_NAME="sbagenx-windows-setup.exe"
-
 # Remove the existing installer if it exists
-rm -f dist/${SETUP_NAME}
+rm -f "dist/${SETUP_NAME}"
 
 section_header "Creating Windows Installer..."
 
+# Check and auto-install dependencies if missing
+if ! ensure_required_commands pgrep Xvfb wine wineserver wineboot curl pandoc; then
+    error "Missing dependencies. Install them manually or rerun with SBAGENX_AUTO_INSTALL_DEPS=1."
+    exit 1
+fi
+
 # Set up wine environment
 export WINEARCH=win32
-export WINEPREFIX=/tmp/wineprefix
+export WINEPREFIX
 export WINEDEBUG=-all
 export WINEDLLOVERRIDES="winemenubuilder.exe=d"
-export DISPLAY=:99
+export DISPLAY
 
 # Increase Wine memory limits
 export WINE_LARGE_ADDRESS_AWARE=1
 export WINE_HEAP_MAXRESERVE=4096
 
 # Get Xvfb PID
-XVFB_PID=$(pgrep -f "Xvfb $DISPLAY -screen 0 1024x768x16")
+XVFB_PID=$(pgrep -f "Xvfb ${DISPLAY} " | head -n 1)
 
 # Start Xvfb to provide a virtual display if it's not already running
 if [ -z "$XVFB_PID" ]; then
     rm -f /tmp/.X${DISPLAY/:/}-lock
     info "Starting Xvfb for headless Wine operation..."
-    Xvfb $DISPLAY -screen 0 1024x768x16 & XVFB_PID=$!
+    Xvfb "$DISPLAY" -screen 0 1024x768x16 &
+    XVFB_PID=$!
+    STARTED_XVFB=1
     sleep 2  # Wait for Xvfb to start
+    if ! kill -0 "$XVFB_PID" >/dev/null 2>&1; then
+        error "Failed to start Xvfb on display $DISPLAY"
+        exit 1
+    fi
 fi
 
 # Initialize Wine prefix if it doesn't exist
 if [ ! -d "$WINEPREFIX" ]; then
     info "Initializing Wine prefix..."
-    wineboot -i > /dev/null 2>&1
-    # Wait for wineboot to complete
-    sleep 5
+    if ! wineboot -i > /dev/null 2>&1; then
+        error "wineboot failed. Ensure 32-bit Wine support is installed (e.g., wine32 on Debian/Ubuntu)."
+        exit 1
+    fi
+    wineserver -w
 fi
 
 # Check if Inno Setup is installed in Wine
 ISCC="$WINEPREFIX/drive_c/Program Files/Inno Setup 6/ISCC.exe"
 if [ ! -f "$ISCC" ]; then
     info "Inno Setup not found. Downloading and installing..."
-    
+
     # Create temp directory
     TEMP_DIR=$(mktemp -d)
-    cd "$TEMP_DIR"
-    
-    # Download Inno Setup
-    curl -L -o innosetup.exe -s "https://files.jrsoftware.org/is/6/innosetup-6.4.2.exe"
+    cd "$TEMP_DIR" || exit 1
 
-    if [ $? -ne 0 ]; then
+    # Download Inno Setup
+    if ! curl -fsSL -o innosetup.exe "$ISCC_URL"; then
         error "Failed to download Inno Setup"
-        kill $XVFB_PID
         exit 1
     fi
-    
+
     # Install Inno Setup silently
     info "Installing Inno Setup..."
-    wine innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOICONS
-    
-    # Wait for installation to complete
-    sleep 10
+    if ! wine innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOICONS; then
+        error "Failed to run Inno Setup installer under Wine"
+        exit 1
+    fi
     wineserver -w
-    
+
     # Clean up
-    cd - > /dev/null
+    cd - > /dev/null || exit 1
     rm -rf "$TEMP_DIR"
-    
+    TEMP_DIR=""
+
     if [ ! -f "$ISCC" ]; then
         error "Failed to install Inno Setup"
-        kill $XVFB_PID
         exit 1
     fi
 fi
@@ -110,7 +304,6 @@ if [ ! -f "dist/${SETUP_NAME}" ]; then
 
     # Kill any hanging processes
     wineserver -k
-    kill $XVFB_PID
     exit 1
 fi
 
@@ -119,8 +312,5 @@ success "Installer created successfully at dist/${SETUP_NAME}"
 # Final cleanup
 wineserver -w
 rm -rf "$WINEPREFIX" build
-
-# Kill Xvfb
-kill $XVFB_PID
 
 section_header "Build process completed!" 

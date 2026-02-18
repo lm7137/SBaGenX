@@ -410,6 +410,12 @@ default this writes headerless raw data (to write a WAV file, see the
 encoder libraries).  The -O option remains raw PCM only.  For example,
 to pipe to bplay under UNIX, you could use the following:
 
+Windows packaging note: when installed via the Windows installer, the
+correct architecture runtime DLLs are promoted to canonical names
+(e.g. libsndfile-1.dll, libmp3lame-0.dll) automatically.  If you run
+dist/sbagenx-win32.exe or dist/sbagenx-win64.exe directly (without the
+installer), that promotion step is not run.
+
 >> sbagenx -r 8000 -O -i 100+0.92/30 200+4.2/15 | bplay -S -s 8000 -b 16
 
 To output an isochronic tone to a file:
