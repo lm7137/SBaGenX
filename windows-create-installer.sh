@@ -14,6 +14,8 @@ STARTED_XVFB=0
 WINEPREFIX_DEFAULT="/tmp/wineprefix"
 WINEPREFIX="${WINEPREFIX:-$WINEPREFIX_DEFAULT}"
 DISPLAY="${DISPLAY:-:99}"
+HOST_UNAME="$(uname -s)"
+ISCC_NATIVE=""
 
 cleanup() {
     if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
@@ -22,6 +24,110 @@ cleanup() {
     if [ "$STARTED_XVFB" -eq 1 ] && [ -n "$XVFB_PID" ]; then
         kill "$XVFB_PID" >/dev/null 2>&1 || true
     fi
+}
+
+is_windows_host() {
+    case "$HOST_UNAME" in
+        MINGW*|MSYS*|CYGWIN*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+find_native_iscc() {
+    if command -v iscc >/dev/null 2>&1; then
+        command -v iscc
+        return 0
+    fi
+    if command -v ISCC.exe >/dev/null 2>&1; then
+        command -v ISCC.exe
+        return 0
+    fi
+
+    local candidate
+    for candidate in \
+        "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+        "/c/Program Files/Inno Setup 6/ISCC.exe"; do
+        if [ -f "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+install_innosetup_windows() {
+    local found
+
+    found="$(find_native_iscc)"
+    if [ -n "$found" ]; then
+        ISCC_NATIVE="$found"
+        return 0
+    fi
+
+    if [ "$AUTO_INSTALL_DEPS" = "0" ]; then
+        error "Inno Setup compiler (ISCC.exe) not found and auto-install is disabled (SBAGENX_AUTO_INSTALL_DEPS=0)."
+        return 1
+    fi
+
+    warning "ISCC.exe not found. Attempting automatic install of Inno Setup 6..."
+
+    # First preference: winget (if available) keeps the script simple on Windows.
+    if command -v winget >/dev/null 2>&1; then
+        info "Trying winget install JRSoftware.InnoSetup..."
+        winget install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements --silent --disable-interactivity >/dev/null 2>&1 || true
+        found="$(find_native_iscc)"
+        if [ -n "$found" ]; then
+            success "Installed Inno Setup using winget."
+            ISCC_NATIVE="$found"
+            return 0
+        fi
+        warning "winget install did not make ISCC.exe available; trying direct installer fallback."
+    fi
+
+    # Fallback: download and run the official installer silently using PowerShell.
+    if command -v powershell.exe >/dev/null 2>&1; then
+        info "Trying direct download + silent install of Inno Setup 6..."
+        if powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
+            "$ErrorActionPreference='Stop'; \
+             $ProgressPreference='SilentlyContinue'; \
+             $tmp=Join-Path $env:TEMP 'innosetup-6.4.2.exe'; \
+             Invoke-WebRequest -UseBasicParsing -Uri '$ISCC_URL' -OutFile $tmp; \
+             Start-Process -FilePath $tmp -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOICONS' -Wait;"; then
+            found="$(find_native_iscc)"
+            if [ -n "$found" ]; then
+                success "Installed Inno Setup using direct installer fallback."
+                ISCC_NATIVE="$found"
+                return 0
+            fi
+        fi
+    else
+        warning "powershell.exe is not available; cannot run direct installer fallback."
+    fi
+
+    error "Inno Setup compiler (ISCC.exe) still not found after auto-install attempts."
+    info "Install Inno Setup 6 manually from: https://jrsoftware.org/isdl.php"
+    return 1
+}
+
+render_markdown_text() {
+    local src="$1"
+    local dst="$2"
+
+    if command -v pandoc >/dev/null 2>&1; then
+        pandoc -f markdown -t plain "$src" -o "$dst"
+    else
+        warning "pandoc not found; copying $src as plain text fallback"
+        cp "$src" "$dst"
+    fi
+}
+
+prepare_installer_docs() {
+    create_dir_if_not_exists "build"
+    render_markdown_text README.md build/README.txt
+    render_markdown_text USAGE.md build/USAGE.txt
+    render_markdown_text RESEARCH.md build/RESEARCH.txt
 }
 
 detect_package_manager() {
@@ -199,6 +305,32 @@ rm -f "dist/${SETUP_NAME}"
 
 section_header "Creating Windows Installer..."
 
+# Native Windows/MSYS2 path: use Inno Setup directly, no Wine/Xvfb.
+if is_windows_host; then
+    if ! install_innosetup_windows || [ -z "$ISCC_NATIVE" ]; then
+        exit 1
+    fi
+
+    info "Using native Inno Setup compiler: $ISCC_NATIVE"
+    prepare_installer_docs
+
+    info "Creating installer..."
+    if ! "$ISCC_NATIVE" /O+ /Q setup.iss; then
+        error "Failed to create installer with native Inno Setup"
+        exit 1
+    fi
+
+    if [ ! -f "dist/${SETUP_NAME}" ]; then
+        error "Failed to create installer"
+        exit 1
+    fi
+
+    success "Installer created successfully at dist/${SETUP_NAME}"
+    rm -rf build
+    section_header "Build process completed!"
+    exit 0
+fi
+
 # Check and auto-install dependencies if missing
 if ! ensure_required_commands pgrep Xvfb wine wineserver wineboot curl pandoc; then
     error "Missing dependencies. Install them manually or rerun with SBAGENX_AUTO_INSTALL_DEPS=1."
@@ -283,17 +415,8 @@ info "Creating installer..."
 # Kill any hanging wine processes
 wineserver -k
 
-# For convert *.md to *.txt
-create_dir_if_not_exists "build"
-
-# Convert README.md to README.txt
-pandoc -f markdown -t plain README.md -o build/README.txt 
-
-# Convert USAGE.md to USAGE.txt
-pandoc -f markdown -t plain USAGE.md -o build/USAGE.txt
-
-# Convert RESEARCH.md to RESEARCH.txt
-pandoc -f markdown -t plain RESEARCH.md -o build/RESEARCH.txt
+# Prepare docs consumed by setup.iss
+prepare_installer_docs
 
 # Run ISCC with increased memory limits and in silent mode
 wine "$ISCC" /O+ /Q setup.iss
