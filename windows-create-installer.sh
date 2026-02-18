@@ -311,7 +311,8 @@ if is_windows_host; then
     prepare_installer_docs
 
     info "Creating installer..."
-    if ! "$ISCC_NATIVE" /O+ /Q setup.iss; then
+    # Prevent MSYS2 from rewriting ISCC switch arguments like /O+ and /Q.
+    if ! MSYS2_ARG_CONV_EXCL='*' "$ISCC_NATIVE" /O+ /Q "setup.iss"; then
         error "Failed to create installer with native Inno Setup"
         exit 1
     fi
