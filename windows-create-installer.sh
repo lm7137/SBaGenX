@@ -89,12 +89,8 @@ install_innosetup_windows() {
     # Fallback: download and run the official installer silently using PowerShell.
     if command -v powershell.exe >/dev/null 2>&1; then
         info "Trying direct download + silent install of Inno Setup 6..."
-        if powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
-            "$ErrorActionPreference='Stop'; \
-             $ProgressPreference='SilentlyContinue'; \
-             $tmp=Join-Path $env:TEMP 'innosetup-6.4.2.exe'; \
-             Invoke-WebRequest -UseBasicParsing -Uri '$ISCC_URL' -OutFile $tmp; \
-             Start-Process -FilePath $tmp -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOICONS' -Wait;"; then
+        if ISCC_URL_PS="$ISCC_URL" powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \
+            '& { $ErrorActionPreference = "Stop"; $ProgressPreference = "SilentlyContinue"; $tmp = Join-Path $env:TEMP "innosetup-6.4.2.exe"; Invoke-WebRequest -UseBasicParsing -Uri $env:ISCC_URL_PS -OutFile $tmp; Start-Process -FilePath $tmp -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /NOICONS" -Wait; }'; then
             found="$(find_native_iscc)"
             if [ -n "$found" ]; then
                 success "Installed Inno Setup using direct installer fallback."
