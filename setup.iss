@@ -67,6 +67,9 @@ Name: "addtopath"; Description: "Add {#MyAppName} to PATH environment variable";
 ; Include both 32-bit and 64-bit versions
 Source: "dist\sbagenx-win32.exe"; DestDir: "{app}"; DestName: "sbagenx-win32.exe"; Flags: ignoreversion
 Source: "dist\sbagenx-win64.exe"; DestDir: "{app}"; DestName: "sbagenx-win64.exe"; Flags: ignoreversion
+; Bundled ambient mix tracks (kept beside sbagenx.exe for direct -m usage)
+Source: "assets\river1.ogg"; DestDir: "{app}"; DestName: "river1.ogg"; Flags: ignoreversion
+Source: "assets\river2.ogg"; DestDir: "{app}"; DestName: "river2.ogg"; Flags: ignoreversion
 ; Optional encoder runtime DLL bundles (added by windows-build-sbagenx.sh when available)
 Source: "dist\libsndfile-win32.dll"; DestDir: "{app}"; DestName: "libsndfile-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "dist\libsndfile-win64.dll"; DestDir: "{app}"; DestName: "libsndfile-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist

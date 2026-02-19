@@ -8,6 +8,8 @@ sbagenx-*
 *.wav
 *.mp3
 *.ogg
+!assets/river1.ogg
+!assets/river2.ogg
 *.log
 *.tmp.c
 
