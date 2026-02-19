@@ -11,7 +11,7 @@
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
-AppId={{F4E7F182-5437-4F54-A4FE-B8F2891AE7E2}
+AppId={{8C28BD17-FA66-41C2-8458-985701F15639}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
