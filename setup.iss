@@ -101,18 +101,19 @@ Source: "examples\*"; DestDir: "{app}\examples"; Flags: ignoreversion recursesub
 Source: "scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Changelog
 Source: "ChangeLog.txt"; DestDir: "{app}"; Flags: ignoreversion
-; USAGE.txt
-Source: "build\USAGE.txt"; DestDir: "{app}"; Flags: ignoreversion
-; RESEARCH.txt
-Source: "build\RESEARCH.txt"; DestDir: "{app}"; Flags: ignoreversion
+; Top-level Markdown docs (preserved as Markdown)
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "USAGE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "RESEARCH.md"; DestDir: "{app}"; Flags: ignoreversion
 ; Documentation files in user's Documents folder
 Source: "docs\*"; DestDir: "{#MyAppUserDocsDir}\Documentation"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "licenses\*"; DestDir: "{#MyAppUserDocsDir}\Licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "examples\*"; DestDir: "{#MyAppUserDocsDir}\Examples"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "COPYING.txt"; DestDir: "{#MyAppUserDocsDir}"; DestName: "License.txt"; Flags: ignoreversion
 Source: "NOTICE.txt"; DestDir: "{#MyAppUserDocsDir}"; DestName: "Notice.txt"; Flags: ignoreversion
-Source: "build\USAGE.txt"; DestDir: "{#MyAppUserDocsDir}"; DestName: "Usage.txt"; Flags: ignoreversion
-Source: "build\RESEARCH.txt"; DestDir: "{#MyAppUserDocsDir}"; DestName: "Research.txt"; Flags: ignoreversion
+Source: "README.md"; DestDir: "{#MyAppUserDocsDir}"; DestName: "README.md"; Flags: ignoreversion
+Source: "USAGE.md"; DestDir: "{#MyAppUserDocsDir}"; DestName: "USAGE.md"; Flags: ignoreversion
+Source: "RESEARCH.md"; DestDir: "{#MyAppUserDocsDir}"; DestName: "RESEARCH.md"; Flags: ignoreversion
 
 [Dirs]
 Name: "{#MyAppUserDocsDir}"; Flags: uninsalwaysuninstall

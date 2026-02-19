@@ -107,25 +107,6 @@ install_innosetup_windows() {
     return 1
 }
 
-render_markdown_text() {
-    local src="$1"
-    local dst="$2"
-
-    if command -v pandoc >/dev/null 2>&1; then
-        pandoc -f markdown -t plain "$src" -o "$dst"
-    else
-        warning "pandoc not found; copying $src as plain text fallback"
-        cp "$src" "$dst"
-    fi
-}
-
-prepare_installer_docs() {
-    create_dir_if_not_exists "build"
-    render_markdown_text README.md build/README.txt
-    render_markdown_text USAGE.md build/USAGE.txt
-    render_markdown_text RESEARCH.md build/RESEARCH.txt
-}
-
 detect_package_manager() {
     if command -v apt-get >/dev/null 2>&1; then
         PKG_MANAGER="apt-get"
@@ -186,7 +167,6 @@ pkg_for_cmd() {
             esac
             ;;
         curl) echo "curl" ;;
-        pandoc) echo "pandoc" ;;
     esac
 }
 
@@ -308,8 +288,6 @@ if is_windows_host; then
     fi
 
     info "Using native Inno Setup compiler: $ISCC_NATIVE"
-    prepare_installer_docs
-
     info "Creating installer..."
     # Prevent MSYS2 from rewriting ISCC switch arguments like /O+ and /Q.
     if ! MSYS2_ARG_CONV_EXCL='*' "$ISCC_NATIVE" /O+ /Q "setup.iss"; then
@@ -329,7 +307,7 @@ if is_windows_host; then
 fi
 
 # Check and auto-install dependencies if missing
-if ! ensure_required_commands pgrep Xvfb wine wineserver wineboot curl pandoc; then
+if ! ensure_required_commands pgrep Xvfb wine wineserver wineboot curl; then
     error "Missing dependencies. Install them manually or rerun with SBAGENX_AUTO_INSTALL_DEPS=1."
     exit 1
 fi
@@ -411,9 +389,6 @@ info "Creating installer..."
 
 # Kill any hanging wine processes
 wineserver -k
-
-# Prepare docs consumed by setup.iss
-prepare_installer_docs
 
 # Run ISCC with increased memory limits and in silent mode
 wine "$ISCC" /O+ /Q setup.iss
