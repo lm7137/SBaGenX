@@ -1,5 +1,6 @@
-SBaGen+ is a fork of the original SBaGen software (https://uazu.net/sbagen/),
-distributed under the terms of the GNU General Public License v2.
+SBaGenX is a fork of SBaGen+ by Ruan Klein, which is a fork of the original
+SBaGen software (https://uazu.net/sbagen/), distributed under the terms
+of the GNU General Public License v2.
 
 The full source code is available at:
 https://github.com/ruanklein/sbagen-plus
