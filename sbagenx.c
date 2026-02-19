@@ -2014,8 +2014,12 @@ status(char *err) {
   *p++= ' '; *p++= ' ';
   p += sprintTime(p, now);
   while (nch > 1 && chan[nch-1].v.typ == 0) nch--;
-  for (a= 0; a<nch; a++)
-    p += sprintVoice(p, &chan[a].v, 0);
+  for (a= 0; a<nch; a++) {
+    if (opt_A && mix_in && chan[a].v.typ == 5)
+      p += sprintf(p, " mix/%.2f", AMP_AD(chan[a].v.amp) * mix_mod_multiplier(now));
+    else
+      p += sprintVoice(p, &chan[a].v, 0);
+  }
   if (err) p += sprintf(p, " %s", err);
   p1= p;		// End of line
 
@@ -5494,6 +5498,7 @@ create_drop(int ac, char **av) {
    if (opt_A) {
       warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
 	   opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
+      warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
    }
 
    // Start generating sequence
@@ -5753,6 +5758,7 @@ create_sigmoid(int ac, char **av) {
    if (opt_A) {
       warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
 	   opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
+      warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
    }
 
    // Start generating sequence

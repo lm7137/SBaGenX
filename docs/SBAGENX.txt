@@ -926,6 +926,10 @@ With `-A`, the mix amplitude is multiplied by:
   V(t) = 1 - ((1 - E) / T) * t
   F(t) = G(t) * V(t)
 
+Note: period/tone-set displays still show the base `mix/<amp>` value.
+When `-A` is active, the runtime status line shows `mix/<value>` as the
+effective mix amplitude after modulation.
+
 Where:
   t = minutes from start of session (excluding wake phase)
   T = total main session length in minutes (drop + hold if `+` is used)
@@ -1236,6 +1240,10 @@ For main session time (`drop + hold`, excluding wake):
   G(t) = 1 - d * exp( -e * ((t mod 2k) - k)^2 )
   V(t) = 1 - ((1 - E) / T) * t
   F(t) = G(t) * V(t)
+
+Note: period/tone-set displays still show the base `mix/<amp>` value.
+When `-A` is active, the runtime status line shows `mix/<value>` as the
+effective mix amplitude after modulation.
 
 For wake-up time (if `^` is present):
 
