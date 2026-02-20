@@ -285,9 +285,10 @@ void init_mac_audio();
 void 
 help() {
    printf("SBaGenX - Sequenced Brainwave Generator, version " VERSION
-     NL "Original version (c) 1999-2011 Jim Peters, http://uazu.net/"
-     NL "This fork maintained by Ruan, https://ruan.sh/"
-	  NL "Released under the GNU GPL v2. See file COPYING."
+     NL "Original SBaGen version (c) 1999-2011 Jim Peters, http://uazu.net/"
+     NL "SBaGen+ fork by Ruan Klein, https://ruan.sh/"
+     NL "This fork (SBaGenX) maintained by Lech Madrzyk, https://www.sbagenx.com/"
+		  NL "Released under the GNU GPL v2. See file COPYING."
 	  NL 
 	  NL "Usage: sbagenx [options] seq-file ..."
 	  NL "       sbagenx [options] -i tone-specs ..."
@@ -364,15 +365,16 @@ help() {
 void 
 usage() {
   error("SBaGenX - Sequenced Brainwave Generator, version " VERSION 
-	NL "Original version (c) 1999-2011 Jim Peters, http://uazu.net/"
-	NL "This fork maintained by Ruan, https://ruan.sh/"
-	NL "Released under the GNU GPL v2. See file COPYING."
+		NL "Original SBaGen version (c) 1999-2011 Jim Peters, http://uazu.net/"
+		NL "SBaGen+ fork by Ruan Klein, https://ruan.sh/"
+		NL "This fork (SBaGenX) maintained by Lech Madrzyk, https://www.sbagenx.com/"
+		NL "Released under the GNU GPL v2. See file COPYING."
 	NL 
 	NL "Usage: sbagenx [options] seq-file ..."
 	NL "       sbagenx [options] -i tone-specs ..."
 	NL "       sbagenx [options] -p pre-programmed-sequence-specs ..."
 	NL
-	NL "SBaGenX is a fork of the original SBaGen with added features."
+		NL "SBaGenX is a fork of SBaGen+, which is a fork of the original SBaGen."
 	NL "For full usage help, type 'sbagenx -h'."
 #ifdef EXIT_KEY
 	NL
