@@ -298,6 +298,7 @@ help() {
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
 	  NL "          -G        With -p sigmoid, render beat/pulse sigmoid graph as PNG and exit"
+	  NL "          -C        Monaural mode for -p drop/-p sigmoid/-p slide (two tones at carr+/-beat/2)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -370,12 +371,13 @@ usage() {
 		NL "This fork (SBaGenX) maintained by Lech Madrzyk, https://www.sbagenx.com/"
 		NL "Released under the GNU GPL v2. See file COPYING."
 	NL 
-	NL "Usage: sbagenx [options] seq-file ..."
-	NL "       sbagenx [options] -i tone-specs ..."
-	NL "       sbagenx [options] -p pre-programmed-sequence-specs ..."
-	NL
+		NL "Usage: sbagenx [options] seq-file ..."
+		NL "       sbagenx [options] -i tone-specs ..."
+		NL "       sbagenx [options] -p pre-programmed-sequence-specs ..."
+		NL
 		NL "SBaGenX is a fork of SBaGen+, which is a fork of the original SBaGen."
-	NL "For full usage help, type 'sbagenx -h'."
+		NL "Use -C with -p drop/-p sigmoid/-p slide for monaural beats (carr-beat/2 and carr+beat/2)."
+		NL "For full usage help, type 'sbagenx -h'."
 #ifdef EXIT_KEY
 	NL
 	NL "Windows users please note that this utility is designed to be run as the"
@@ -481,6 +483,7 @@ int tty_erase;			// Chars to erase from current line (for ESC[K emulation)
 int opt_Q;			// Quiet mode
 int opt_D;
 int opt_G;			// Graph mode for -p sigmoid: write PNG and exit
+int opt_C;			// Monaural mode for -p drop/-p sigmoid (binaural specs only)
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -604,7 +607,9 @@ typedef struct {
    int active;			// Function-driven modulation enabled?
    int mode;			// 1 exponential drop, 2 sigmoid
    int chan;			// Channel index to apply to
+   int chan2;			// Optional second channel (used for monaural twin)
    int typ;			// Voice type to apply to (1 binaural, 8 isochronic)
+   int monaural;		// 1 => chan/chan2 are f1/f2 mono components
    int start_ms;		// Start time (ms from midnight)
    int end_ms;			// End time for function-driven carrier path
    double carr0, carr1;	// Carrier start/end (Hz)
@@ -868,6 +873,7 @@ int t_mid(int t0, int t1) {		// Midpoint of period from t0 to t1
 static void
 clear_func_curve() {
    memset(&func_curve, 0, sizeof(func_curve));
+   func_curve.chan2= -1;
 }
 
 void
@@ -1001,7 +1007,9 @@ setup_drop_func_curve(int chan, int typ, int start_ms,
    func_curve.active= 1;
    func_curve.mode= 1;
    func_curve.chan= chan;
+   func_curve.chan2= -1;
    func_curve.typ= typ;
+   func_curve.monaural= 0;
    func_curve.start_ms= start_ms;
    func_curve.end_ms= (start_ms + (int)(1000.0 * carr_span_s + 0.5)) % H24;
    func_curve.carr0= carr0;
@@ -1034,7 +1042,9 @@ setup_sigmoid_func_curve(int chan, int typ, int start_ms,
    func_curve.active= 1;
    func_curve.mode= 2;
    func_curve.chan= chan;
+   func_curve.chan2= -1;
    func_curve.typ= typ;
+   func_curve.monaural= 0;
    func_curve.start_ms= start_ms;
    func_curve.end_ms= (start_ms + (int)(1000.0 * carr_span_s + 0.5)) % H24;
    func_curve.carr0= carr0;
@@ -1051,6 +1061,17 @@ setup_sigmoid_func_curve(int chan, int typ, int start_ms,
    return 1;
 }
 
+// Configure monaural twin routing for the registered curve.
+// Each ear receives both tones: carr-beat/2 and carr+beat/2.
+static void
+setup_func_curve_monaural_pair(int chan0, int chan1) {
+   if (!func_curve.active) return;
+   func_curve.monaural= 1;
+   func_curve.chan= chan0;
+   func_curve.chan2= chan1;
+   func_curve.typ= 1;		// Monaural is built from two plain sine tones
+}
+
 // Apply the registered curve at the current runtime position.
 static void
 apply_func_curve(int now_ms, int chan, Voice *vv) {
@@ -1059,7 +1080,11 @@ apply_func_curve(int now_ms, int chan, Voice *vv) {
    int elapsed_ms, total_ms;
 
    if (!func_curve.active) return;
-   if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
+   if (func_curve.monaural) {
+      if ((chan != func_curve.chan && chan != func_curve.chan2) || vv->typ != 1) return;
+   } else {
+      if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
+   }
 
    elapsed_ms= t_per0(func_curve.start_ms, now_ms);
    total_ms= t_per0(func_curve.start_ms, func_curve.end_ms);
@@ -1083,8 +1108,17 @@ apply_func_curve(int now_ms, int chan, Voice *vv) {
    }
    carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) * carr_s / func_curve.carr_span_s;
 
-   vv->carr= carr;
-   vv->res= beat;
+   if (func_curve.monaural) {
+      if (chan == func_curve.chan) {
+	 vv->carr= carr - beat/2.0;
+      } else {
+	 vv->carr= carr + beat/2.0;
+      }
+      vv->res= 0.0;
+   } else {
+      vv->carr= carr;
+      vv->res= beat;
+   }
 }
 
 static void
@@ -1750,6 +1784,7 @@ scanOptions(int *acp, char ***avp) {
 	  case 'h': help(); break;
 	  case 'D': opt_D= 1; break;
 	  case 'G': opt_G= 1; break;
+	  case 'C': opt_C= 1; break;
 	  case 'M': opt_M= 1; break;
 	  case 'O': opt_O= 1;
 	     if (!fast_mult) fast_mult= 1; 		// Don't try to sync with real time
@@ -5315,6 +5350,10 @@ readPreProg(int ac, char **av) {
 
    if (opt_G && strcmp(av[0], "sigmoid") != 0)
       error("-G is only supported with -p sigmoid");
+
+   if (opt_C && strcmp(av[0], "drop") != 0 && strcmp(av[0], "sigmoid") != 0 &&
+       strcmp(av[0], "slide") != 0 && !opt_Q)
+      warn("-C monaural mode currently applies only to -p drop/-p sigmoid/-p slide; ignoring for -p %s", av[0]);
    
    // Handle 'drop'
    if (0 == strcmp(av[0], "drop")) {
@@ -5354,6 +5393,7 @@ bad_drop() {
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
+	 NL "Use -C with -p drop for monaural mode (f1=carr-beat/2, f2=carr+beat/2)."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
 	 NL "  sequence like pink noise or a mix soundtrack, e.g 'pink/20' or 'mix/60'");
@@ -5373,7 +5413,7 @@ create_drop(int ac, char **av) {
    char *p, *q;
    char signal;
    int a;
-   int slide, n_step, islong, wakeup, isisochronic;
+   int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    double carr, amp, c0, c2;
    double beat_target;
@@ -5423,6 +5463,7 @@ create_drop(int ac, char **av) {
    islong= 0;
    wakeup= 0;
    isisochronic= 0;
+   ismono= 0;
    have_step_mode= 0;
    amp= 1.0;
 
@@ -5451,6 +5492,10 @@ create_drop(int ac, char **av) {
    while (isspace(*p)) p++;
    if (*p) error("Trailing rubbish after -p drop spec: \"%s\"", p);
 
+   if (opt_C && isisochronic)
+      error("-C monaural mode cannot be combined with '@' isochronic drop specs");
+   ismono= (opt_C && !isisochronic);
+
 #undef BAD
       
    n_step= 1 + (len0-1) / steplen;	// Round up
@@ -5475,6 +5520,8 @@ create_drop(int ac, char **av) {
       setup_drop_func_curve(0, isisochronic ? 8 : 1, 0,
 			    c0, c2, len,
 			    beat[0], beat[n_step-1], len0);
+      if (ismono)
+	 setup_func_curve_monaural_pair(0, 1);
       warn(" Using function-driven curve for sliding drop");
    }
 
@@ -5483,17 +5530,27 @@ create_drop(int ac, char **av) {
    if (slide) {
       warn(" Carrier slides from %gHz to %gHz over %d minutes", 
 	   c0, c2, len/60);
-      warn(" %s frequency slides from %gHz to %gHz over %d minutes", 
-	   isisochronic ? "Pulse" : "Beat", beat[0], beat[n_step-1], len0/60);
+      if (ismono)
+	 warn(" Monaural beat frequency slides from %gHz to %gHz over %d minutes", 
+	      beat[0], beat[n_step-1], len0/60);
+      else
+	 warn(" %s frequency slides from %gHz to %gHz over %d minutes", 
+	      isisochronic ? "Pulse" : "Beat", beat[0], beat[n_step-1], len0/60);
    } else {
       warn(" Carrier steps from %gHz to %gHz over %d minutes", 
 	   c0, c2, len/60);
-      warn(" %s frequency steps from %gHz to %gHz over %d minutes:", 
-	   isisochronic ? "Pulse" : "Beat", beat[0], beat[n_step-1], len0/60);
+      if (ismono)
+	 warn(" Monaural beat frequency steps from %gHz to %gHz over %d minutes:", 
+	      beat[0], beat[n_step-1], len0/60);
+      else
+	 warn(" %s frequency steps from %gHz to %gHz over %d minutes:", 
+	      isisochronic ? "Pulse" : "Beat", beat[0], beat[n_step-1], len0/60);
       fprintf(stderr, "   ");
       for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
       fprintf(stderr, "\n");
    }
+   if (ismono)
+      warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
    if (wakeup) {
       warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
    }
@@ -5515,15 +5572,27 @@ create_drop(int ac, char **av) {
       // Slide version
       for (a= 0; a<n_step; a++) {
 	 int tim= a * len0 / (n_step-1);
-	 formatNameDef("ts%02d: %g%c%g/%g %s", a, 
-		       c0 + (c2-c0) * tim * 1.0 / len,
-		       signal, beat[a], amp, extra);
+	 double carr_t= c0 + (c2-c0) * tim * 1.0 / len;
+	 if (ismono) {
+	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
+			  carr_t - beat[a]/2.0, amp,
+			  carr_t + beat[a]/2.0, amp, extra);
+	 } else {
+	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
+			  carr_t, signal, beat[a], amp, extra);
+	 }
 	 formatTimeLine(tim, "== ts%02d ->", a);
       }
 
       if (islong) {
-	 formatNameDef("tsend: %g%c%g/%g %s",
-		       c2, signal, beat[n_step-1], amp, extra);
+	 if (ismono) {
+	    formatNameDef("tsend: %g/%g %g/%g %s",
+			  c2 - beat[n_step-1]/2.0, amp,
+			  c2 + beat[n_step-1]/2.0, amp, extra);
+	 } else {
+	    formatNameDef("tsend: %g%c%g/%g %s",
+			  c2, signal, beat[n_step-1], amp, extra);
+	 }
 	 formatTimeLine(len, "== tsend ->");
       }
       end= len;
@@ -5534,10 +5603,16 @@ create_drop(int ac, char **av) {
       for (a= 0; a<lim; a++) {
 	 int tim0= a * steplen;
 	 int tim1= (a+1) * steplen;
-	 formatNameDef("ts%02d: %g%c%g/%g %s", a,
-		       c0 + (c2-c0) * tim1/len,
-		       signal, beat[(a>=n_step) ? n_step-1 : a], 
-		       amp, extra);
+	 double carr_t= c0 + (c2-c0) * tim1/len;
+	 double beat_t= beat[(a>=n_step) ? n_step-1 : a];
+	 if (ismono) {
+	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
+			  carr_t - beat_t/2.0, amp,
+			  carr_t + beat_t/2.0, amp, extra);
+	 } else {
+	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
+			  carr_t, signal, beat_t, amp, extra);
+	 }
 	 formatTimeLine(tim0, "== ts%02d ->", a);
 	 formatTimeLine(tim1-stepslide, "== ts%02d ->", a);
       }
@@ -5546,8 +5621,14 @@ create_drop(int ac, char **av) {
    
    // Wake-up and ending
    if (wakeup) {
-      formatNameDef("tswake: %g%c%g/%g %s",
-		    c0, signal, beat[0], amp, extra);
+      if (ismono) {
+	 formatNameDef("tswake: %g/%g %g/%g %s",
+		       c0 - beat[0]/2.0, amp,
+		       c0 + beat[0]/2.0, amp, extra);
+      } else {
+	 formatNameDef("tswake: %g%c%g/%g %s",
+		       c0, signal, beat[0], amp, extra);
+      }
       formatTimeLine(end+len2, "== tswake ->");
       end += len2;
    } 
@@ -5569,6 +5650,7 @@ bad_sigmoid() {
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
 	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0)."
+	 NL "Use -C with -p sigmoid for monaural mode (f1=carr-beat/2, f2=carr+beat/2)."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the sequence"
 	 NL "  like pink noise or a mix soundtrack, e.g 'pink/20' or 'mix/60'");
@@ -5585,7 +5667,7 @@ create_sigmoid(int ac, char **av) {
    char signal;
    char depth_ch;
    int a;
-   int slide, n_step, islong, wakeup, isisochronic;
+   int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    double level;
    double carr, amp, c0, c2;
@@ -5640,6 +5722,7 @@ create_sigmoid(int ac, char **av) {
    islong= 0;
    wakeup= 0;
    isisochronic= 0;
+   ismono= 0;
    have_step_mode= 0;
    amp= 1.0;
 
@@ -5683,6 +5766,10 @@ create_sigmoid(int ac, char **av) {
 
    while (isspace(*p)) p++;
    if (*p) error("Trailing rubbish after -p sigmoid spec: \"%s\"", p);
+
+   if (opt_C && isisochronic)
+      error("-C monaural mode cannot be combined with '@' isochronic sigmoid specs");
+   ismono= (opt_C && !isisochronic);
 
 #undef BAD
 
@@ -5734,6 +5821,8 @@ create_sigmoid(int ac, char **av) {
 				    beat_start, beat_target, len0,
 				    sig_l, sig_h))
 	 error("Sigmoid parameters produce an invalid runtime curve");
+      if (ismono)
+	 setup_func_curve_monaural_pair(0, 1);
       warn(" Using function-driven curve for sliding sigmoid");
    }
 
@@ -5742,17 +5831,27 @@ create_sigmoid(int ac, char **av) {
    if (slide) {
       warn(" Carrier slides from %gHz to %gHz over %d minutes",
 	   c0, c2, len/60);
-      warn(" %s frequency follows sigmoid from %gHz to %gHz over %d minutes",
-	   isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
+      if (ismono)
+	 warn(" Monaural beat frequency follows sigmoid from %gHz to %gHz over %d minutes",
+	      beat_start, beat_target, len0/60);
+      else
+	 warn(" %s frequency follows sigmoid from %gHz to %gHz over %d minutes",
+	      isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
    } else {
       warn(" Carrier steps from %gHz to %gHz over %d minutes",
 	   c0, c2, len/60);
-      warn(" %s frequency steps over sigmoid from %gHz to %gHz over %d minutes:",
-	   isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
+      if (ismono)
+	 warn(" Monaural beat frequency steps over sigmoid from %gHz to %gHz over %d minutes:",
+	      beat_start, beat_target, len0/60);
+      else
+	 warn(" %s frequency steps over sigmoid from %gHz to %gHz over %d minutes:",
+	      isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
       fprintf(stderr, "   ");
       for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
       fprintf(stderr, "\n");
    }
+   if (ismono)
+      warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
    warn(" Sigmoid shape parameters: l=%g h=%g", sig_l, sig_h);
    if (wakeup) {
       warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
@@ -5775,15 +5874,27 @@ create_sigmoid(int ac, char **av) {
       // Slide version
       for (a= 0; a<n_step; a++) {
 	 int tim= a * len0 / (n_step-1);
-	 formatNameDef("ts%02d: %g%c%g/%g %s", a,
-		       c0 + (c2-c0) * tim * 1.0 / len,
-		       signal, beat[a], amp, extra);
+	 double carr_t= c0 + (c2-c0) * tim * 1.0 / len;
+	 if (ismono) {
+	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
+			  carr_t - beat[a]/2.0, amp,
+			  carr_t + beat[a]/2.0, amp, extra);
+	 } else {
+	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
+			  carr_t, signal, beat[a], amp, extra);
+	 }
 	 formatTimeLine(tim, "== ts%02d ->", a);
       }
 
       if (islong) {
-	 formatNameDef("tsend: %g%c%g/%g %s",
-		       c2, signal, beat[n_step-1], amp, extra);
+	 if (ismono) {
+	    formatNameDef("tsend: %g/%g %g/%g %s",
+			  c2 - beat[n_step-1]/2.0, amp,
+			  c2 + beat[n_step-1]/2.0, amp, extra);
+	 } else {
+	    formatNameDef("tsend: %g%c%g/%g %s",
+			  c2, signal, beat[n_step-1], amp, extra);
+	 }
 	 formatTimeLine(len, "== tsend ->");
       }
       end= len;
@@ -5794,10 +5905,16 @@ create_sigmoid(int ac, char **av) {
       for (a= 0; a<lim; a++) {
 	 int tim0= a * steplen;
 	 int tim1= (a+1) * steplen;
-	 formatNameDef("ts%02d: %g%c%g/%g %s", a,
-		       c0 + (c2-c0) * tim1/len,
-		       signal, beat[(a>=n_step) ? n_step-1 : a],
-		       amp, extra);
+	 double carr_t= c0 + (c2-c0) * tim1/len;
+	 double beat_t= beat[(a>=n_step) ? n_step-1 : a];
+	 if (ismono) {
+	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
+			  carr_t - beat_t/2.0, amp,
+			  carr_t + beat_t/2.0, amp, extra);
+	 } else {
+	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
+			  carr_t, signal, beat_t, amp, extra);
+	 }
 	 formatTimeLine(tim0, "== ts%02d ->", a);
 	 formatTimeLine(tim1-stepslide, "== ts%02d ->", a);
       }
@@ -5806,8 +5923,14 @@ create_sigmoid(int ac, char **av) {
 
    // Wake-up and ending
    if (wakeup) {
-      formatNameDef("tswake: %g%c%g/%g %s",
-		    c0, signal, beat[0], amp, extra);
+      if (ismono) {
+	 formatNameDef("tswake: %g/%g %g/%g %s",
+		       c0 - beat[0]/2.0, amp,
+		       c0 + beat[0]/2.0, amp, extra);
+      } else {
+	 formatNameDef("tswake: %g%c%g/%g %s",
+		       c0, signal, beat[0], amp, extra);
+      }
       formatTimeLine(end+len2, "== tswake ->");
       end += len2;
    }
@@ -5830,6 +5953,7 @@ bad_slide() {
 	 NL "<slide-spec> is just like a tone-spec: <carrier><sign><beat>/<amp>"
 	 NL "The optional <time-spec> is t<slide-time>, giving length of session in"
 	 NL "  minutes (the default is equivalent to 't30')."
+	 NL "Use -C with -p slide for monaural mode (f1=carr-beat/2, f2=carr+beat/2)."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
 	 NL "  sequence like white/pink/brown noise or a mix soundtrack, e.g 'pink/20', 'white/20', 'brown/20', or 'mix/60'");
 }
@@ -5838,7 +5962,9 @@ void
 create_slide(int ac, char **av) {
    int len= 1800;
    char *p, dmy, signal;
+   int ismono;
    double val, c0, c1, beat, amp;
+   double beat_abs;
    char extra[256];
 
 #define BAD bad_slide()
@@ -5856,7 +5982,11 @@ create_slide(int ac, char **av) {
    if (4 != sscanf(av[0], "%lf%c%lf/%lf %c", &c0, &signal, &beat, &amp, &dmy)) BAD;
 
    if (signal != '+' && signal != '-' && signal != '@') BAD;
+   if (opt_C && signal == '@')
+      error("-C monaural mode cannot be combined with '@' isochronic slide specs");
 
+   ismono= (opt_C && signal != '@');
+   beat_abs= fabs(beat);
    c1= beat/2;
    ac--; av++;
 
@@ -5875,7 +6005,12 @@ create_slide(int ac, char **av) {
    warn("SLIDE summary:");
    warn(" Sliding carrier from %gHz to %gHz over %g minutes",
 	c0, c1, len/60.0);
-   warn(" Holding %s constant at %gHz", signal == '@' ? "pulse" : "beat", beat);
+   if (ismono) {
+      warn(" Holding monaural beat constant at %gHz", beat_abs);
+      warn(" Monaural tone pair: f1=carr-beat/2, f2=carr+beat/2");
+   } else {
+      warn(" Holding %s constant at %gHz", signal == '@' ? "pulse" : "beat", beat);
+   }
 
    // Generate sequence
    handleOptions("-SE");
@@ -5883,9 +6018,19 @@ create_slide(int ac, char **av) {
 
    formatNameDef("off: -");
    formatTimeLine(86395, "== off ->");		// 23:59:55
-   formatNameDef("ts0: %g%c%g/%g %s", c0, signal, beat, amp, extra);
+   if (ismono) {
+      formatNameDef("ts0: %g/%g %g/%g %s",
+		    c0 - beat_abs/2.0, amp, c0 + beat_abs/2.0, amp, extra);
+   } else {
+      formatNameDef("ts0: %g%c%g/%g %s", c0, signal, beat, amp, extra);
+   }
    formatTimeLine(0, "== ts0 ->");
-   formatNameDef("ts1: %g%c%g/%g %s", c1, signal, beat, amp, extra);
+   if (ismono) {
+      formatNameDef("ts1: %g/%g %g/%g %s",
+		    c1 - beat_abs/2.0, amp, c1 + beat_abs/2.0, amp, extra);
+   } else {
+      formatNameDef("ts1: %g%c%g/%g %s", c1, signal, beat, amp, extra);
+   }
    formatTimeLine(len, "== ts1 ->");
    formatTimeLine(len+10, "== off");
    

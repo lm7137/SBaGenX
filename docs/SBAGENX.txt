@@ -784,6 +784,7 @@ hour-long sequence.  It is best to also mix these with river sounds,
 for example:
 
   sbagenx -m river1.ogg -p drop 00ds+ mix/100
+  sbagenx -C -m river1.ogg -p drop 00ds+ mix/100
 
 If you are doing sessions in the middle of the day, you may want to
 add a 'wake-up' at the end using '^', which brings you up to alpha
@@ -823,6 +824,7 @@ Examples:
   -p drop 34.5dk+/1.5 pink/30
   -p drop -01ds+ white/10
   -p drop 00d@/3 brown/15
+  -C -p drop 00ds+/2
   -A -p drop 00ds+/3 mix/97
   -A d=0.3:e=0.3:k=10:E=0.7 -p drop 00ds+/3 mix/97
 
@@ -911,6 +913,14 @@ you up.
 The optional '/<amp>' on the end lets you change the amplitude of the
 waves if necessary (e.g. 00ds+/2).  By default, the level is set to 1.
 
+With `-C` (monaural mode), `-p drop` uses two tones per step:
+
+  f1 = carrier - beat/2
+  f2 = carrier + beat/2
+
+Each ear receives both tones (instead of the usual left/right split
+used for binaural beats).  `-C` is not compatible with `@`.
+
 Mix modulation parameters (via `-A`):
 
 Rationale (conjectural): the linear decay term `V(t)` provides gradual
@@ -993,6 +1003,7 @@ Example:
   -p slide 200+10/1
   -p slide t60 200+10/1 mix/100
   -p slide 200@10/1
+  -C -p slide 200+10/1
 
 This provides a series of sequences that hold the beat frequency
 constant whilst dropping the carrier tone from the initial value right
@@ -1013,6 +1024,13 @@ drop for working through all the combinations.
 The sessions are 30 minutes long by default.  If you want a longer
 session, you can add 't<duration>' after the 'slide', for example "-p
 slide t60 200+6/1" for a 60 minute session.
+
+With `-C` (monaural mode), `-p slide` uses:
+
+  f1 = carrier - beat/2
+  f2 = carrier + beat/2
+
+Each ear receives both tones.  `-C` is not compatible with `@`.
 
 Another point is that the lower frequencies will probably not be
 audible on your headphones.  This is not a big problem, but if you
@@ -1110,6 +1128,7 @@ with more change through the middle of the drop period.
 Like `-p drop`, these sessions use a level/depth code.  For example:
 
   sbagenx -m river1.ogg -p sigmoid 00ds+:l=0.125:h=0 mix/100
+  sbagenx -C -m river1.ogg -p sigmoid 00ds+:l=0.125:h=0 mix/100
 
 You can also use isochronic pulse mode by adding `@`:
 
@@ -1152,6 +1171,7 @@ Examples:
   -p sigmoid 20fs+^/2:h=0:l=0.125 mix/98
   -p sigmoid 34.5dk+/1.5:l=0.20:h=-2 pink/30
   -p sigmoid -01ds+@/3:l=0.125:h=0 brown/15
+  -C -p sigmoid 00ls+/2:l=0.125:h=0
   -A -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
   -A d=0.3:e=0.3:k=10:E=0.7 -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
 
@@ -1222,6 +1242,13 @@ Other options:
   ^   add wake-up segment at end
   @   use isochronic pulse instead of binaural beat
   /x  set amplitude (default 1.0)
+
+With `-C` (monaural mode), `-p sigmoid` uses:
+
+  f1 = carrier - beat/2
+  f2 = carrier + beat/2
+
+Each ear receives both tones.  `-C` is not compatible with `@`.
 
 Mix modulation parameters (via `-A`):
 
@@ -1337,6 +1364,8 @@ follows:
   -L time   Select the length of time (hh:mm or hh:mm:ss) to output for
   -m file   Read audio data from the given file and mix it with the
               generated binaural beats; may be flac/ogg/mp3/wav/raw format
+  -C        With -p drop/-p sigmoid/-p slide, use monaural beats
+              (two tones: carrier-beat/2 and carrier+beat/2 in both ears)
   -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid.
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
