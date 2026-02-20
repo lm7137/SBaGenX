@@ -913,6 +913,14 @@ you up.
 The optional '/<amp>' on the end lets you change the amplitude of the
 waves if necessary (e.g. 00ds+/2).  By default, the level is set to 1.
 
+Adding `@` switches `-p drop` from binaural beat mode to isochronic
+pulse mode.  In that case, the same depth letter and timing rules apply
+to pulse frequency instead of binaural beat frequency.
+
+Example:
+
+  -p drop 00ds+@/3
+
 With `-C` (monaural mode), `-p drop` uses two tones per step:
 
   f1 = carrier - beat/2
