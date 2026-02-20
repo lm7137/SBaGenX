@@ -9,7 +9,7 @@ SBaGenX is a command-line tool for generating binaural beats and isochronic tone
 
 - [💡 About This Project](#-about-this-project)
 - [📥 Installation](#-installation)
-  - [🐳 Using SBaGenX with Docker](#-using-sbagenx-with-docker)
+  - [🐳 Using Docker for Builds](#-using-docker-for-builds)
   - [⬇️ Download Pre-built Binaries](#️-download-pre-built-binaries)
   - [🐧 Installing on Linux](#-installing-on-linux)
   - [🍎 Installing on macOS](#-installing-on-macos)
@@ -32,95 +32,62 @@ The name has been changed from **"Sequenced Binaural Beat Generator"** to **"Seq
 
 ## 📥 Installation
 
-You can download pre-built binaries on Linux and installers for Windows and macOS from the [releases page](https://github.com/ruanklein/sbagen-plus/releases).
+Download assets from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
 
-### 🐳 Using SBaGenX with Docker
+### 🐳 Using Docker for Builds
 
-If you don’t want to install SBaGenX on your machine, there’s the option to use it via Docker.
+This repository includes Docker support for **build workflows** (Linux/Windows artifacts), via `Dockerfile` and `compose.yml`.
 
-SBaGenX for Docker was compiled without support for directly playing .sbg files. Therefore, the way to use SBaGenX via Docker is by generating output files in RAW or WAV format.
+Use:
 
-The default image uses scratch to offer a simplified usage for most cases. Use this image if you just want to generate WAV files from your .sbg files using SBaGenX, without having to install sbagenx on your machine.
+```bash
+# Build Linux + Windows artifacts
+docker compose up build
 
-To use .sbg files, you need to map the **/sbg** folder to your local sbg files directory, for example:
-
+# Build Linux ARM64 artifacts
+docker compose up build-arm64
 ```
-docker run --rm -v ./sbg:/sbg ruanklein/sbagen-plus -m river1.ogg -Wo out.wav Sleep.sbg
-```
 
-This will generate a WAV file in your sbg directory.
-
-If you want to use media files (flac/ogg/mp3/wav) with the -m parameter, make sure they are in the same folder as your .sbg file.
+At present, there is no officially published SBaGenX runtime container image for end-user playback.
 
 ### ⬇️ Download Pre-built Binaries
 
-The latest release (v1.5.5) can be downloaded directly from the following links:
+Current release asset:
 
-- Linux ARM64: [sbagenx-linux-arm64](https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/sbagenx-linux-arm64)
-- Linux 32-bit: [sbagenx-linux32](https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/sbagenx-linux32)
-- Linux 64-bit: [sbagenx-linux64](https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/sbagenx-linux64)
-- macOS Installer: [SBaGenX Installer.dmg](https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/SBaGenX-Installer.dmg)
-- Windows x86/x86_64 and ARM64: [sbagenx-windows-setup.exe](https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/sbagenx-windows-setup.exe)
+- Windows installer: [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/download/v2.0.0/sbagenx-windows-setup.exe)
 
-  **Important**: Always verify the SHA256 checksum of downloaded binaries against those listed on the [releases page](https://github.com/ruanklein/sbagen-plus/releases) to ensure file integrity and security.
+  **Important**: Always verify the SHA256 checksum of downloaded binaries against those listed on the [releases page](https://github.com/lm7137/SBaGenX/releases) to ensure file integrity and security.
 
 ### 🐧 Installing on Linux
 
-1. Download the appropriate binary for your system:
+Pre-built Linux binaries are not currently published for `v2.0.0`.
+Build from source instead:
 
-   ```bash
-   # For 64-bit systems
-   wget https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/sbagenx-linux64
+```bash
+bash linux-build-libs.sh
+bash linux-build-sbagenx.sh
+```
 
-   # For 32-bit systems
-   wget https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/sbagenx-linux32
+Then install the produced binary (for example):
 
-   # For ARM64 systems
-   wget https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/sbagenx-linux-arm64
-   ```
-
-2. Verify the SHA256 checksum:
-
-   ```bash
-   sha256sum sbagenx-linux64  # Replace with your downloaded file
-   # Compare the output with the checksum on the releases page
-   ```
-
-3. Make the binary executable:
-
-   ```bash
-   chmod +x sbagenx-linux64  # Replace with your downloaded file
-   ```
-
-4. Move the binary to a directory in your PATH:
-
-   ```bash
-   sudo mv sbagenx-linux64 /usr/local/bin/sbagenx  # Replace with your downloaded file
-   ```
-
-5. Verify the installation:
-
-   ```bash
-   sbagenx -h
-   ```
+```bash
+sudo cp dist/sbagenx-linux64 /usr/local/bin/sbagenx
+sudo chmod +x /usr/local/bin/sbagenx
+sbagenx -h
+```
 
 ### 🍎 Installing on macOS
 
-1. Download the macOS Installer: [SBaGenX Installer.dmg](https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/SBaGenX-Installer.dmg)
+Pre-built macOS installer assets are not currently published for `v2.0.0`.
+Build on macOS instead:
 
-2. Verify the SHA256 checksum. You can use the `shasum` command on the terminal to verify the checksum:
+```bash
+bash macos-build-libs.sh
+bash macos-build-sbagenx.sh
+bash macos-create-installer.sh
+```
 
-   ```bash
-   cd ~/Downloads
-   shasum -a 256 SBaGenX-Installer.dmg
-   # Compare the output with the checksum on the releases page
-   ```
-
-3. Open the DMG file and drag the `SBaGenX` application to the Applications folder.
-
-4. Run the `SBaGenX` application from the Applications folder, accept the license agreement and click the `View Examples` button to view examples of sbg files.
-
-5. Click in the .sbg file to play, edit or convert it. Also, you can drop sbg files on the `SBaGenX` application icon to open them.
+This creates the macOS artifact in `dist/`.
 
 **Important:** The `SBaGenX` application is not digitally signed, so you may need to add an exception on the `System Settings -> Security & Privacy -> General tab`.
 
@@ -140,7 +107,7 @@ sbagenx -h
 
 1. Download the installer:
 
-   - [sbagenx-windows-setup.exe](https://github.com/ruanklein/sbagen-plus/releases/download/v1.5.5/sbagenx-windows-setup.exe)
+   - [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/download/v2.0.0/sbagenx-windows-setup.exe)
 
 2. Verify the SHA256 checksum of the installer. You can use PowerShell or Command Prompt to do this:
 
