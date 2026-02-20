@@ -234,7 +234,7 @@ This example runs the sequence at 120 times the normal speed.  This is
 quite useful to check that a new sequence is going to do what you
 expect it to do.
 
-To check that SBaGen+ has interpreted your sequence-file correctly, use
+To check that SBaGenX has interpreted your sequence-file correctly, use
 the -D option, which dumps a listing of the interpreted sequence
 instead of playing it:
 
@@ -321,7 +321,7 @@ bit-width.  For example:
 >> sbagenx -r 8000 -i pink/40 100+1.5/20 200+6/30
 >> sbagenx -b 8 -i pink/40 100+1.5/20 200+6/30
 
-SBaGen+ includes several additional options for enhanced control:
+SBaGenX includes several additional options for enhanced control:
 
 The -V option allows you to set a global volume level from 1 to 100 
 (default is 100). This affects the final output volume without changing 
@@ -341,7 +341,7 @@ for binaural beats and isochronic tones as they produce the smoothest entrainmen
 >> sbagenx -w sawtooth -i 200+10/20  # Sawtooth wave
 
 The -N option disables automatic amplitude normalization. By default, 
-SBaGen+ automatically normalizes amplitudes when the total exceeds 100% 
+SBaGenX automatically normalizes amplitudes when the total exceeds 100% 
 to prevent audio distortion. Using -N allows the original behavior where 
 amplitude totals exceeding 100% may cause clipping and distortion:
 
@@ -651,7 +651,7 @@ used to select different cross-fade times.
 2.4.1: Using ReplayGain with OGG/FLAC files
 -------------------------------------------
 
-SBaGen+ supports ReplayGain tags in OGG/FLAC metadata.  What this means
+SBaGenX supports ReplayGain tags in OGG/FLAC metadata.  What this means
 is that if you run 'vorbisgain' on your OGG file, or set the
 REPLAYGAIN_TRACK_GAIN tag in FLAC metadata, your file should come out
 sounding around about the same loudness level as everyone else's files
@@ -1106,7 +1106,7 @@ Example:
 
   sbagenx -r 44100 -i 200+10/1
 
-SBaGen+ was designed and optimized for a sample rate of 44.1kHz. While the program supports different
+SBaGenX was designed and optimized for a sample rate of 44.1kHz. While the program supports different
 sample rates through the -r option, using 44.1kHz is recommended for the following reasons:
 
 1. Timing Accuracy: The internal calculations and timing of sequences are based on 44.1kHz.
@@ -1414,7 +1414,7 @@ try this:
 
   -L 0:30 -T 14:00
 
-Additional SBaGen+ options can also be used in sequence files:
+Additional SBaGenX options can also be used in sequence files:
 
 To set a custom global volume level (useful for creating quieter sequences):
 
@@ -1481,7 +1481,7 @@ Here are the different types:
   <waveform>:mixspin:<width>+<freq>/<intensity> # Mixspin with specific waveform modulation
   <waveform>:mixpulse:<pulse>/<intensity>       # Mixpulse with specific waveform modulation
 
-The amplitudes are expressed on a scale 0-100.  By default, SBaGen+ 
+The amplitudes are expressed on a scale 0-100.  By default, SBaGenX 
 automatically normalizes amplitudes when the total exceeds 100% to prevent 
 audio distortion. If you want to disable this behavior and allow clipping 
 (which may cause distortion), you can use the -N option. In the original 
@@ -1507,7 +1507,7 @@ generates tones of 98 and 102 Hz.
 
 **Individual Waveform Specifications**
 
-SBaGen+ supports specifying individual waveforms for each tone in a tone-set 
+SBaGenX supports specifying individual waveforms for each tone in a tone-set 
 definition, allowing you to use different waveform types (sine, square, triangle, 
 sawtooth) for specific tones rather than applying a global waveform with the -w option.
 
@@ -1850,7 +1850,7 @@ won't work unless they were designed to work together.
 4: Predefined sequences
 ----------------------
 
-SBaGen+ comes with several predefined sequences that you can use without
+SBaGenX comes with several predefined sequences that you can use without
 having to create your own sequence files. These are accessed using
 the -p option followed by the sequence name and any required parameters.
 
