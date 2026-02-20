@@ -33,7 +33,7 @@ aims to keep the lineage functional on modern systems while preserving
 its core structure. Updates focus on compatibility fixes and practical
 feature additions, without major refactoring of the original codebase.
 
-The name has been changed from **"Sequenced Binaural Beat Generator"** to **"Sequenced Brainwave Generator"** to better reflect its expanded functionality. Since SBaGenX now supports isochronic tones in addition to binaural beats, the original name no longer fully represented its capabilities.
+The name was changed from **"Sequenced Binaural Beat Generator"** to **"Sequenced Brainwave Generator"** in the SBaGen+ fork to better reflect its expanded functionality. Since SBaGen+ added support for isochronic tones in addition to binaural beats, and SBaGenX added monaural beat support for the built-in programs, the original name no longer fully represented its capabilities.
 
 ## 📥 Installation
 
