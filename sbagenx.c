@@ -298,7 +298,6 @@ help() {
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
 	  NL "          -G        With -p sigmoid, render beat/pulse sigmoid graph as PNG and exit"
-	  NL "          -C        Monaural mode for -p drop/-p sigmoid/-p slide (two tones at carr+/-beat/2)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -376,7 +375,7 @@ usage() {
 		NL "       sbagenx [options] -p pre-programmed-sequence-specs ..."
 		NL
 		NL "SBaGenX is a fork of SBaGen+, which is a fork of the original SBaGen."
-		NL "Use -C with -p drop/-p sigmoid/-p slide for monaural beats (carr-beat/2 and carr+beat/2)."
+		NL "Use inline 'M' (where '@' is used) for monaural beats."
 		NL "For full usage help, type 'sbagenx -h'."
 #ifdef EXIT_KEY
 	NL
@@ -483,7 +482,6 @@ int tty_erase;			// Chars to erase from current line (for ESC[K emulation)
 int opt_Q;			// Quiet mode
 int opt_D;
 int opt_G;			// Graph mode for -p sigmoid: write PNG and exit
-int opt_C;			// Monaural mode for -p drop/-p sigmoid (binaural specs only)
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -1784,7 +1782,6 @@ scanOptions(int *acp, char ***avp) {
 	  case 'h': help(); break;
 	  case 'D': opt_D= 1; break;
 	  case 'G': opt_G= 1; break;
-	  case 'C': opt_C= 1; break;
 	  case 'M': opt_M= 1; break;
 	  case 'O': opt_O= 1;
 	     if (!fast_mult) fast_mult= 1; 		// Don't try to sync with real time
@@ -5350,10 +5347,6 @@ readPreProg(int ac, char **av) {
 
    if (opt_G && strcmp(av[0], "sigmoid") != 0)
       error("-G is only supported with -p sigmoid");
-
-   if (opt_C && strcmp(av[0], "drop") != 0 && strcmp(av[0], "sigmoid") != 0 &&
-       strcmp(av[0], "slide") != 0 && !opt_Q)
-      warn("-C monaural mode currently applies only to -p drop/-p sigmoid/-p slide; ignoring for -p %s", av[0]);
    
    // Handle 'drop'
    if (0 == strcmp(av[0], "drop")) {
@@ -5388,12 +5381,12 @@ readPreProg(int ac, char **av) {
 void 
 bad_drop() {
    error("Bad arguments: expecting -p drop [<time-spec>] <drop-spec> [<tone-specs...>]"
-	 NL "<drop-spec> is <signed-level><a-l>[s|k][+][^][@][/<amp>]"
+	 NL "<drop-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
-	 NL "Use -C with -p drop for monaural mode (f1=carr-beat/2, f2=carr+beat/2)."
+	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
 	 NL "  sequence like pink noise or a mix soundtrack, e.g 'pink/20' or 'mix/60'");
@@ -5480,6 +5473,7 @@ create_drop(int ac, char **av) {
       if (*p == '+') { islong= 1; p++; continue; }
       if (*p == '^') { wakeup= 1; p++; continue; }
       if (*p == '@') { isisochronic= 1; p++; continue; }
+      if (*p == 'M') { ismono= 1; p++; continue; }
       if (*p == '/') {
 	 p++; q= p;
 	 amp= strtod(p, &p);
@@ -5492,9 +5486,8 @@ create_drop(int ac, char **av) {
    while (isspace(*p)) p++;
    if (*p) error("Trailing rubbish after -p drop spec: \"%s\"", p);
 
-   if (opt_C && isisochronic)
-      error("-C monaural mode cannot be combined with '@' isochronic drop specs");
-   ismono= (opt_C && !isisochronic);
+   if (ismono && isisochronic)
+      error("M monaural mode cannot be combined with '@' isochronic drop specs");
 
 #undef BAD
       
@@ -5644,13 +5637,13 @@ create_drop(int ac, char **av) {
 void
 bad_sigmoid() {
    error("Bad arguments: expecting -p sigmoid [<time-spec>] <sigmoid-spec> [<tone-specs...>]"
-	 NL "<sigmoid-spec> is <signed-level><a-l>[s|k][+][^][@][/<amp>][:l=<val>][:h=<val>]"
+	 NL "<sigmoid-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
 	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0)."
-	 NL "Use -C with -p sigmoid for monaural mode (f1=carr-beat/2, f2=carr+beat/2)."
+	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the sequence"
 	 NL "  like pink noise or a mix soundtrack, e.g 'pink/20' or 'mix/60'");
@@ -5739,6 +5732,7 @@ create_sigmoid(int ac, char **av) {
       if (*p == '+') { islong= 1; p++; continue; }
       if (*p == '^') { wakeup= 1; p++; continue; }
       if (*p == '@') { isisochronic= 1; p++; continue; }
+      if (*p == 'M') { ismono= 1; p++; continue; }
       if (*p == '/') {
 	 p++; q= p;
 	 amp= strtod(p, &p);
@@ -5767,9 +5761,8 @@ create_sigmoid(int ac, char **av) {
    while (isspace(*p)) p++;
    if (*p) error("Trailing rubbish after -p sigmoid spec: \"%s\"", p);
 
-   if (opt_C && isisochronic)
-      error("-C monaural mode cannot be combined with '@' isochronic sigmoid specs");
-   ismono= (opt_C && !isisochronic);
+   if (ismono && isisochronic)
+      error("M monaural mode cannot be combined with '@' isochronic sigmoid specs");
 
 #undef BAD
 
@@ -5951,9 +5944,9 @@ void
 bad_slide() {
    error("Bad arguments: expecting -p slide [<time-spec>] <slide-spec> [<tone-specs...>]"
 	 NL "<slide-spec> is just like a tone-spec: <carrier><sign><beat>/<amp>"
+	 NL "<sign> may be +, -, @ (isochronic), or M (monaural)"
 	 NL "The optional <time-spec> is t<slide-time>, giving length of session in"
 	 NL "  minutes (the default is equivalent to 't30')."
-	 NL "Use -C with -p slide for monaural mode (f1=carr-beat/2, f2=carr+beat/2)."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
 	 NL "  sequence like white/pink/brown noise or a mix soundtrack, e.g 'pink/20', 'white/20', 'brown/20', or 'mix/60'");
 }
@@ -5981,11 +5974,9 @@ create_slide(int ac, char **av) {
    if (ac < 1) BAD;
    if (4 != sscanf(av[0], "%lf%c%lf/%lf %c", &c0, &signal, &beat, &amp, &dmy)) BAD;
 
-   if (signal != '+' && signal != '-' && signal != '@') BAD;
-   if (opt_C && signal == '@')
-      error("-C monaural mode cannot be combined with '@' isochronic slide specs");
+   if (signal != '+' && signal != '-' && signal != '@' && signal != 'M') BAD;
 
-   ismono= (opt_C && signal != '@');
+   ismono= (signal == 'M');
    beat_abs= fabs(beat);
    c1= beat/2;
    ac--; av++;
