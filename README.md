@@ -55,6 +55,7 @@ At present, there is no officially published SBaGenX runtime container image for
 Current release asset:
 
 - Windows installer: [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/download/v2.0.0/sbagenx-windows-setup.exe)
+- SHA256: `16B9CE7F3F4F00BA674D184B0C1448D35B59E107F2DCEB41B4B760509544EA88`
 
   **Important**: Always verify the SHA256 checksum of downloaded binaries against those listed on the [releases page](https://github.com/lm7137/SBaGenX/releases) to ensure file integrity and security.
 
@@ -113,7 +114,8 @@ sbagenx -h
 
    ```powershell
    Get-FileHash -Algorithm SHA256 .\sbagenx-windows-setup.exe
-   # Compare the output with the checksum on the releases page
+   # Expected SHA256:
+   # 16B9CE7F3F4F00BA674D184B0C1448D35B59E107F2DCEB41B4B760509544EA88
    ```
 
 3. Run the installer and follow the instructions.
