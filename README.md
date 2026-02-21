@@ -1,30 +1,30 @@
 <img src="assets/sbagenx.png" alt="SBaGenX Logo" width="32" height="32"> SBaGenX - Sequenced Brainwave Generator
 
-SBaGenX is a command-line tool for generating binaural beats and isochronic tones, designed to assist with meditation, relaxation, and altering states of consciousness.
+SBaGenX is a command-line tool for generating binaural beats, monaural beats and isochronic tones, designed to assist with meditation, relaxation, and altering states of consciousness.
 
-> ⚠️ **SBaGenX is a fork of the project SBaGen+, which is no longer under active development.**  
+> **SBaGenX is a fork of the project SBaGen+, which is no longer under active development.**  
 > Full credit is due, first and foremost, to the father of SBaGen, Jim Peters, and also to the creator of the SBaGen+ fork, Ruan Klein, who added isochronic beats as well as making numerous enhancements.
 
-## 📑 Table of Contents
+## Table of Contents
 
-- [💡 About This Project](#-about-this-project)
-- [📥 Installation](#-installation)
-  - [🐳 Using Docker for Builds](#-using-docker-for-builds)
-  - [⬇️ Download Pre-built Binaries](#️-download-pre-built-binaries)
-  - [🐧 Installing on Linux](#-installing-on-linux)
-  - [🍎 Installing on macOS](#-installing-on-macos)
-  - [🪟 Installing on Windows](#-installing-on-windows)
-- [🚀 Basic Usage](#-basic-usage)
-- [📚 Documentation](#-documentation)
-- [🔍 Research](#-research)
-- [🛠️ Compilation](#️-compilation)
-  - [📁 Build Scripts Structure](#-build-scripts-structure)
-  - [🐳 Building with Docker](#-option-1-using-docker-compose-simplest-method)
-  - [💻 Building Natively](#-option-2-building-natively)
-- [⚖️ License](#️-license)
-- [👏 Credits](#-credits)
+- [About This Project](#-about-this-project)
+- [Installation](#-installation)
+  - [Using Docker for Builds](#-using-docker-for-builds)
+  - [Download Pre-built Binaries](#️-download-pre-built-binaries)
+  - [Installing on Linux](#-installing-on-linux)
+  - [Installing on macOS](#-installing-on-macos)
+  - [Installing on Windows](#-installing-on-windows)
+- [Basic Usage](#-basic-usage)
+- [Documentation](#-documentation)
+- [Research](#-research)
+- [Compilation](#️-compilation)
+  - [Build Scripts Structure](#-build-scripts-structure)
+  - [Building with Docker](#-option-1-using-docker-compose-simplest-method)
+  - [Building Natively](#-option-2-building-natively)
+- [License](#️-license)
+- [Credits](#-credits)
 
-## 💡 About This Project
+## About This Project
 
 SBaGenX is a fork of SBaGen+, which is itself a fork of the original
 SBaGen (Sequenced Binaural Beat Generator) created by Jim Peters. The
@@ -35,11 +35,11 @@ feature additions, without major refactoring of the original codebase.
 
 The name was changed from **"Sequenced Binaural Beat Generator"** to **"Sequenced Brainwave Generator"** in the SBaGen+ fork to better reflect its expanded functionality. Since SBaGen+ added support for isochronic tones in addition to binaural beats, and SBaGenX added monaural beat support for the built-in programs, the original name no longer fully represented its capabilities.
 
-## 📥 Installation
+## Installation
 
 Download assets from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
 
-### 🐳 Using Docker for Builds
+### Using Docker for Builds
 
 This repository includes Docker support for **build workflows** (Linux/Windows artifacts), via `Dockerfile` and `compose.yml`.
 
@@ -55,7 +55,7 @@ docker compose up build-arm64
 
 At present, there is no officially published SBaGenX runtime container image for end-user playback.
 
-### ⬇️ Download Pre-built Binaries
+### Download Pre-built Binaries
 
 Current release asset:
 
@@ -64,7 +64,7 @@ Current release asset:
 
   **Important**: Always verify the SHA256 checksum of downloaded binaries against those listed on the [releases page](https://github.com/lm7137/SBaGenX/releases) to ensure file integrity and security.
 
-### 🐧 Installing on Linux
+### Installing on Linux
 
 Pre-built Linux binaries are not currently published for `v2.0.0`.
 Build from source instead:
@@ -89,7 +89,7 @@ bash linux-create-deb.sh
 sudo apt install ./dist/sbagenx_*_amd64.deb
 ```
 
-### 🍎 Installing on macOS
+### Installing on macOS
 
 Pre-built macOS installer assets are not currently published for `v2.0.0`.
 Build on macOS instead:
@@ -116,23 +116,23 @@ And you can see the usage with:
 sbagenx -h
 ```
 
-### 🪟 Installing on Windows
+### Installing on Windows
 
 1. Download the installer:
 
-   - [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/download/v2.0.0/sbagenx-windows-setup.exe)
+   - [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/latest/download/sbagenx-windows-setup.exe)
 
 2. Verify the SHA256 checksum of the installer. You can use PowerShell or Command Prompt to do this:
 
    ```powershell
    Get-FileHash -Algorithm SHA256 .\sbagenx-windows-setup.exe
-   # Expected SHA256:
-   # 16B9CE7F3F4F00BA674D184B0C1448D35B59E107F2DCEB41B4B760509544EA88
    ```
+
+   You can find the expected hash of the installer at https://www.sbagenx.com
 
 3. Run the installer and follow the instructions.
 
-⚠️ **Warning about antivirus on Windows**
+**Warning about antivirus on Windows**
 
 Some versions of Windows Defender or other antivirus software may falsely detect `SBaGenX` as a threat.
 
@@ -140,28 +140,28 @@ This happens because the executable is **not digitally signed**, and as a comman
 
 `SBaGenX` is an open-source project, and the source code is publicly available in this repository for inspection.
 
-✅ **Temporary solution:** if you trust the source of the executable, add an exception in your antivirus for the file or the folder where `SBaGenX` is installed.
+**Temporary solution:** if you trust the source of the executable, add an exception in your antivirus for the file or the folder where `SBaGenX` is installed.
 
-## 🚀 Basic Usage
+## Basic Usage
 
 See [USAGE.md](USAGE.md) for more information on how to use SBaGenX.
 
-## 📚 Documentation
+## Documentation
 
 For detailed information on all features, see the [SBAGENX.txt](docs/SBAGENX.txt) file.
 
-## 🔍 Research
+## Research
 
 For the scientific background behind SBaGenX, check out [RESEARCH.md](RESEARCH.md).
 
-## 🛠️ Compilation
+## Compilation
 
 SBaGenX can be compiled for macOS, Linux and Windows. The build process is divided into two steps:
 
 1. **Building the libraries**: This step is only necessary if you want MP3 and OGG support (FLAC support is built in)
 2. **Building the main program**: This step compiles SBaGenX using the libraries built in the previous step
 
-### 📁 Build Scripts Structure
+### Build Scripts Structure
 
 - **Library build scripts**:
 
@@ -175,7 +175,7 @@ SBaGenX can be compiled for macOS, Linux and Windows. The build process is divid
   - `linux-create-deb.sh`: Creates a Debian package from the Linux build output
   - `windows-build-sbagenx.sh`: Builds SBaGenX for Windows using MinGW (cross-compilation)
 
-#### 🐳 Option 1: Using Docker Compose (Simplest Method)
+#### Option 1: Using Docker Compose (Simplest Method)
 
 The easiest way to build SBaGenX for Linux and Windows is using Docker Compose:
 
@@ -191,7 +191,7 @@ This will automatically build the Docker image and run all necessary build scrip
 
 **For macOS**, you need compile natively. See next section for more details.
 
-#### 💻 Option 2: Building Natively
+#### Option 2: Building Natively
 
 If you prefer to build without Docker, you can use the build scripts directly on your system, provided you have all the necessary dependencies installed.
 
@@ -281,7 +281,7 @@ Provenance notes for these runtime trees are tracked in:
 The installer copies the matching architecture runtime to
 `{app}\python`, and SBaGenX uses it automatically for plotting.
 
-## ⚖️ License
+## License
 
 SBaGenX is distributed under the GPL license. See [COPYING.txt](COPYING.txt) for details.
 
@@ -289,7 +289,7 @@ Third-party dependency license texts are included in
 [`licenses/third_party`](licenses/third_party), with an index in
 [`licenses/third_party/README.txt`](licenses/third_party/README.txt).
 
-## 👏 Credits
+## Credits
 
 Original SBaGen was developed by Jim Peters. See [SBaGen project](https://uazu.net/sbagen/).
 
