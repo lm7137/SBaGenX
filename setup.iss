@@ -90,6 +90,9 @@ Source: "dist\libvorbisenc-2-win64.dll"; DestDir: "{app}"; DestName: "libvorbise
 Source: "dist\libwinpthread-1-win32.dll"; DestDir: "{app}"; DestName: "libwinpthread-1-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "dist\libwinpthread-1-win64.dll"; DestDir: "{app}"; DestName: "libwinpthread-1-win64.dll"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "dist\libgcc_s_dw2-1-win32.dll"; DestDir: "{app}"; DestName: "libgcc_s_dw2-1-win32.dll"; Flags: ignoreversion skipifsourcedoesntexist
+; Bundled Python+Cairo plot runtime (architecture-specific, required)
+Source: "dist\python-win32\*"; DestDir: "{app}\python"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: not IsWin64
+Source: "dist\python-win64\*"; DestDir: "{app}\python"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: IsWin64
 ; Documentation
 Source: "COPYING.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion dontcopy

@@ -1,0 +1,9 @@
+pycairo-1.29.0.dist-info/METADATA,sha256=yGPapXkdwE2GcfkBdzqqa69Pru0lyrKa17v4qc32Brw,2279
+pycairo-1.29.0.dist-info/WHEEL,sha256=suq8ARrxbiI7iLH3BgK-82uzxQ-4Hm-m8w01oCokrtA,85
+cairo/_cairo.cp313-win_amd64.pyd,sha256=5cOg2s3BRhb2zKERRVAF40vWPmompuKl0szdbWx3ugQ,1735168
+cairo/_cairo.cp313-win_amd64.lib,sha256=EQBeE1cqHvl6C6xBxxIGg0byh0QpWJ0Cx__b-sNyyCI,3786
+cairo/__init__.py,sha256=471Ajy2oTGSGRXwB0mRbm0t1DI4vplz0ds2br1zfpP8,685
+cairo/__init__.pyi,sha256=1MTPU9pRW_LgJhYVtd-IdRbrJKTF4oM2UpLX-_Et_6Q,225448
+cairo/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+cairo/include/py3cairo.h,sha256=gKhDzJuUCXwzOCmdquWVfO-TT66w2J681_N8TG8i5E8,9044
+pycairo-1.29.0.dist-info/RECORD,,

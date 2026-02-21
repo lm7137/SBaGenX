@@ -276,6 +276,13 @@ if [ ! -f dist/sbagenx-win32.exe ] || [ ! -f dist/sbagenx-win64.exe ]; then
     exit 1
 fi
 
+# Python+Cairo runtimes are required in current Windows packaging.
+if [ ! -f dist/python-win32/python.exe ] || [ ! -f dist/python-win64/python.exe ]; then
+    error "Required bundled Python+Cairo runtimes not found in dist/."
+    info "Run ./windows-build-sbagenx.sh to auto-prepare and bundle them."
+    exit 1
+fi
+
 # Remove the existing installer if it exists
 rm -f "dist/${SETUP_NAME}"
 

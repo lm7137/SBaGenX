@@ -1,0 +1,4 @@
+SBaGenX auto-prepared Python+Cairo runtime
+Python embed version: 3.13.12
+pycairo version: 1.29.0
+Architecture: win64

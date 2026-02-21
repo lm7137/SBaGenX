@@ -289,6 +289,10 @@ This writes a two-panel graph (envelope + waveform) for exactly one
 pulse cycle, with labelled numeric ticks and the effective parameters
 printed at the bottom.
 
+If Python+Cairo plotting is available (for example from a bundled
+Windows runtime), `-P` uses that high-quality backend automatically.
+If not, it falls back to the built-in renderer.
+
 You can also combine isochronic tones with other sounds:
 
 >> sbagenx -i pink/40 300@10/20
@@ -1193,7 +1197,13 @@ The graph includes labelled axes and numeric tick marks.  The X-axis
 shows time in minutes (0 to D over the drop period).  The Y-axis
 shows beat/pulse frequency in Hz, with tick values snapped to readable
 whole/half steps (0.5Hz spacing).  Rendering is supersampled for
-smoother curves and cleaner line quality.
+smoother curves and cleaner line quality.  The bottom caption also
+prints the active sigmoid parameters (start/target, D, l/h, and solved
+a/b values) for reference.
+
+`-G` first tries the Python+Cairo backend (bundled by default in current
+Windows builds).  If not available, it falls back to the built-in
+renderer.
 
 
 2.10.1: More detailed notes on -p sigmoid options
@@ -1415,11 +1425,51 @@ follows:
               Requires a mix input stream via -m or -M.
   -P        Render a one-cycle isochronic (@) waveform graph as PNG and
               exit.  Uses the current isochronic tone and `-I` settings.
+              Python+Cairo backend is preferred; otherwise
+              built-in plotting is used.
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
               Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.
               Constraint: a+r <= 1.
               e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
+
+Plot backend environment overrides:
+
+  SBAGENX_PLOT_BACKEND=internal|python|cairo|external
+    internal  force built-in C renderer
+    python    force external Python/Cairo backend (error if unavailable)
+  SBAGENX_PLOT_PYTHON=<path>
+    absolute path to Python executable to use for plotting
+  SBAGENX_PLOT_SCRIPT=<path>
+    absolute path to sbagenx_plot.py
+
+Windows build/runtime bundling notes:
+
+  windows-build-sbagenx.sh now treats Python+Cairo runtimes as required.
+  It bundles both architectures and fails the build if either one cannot
+  be prepared.
+
+  Runtime sources are checked in this order:
+    1) pre-populated runtime trees:
+       libs/windows-win32-python-runtime/
+       libs/windows-win64-python-runtime/
+    2) archives (auto-extracted):
+       libs/windows-win32-python-runtime.zip
+       libs/windows-win64-python-runtime.zip
+       (or paths via SBAGENX_WIN32_PY_RUNTIME_ARCHIVE /
+        SBAGENX_WIN64_PY_RUNTIME_ARCHIVE)
+    3) official auto-prep:
+       - CPython embeddable package
+       - matching pycairo wheel
+       defaults:
+         SBAGENX_PY_EMBED_VERSION=3.13.12
+         SBAGENX_PYCAIRO_VERSION=1.29.0
+
+  Additional controls:
+    SBAGENX_AUTO_PREPARE_PY_RUNTIME=1|0  (default 1)
+    SBAGENX_REQUIRE_PY_RUNTIME=1|0       (default 1)
+    SBAGENX_WIN32_PY_RUNTIME_URL
+    SBAGENX_WIN64_PY_RUNTIME_URL
   -i ...    Generate the whole sequence from an 'immediate' spec
   -p ...    Generate the whole sequence from a prodefined sequence type,
               e.g. -p drop or -p slide

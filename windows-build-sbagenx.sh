@@ -93,6 +93,16 @@ LAME_STATIC_LIB_PATH_32="libs/windows-win32-libmp3lame.a"
 LAME_STATIC_LIB_PATH_64="libs/windows-win64-libmp3lame.a"
 RUNTIME_DLL_DIR_32="libs/windows-win32-runtime"
 RUNTIME_DLL_DIR_64="libs/windows-win64-runtime"
+PY_RUNTIME_DIR_32="libs/windows-win32-python-runtime"
+PY_RUNTIME_DIR_64="libs/windows-win64-python-runtime"
+PY_RUNTIME_ARCHIVE_32_DEFAULT="libs/windows-win32-python-runtime.zip"
+PY_RUNTIME_ARCHIVE_64_DEFAULT="libs/windows-win64-python-runtime.zip"
+PLOT_SCRIPT_SRC="scripts/sbagenx_plot.py"
+PY_RUNTIME_CACHE_DIR="build/python-runtime-cache"
+PY_RUNTIME_REQUIRED="${SBAGENX_REQUIRE_PY_RUNTIME:-1}"
+PY_RUNTIME_AUTO_PREPARE="${SBAGENX_AUTO_PREPARE_PY_RUNTIME:-1}"
+PY_EMBED_VERSION="${SBAGENX_PY_EMBED_VERSION:-3.13.12}"
+PYCAIRO_VERSION="${SBAGENX_PYCAIRO_VERSION:-1.29.0}"
 
 STATIC_ENCODERS_32=0
 STATIC_ENCODERS_64=0
@@ -201,6 +211,365 @@ copy_runtime_dll() {
         warning "Could not find ${output_name} runtime DLL for ${target}; installer will rely on system-provided runtime"
         warning "Hint: add DLLs under ${project_dir}/, or set SBAGENX_${arch_tag^^}_DLL_DIR to a folder containing one of: $*"
     fi
+}
+
+download_file_if_missing() {
+    local url="$1"
+    local out_path="$2"
+    local tmp_path="${out_path}.tmp.$$"
+
+    if [ -f "$out_path" ]; then
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$out_path")"
+    info "Downloading: ${url}"
+
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fL --retry 3 --retry-delay 2 -o "$tmp_path" "$url"; then
+            rm -f "$tmp_path"
+            return 1
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -O "$tmp_path" "$url"; then
+            rm -f "$tmp_path"
+            return 1
+        fi
+    else
+        warning "Cannot download ${url}: neither curl nor wget is available"
+        return 1
+    fi
+
+    mv "$tmp_path" "$out_path"
+    return 0
+}
+
+extract_zip_file() {
+    local archive="$1"
+    local dest_dir="$2"
+    mkdir -p "$dest_dir"
+
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q -o "$archive" -d "$dest_dir"
+        return $?
+    fi
+    if command -v bsdtar >/dev/null 2>&1; then
+        bsdtar -xf "$archive" -C "$dest_dir"
+        return $?
+    fi
+
+    warning "Cannot extract ${archive}: need unzip or bsdtar"
+    return 1
+}
+
+find_pycairo_wheel_url() {
+    local wheel_name="$1"
+    local simple_html=""
+    local wheel_url=""
+
+    if command -v curl >/dev/null 2>&1; then
+        if ! simple_html="$(curl -fsSL https://pypi.org/simple/pycairo/)"; then
+            return 1
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if ! simple_html="$(wget -q -O - https://pypi.org/simple/pycairo/)"; then
+            return 1
+        fi
+    else
+        return 1
+    fi
+
+    wheel_url="$(printf '%s' "$simple_html" \
+        | tr '"' '\n' \
+        | grep -F "$wheel_name" \
+        | grep -E '^https?://' \
+        | head -n 1 \
+        | sed 's/#.*$//')"
+
+    if [ -z "$wheel_url" ]; then
+        return 1
+    fi
+
+    printf '%s\n' "$wheel_url"
+    return 0
+}
+
+configure_embedded_python_pth() {
+    local runtime_dir="$1"
+    local py_mm="$2"
+    local pth_file="${runtime_dir}/python${py_mm}._pth"
+    local py_zip=""
+
+    if [ ! -f "$pth_file" ]; then
+        pth_file="$(find "$runtime_dir" -maxdepth 1 -type f -name 'python*._pth' | head -n 1)"
+    fi
+    if [ -z "$pth_file" ] || [ ! -f "$pth_file" ]; then
+        warning "Could not find embedded Python ._pth file in ${runtime_dir}"
+        return 1
+    fi
+
+    py_zip="$(find "$runtime_dir" -maxdepth 1 -type f -name "python${py_mm}.zip" | head -n 1)"
+    if [ -z "$py_zip" ]; then
+        py_zip="$(find "$runtime_dir" -maxdepth 1 -type f -name 'python*.zip' | head -n 1)"
+    fi
+    if [ -z "$py_zip" ]; then
+        warning "Could not find embedded stdlib zip in ${runtime_dir}"
+        return 1
+    fi
+    py_zip="$(basename "$py_zip")"
+
+    cat > "$pth_file" << EOF
+${py_zip}
+.
+Lib
+Lib/site-packages
+import site
+EOF
+    return 0
+}
+
+python_runtime_tree_valid() {
+    local dir="$1"
+    if [ ! -f "${dir}/python.exe" ]; then
+        return 1
+    fi
+    if [ ! -d "${dir}/Lib/site-packages/cairo" ]; then
+        return 1
+    fi
+    if ! find "${dir}/Lib/site-packages/cairo" -maxdepth 1 -type f -name '_cairo*.pyd' | grep -q .; then
+        return 1
+    fi
+    return 0
+}
+
+auto_prepare_python_runtime_tree() {
+    local arch_tag="$1"
+    local target_dir="$2"
+    local embed_arch=""
+    local wheel_arch=""
+    local py_mm=""
+    local py_tag=""
+    local embed_name=""
+    local embed_url=""
+    local embed_path=""
+    local wheel_name=""
+    local wheel_path=""
+    local wheel_url=""
+
+    case "$arch_tag" in
+        win32)
+            embed_arch="win32"
+            wheel_arch="win32"
+            ;;
+        win64)
+            embed_arch="amd64"
+            wheel_arch="win_amd64"
+            ;;
+        *)
+            warning "Unknown Python runtime arch tag: ${arch_tag}"
+            return 1
+            ;;
+    esac
+
+    py_mm="$(printf '%s' "$PY_EMBED_VERSION" | awk -F. '{ printf "%d%d", $1, $2 }')"
+    if [ -z "$py_mm" ]; then
+        warning "Could not derive Python ABI tag from SBAGENX_PY_EMBED_VERSION=${PY_EMBED_VERSION}"
+        return 1
+    fi
+    py_tag="cp${py_mm}"
+
+    embed_name="python-${PY_EMBED_VERSION}-embed-${embed_arch}.zip"
+    embed_url="https://www.python.org/ftp/python/${PY_EMBED_VERSION}/${embed_name}"
+    wheel_name="pycairo-${PYCAIRO_VERSION}-${py_tag}-${py_tag}-${wheel_arch}.whl"
+
+    embed_path="${PY_RUNTIME_CACHE_DIR}/${embed_name}"
+    wheel_path="${PY_RUNTIME_CACHE_DIR}/${wheel_name}"
+
+    if ! download_file_if_missing "$embed_url" "$embed_path"; then
+        warning "Failed to download embedded Python runtime: ${embed_url}"
+        return 1
+    fi
+
+    if [ ! -f "$wheel_path" ]; then
+        wheel_url="$(find_pycairo_wheel_url "$wheel_name")"
+        if [ -z "$wheel_url" ]; then
+            warning "Could not resolve pycairo wheel URL for ${wheel_name}"
+            return 1
+        fi
+        if ! download_file_if_missing "$wheel_url" "$wheel_path"; then
+            warning "Failed to download pycairo wheel: ${wheel_url}"
+            return 1
+        fi
+    fi
+
+    rm -rf "$target_dir"
+    mkdir -p "$target_dir"
+    if ! extract_zip_file "$embed_path" "$target_dir"; then
+        warning "Failed to extract embedded Python archive: ${embed_path}"
+        return 1
+    fi
+
+    mkdir -p "${target_dir}/Lib/site-packages"
+    if ! extract_zip_file "$wheel_path" "${target_dir}/Lib/site-packages"; then
+        warning "Failed to extract pycairo wheel: ${wheel_path}"
+        return 1
+    fi
+
+    if ! configure_embedded_python_pth "$target_dir" "$py_mm"; then
+        warning "Failed to configure embedded Python search path in ${target_dir}"
+        return 1
+    fi
+
+    cat > "${target_dir}/SBAGENX_PY_RUNTIME.txt" << EOF
+SBaGenX auto-prepared Python+Cairo runtime
+Python embed version: ${PY_EMBED_VERSION}
+pycairo version: ${PYCAIRO_VERSION}
+Architecture: ${arch_tag}
+EOF
+
+    if ! python_runtime_tree_valid "$target_dir"; then
+        warning "Prepared runtime in ${target_dir} did not pass validation"
+        return 1
+    fi
+
+    success "Prepared Python+Cairo runtime for ${arch_tag} in ${target_dir}"
+    return 0
+}
+
+copy_python_runtime_tree() {
+    local arch_tag="$1"
+    local src_dir=""
+    local manual_dir=""
+    local project_dir=""
+    local out_dir=""
+    local archive_path=""
+    local archive_url=""
+
+    extract_archive_into_runtime_dir() {
+        local archive="$1"
+        local target_dir="$2"
+        local temp_root=""
+        local extracted_root=""
+        local py_candidate=""
+
+        temp_root="$(mktemp -d)"
+        rm -rf "$target_dir"
+        mkdir -p "$target_dir"
+
+        if [[ "$archive" == *.zip ]]; then
+            if ! extract_zip_file "$archive" "$temp_root"; then
+                warning "Failed to extract python runtime archive: $archive"
+                rm -rf "$temp_root"
+                return 1
+            fi
+        else
+            if command -v bsdtar >/dev/null 2>&1; then
+                if ! bsdtar -xf "$archive" -C "$temp_root"; then
+                    warning "Failed to extract python runtime archive: $archive"
+                    rm -rf "$temp_root"
+                    return 1
+                fi
+            elif command -v tar >/dev/null 2>&1; then
+                if ! tar -xf "$archive" -C "$temp_root"; then
+                    warning "Failed to extract python runtime archive: $archive"
+                    rm -rf "$temp_root"
+                    return 1
+                fi
+            else
+                warning "Cannot extract $archive: need bsdtar or tar"
+                rm -rf "$temp_root"
+                return 1
+            fi
+        fi
+
+        if [ -f "${temp_root}/python.exe" ]; then
+            extracted_root="$temp_root"
+        else
+            py_candidate="$(find "$temp_root" -type f -name 'python.exe' | head -n 1)"
+            if [ -n "$py_candidate" ]; then
+                extracted_root="$(dirname "$py_candidate")"
+            fi
+        fi
+
+        if [ -z "$extracted_root" ] || [ ! -f "${extracted_root}/python.exe" ]; then
+            warning "Archive $archive does not appear to contain a runtime root with python.exe"
+            rm -rf "$temp_root"
+            return 1
+        fi
+
+        cp -R "${extracted_root}/." "$target_dir/"
+        rm -rf "$temp_root"
+        return 0
+    }
+
+    if [ "$arch_tag" = "win32" ]; then
+        manual_dir="${SBAGENX_WIN32_PY_RUNTIME_DIR}"
+        project_dir="${PY_RUNTIME_DIR_32}"
+        archive_path="${SBAGENX_WIN32_PY_RUNTIME_ARCHIVE:-$PY_RUNTIME_ARCHIVE_32_DEFAULT}"
+        archive_url="${SBAGENX_WIN32_PY_RUNTIME_URL:-}"
+    elif [ "$arch_tag" = "win64" ]; then
+        manual_dir="${SBAGENX_WIN64_PY_RUNTIME_DIR}"
+        project_dir="${PY_RUNTIME_DIR_64}"
+        archive_path="${SBAGENX_WIN64_PY_RUNTIME_ARCHIVE:-$PY_RUNTIME_ARCHIVE_64_DEFAULT}"
+        archive_url="${SBAGENX_WIN64_PY_RUNTIME_URL:-}"
+    else
+        warning "Unknown python runtime arch tag: $arch_tag"
+        return 1
+    fi
+
+    if [ -n "$manual_dir" ] && python_runtime_tree_valid "$manual_dir"; then
+        src_dir="$manual_dir"
+    elif [ -d "$project_dir" ] && python_runtime_tree_valid "$project_dir"; then
+        src_dir="$project_dir"
+    fi
+
+    if [ -z "$src_dir" ]; then
+        if [ ! -f "$archive_path" ] && [ -n "$archive_url" ]; then
+            if ! download_file_if_missing "$archive_url" "$archive_path"; then
+                warning "Failed to download Python runtime archive for ${arch_tag} from ${archive_url}"
+            fi
+        fi
+
+        if [ -f "$archive_path" ]; then
+            info "Extracting ${arch_tag} Python+Cairo runtime archive: ${archive_path}"
+            if extract_archive_into_runtime_dir "$archive_path" "$project_dir" && python_runtime_tree_valid "$project_dir"; then
+                src_dir="$project_dir"
+            else
+                warning "Failed to prepare a valid ${arch_tag} Python runtime from archive ${archive_path}"
+            fi
+        fi
+    fi
+
+    if [ -z "$src_dir" ] && [ "$PY_RUNTIME_AUTO_PREPARE" = "1" ]; then
+        section_header "Auto-preparing ${arch_tag} Python+Cairo runtime..."
+        if auto_prepare_python_runtime_tree "$arch_tag" "$project_dir"; then
+            src_dir="$project_dir"
+        fi
+    fi
+
+    if [ -z "$src_dir" ]; then
+        warning "Python+Cairo runtime tree is missing for ${arch_tag}"
+        warning "Tried runtime dir (${project_dir}), archive path (${archive_path}), and auto-preparation"
+        if [ "$PY_RUNTIME_REQUIRED" = "1" ]; then
+            return 1
+        fi
+        return 0
+    fi
+
+    out_dir="dist/python-${arch_tag}"
+    rm -rf "$out_dir"
+    mkdir -p "$out_dir"
+    cp -R "${src_dir}/." "$out_dir/"
+
+    if ! python_runtime_tree_valid "$out_dir"; then
+        warning "Bundled runtime failed validation after copy: ${out_dir}"
+        if [ "$PY_RUNTIME_REQUIRED" = "1" ]; then
+            return 1
+        fi
+    fi
+
+    success "Bundled Python+Cairo runtime tree: ${out_dir}"
+    return 0
 }
 
 # Build 32-bit version
@@ -339,6 +708,25 @@ else
     copy_runtime_dll "win64" "x86_64-w64-mingw32" "libvorbis-0" "libvorbis-0.dll"
     copy_runtime_dll "win64" "x86_64-w64-mingw32" "libvorbisenc-2" "libvorbisenc-2.dll"
     copy_runtime_dll "win64" "x86_64-w64-mingw32" "libwinpthread-1" "libwinpthread-1.dll"
+fi
+
+section_header "Bundling required Python+Cairo plot runtimes..."
+if ! copy_python_runtime_tree "win32"; then
+    error "Failed to bundle required win32 Python+Cairo runtime"
+    exit 1
+fi
+if ! copy_python_runtime_tree "win64"; then
+    error "Failed to bundle required win64 Python+Cairo runtime"
+    exit 1
+fi
+
+if [ -f "$PLOT_SCRIPT_SRC" ]; then
+    mkdir -p dist/scripts
+    cp "$PLOT_SCRIPT_SRC" dist/scripts/sbagenx_plot.py
+    success "Bundled plot script: dist/scripts/sbagenx_plot.py"
+else
+    error "Required plot script not found at ${PLOT_SCRIPT_SRC}"
+    exit 1
 fi
 
 # Clean up temporary files

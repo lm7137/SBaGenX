@@ -231,6 +231,46 @@ If extra static link dependencies are needed, pass them via:
 - `SBAGENX_STATIC_ENCODER_DEPS_WIN32`
 - `SBAGENX_STATIC_ENCODER_DEPS_WIN64`
 
+For high-quality graph rendering (`-G` / `-P`) with anti-aliased text,
+Windows builds now treat Python+Cairo as a required bundled runtime.
+`windows-build-sbagenx.sh` auto-prepares these runtimes if missing, then
+bundles them into:
+- `dist/python-win32/`
+- `dist/python-win64/`
+
+The build aborts if either runtime cannot be prepared.
+
+You can still point the build to custom pre-prepared runtime folders:
+- `SBAGENX_WIN32_PY_RUNTIME_DIR`
+- `SBAGENX_WIN64_PY_RUNTIME_DIR`
+
+Or provide archives (auto-extracted during `windows-build-sbagenx.sh`):
+- `SBAGENX_WIN32_PY_RUNTIME_ARCHIVE` (default: `libs/windows-win32-python-runtime.zip`)
+- `SBAGENX_WIN64_PY_RUNTIME_ARCHIVE` (default: `libs/windows-win64-python-runtime.zip`)
+
+Optional download URLs (used if archive file is missing):
+- `SBAGENX_WIN32_PY_RUNTIME_URL`
+- `SBAGENX_WIN64_PY_RUNTIME_URL`
+
+If no custom runtime/archive is provided, the script auto-downloads:
+- CPython embeddable package (`SBAGENX_PY_EMBED_VERSION`, default `3.13.12`)
+- matching `pycairo` wheel (`SBAGENX_PYCAIRO_VERSION`, default `1.29.0`)
+
+You can tune behavior with:
+- `SBAGENX_REQUIRE_PY_RUNTIME=1|0` (default `1`)
+- `SBAGENX_AUTO_PREPARE_PY_RUNTIME=1|0` (default `1`)
+
+Each runtime tree must include at minimum:
+- `python.exe`
+- standard library / site-packages needed by `scripts/sbagenx_plot.py`
+- Python Cairo bindings (`pycairo`)
+
+Provenance notes for these runtime trees are tracked in:
+- `libs/windows-python-runtime-SOURCES.txt`
+
+The installer copies the matching architecture runtime to
+`{app}\python`, and SBaGenX uses it automatically for plotting.
+
 ## ⚖️ License
 
 SBaGenX is distributed under the GPL license. See [COPYING.txt](COPYING.txt) for details.

@@ -66,3 +66,11 @@ Files and source locations:
     License files: gcc-libs-COPYING.RUNTIME.txt,
     gcc-libs-COPYING3.txt, gcc-libs-COPYING.LIB.txt
     Source: https://gcc.gnu.org/
+
+14) CPython (embedded Windows runtime used for plotting backend)
+    License file: python-COPYING.txt
+    Source: https://github.com/python/cpython
+
+15) pycairo (Python Cairo bindings used for plotting backend)
+    License file: pycairo-COPYING.txt
+    Source: https://github.com/pygobject/pycairo

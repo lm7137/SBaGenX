@@ -1,0 +1,47 @@
+Windows Python+Cairo runtime provenance (required Windows plotting backend)
+===========================================================================
+
+This file documents the provenance for the Windows plotting runtime trees:
+
+  - libs/windows-win32-python-runtime/
+  - libs/windows-win64-python-runtime/
+
+These trees are used for high-quality graph rendering (`-G` and `-P`)
+via `scripts/sbagenx_plot.py`.
+
+Recommended upstream sources:
+
+1) CPython embeddable package
+   Source: https://www.python.org/downloads/windows/
+   Suggested artifact names:
+     - python-<version>-embed-win32.zip
+     - python-<version>-embed-amd64.zip
+
+2) pycairo (Python bindings)
+   Source: https://pypi.org/project/pycairo/
+   Install into each runtime's site-packages.
+
+Note:
+- Current pycairo wheels used by SBaGenX are self-contained for cairo
+  symbols in this backend path; no separate cairo DLL package is needed
+  for these runtime trees.
+
+When distributing builds that bundle these runtimes, include and
+publish the corresponding upstream license texts for:
+  - CPython
+  - pycairo
+  - any bundled transitive runtime dependencies (if applicable)
+
+Automation notes:
+
+- windows-build-sbagenx.sh first checks for pre-existing runtime trees:
+    - libs/windows-win32-python-runtime/
+    - libs/windows-win64-python-runtime/
+- then it can auto-extract these runtime trees from archives:
+    - libs/windows-win32-python-runtime.zip
+    - libs/windows-win64-python-runtime.zip
+- then, if still missing, it auto-prepares runtimes from upstream
+  CPython embeddable zips and matching pycairo wheels.
+- It can also download archives when URLs are provided via:
+    - SBAGENX_WIN32_PY_RUNTIME_URL
+    - SBAGENX_WIN64_PY_RUNTIME_URL

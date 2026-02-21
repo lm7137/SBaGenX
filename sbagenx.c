@@ -136,6 +136,10 @@
 #include <fcntl.h>
 #include <time.h>
 
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 #ifdef T_MSVC
  #include <io.h>
  #define write _write
@@ -258,6 +262,14 @@ void write_sigmoid_graph_png(const char *fmt, double level,
 			     double sig_l, double sig_h,
 			     double sig_a, double sig_b);
 void write_iso_cycle_graph_png_from_sequence(void);
+int try_external_sigmoid_graph_png(const char *out_fname,
+				   int len0_sec,
+				   double beat_start, double beat_target,
+				   double sig_l, double sig_h,
+				   double sig_a, double sig_b);
+int try_external_iso_cycle_graph_png(const char *out_fname,
+				     double carr_hz, double pulse_hz,
+				     double amp_pct, int waveform);
 
 #define ALLOC_ARR(cnt, type) ((type*)Alloc((cnt) * sizeof(type)))
 #define uint unsigned int
@@ -301,7 +313,9 @@ help() {
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
 	  NL "          -G        With -p sigmoid, render beat/pulse sigmoid graph as PNG and exit"
+	  NL "                     (prefers Python/Cairo backend when available)"
 	  NL "          -P        Render one-cycle isochronic waveform graph as PNG and exit"
+	  NL "                     (prefers Python/Cairo backend when available)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -1710,6 +1724,202 @@ double_to_token(double val, char *out, int out_sz) {
    out[b]= 0;
 }
 
+static int
+str_ieq(const char *a, const char *b) {
+   while (*a && *b) {
+      if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+	 return 0;
+      a++;
+      b++;
+   }
+   return *a == 0 && *b == 0;
+}
+
+static int
+file_exists_regular(const char *path) {
+   struct stat st;
+   if (!path || !*path) return 0;
+   if (stat(path, &st) != 0) return 0;
+#ifdef _S_IFREG
+   return (st.st_mode & _S_IFMT) == _S_IFREG;
+#else
+   return S_ISREG(st.st_mode);
+#endif
+}
+
+static int
+plot_cmd_append(char *cmd, int cmd_sz, const char *txt) {
+   int len= (int)strlen(cmd);
+   int add= (int)strlen(txt);
+   if (len + add >= cmd_sz) return 0;
+   memcpy(cmd + len, txt, add + 1);
+   return 1;
+}
+
+static int
+plot_cmd_append_quoted(char *cmd, int cmd_sz, const char *arg) {
+   const char *p= arg;
+   if (!plot_cmd_append(cmd, cmd_sz, " \"")) return 0;
+   while (*p) {
+      char ch= *p++;
+      if (ch == '"') {
+	 if (!plot_cmd_append(cmd, cmd_sz, "\\\"")) return 0;
+      } else {
+	 char tmp[2];
+	 tmp[0]= ch;
+	 tmp[1]= 0;
+	 if (!plot_cmd_append(cmd, cmd_sz, tmp)) return 0;
+      }
+   }
+   if (!plot_cmd_append(cmd, cmd_sz, "\"")) return 0;
+   return 1;
+}
+
+static int
+plot_find_script(char *script, int script_sz) {
+   const char *env_script= getenv("SBAGENX_PLOT_SCRIPT");
+   if (env_script && file_exists_regular(env_script)) {
+      strncpy(script, env_script, script_sz-1);
+      script[script_sz-1]= 0;
+      return 1;
+   }
+
+   if (pdir && *pdir) {
+      snprintf(script, script_sz, "%sscripts/sbagenx_plot.py", pdir);
+      if (file_exists_regular(script))
+	 return 1;
+   }
+
+   snprintf(script, script_sz, "scripts/sbagenx_plot.py");
+   if (file_exists_regular(script))
+      return 1;
+
+   return 0;
+}
+
+static int
+plot_external_disabled(void) {
+   const char *mode= getenv("SBAGENX_PLOT_BACKEND");
+   if (!mode || !*mode) return 0;
+   return str_ieq(mode, "internal") || str_ieq(mode, "builtin") || str_ieq(mode, "c");
+}
+
+static int
+plot_external_force(void) {
+   const char *mode= getenv("SBAGENX_PLOT_BACKEND");
+   if (!mode || !*mode) return 0;
+   return str_ieq(mode, "python") || str_ieq(mode, "cairo") || str_ieq(mode, "external");
+}
+
+static int
+plot_try_external_cmd(const char *script,
+		      const char *out_fname,
+		      const char *arg_tail) {
+   const char *env_py= getenv("SBAGENX_PLOT_PYTHON");
+   const char *candidates[8];
+   char py_embedded[4][PATH_MAX];
+   int n= 0, i;
+   int force_external= plot_external_force();
+
+   if (plot_external_disabled())
+      return 0;
+
+   if (!script || !*script || !file_exists_regular(script))
+      return 0;
+
+   if (env_py && *env_py)
+      candidates[n++]= env_py;
+
+   if (pdir && *pdir) {
+      snprintf(py_embedded[0], sizeof(py_embedded[0]), "%spython/python.exe", pdir);
+      snprintf(py_embedded[1], sizeof(py_embedded[1]), "%spython-win64/python.exe", pdir);
+      snprintf(py_embedded[2], sizeof(py_embedded[2]), "%spython-win32/python.exe", pdir);
+      snprintf(py_embedded[3], sizeof(py_embedded[3]), "%spython/bin/python3", pdir);
+
+      for (i= 0; i<4; i++) {
+	 if (file_exists_regular(py_embedded[i]))
+	    candidates[n++]= py_embedded[i];
+      }
+   }
+
+   candidates[n++]= "python3";
+   candidates[n++]= "python";
+
+   for (i= 0; i<n; i++) {
+      char cmd[8192];
+      int rc;
+      const char *py= candidates[i];
+      int looks_like_path= strchr(py, '/') || strchr(py, '\\') || strchr(py, ':');
+
+      if (looks_like_path && !file_exists_regular(py))
+	 continue;
+
+      cmd[0]= 0;
+      if (!plot_cmd_append_quoted(cmd, sizeof(cmd), py)) continue;
+      if (!plot_cmd_append_quoted(cmd, sizeof(cmd), script)) continue;
+      if (!plot_cmd_append(cmd, sizeof(cmd), arg_tail)) continue;
+#ifdef T_MINGW
+      if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL")) continue;
+#else
+      if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null 2>&1")) continue;
+#endif
+
+      rc= system(cmd);
+      if (rc == 0 && file_exists_regular(out_fname))
+	 return 1;
+   }
+
+   if (force_external)
+      error("External Python/Cairo plot backend requested but unavailable or failed (set SBAGENX_PLOT_BACKEND=internal to force built-in plotting)");
+
+   return 0;
+}
+
+int
+try_external_sigmoid_graph_png(const char *out_fname,
+			       int len0_sec,
+			       double beat_start, double beat_target,
+			       double sig_l, double sig_h,
+			       double sig_a, double sig_b) {
+   char script[PATH_MAX];
+   char args[2048];
+   int force_external= plot_external_force();
+
+   if (!plot_find_script(script, sizeof(script))) {
+      if (force_external)
+	 error("External Python/Cairo plot backend requested but plot script was not found (set SBAGENX_PLOT_SCRIPT or use SBAGENX_PLOT_BACKEND=internal)");
+      return 0;
+   }
+
+   snprintf(args, sizeof(args),
+	    " sigmoid --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --sig-l %.12g --sig-h %.12g --sig-a %.12g --sig-b %.12g",
+	    out_fname, len0_sec / 60.0, beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
+
+   return plot_try_external_cmd(script, out_fname, args);
+}
+
+int
+try_external_iso_cycle_graph_png(const char *out_fname,
+				 double carr_hz, double pulse_hz,
+				 double amp_pct, int waveform) {
+   char script[PATH_MAX];
+   char args[2048];
+   int force_external= plot_external_force();
+
+   if (!plot_find_script(script, sizeof(script))) {
+      if (force_external)
+	 error("External Python/Cairo plot backend requested but plot script was not found (set SBAGENX_PLOT_SCRIPT or use SBAGENX_PLOT_BACKEND=internal)");
+      return 0;
+   }
+
+   snprintf(args, sizeof(args),
+	    " iso-cycle --out \"%s\" --carrier-hz %.12g --pulse-hz %.12g --amp-pct %.12g --waveform %d --opt-i %d --i-s %.12g --i-d %.12g --i-a %.12g --i-r %.12g --i-e %d",
+	    out_fname, carr_hz, pulse_hz, amp_pct, waveform, opt_I,
+	    opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
+
+   return plot_try_external_cmd(script, out_fname, args);
+}
+
 static double
 sigmoid_eval(double t_min, double d_min, double beat_target,
 	     double sig_l, double sig_h, double sig_a, double sig_b) {
@@ -1737,15 +1947,32 @@ write_sigmoid_graph_png(const char *fmt, double level,
    int start_y= -1, end_y= -1;
    int label_scale= 3 * ss;
    int tick_scale= 2 * ss;
+   int param_scale= (3 * ss) / 2;
    int prev_x= -1, prev_y= -1;
    char fmt_tok[256], lvl_tok[64], l_tok[64], h_tok[64];
    char tick_txt[64];
+   char ptxt1[256], ptxt2[256];
    char fname[512];
    const char *x_label= "TIME MIN";
    const char *y_label= "FREQ HZ";
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
+
+   sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
+   double_to_token(level, lvl_tok, sizeof(lvl_tok));
+   double_to_token(sig_l, l_tok, sizeof(l_tok));
+   double_to_token(sig_h, h_tok, sizeof(h_tok));
+   snprintf(fname, sizeof(fname),
+	    "sigmoid_%s_L%s_d%c_t%d_%d_%d_l%s_h%s.png",
+	    fmt_tok, lvl_tok, tolower((unsigned char)depth_ch),
+	    len0/60, len1/60, len2/60, l_tok, h_tok);
+
+   if (try_external_sigmoid_graph_png(fname, len0, beat_start, beat_target, sig_l, sig_h, sig_a, sig_b)) {
+      if (!opt_Q)
+	 warn("Sigmoid graph saved to: %s (Python/Cairo)", fname);
+      return;
+   }
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
    plot_fill(img_hi, hw, hh, 255, 255, 255);
@@ -1842,7 +2069,7 @@ write_sigmoid_graph_png(const char *fmt, double level,
    {
       int xw= font5x7_text_width(x_label, label_scale);
       int x0= ml + (pw - xw) / 2;
-      int y0= hh - 7*label_scale - 8*ss;
+      int y0= mt + ph + 24*ss;
       font5x7_draw_text(img_hi, hw, hh, x0, y0, x_label, label_scale, 0, 30, 30, 30);
    }
 
@@ -1853,17 +2080,25 @@ write_sigmoid_graph_png(const char *fmt, double level,
       font5x7_draw_text(img_hi, hw, hh, x0, y0, y_label, label_scale, 1, 30, 30, 30);
    }
 
+   snprintf(ptxt1, sizeof(ptxt1), "START=%.3fHZ TARGET=%.3fHZ D=%dMIN",
+	    beat_start, beat_target, len0/60);
+   snprintf(ptxt2, sizeof(ptxt2), "L=%.4f H=%.4f A=%.4f B=%.4f",
+	    sig_l, sig_h, sig_a, sig_b);
+   {
+      int tw1= font5x7_text_width(ptxt1, param_scale);
+      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tx1= ml + (pw - tw1) / 2;
+      int tx2= ml + (pw - tw2) / 2;
+      int phh= 7 * param_scale;
+      int pgap= 4 * ss;
+      int ty2= hh - (8 * ss + phh);
+      int ty1= ty2 - (phh + pgap);
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+   }
+
    img= plot_downsample_box(img_hi, hw, hh, ss);
    free(img_hi);
-
-   sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
-   double_to_token(level, lvl_tok, sizeof(lvl_tok));
-   double_to_token(sig_l, l_tok, sizeof(l_tok));
-   double_to_token(sig_h, h_tok, sizeof(h_tok));
-   snprintf(fname, sizeof(fname),
-	    "sigmoid_%s_L%s_d%c_t%d_%d_%d_l%s_h%s.png",
-	    fmt_tok, lvl_tok, tolower((unsigned char)depth_ch),
-	    len0/60, len1/60, len2/60, l_tok, h_tok);
 
    if (!stbi_write_png(fname, w, h, 3, img, w*3))
       error("Failed to write sigmoid graph PNG file");
@@ -1929,6 +2164,26 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
    period_sec= 1.0 / pulse_hz;
    if (period_sec <= 0.0)
       error("-P calculated an invalid cycle period");
+
+   sanitize_filename_token(waveform_name[waveform], wave_tok, sizeof(wave_tok));
+   double_to_token(carr_hz, carr_tok, sizeof(carr_tok));
+   double_to_token(pulse_hz, pulse_tok, sizeof(pulse_tok));
+   double_to_token(amp_pct, amp_tok, sizeof(amp_tok));
+   if (opt_I) {
+      snprintf(fname, sizeof(fname),
+	       "iso_cycle_%s_c%s_p%s_a%s_i%d.png",
+	       wave_tok, carr_tok, pulse_tok, amp_tok, opt_I_e);
+   } else {
+      snprintf(fname, sizeof(fname),
+	       "iso_cycle_%s_c%s_p%s_a%s_legacy.png",
+	       wave_tok, carr_tok, pulse_tok, amp_tok);
+   }
+
+   if (try_external_iso_cycle_graph_png(fname, carr_hz, pulse_hz, amp_pct, waveform)) {
+      if (!opt_Q)
+	 warn("Isochronic cycle graph saved to: %s (Python/Cairo)", fname);
+      return;
+   }
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
    plot_fill(img_hi, hw, hh, 255, 255, 255);
@@ -2059,20 +2314,6 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
 
    img= plot_downsample_box(img_hi, hw, hh, ss);
    free(img_hi);
-
-   sanitize_filename_token(waveform_name[waveform], wave_tok, sizeof(wave_tok));
-   double_to_token(carr_hz, carr_tok, sizeof(carr_tok));
-   double_to_token(pulse_hz, pulse_tok, sizeof(pulse_tok));
-   double_to_token(amp_pct, amp_tok, sizeof(amp_tok));
-   if (opt_I) {
-      snprintf(fname, sizeof(fname),
-	       "iso_cycle_%s_c%s_p%s_a%s_i%d.png",
-	       wave_tok, carr_tok, pulse_tok, amp_tok, opt_I_e);
-   } else {
-      snprintf(fname, sizeof(fname),
-	       "iso_cycle_%s_c%s_p%s_a%s_legacy.png",
-	       wave_tok, carr_tok, pulse_tok, amp_tok);
-   }
 
    if (!stbi_write_png(fname, w, h, 3, img, w*3))
       error("Failed to write isochronic cycle graph PNG file");
