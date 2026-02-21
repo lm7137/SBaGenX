@@ -1185,9 +1185,9 @@ with `-p drop`:
   sbagenx -p sigmoid -01ds+:l=0.125:h=0
 
 To render the sigmoid beat/pulse curve as an image instead of running
-audio output, add `-G` with `-p sigmoid`:
+audio output, add `-P` with `-p sigmoid`:
 
-  sbagenx -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
+  sbagenx -P -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
 
 This writes a PNG graph of the beat/pulse curve over the drop period
 only, then exits.  The filename is generated from the sigmoid
@@ -1201,9 +1201,11 @@ smoother curves and cleaner line quality.  The bottom caption also
 prints the active sigmoid parameters (start/target, D, l/h, and solved
 a/b values) for reference.
 
-`-G` first tries the Python+Cairo backend (bundled by default in current
+`-P` first tries the Python+Cairo backend (bundled by default in current
 Windows builds).  If not available, it falls back to the built-in
 renderer.
+
+(`-G` remains accepted as a legacy alias for sigmoid plotting.)
 
 
 2.10.1: More detailed notes on -p sigmoid options
@@ -1213,7 +1215,7 @@ Usage:
 
   -p sigmoid [t<drop>,<hold>,<wake>]
       <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>] <tone-specs> ...
-  -G -p sigmoid [t<drop>,<hold>,<wake>]
+  -P -p sigmoid [t<drop>,<hold>,<wake>]
       <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>]
 
 Examples:
@@ -1423,10 +1425,12 @@ follows:
   -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid.
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
-  -P        Render a one-cycle isochronic (@) waveform graph as PNG and
-              exit.  Uses the current isochronic tone and `-I` settings.
-              Python+Cairo backend is preferred; otherwise
-              built-in plotting is used.
+  -P        Plot graph as PNG and exit.
+              With -p sigmoid: renders beat/pulse sigmoid graph.
+              Otherwise: renders one-cycle isochronic (@) waveform
+              using current tone and `-I` settings.
+              Python+Cairo backend is preferred; otherwise built-in
+              plotting is used.
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
               Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.

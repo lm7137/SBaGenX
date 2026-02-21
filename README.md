@@ -231,7 +231,8 @@ If extra static link dependencies are needed, pass them via:
 - `SBAGENX_STATIC_ENCODER_DEPS_WIN32`
 - `SBAGENX_STATIC_ENCODER_DEPS_WIN64`
 
-For high-quality graph rendering (`-G` / `-P`) with anti-aliased text,
+For high-quality graph rendering (`-P`, or legacy `-G` for sigmoid)
+with anti-aliased text,
 Windows builds now treat Python+Cairo as a required bundled runtime.
 `windows-build-sbagenx.sh` auto-prepares these runtimes if missing, then
 bundles them into:

@@ -312,10 +312,10 @@ help() {
 	  NL "Options:  -h        Display this help-text"
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
-	  NL "          -G        With -p sigmoid, render beat/pulse sigmoid graph as PNG and exit"
-	  NL "                     (prefers Python/Cairo backend when available)"
-	  NL "          -P        Render one-cycle isochronic waveform graph as PNG and exit"
-	  NL "                     (prefers Python/Cairo backend when available)"
+		  NL "          -P        Plot graph as PNG and exit (prefers Python/Cairo when available)"
+		  NL "                     With -p sigmoid: plots beat/pulse sigmoid curve"
+		  NL "                     Otherwise: plots one-cycle isochronic waveform"
+		  NL "          -G        Legacy alias for sigmoid plotting (-P with -p sigmoid)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -502,8 +502,9 @@ int tty_erase;			// Chars to erase from current line (for ESC[K emulation)
 
 int opt_Q;			// Quiet mode
 int opt_D;
-int opt_G;			// Graph mode for -p sigmoid: write PNG and exit
-int opt_P;			// Graph mode for 1-cycle isochronic waveform: write PNG and exit
+int opt_G;			// Legacy graph flag for -p sigmoid (-G)
+int opt_P;			// Unified plot flag (-P)
+int opt_P_sigmoid;		// -P used with -p sigmoid, so render sigmoid graph
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -2175,7 +2176,7 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
 	       wave_tok, carr_tok, pulse_tok, amp_tok, opt_I_e);
    } else {
       snprintf(fname, sizeof(fname),
-	       "iso_cycle_%s_c%s_p%s_a%s_legacy.png",
+	       "iso_cycle_%s_c%s_p%s_a%s_default.png",
 	       wave_tok, carr_tok, pulse_tok, amp_tok);
    }
 
@@ -2299,7 +2300,7 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
       snprintf(ptxt2, sizeof(ptxt2), "I:S=%.4f D=%.4f A=%.2f R=%.2f E=%d",
 	       opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
    } else {
-      snprintf(ptxt2, sizeof(ptxt2), "I=LEGACY THRESHOLD GATE");
+      snprintf(ptxt2, sizeof(ptxt2), "I=DEFAULT THRESHOLD GATE");
    }
    {
       int tw1= font5x7_text_width(ptxt1, param_scale);
@@ -2330,6 +2331,44 @@ write_iso_cycle_graph_png_from_sequence(void) {
    write_iso_cycle_graph_png(vv.carr, fabs(vv.res), AMP_AD(vv.amp), vv.waveform);
 }
 
+static void
+init_program_dir(char *argv0) {
+   char path[PATH_MAX];
+   char *src= argv0 && *argv0 ? argv0 : ".";
+   char *p;
+
+#ifdef WIN_MISC
+   {
+      DWORD len= GetModuleFileNameA(0, path, sizeof(path)-1);
+      if (len > 0 && len < sizeof(path)) {
+	 path[len]= 0;
+	 src= path;
+      }
+   }
+#else
+   if (src && !strchr(src, '/') && !strchr(src, '\\')) {
+      ssize_t len= readlink("/proc/self/exe", path, sizeof(path)-1);
+      if (len > 0 && len < sizeof(path)) {
+	 path[len]= 0;
+	 src= path;
+      }
+   }
+#endif
+
+   pdir= StrDup(src);
+   p= strchr(pdir, 0);
+   while (p > pdir && p[-1] != '/' && p[-1] != '\\') *--p= 0;
+
+   if (!*pdir) {
+      free(pdir);
+#ifdef WIN_MISC
+      pdir= StrDup(".\\");
+#else
+      pdir= StrDup("./");
+#endif
+   }
+}
+
 //
 //	M A I N
 //
@@ -2338,11 +2377,8 @@ int
 main(int argc, char **argv) {
    short test= 0x1100;
    int rv;
-   char *p;
    
-   pdir= StrDup(argv[0]);
-   p= strchr(pdir, 0);
-   while (p > pdir && p[-1] != '/' && p[-1] != '\\') *--p= 0;
+   init_program_dir(argv[0]);
 
    argc--; argv++;
    bigendian= ((char*)&test)[0] != 0;
@@ -2350,9 +2386,6 @@ main(int argc, char **argv) {
    // Process all the options
    rv= scanOptions(&argc, &argv);
 
-   if (opt_G && opt_P)
-      error("-G and -P cannot be used together");
-   
    if (argc < 1) usage();
    
    if (rv == 'i') {
@@ -2363,7 +2396,7 @@ main(int argc, char **argv) {
    } else if (rv == 'p') {
       // Pre-programmed sequence
       readPreProg(argc, argv);
-      if (opt_G) return 0;
+      if (opt_G || opt_P_sigmoid) return 0;
    } else {
       // Sequenced mode -- sequence may include options, so options
       // are not settled until below this point
@@ -6138,6 +6171,7 @@ void
 readPreProg(int ac, char **av) {
    clear_func_curve();
    clear_mix_mod_curve();
+   opt_P_sigmoid= 0;
 
    if (ac < 1) 
       error("Expecting a pre-programmed sequence description.  Examples:" 
@@ -6150,7 +6184,7 @@ readPreProg(int ac, char **av) {
       error("-A requires a mix input stream; use -m <file> or -M");
 
    if (opt_G && strcmp(av[0], "sigmoid") != 0)
-      error("-G is only supported with -p sigmoid");
+      error("-G is only supported with -p sigmoid (or use -P for isochronic waveform plots)");
    
    // Handle 'drop'
    if (0 == strcmp(av[0], "drop")) {
@@ -6170,6 +6204,8 @@ readPreProg(int ac, char **av) {
 
    // Handle 'sigmoid'
    if (0 == strcmp(av[0], "sigmoid")) {
+      if (opt_P && !opt_G)
+	 opt_P_sigmoid= 1;
       ac--; av++;
       create_sigmoid(ac, av);
       return;
@@ -6596,7 +6632,7 @@ create_sigmoid(int ac, char **av) {
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
 
-   if (opt_G) {
+   if (opt_G || opt_P_sigmoid) {
       write_sigmoid_graph_png(fmt, level, depth_ch, len0, len1, len2,
 			      beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
       return;
