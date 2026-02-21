@@ -74,12 +74,19 @@ bash linux-build-libs.sh
 bash linux-build-sbagenx.sh
 ```
 
-Then install the produced binary (for example):
+You can either install the produced binary directly:
 
 ```bash
 sudo cp dist/sbagenx-linux64 /usr/local/bin/sbagenx
 sudo chmod +x /usr/local/bin/sbagenx
 sbagenx -h
+```
+
+Or build an Ubuntu/Debian package:
+
+```bash
+bash linux-create-deb.sh
+sudo apt install ./dist/sbagenx_*_amd64.deb
 ```
 
 ### 🍎 Installing on macOS
@@ -165,6 +172,7 @@ SBaGenX can be compiled for macOS, Linux and Windows. The build process is divid
 - **Main program build scripts**:
   - `macos-build-sbagenx.sh`: Builds SBaGenX for macOS (universal binary - ARM64 + x86_64)
   - `linux-build-sbagenx.sh`: Builds SBaGenX for Linux (32-bit, 64-bit, ARM64 [if native])
+  - `linux-create-deb.sh`: Creates a Debian package from the Linux build output
   - `windows-build-sbagenx.sh`: Builds SBaGenX for Windows using MinGW (cross-compilation)
 
 #### 🐳 Option 1: Using Docker Compose (Simplest Method)
@@ -194,6 +202,7 @@ The build scripts are:
 ```
 <platform>-build-libs.sh # macOS, Linux, Windows
 <platform>-build-sbagenx.sh # macOS, Linux, Windows
+linux-create-deb.sh # Linux (.deb package)
 <platform>-create-installer.sh # macOS, Windows
 ```
 
