@@ -280,6 +280,15 @@ Defaults are:
 
   s=0.0485, d=0.4030, a=0.5, r=0.5, e=2
 
+To render a one-cycle isochronic plot (PNG) instead of audio output,
+use `-P` with an isochronic (`@`) tone:
+
+>> sbagenx -P -I s=0.05:d=0.40:a=0.50:r=0.50:e=2 -i 200@1/100
+
+This writes a two-panel graph (envelope + waveform) for exactly one
+pulse cycle, with labelled numeric ticks and the effective parameters
+printed at the bottom.
+
 You can also combine isochronic tones with other sounds:
 
 >> sbagenx -i pink/40 300@10/20
@@ -1183,7 +1192,8 @@ parameters, with unsupported filename characters replaced.
 The graph includes labelled axes and numeric tick marks.  The X-axis
 shows time in minutes (0 to D over the drop period).  The Y-axis
 shows beat/pulse frequency in Hz, with tick values snapped to readable
-whole/half steps (0.5Hz spacing).
+whole/half steps (0.5Hz spacing).  Rendering is supersampled for
+smoother curves and cleaner line quality.
 
 
 2.10.1: More detailed notes on -p sigmoid options
@@ -1403,6 +1413,8 @@ follows:
   -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid.
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
+  -P        Render a one-cycle isochronic (@) waveform graph as PNG and
+              exit.  Uses the current isochronic tone and `-I` settings.
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
               Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.

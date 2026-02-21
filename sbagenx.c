@@ -257,6 +257,7 @@ void write_sigmoid_graph_png(const char *fmt, double level,
 			     double beat_start, double beat_target,
 			     double sig_l, double sig_h,
 			     double sig_a, double sig_b);
+void write_iso_cycle_graph_png_from_sequence(void);
 
 #define ALLOC_ARR(cnt, type) ((type*)Alloc((cnt) * sizeof(type)))
 #define uint unsigned int
@@ -300,6 +301,7 @@ help() {
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
 	  NL "          -G        With -p sigmoid, render beat/pulse sigmoid graph as PNG and exit"
+	  NL "          -P        Render one-cycle isochronic waveform graph as PNG and exit"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -487,6 +489,7 @@ int tty_erase;			// Chars to erase from current line (for ESC[K emulation)
 int opt_Q;			// Quiet mode
 int opt_D;
 int opt_G;			// Graph mode for -p sigmoid: write PNG and exit
+int opt_P;			// Graph mode for 1-cycle isochronic waveform: write PNG and exit
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -1100,56 +1103,69 @@ iso_edge_shape(double x, int mode) {
 }
 
 static double
-isochronic_mod_factor(Channel *ch) {
-   if (opt_I) {
-      double phase= ch->off2 / (double)(ST_SIZ * 65536.0);
-      double duty= opt_I_d;
-      double start= opt_I_s;
-      double end= start + duty;
-      double u= -1.0;
-      double a= opt_I_a;
-      double r= opt_I_r;
+isochronic_mod_factor_phase_custom(double phase,
+				   double start, double duty,
+				   double attack, double release,
+				   int edge_mode) {
+   double end= start + duty;
+   double u= -1.0;
 
-      phase -= floor(phase);
-      if (phase < 0.0) phase += 1.0;
+   phase -= floor(phase);
+   if (phase < 0.0) phase += 1.0;
 
-      if (duty >= 1.0)
-	 return 1.0;
+   if (duty >= 1.0)
+      return 1.0;
 
-      if (end <= 1.0) {
-	 if (phase >= start && phase < end)
-	    u= (phase - start) / duty;
-      } else {
-	 if (phase >= start)
-	    u= (phase - start) / duty;
-	 else if (phase < (end - 1.0))
-	    u= (phase + (1.0 - start)) / duty;
-      }
+   if (end <= 1.0) {
+      if (phase >= start && phase < end)
+	 u= (phase - start) / duty;
+   } else {
+      if (phase >= start)
+	 u= (phase - start) / duty;
+      else if (phase < (end - 1.0))
+	 u= (phase + (1.0 - start)) / duty;
+   }
 
-      if (u <= 0.0 || u >= 1.0)
-	 return 0.0;
-
-      // Piecewise envelope in ON window:
-      // attack (a), optional sustain (1-a-r), release (r).
-      if (a > 0.0 && u < a)
-	 return iso_edge_shape(u / a, opt_I_e);
-      if (u <= (1.0 - r))
-	 return 1.0;
-      if (r > 0.0)
-	 return iso_edge_shape((1.0 - u) / r, opt_I_e);
+   if (u <= 0.0 || u >= 1.0)
       return 0.0;
-   }
 
-   {
-      int mod_val = sin_tables[ch->v.waveform][ch->off2 >> 16];
-      double mod_factor = 0.0;
+   if (attack > 0.0 && u < attack)
+      return iso_edge_shape(u / attack, edge_mode);
+   if (u <= (1.0 - release))
+      return 1.0;
+   if (release > 0.0)
+      return iso_edge_shape((1.0 - u) / release, edge_mode);
+   return 0.0;
+}
 
-      if (mod_val > ST_AMP * 0.3) {
-	 mod_factor = (mod_val - (ST_AMP * 0.3)) / (double)(ST_AMP * 0.7);
-	 mod_factor = mod_factor * mod_factor * (3 - 2 * mod_factor);
-      }
-      return mod_factor;
+static double
+wave_sample_phase(int waveform, double phase) {
+   int idx;
+   while (phase < 0.0) phase += 1.0;
+   phase -= floor(phase);
+   idx= (int)(phase * ST_SIZ);
+   if (idx >= ST_SIZ) idx= ST_SIZ-1;
+   return sin_tables[waveform][idx] / (double)ST_AMP;
+}
+
+static double
+isochronic_mod_factor_phase_legacy(double phase, int waveform) {
+   double wave= wave_sample_phase(waveform, phase);
+   double mod_factor= 0.0;
+   double threshold= 0.3;
+   if (wave > threshold) {
+      mod_factor= (wave - threshold) / (1.0 - threshold);
+      mod_factor= mod_factor * mod_factor * (3.0 - 2.0 * mod_factor);
    }
+   return mod_factor;
+}
+
+static double
+isochronic_mod_factor(Channel *ch) {
+   double phase= ch->off2 / (double)(ST_SIZ * 65536.0);
+   if (opt_I)
+      return isochronic_mod_factor_phase_custom(phase, opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
+   return isochronic_mod_factor_phase_legacy(phase, ch->v.waveform);
 }
 
 // Register function-driven exponential beat/pulse drop for one channel.
@@ -1290,6 +1306,36 @@ plot_set_px(unsigned char *img, int w, int h, int x, int y,
 }
 
 static void
+plot_fill(unsigned char *img, int w, int h,
+	  unsigned char r, unsigned char g, unsigned char b) {
+   int a, o;
+   for (a= 0, o= 0; a<w*h; a++, o += 3) {
+      img[o+0]= r;
+      img[o+1]= g;
+      img[o+2]= b;
+   }
+}
+
+static void
+plot_fill_rect(unsigned char *img, int w, int h,
+	       int x0, int y0, int x1, int y1,
+	       unsigned char r, unsigned char g, unsigned char b) {
+   int x, y, t;
+   if (x0 > x1) { t= x0; x0= x1; x1= t; }
+   if (y0 > y1) { t= y0; y0= y1; y1= t; }
+   if (x0 < 0) x0= 0;
+   if (y0 < 0) y0= 0;
+   if (x1 >= w) x1= w-1;
+   if (y1 >= h) y1= h-1;
+   if (x0 > x1 || y0 > y1) return;
+   for (y= y0; y<=y1; y++) {
+      for (x= x0; x<=x1; x++) {
+	 plot_set_px(img, w, h, x, y, r, g, b);
+      }
+   }
+}
+
+static void
 plot_line(unsigned char *img, int w, int h,
 	  int x0, int y0, int x1, int y1,
 	  unsigned char r, unsigned char g, unsigned char b) {
@@ -1304,6 +1350,24 @@ plot_line(unsigned char *img, int w, int h,
 	 int e2= 2 * err;
 	 if (e2 >= dy) { err += dy; x0 += sx; }
 	 if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+   }
+}
+
+static void
+plot_line_thick(unsigned char *img, int w, int h,
+		int x0, int y0, int x1, int y1, int thick,
+		unsigned char r, unsigned char g, unsigned char b) {
+   int rad, ox, oy;
+   if (thick <= 1) {
+      plot_line(img, w, h, x0, y0, x1, y1, r, g, b);
+      return;
+   }
+   rad= thick / 2;
+   for (oy= -rad; oy<=rad; oy++) {
+      for (ox= -rad; ox<=rad; ox++) {
+	 if (ox*ox + oy*oy <= rad*rad)
+	    plot_line(img, w, h, x0+ox, y0+oy, x1+ox, y1+oy, r, g, b);
       }
    }
 }
@@ -1324,6 +1388,45 @@ plot_vline(unsigned char *img, int w, int h, int x, int y0, int y1,
    if (y0 > y1) { int t= y0; y0= y1; y1= t; }
    for (y= y0; y<=y1; y++)
       plot_set_px(img, w, h, x, y, r, g, b);
+}
+
+static unsigned char
+plot_clamp_u8(int v) {
+   if (v < 0) return 0;
+   if (v > 255) return 255;
+   return (unsigned char)v;
+}
+
+static unsigned char *
+plot_downsample_box(unsigned char *src, int sw, int sh, int ss) {
+   int dw= sw / ss;
+   int dh= sh / ss;
+   int x, y, xx, yy;
+   int area= ss * ss;
+   unsigned char *dst= ALLOC_ARR(dw*dh*3, unsigned char);
+
+   for (y= 0; y<dh; y++) {
+      for (x= 0; x<dw; x++) {
+	 int sumr= 0, sumg= 0, sumb= 0;
+	 int doff= (y*dw + x) * 3;
+	 for (yy= 0; yy<ss; yy++) {
+	    int sy= y*ss + yy;
+	    int row= sy * sw;
+	    for (xx= 0; xx<ss; xx++) {
+	       int sx= x*ss + xx;
+	       int soff= (row + sx) * 3;
+	       sumr += src[soff+0];
+	       sumg += src[soff+1];
+	       sumb += src[soff+2];
+	    }
+	 }
+	 dst[doff+0]= plot_clamp_u8((sumr + area/2) / area);
+	 dst[doff+1]= plot_clamp_u8((sumg + area/2) / area);
+	 dst[doff+2]= plot_clamp_u8((sumb + area/2) / area);
+      }
+   }
+
+   return dst;
 }
 
 static void
@@ -1371,36 +1474,105 @@ font5x7_glyph(char ch, unsigned char g[7]) {
     case 'A':
       g[0]= 0x0E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x1F;
       g[4]= 0x11; g[5]= 0x11; g[6]= 0x11; break;
+    case 'B':
+      g[0]= 0x1E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x1E;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x1E; break;
+    case 'C':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x10; g[3]= 0x10;
+      g[4]= 0x10; g[5]= 0x11; g[6]= 0x0E; break;
+    case 'D':
+      g[0]= 0x1E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x11;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x1E; break;
     case 'E':
       g[0]= 0x1F; g[1]= 0x10; g[2]= 0x10; g[3]= 0x1E;
       g[4]= 0x10; g[5]= 0x10; g[6]= 0x1F; break;
     case 'F':
       g[0]= 0x1F; g[1]= 0x10; g[2]= 0x10; g[3]= 0x1E;
       g[4]= 0x10; g[5]= 0x10; g[6]= 0x10; break;
+    case 'G':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x10; g[3]= 0x17;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x0E; break;
     case 'H':
       g[0]= 0x11; g[1]= 0x11; g[2]= 0x11; g[3]= 0x1F;
       g[4]= 0x11; g[5]= 0x11; g[6]= 0x11; break;
     case 'I':
       g[0]= 0x1F; g[1]= 0x04; g[2]= 0x04; g[3]= 0x04;
       g[4]= 0x04; g[5]= 0x04; g[6]= 0x1F; break;
+    case 'J':
+      g[0]= 0x01; g[1]= 0x01; g[2]= 0x01; g[3]= 0x01;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x0E; break;
+    case 'K':
+      g[0]= 0x11; g[1]= 0x12; g[2]= 0x14; g[3]= 0x18;
+      g[4]= 0x14; g[5]= 0x12; g[6]= 0x11; break;
+    case 'L':
+      g[0]= 0x10; g[1]= 0x10; g[2]= 0x10; g[3]= 0x10;
+      g[4]= 0x10; g[5]= 0x10; g[6]= 0x1F; break;
     case 'M':
       g[0]= 0x11; g[1]= 0x1B; g[2]= 0x15; g[3]= 0x15;
       g[4]= 0x11; g[5]= 0x11; g[6]= 0x11; break;
     case 'N':
       g[0]= 0x11; g[1]= 0x19; g[2]= 0x15; g[3]= 0x13;
       g[4]= 0x11; g[5]= 0x11; g[6]= 0x11; break;
+    case 'O':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x11;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x0E; break;
+    case 'P':
+      g[0]= 0x1E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x1E;
+      g[4]= 0x10; g[5]= 0x10; g[6]= 0x10; break;
     case 'Q':
       g[0]= 0x0E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x11;
       g[4]= 0x15; g[5]= 0x12; g[6]= 0x0D; break;
     case 'R':
       g[0]= 0x1E; g[1]= 0x11; g[2]= 0x11; g[3]= 0x1E;
       g[4]= 0x14; g[5]= 0x12; g[6]= 0x11; break;
+    case 'S':
+      g[0]= 0x0F; g[1]= 0x10; g[2]= 0x10; g[3]= 0x0E;
+      g[4]= 0x01; g[5]= 0x01; g[6]= 0x1E; break;
     case 'T':
       g[0]= 0x1F; g[1]= 0x04; g[2]= 0x04; g[3]= 0x04;
+      g[4]= 0x04; g[5]= 0x04; g[6]= 0x04; break;
+    case 'U':
+      g[0]= 0x11; g[1]= 0x11; g[2]= 0x11; g[3]= 0x11;
+      g[4]= 0x11; g[5]= 0x11; g[6]= 0x0E; break;
+    case 'V':
+      g[0]= 0x11; g[1]= 0x11; g[2]= 0x11; g[3]= 0x11;
+      g[4]= 0x0A; g[5]= 0x0A; g[6]= 0x04; break;
+    case 'W':
+      g[0]= 0x11; g[1]= 0x11; g[2]= 0x11; g[3]= 0x15;
+      g[4]= 0x15; g[5]= 0x15; g[6]= 0x0A; break;
+    case 'X':
+      g[0]= 0x11; g[1]= 0x11; g[2]= 0x0A; g[3]= 0x04;
+      g[4]= 0x0A; g[5]= 0x11; g[6]= 0x11; break;
+    case 'Y':
+      g[0]= 0x11; g[1]= 0x11; g[2]= 0x0A; g[3]= 0x04;
       g[4]= 0x04; g[5]= 0x04; g[6]= 0x04; break;
     case 'Z':
       g[0]= 0x1F; g[1]= 0x01; g[2]= 0x02; g[3]= 0x04;
       g[4]= 0x08; g[5]= 0x10; g[6]= 0x1F; break;
+    case ':':
+      g[0]= 0x00; g[1]= 0x06; g[2]= 0x06; g[3]= 0x00;
+      g[4]= 0x06; g[5]= 0x06; g[6]= 0x00; break;
+    case '/':
+      g[0]= 0x01; g[1]= 0x02; g[2]= 0x04; g[3]= 0x08;
+      g[4]= 0x10; g[5]= 0x00; g[6]= 0x00; break;
+    case '=':
+      g[0]= 0x00; g[1]= 0x1F; g[2]= 0x00; g[3]= 0x1F;
+      g[4]= 0x00; g[5]= 0x00; g[6]= 0x00; break;
+    case '+':
+      g[0]= 0x00; g[1]= 0x04; g[2]= 0x04; g[3]= 0x1F;
+      g[4]= 0x04; g[5]= 0x04; g[6]= 0x00; break;
+    case '_':
+      g[0]= 0x00; g[1]= 0x00; g[2]= 0x00; g[3]= 0x00;
+      g[4]= 0x00; g[5]= 0x00; g[6]= 0x1F; break;
+    case ',':
+      g[0]= 0x00; g[1]= 0x00; g[2]= 0x00; g[3]= 0x00;
+      g[4]= 0x06; g[5]= 0x06; g[6]= 0x04; break;
+    case '%':
+      g[0]= 0x19; g[1]= 0x19; g[2]= 0x02; g[3]= 0x04;
+      g[4]= 0x08; g[5]= 0x13; g[6]= 0x13; break;
+    case '@':
+      g[0]= 0x0E; g[1]= 0x11; g[2]= 0x17; g[3]= 0x15;
+      g[4]= 0x17; g[5]= 0x10; g[6]= 0x0E; break;
     default:
       break;
    }
@@ -1551,18 +1723,20 @@ write_sigmoid_graph_png(const char *fmt, double level,
 			double beat_start, double beat_target,
 			double sig_l, double sig_h,
 			double sig_a, double sig_b) {
-   int w= 1200, h= 700;
-   int ml= 150, mr= 40, mt= 40, mb= 120;
-   int pw= w - ml - mr, ph= h - mt - mb;
-   int a;
+   int w= 1200, h= 700, ss= 4;
+   int hw= w * ss, hh= h * ss;
+   int ml= 150 * ss, mr= 40 * ss, mt= 40 * ss, mb= 120 * ss;
+   int pw= hw - ml - mr, ph= hh - mt - mb;
+   int a, gy;
+   unsigned char *img_hi;
    unsigned char *img;
    double d_min= len0 / 60.0;
    double y_min= 1e30, y_max= -1e30;
    double y_pad, y_span;
    double y_tick_step, y_tick_first, y_tick_last;
    int start_y= -1, end_y= -1;
-   int label_scale= 3;
-   int tick_scale= 2;
+   int label_scale= 3 * ss;
+   int tick_scale= 2 * ss;
    int prev_x= -1, prev_y= -1;
    char fmt_tok[256], lvl_tok[64], l_tok[64], h_tok[64];
    char tick_txt[64];
@@ -1573,12 +1747,12 @@ write_sigmoid_graph_png(const char *fmt, double level,
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
 
-   img= ALLOC_ARR(w*h*3, unsigned char);
-   memset(img, 255, w*h*3);
+   img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
+   plot_fill(img_hi, hw, hh, 255, 255, 255);
 
    for (a= 0; a<=10; a++) {
       int gx= ml + (pw-1) * a / 10;
-      plot_vline(img, w, h, gx, mt, mt+ph-1, 236, 236, 236);
+      plot_vline(img_hi, hw, hh, gx, mt, mt+ph-1, 236, 236, 236);
    }
 
    for (a= 0; a<=2000; a++) {
@@ -1611,15 +1785,15 @@ write_sigmoid_graph_png(const char *fmt, double level,
    {
       double yv;
       for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
-	 int gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
-	 plot_hline(img, w, h, ml, ml+pw-1, gy, 236, 236, 236);
+	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+	 plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
       }
    }
 
-   plot_hline(img, w, h, ml, ml+pw-1, mt, 90, 90, 90);
-   plot_hline(img, w, h, ml, ml+pw-1, mt+ph-1, 90, 90, 90);
-   plot_vline(img, w, h, ml, mt, mt+ph-1, 90, 90, 90);
-   plot_vline(img, w, h, ml+pw-1, mt, mt+ph-1, 90, 90, 90);
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt, 90, 90, 90);
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt+ph-1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml, mt, mt+ph-1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml+pw-1, mt, mt+ph-1, 90, 90, 90);
 
    for (a= 0; a<pw; a++) {
       double t_min= d_min * a / (double)(pw-1);
@@ -1629,7 +1803,7 @@ write_sigmoid_graph_png(const char *fmt, double level,
       if (a == 0) start_y= py;
       if (a == pw-1) end_y= py;
       if (prev_x >= 0)
-	 plot_line(img, w, h, prev_x, prev_y, px, py, 34, 94, 224);
+	 plot_line_thick(img_hi, hw, hh, prev_x, prev_y, px, py, ss+1, 34, 94, 224);
       prev_x= px;
       prev_y= py;
    }
@@ -1639,45 +1813,48 @@ write_sigmoid_graph_png(const char *fmt, double level,
       int tw, tx, ty;
       double xv= d_min * a / 10.0;
       format_tick_value(xv, tick_txt, sizeof(tick_txt));
-      plot_vline(img, w, h, gx, mt+ph-1, mt+ph+4, 90, 90, 90);
+      plot_vline(img_hi, hw, hh, gx, mt+ph-1, mt+ph+4*ss, 90, 90, 90);
       tw= font5x7_text_width(tick_txt, tick_scale);
       tx= gx - tw/2;
-      ty= mt + ph + 10;
-      font5x7_draw_text(img, w, h, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+      ty= mt + ph + 10*ss;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
    {
       double yv;
       for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
-	 int gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
 	 int tw, tx, ty;
 	 format_tick_value(yv, tick_txt, sizeof(tick_txt));
-	 plot_hline(img, w, h, ml-4, ml, gy, 90, 90, 90);
+	 plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
 	 tw= font5x7_text_width(tick_txt, tick_scale);
-	 tx= ml - 8 - tw;
+	 tx= ml - 8*ss - tw;
 	 ty= gy - (7 * tick_scale) / 2;
-	 font5x7_draw_text(img, w, h, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+	 font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
       }
    }
 
-   for (a= -4; a<=4; a++) {
-      plot_set_px(img, w, h, ml + a, start_y, 220, 40, 40);
-      plot_set_px(img, w, h, ml + pw - 1 + a, end_y, 220, 40, 40);
+   for (a= -4*ss; a<=4*ss; a++) {
+      plot_set_px(img_hi, hw, hh, ml + a, start_y, 220, 40, 40);
+      plot_set_px(img_hi, hw, hh, ml + pw - 1 + a, end_y, 220, 40, 40);
    }
 
    {
       int xw= font5x7_text_width(x_label, label_scale);
       int x0= ml + (pw - xw) / 2;
-      int y0= h - 7*label_scale - 8;
-      font5x7_draw_text(img, w, h, x0, y0, x_label, label_scale, 0, 30, 30, 30);
+      int y0= hh - 7*label_scale - 8*ss;
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, x_label, label_scale, 0, 30, 30, 30);
    }
 
    {
       int yh= font5x7_text_height_rot90(y_label, label_scale);
-      int x0= 20;
+      int x0= 20*ss;
       int y0= mt + (ph - yh) / 2;
-      font5x7_draw_text(img, w, h, x0, y0, y_label, label_scale, 1, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, y_label, label_scale, 1, 30, 30, 30);
    }
+
+   img= plot_downsample_box(img_hi, hw, hh, ss);
+   free(img_hi);
 
    sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
    double_to_token(level, lvl_tok, sizeof(lvl_tok));
@@ -1694,6 +1871,222 @@ write_sigmoid_graph_png(const char *fmt, double level,
       warn("Sigmoid graph saved to: %s", fname);
 
    free(img);
+}
+
+static int
+find_first_iso_voice(Voice *out) {
+   Period *pp;
+   int ch;
+   if (!per) return 0;
+   pp= per;
+   do {
+      for (ch= 0; ch<N_CH; ch++) {
+	 if (pp->v0[ch].typ == 8 && pp->v0[ch].amp > 0.0) {
+	    *out= pp->v0[ch];
+	    return 1;
+	 }
+      }
+      for (ch= 0; ch<N_CH; ch++) {
+	 if (pp->v1[ch].typ == 8 && pp->v1[ch].amp > 0.0) {
+	    *out= pp->v1[ch];
+	    return 1;
+	 }
+      }
+      pp= pp->nxt;
+   } while (pp != per);
+   return 0;
+}
+
+static void
+write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
+			  double amp_pct, int waveform) {
+   int w= 1600, h= 980, ss= 4;
+   int hw= w * ss, hh= h * ss;
+   int ml= 130 * ss, mr= 40 * ss, mt= 40 * ss, mb= 160 * ss;
+   int gap= 70 * ss;
+   int pw= hw - ml - mr;
+   int ph= (hh - mt - mb - gap) / 2;
+   int top_y0= mt, top_y1= mt + ph - 1;
+   int bot_y0= mt + ph + gap, bot_y1= mt + ph + gap + ph - 1;
+   int tick_scale= 2 * ss;
+   int label_scale= 3 * ss;
+   int param_scale= 3 * ss;
+   int a, i, prev_ex= -1, prev_ey= -1, prev_wx= -1, prev_wy= -1;
+   unsigned char *img_hi;
+   unsigned char *img;
+   double period_sec;
+   char carr_tok[64], pulse_tok[64], amp_tok[64];
+   char wave_tok[64], tick_txt[64], fname[512];
+   char ptxt1[256], ptxt2[256];
+   const char *title= "ISOCHRONIC SINGLE-CYCLE PLOT";
+
+   if (pulse_hz <= 0.0)
+      error("-P requires an isochronic pulse frequency > 0 Hz");
+
+   if (waveform < 0 || waveform > 3)
+      waveform= 0;
+
+   period_sec= 1.0 / pulse_hz;
+   if (period_sec <= 0.0)
+      error("-P calculated an invalid cycle period");
+
+   img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
+   plot_fill(img_hi, hw, hh, 255, 255, 255);
+   plot_fill_rect(img_hi, hw, hh, ml, top_y0, ml+pw-1, top_y1, 250, 250, 250);
+   plot_fill_rect(img_hi, hw, hh, ml, bot_y0, ml+pw-1, bot_y1, 250, 250, 250);
+
+   for (i= 0; i<=10; i++) {
+      int gx= ml + (pw-1) * i / 10;
+      plot_vline(img_hi, hw, hh, gx, top_y0, top_y1, 236, 236, 236);
+      plot_vline(img_hi, hw, hh, gx, bot_y0, bot_y1, 236, 236, 236);
+   }
+   for (i= 0; i<=10; i++) {
+      int gy= top_y0 + (ph-1) * i / 10;
+      plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
+   }
+   for (i= 0; i<=10; i++) {
+      int gy= bot_y0 + (ph-1) * i / 10;
+      plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
+   }
+
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, top_y0, 90, 90, 90);
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, top_y1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml, top_y0, top_y1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml+pw-1, top_y0, top_y1, 90, 90, 90);
+
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, bot_y0, 90, 90, 90);
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, bot_y1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml, bot_y0, bot_y1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml+pw-1, bot_y0, bot_y1, 90, 90, 90);
+
+   for (a= 0; a<pw; a++) {
+      int ex= ml + a;
+      double t= period_sec * a / (double)(pw-1);
+      double pulse_phase= pulse_hz * t;
+      double carr_phase= carr_hz * t;
+      double env= opt_I ?
+	 isochronic_mod_factor_phase_custom(pulse_phase, opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e) :
+	 isochronic_mod_factor_phase_legacy(pulse_phase, waveform);
+      double wav= wave_sample_phase(waveform, carr_phase) * env * (amp_pct / 100.0);
+      int ey= top_y0 + (int)((1.0 - env) * (ph-1) + 0.5);
+      int wy= bot_y0 + (int)((1.0 - ((wav + 1.0) * 0.5)) * (ph-1) + 0.5);
+
+      if (prev_ex >= 0) {
+	 plot_line_thick(img_hi, hw, hh, prev_ex, prev_ey, ex, ey, ss+1, 220, 40, 40);
+	 plot_line_thick(img_hi, hw, hh, prev_wx, prev_wy, ex, wy, ss+1, 34, 94, 224);
+      }
+      prev_ex= ex; prev_ey= ey;
+      prev_wx= ex; prev_wy= wy;
+   }
+
+   for (i= 0; i<=10; i++) {
+      int gx= ml + (pw-1) * i / 10;
+      double xv= period_sec * i / 10.0;
+      int tx, tw;
+      format_tick_value(xv, tick_txt, sizeof(tick_txt));
+      plot_vline(img_hi, hw, hh, gx, bot_y1, bot_y1 + 4*ss, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= gx - tw/2;
+      font5x7_draw_text(img_hi, hw, hh, tx, bot_y1 + 10*ss, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   for (i= 0; i<=10; i++) {
+      double yv= 1.0 - i * 0.1;
+      int gy= top_y0 + (int)((1.0 - yv) * (ph-1) + 0.5);
+      int tw, tx, ty;
+      format_tick_value(yv, tick_txt, sizeof(tick_txt));
+      plot_hline(img_hi, hw, hh, ml - 4*ss, ml, gy, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= ml - 8*ss - tw;
+      ty= gy - (7 * tick_scale) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   for (i= 0; i<=10; i++) {
+      double yv= 1.0 - i * 0.2;  /* +1 down to -1 */
+      int gy= bot_y0 + (int)((1.0 - ((yv + 1.0) * 0.5)) * (ph-1) + 0.5);
+      int tw, tx, ty;
+      format_tick_value(yv, tick_txt, sizeof(tick_txt));
+      plot_hline(img_hi, hw, hh, ml - 4*ss, ml, gy, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= ml - 8*ss - tw;
+      ty= gy - (7 * tick_scale) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   {
+      int tw= font5x7_text_width(title, label_scale);
+      int tx= ml + (pw - tw) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, 8*ss, title, label_scale, 0, 25, 25, 25);
+   }
+   {
+      const char *x_label= "TIME SEC";
+      int tw= font5x7_text_width(x_label, label_scale);
+      int tx= ml + (pw - tw) / 2;
+      int ty= bot_y1 + 32*ss;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, x_label, label_scale, 0, 30, 30, 30);
+   }
+   {
+      const char *y1_label= "ENVELOPE";
+      const char *y2_label= "WAVEFORM";
+      int yh1= font5x7_text_height_rot90(y1_label, label_scale);
+      int yh2= font5x7_text_height_rot90(y2_label, label_scale);
+      int x0= 18 * ss;
+      int y01= top_y0 + (ph - yh1) / 2;
+      int y02= bot_y0 + (ph - yh2) / 2;
+      font5x7_draw_text(img_hi, hw, hh, x0, y01, y1_label, label_scale, 1, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y02, y2_label, label_scale, 1, 30, 30, 30);
+   }
+
+   snprintf(ptxt1, sizeof(ptxt1), "C=%.1fHZ P=%.2fHZ A=%.1f%% W=%s",
+	    carr_hz, pulse_hz, amp_pct, waveform_name[waveform]);
+   if (opt_I) {
+      snprintf(ptxt2, sizeof(ptxt2), "I:S=%.4f D=%.4f A=%.2f R=%.2f E=%d",
+	       opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
+   } else {
+      snprintf(ptxt2, sizeof(ptxt2), "I=LEGACY THRESHOLD GATE");
+   }
+   {
+      int tw1= font5x7_text_width(ptxt1, param_scale);
+      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tx1= ml + (pw - tw1) / 2;
+      int tx2= ml + (pw - tw2) / 2;
+      int ty1= hh - 66 * ss;
+      int ty2= hh - 38 * ss;
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+   }
+
+   img= plot_downsample_box(img_hi, hw, hh, ss);
+   free(img_hi);
+
+   sanitize_filename_token(waveform_name[waveform], wave_tok, sizeof(wave_tok));
+   double_to_token(carr_hz, carr_tok, sizeof(carr_tok));
+   double_to_token(pulse_hz, pulse_tok, sizeof(pulse_tok));
+   double_to_token(amp_pct, amp_tok, sizeof(amp_tok));
+   if (opt_I) {
+      snprintf(fname, sizeof(fname),
+	       "iso_cycle_%s_c%s_p%s_a%s_i%d.png",
+	       wave_tok, carr_tok, pulse_tok, amp_tok, opt_I_e);
+   } else {
+      snprintf(fname, sizeof(fname),
+	       "iso_cycle_%s_c%s_p%s_a%s_legacy.png",
+	       wave_tok, carr_tok, pulse_tok, amp_tok);
+   }
+
+   if (!stbi_write_png(fname, w, h, 3, img, w*3))
+      error("Failed to write isochronic cycle graph PNG file");
+   if (!opt_Q)
+      warn("Isochronic cycle graph saved to: %s", fname);
+   free(img);
+}
+
+void
+write_iso_cycle_graph_png_from_sequence(void) {
+   Voice vv;
+   if (!find_first_iso_voice(&vv))
+      error("-P requires at least one isochronic (@) tone in the loaded sequence");
+   write_iso_cycle_graph_png(vv.carr, fabs(vv.res), AMP_AD(vv.amp), vv.waveform);
 }
 
 //
@@ -1715,6 +2108,9 @@ main(int argc, char **argv) {
    
    // Process all the options
    rv= scanOptions(&argc, &argv);
+
+   if (opt_G && opt_P)
+      error("-G and -P cannot be used together");
    
    if (argc < 1) usage();
    
@@ -1737,6 +2133,11 @@ main(int argc, char **argv) {
    }
 
    init_sin_table();
+
+   if (opt_P) {
+      write_iso_cycle_graph_png_from_sequence();
+      return 0;
+   }
    
    if (opt_W && !opt_o && !opt_O)
       error("Use -o or -O with the -W option");
@@ -1953,6 +2354,7 @@ scanOptions(int *acp, char ***avp) {
 	  case 'h': help(); break;
 	  case 'D': opt_D= 1; break;
 	  case 'G': opt_G= 1; break;
+	  case 'P': opt_P= 1; break;
 	  case 'M': opt_M= 1; break;
 	  case 'O': opt_O= 1;
 	     if (!fast_mult) fast_mult= 1; 		// Don't try to sync with real time
