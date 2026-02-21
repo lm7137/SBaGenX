@@ -263,6 +263,23 @@ This creates an isochronic tone with a carrier frequency of 300Hz, pulsing at
 10Hz (alpha range), with an amplitude of 20%. Unlike binaural beats, isochronic 
 tones can be effective even without headphones.
 
+You can optionally customize the isochronic pulse gate using `-I`:
+
+>> sbagenx -I s=0.05:d=0.40 -i 300@10/20
+
+`s` is the cycle start proportion (0 to <1) and `d` is duty (0 to 1].
+Additional optional envelope parameters:
+
+  a  attack fraction of the ON window (0..1)
+  r  release fraction of the ON window (0..1)
+  e  edge-shape mode: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep
+
+Parameters are colon-separated, order-independent, and may be omitted.
+Constraint: `a + r <= 1`.
+Defaults are:
+
+  s=0.0485, d=0.4030, a=0.5, r=0.5, e=2
+
 You can also combine isochronic tones with other sounds:
 
 >> sbagenx -i pink/40 300@10/20
@@ -1386,6 +1403,11 @@ follows:
   -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid.
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
+  -I [spec] Customize isochronic (@) pulse envelope.
+              Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
+              Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.
+              Constraint: a+r <= 1.
+              e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
   -i ...    Generate the whole sequence from an 'immediate' spec
   -p ...    Generate the whole sequence from a prodefined sequence type,
               e.g. -p drop or -p slide

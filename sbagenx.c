@@ -232,6 +232,8 @@ void create_sigmoid(int ac, char **av);
 void create_slide(int ac, char **av);
 int is_mix_mod_option_spec(const char *spec);
 void parse_mix_mod_option_spec(const char *spec);
+int is_iso_gate_option_spec(const char *spec);
+void parse_iso_gate_option_spec(const char *spec);
 void clear_mix_mod_curve(void);
 void setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level,
 			 double main_len_min, double wake_len_min, int wake_enabled);
@@ -349,6 +351,9 @@ help() {
 	  NL "          -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid"
 	  NL "                      with mix input; spec is d=<v>:e=<v>:k=<v>:E=<v>"
 	  NL "                      defaults: d=0.3:e=0.3:k=10:E=0.7"
+	  NL "          -I [spec] Customize isochronic (@) pulse envelope; spec is"
+	  NL "                      s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>"
+	  NL "                      defaults s=0.0485:d=0.4030:a=0.5:r=0.5:e=2"
 	  NL
 	  NL "          -R rate   Select rate in Hz that frequency changes are recalculated"
 	  NL "                     (for file/pipe output only, default is 10Hz)"
@@ -502,6 +507,12 @@ double opt_A_d= 0.3;		// d parameter for mix modulation
 double opt_A_e= 0.3;		// e parameter for mix modulation
 double opt_A_k= 10.0;		// k parameter (minutes) for mix modulation
 double opt_A_E= 0.7;		// E parameter for mix modulation
+int opt_I;			// Enable custom isochronic gate for @ tones
+double opt_I_s= 0.048493;	// Gate start as cycle proportion (legacy-equivalent default)
+double opt_I_d= 0.403014;	// Gate duty as cycle proportion (legacy-equivalent default)
+double opt_I_a= 0.5;		// Attack as fraction of ON window
+double opt_I_r= 0.5;		// Release as fraction of ON window
+int opt_I_e= 2;			// Edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
 char *waveform_name[] = {"sine", "square", "triangle", "sawtooth"}; // To be used for messages
 
 FILE *mix_in;			// Input stream for mix sound data, or 0
@@ -991,6 +1002,154 @@ parse_mix_mod_option_spec(const char *spec) {
       error("-A parameter k must be > 0");
    if (opt_A_E < 0.0 || opt_A_E > 1.0)
       error("-A parameter E must be in range 0..1");
+}
+
+int
+is_iso_gate_option_spec(const char *spec) {
+   const char *p= spec;
+   if (!p || !*p) return 0;
+   if (*p == '-') return 0;
+   if (!strchr(p, '=')) return 0;
+   if (*p == ':') p++;
+   return (*p == 's' || *p == 'd' || *p == 'a' || *p == 'r' || *p == 'e');
+}
+
+void
+parse_iso_gate_option_spec(const char *spec) {
+   char tmp[256];
+   char *p, *q, *q2;
+   long edge;
+   if (!spec || !*spec) return;
+   if (strlen(spec) >= sizeof(tmp))
+      error("-I spec is too long");
+   strcpy(tmp, spec);
+   p= tmp;
+
+   while (*p) {
+      while (*p == ':') p++;
+      if (!*p) break;
+      switch (*p++) {
+       case 's':
+	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
+	  opt_I_s= strtod(p, &q);
+	  if (q == p) error("-I parameter s requires a numeric value");
+	  p= q;
+	  break;
+       case 'd':
+	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
+	  opt_I_d= strtod(p, &q);
+	  if (q == p) error("-I parameter d requires a numeric value");
+	  p= q;
+	  break;
+       case 'a':
+	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
+	  opt_I_a= strtod(p, &q);
+	  if (q == p) error("-I parameter a requires a numeric value");
+	  p= q;
+	  break;
+       case 'r':
+	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
+	  opt_I_r= strtod(p, &q);
+	  if (q == p) error("-I parameter r requires a numeric value");
+	  p= q;
+	  break;
+       case 'e':
+	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
+	  edge= strtol(p, &q, 10);
+	  if (q == p) error("-I parameter e requires an integer value");
+	  q2= q;
+	  while (isspace((unsigned char)*q2)) q2++;
+	  if (*q2 && *q2 != ':')
+	     error("-I parameter e must be an integer in range 0..3");
+	  opt_I_e= (int)edge;
+	  p= q;
+	  break;
+       default:
+	  error("-I only supports s=, d=, a=, r= and e= parameters");
+      }
+
+      if (*p == ':') p++;
+      else if (*p) error("-I expects colon-separated parameters");
+   }
+
+   if (opt_I_s < 0.0 || opt_I_s >= 1.0)
+      error("-I parameter s must be in range [0,1)");
+   if (opt_I_d <= 0.0 || opt_I_d > 1.0)
+      error("-I parameter d must be in range (0,1]");
+   if (opt_I_a < 0.0 || opt_I_a > 1.0)
+      error("-I parameter a must be in range [0,1]");
+   if (opt_I_r < 0.0 || opt_I_r > 1.0)
+      error("-I parameter r must be in range [0,1]");
+   if (opt_I_a + opt_I_r > 1.0)
+      error("-I parameters a+r must be <= 1");
+   if (opt_I_e < 0 || opt_I_e > 3)
+      error("-I parameter e must be in range 0..3");
+}
+
+static double
+iso_edge_shape(double x, int mode) {
+   if (x <= 0.0) return 0.0;
+   if (x >= 1.0) return 1.0;
+   switch (mode) {
+    case 0: return x > 0.0 ? 1.0 : 0.0;                    // Hard edge
+    case 1: return x;                                       // Linear
+    case 3: return x*x*x*(x*(x*6.0 - 15.0) + 10.0);        // Smootherstep
+    case 2:
+    default: return x*x*(3.0 - 2.0*x);                     // Smoothstep
+   }
+}
+
+static double
+isochronic_mod_factor(Channel *ch) {
+   if (opt_I) {
+      double phase= ch->off2 / (double)(ST_SIZ * 65536.0);
+      double duty= opt_I_d;
+      double start= opt_I_s;
+      double end= start + duty;
+      double u= -1.0;
+      double a= opt_I_a;
+      double r= opt_I_r;
+
+      phase -= floor(phase);
+      if (phase < 0.0) phase += 1.0;
+
+      if (duty >= 1.0)
+	 return 1.0;
+
+      if (end <= 1.0) {
+	 if (phase >= start && phase < end)
+	    u= (phase - start) / duty;
+      } else {
+	 if (phase >= start)
+	    u= (phase - start) / duty;
+	 else if (phase < (end - 1.0))
+	    u= (phase + (1.0 - start)) / duty;
+      }
+
+      if (u <= 0.0 || u >= 1.0)
+	 return 0.0;
+
+      // Piecewise envelope in ON window:
+      // attack (a), optional sustain (1-a-r), release (r).
+      if (a > 0.0 && u < a)
+	 return iso_edge_shape(u / a, opt_I_e);
+      if (u <= (1.0 - r))
+	 return 1.0;
+      if (r > 0.0)
+	 return iso_edge_shape((1.0 - u) / r, opt_I_e);
+      return 0.0;
+   }
+
+   {
+      int mod_val = sin_tables[ch->v.waveform][ch->off2 >> 16];
+      double mod_factor = 0.0;
+
+      if (mod_val > ST_AMP * 0.3) {
+	 mod_factor = (mod_val - (ST_AMP * 0.3)) / (double)(ST_AMP * 0.7);
+	 mod_factor = mod_factor * mod_factor * (3 - 2 * mod_factor);
+      }
+      return mod_factor;
+   }
 }
 
 // Register function-driven exponential beat/pulse drop for one channel.
@@ -1725,6 +1884,18 @@ scanOptions(int *acp, char ***avp) {
 		p += strlen(p);
 	     } else if (argc > 0 && is_mix_mod_option_spec(argv[0])) {
 		parse_mix_mod_option_spec(*argv++);
+		argc--;
+	     }
+	     break;
+	  case 'I':
+	     opt_I= 1;
+	     if (*p) {
+		if (!is_iso_gate_option_spec(p))
+		   error("-I optional spec must be s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
+		parse_iso_gate_option_spec(p);
+		p += strlen(p);
+	     } else if (argc > 0 && is_iso_gate_option_spec(argv[0])) {
+		parse_iso_gate_option_spec(*argv++);
 		argc--;
 	     }
 	     break;
@@ -3230,35 +3401,20 @@ outChunk() {
             tot2 += (int)(base_amp * mix2 * gain);
           }
           break;
-       case 8:  // Isochronic tones
-          ch->off1 += ch->inc1;  // Carrier (tone frequency)
-          ch->off1 &= (ST_SIZ << 16) - 1;
-          ch->off2 += ch->inc2;  // Modulator (pulse frequency)
-          ch->off2 &= (ST_SIZ << 16) - 1;
-          
-          // Change the modulator to create a true isochronic tone with space between pulses
-          {
-            int mod_val = sin_tables[ch->v.waveform][ch->off2 >> 16];
-            // Apply a threshold to create distinct pulses with space between them
-            // Only produce sound when the modulation value is above a certain threshold
-            double mod_factor = 0.0;
-            
-            // Use only the positive part of the sine wave and apply a threshold
-            // to create a space between pulses
-            if (mod_val > ST_AMP * 0.3) {  // Threshold of 30% of the maximum value
-              // Normalize from ST_AMP*0.3 to ST_AMP to 0 to 1
-              mod_factor = (mod_val - (ST_AMP * 0.3)) / (double)(ST_AMP * 0.7);
-              // Smooth the edges of the pulse to avoid clicks
-              mod_factor = mod_factor * mod_factor * (3 - 2 * mod_factor);  // Cubic smoothing
-            }
-            
-            // Apply the modulation to the carrier
-            // val = ch->amp * sin_table[ch->off1 >> 16] * mod_factor;
-            val = ch->amp * sin_tables[ch->v.waveform][ch->off1 >> 16] * mod_factor;
-            tot1 += val;
-            tot2 += val;
-          }
-          break;
+	       case 8:  // Isochronic tones
+	          ch->off1 += ch->inc1;  // Carrier (tone frequency)
+	          ch->off1 &= (ST_SIZ << 16) - 1;
+	          ch->off2 += ch->inc2;  // Modulator (pulse frequency)
+	          ch->off2 &= (ST_SIZ << 16) - 1;
+	          
+	          {
+	            double mod_factor = isochronic_mod_factor(ch);
+	            // Apply the modulation envelope to the carrier waveform.
+	            val = ch->amp * sin_tables[ch->v.waveform][ch->off1 >> 16] * mod_factor;
+	            tot1 += val;
+	            tot2 += val;
+	          }
+	          break;
        case 11:  // Bspin - spinning brown noise
           ch->off1 += ch->inc1;
           ch->off1 &= (ST_SIZ << 16) - 1;
@@ -3762,6 +3918,11 @@ setup_device(void) {
 
   if (!opt_Q && opt_w != 0) {
    warn("Using global %s waveform for brainwave tones", waveform_name[opt_w]);
+  }
+
+  if (!opt_Q && opt_I) {
+   warn("Using custom isochronic envelope: s=%g d=%g a=%g r=%g e=%d",
+	opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
   }
 
   // Handle output to files and pipes
