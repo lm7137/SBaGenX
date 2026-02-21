@@ -1757,6 +1757,7 @@ plot_cmd_append(char *cmd, int cmd_sz, const char *txt) {
    return 1;
 }
 
+#ifndef T_MINGW
 static int
 plot_cmd_append_quoted(char *cmd, int cmd_sz, const char *arg) {
    const char *p= arg;
@@ -1775,6 +1776,28 @@ plot_cmd_append_quoted(char *cmd, int cmd_sz, const char *arg) {
    if (!plot_cmd_append(cmd, cmd_sz, "\"")) return 0;
    return 1;
 }
+#endif
+
+#ifdef T_MINGW
+static int
+plot_cmd_append_quoted_raw(char *cmd, int cmd_sz, const char *arg) {
+   const char *p= arg;
+   if (!plot_cmd_append(cmd, cmd_sz, "\"")) return 0;
+   while (*p) {
+      char ch= *p++;
+      if (ch == '"') {
+	 if (!plot_cmd_append(cmd, cmd_sz, "\\\"")) return 0;
+      } else {
+	 char tmp[2];
+	 tmp[0]= ch;
+	 tmp[1]= 0;
+	 if (!plot_cmd_append(cmd, cmd_sz, tmp)) return 0;
+      }
+   }
+   if (!plot_cmd_append(cmd, cmd_sz, "\"")) return 0;
+   return 1;
+}
+#endif
 
 static int
 plot_find_script(char *script, int script_sz) {
@@ -1786,12 +1809,20 @@ plot_find_script(char *script, int script_sz) {
    }
 
    if (pdir && *pdir) {
+#ifdef T_MINGW
+      snprintf(script, script_sz, "%sscripts\\sbagenx_plot.py", pdir);
+#else
       snprintf(script, script_sz, "%sscripts/sbagenx_plot.py", pdir);
+#endif
       if (file_exists_regular(script))
 	 return 1;
    }
 
+#ifdef T_MINGW
+   snprintf(script, script_sz, "scripts\\sbagenx_plot.py");
+#else
    snprintf(script, script_sz, "scripts/sbagenx_plot.py");
+#endif
    if (file_exists_regular(script))
       return 1;
 
@@ -1813,6 +1844,13 @@ plot_external_force(void) {
 }
 
 static int
+plot_external_debug(void) {
+   const char *dbg= getenv("SBAGENX_PLOT_DEBUG");
+   if (!dbg || !*dbg) return 0;
+   return !str_ieq(dbg, "0") && !str_ieq(dbg, "false") && !str_ieq(dbg, "off");
+}
+
+static int
 plot_try_external_cmd(const char *script,
 		      const char *out_fname,
 		      const char *arg_tail) {
@@ -1820,6 +1858,7 @@ plot_try_external_cmd(const char *script,
    const char *candidates[8];
    char py_embedded[4][PATH_MAX];
    int n= 0, i;
+   int ok= 0;
    int force_external= plot_external_force();
 
    if (plot_external_disabled())
@@ -1832,10 +1871,17 @@ plot_try_external_cmd(const char *script,
       candidates[n++]= env_py;
 
    if (pdir && *pdir) {
+#ifdef T_MINGW
+      snprintf(py_embedded[0], sizeof(py_embedded[0]), "%spython\\python.exe", pdir);
+      snprintf(py_embedded[1], sizeof(py_embedded[1]), "%spython-win64\\python.exe", pdir);
+      snprintf(py_embedded[2], sizeof(py_embedded[2]), "%spython-win32\\python.exe", pdir);
+      snprintf(py_embedded[3], sizeof(py_embedded[3]), "%spython\\bin\\python3.exe", pdir);
+#else
       snprintf(py_embedded[0], sizeof(py_embedded[0]), "%spython/python.exe", pdir);
       snprintf(py_embedded[1], sizeof(py_embedded[1]), "%spython-win64/python.exe", pdir);
       snprintf(py_embedded[2], sizeof(py_embedded[2]), "%spython-win32/python.exe", pdir);
       snprintf(py_embedded[3], sizeof(py_embedded[3]), "%spython/bin/python3", pdir);
+#endif
 
       for (i= 0; i<4; i++) {
 	 if (file_exists_regular(py_embedded[i]))
@@ -1856,24 +1902,39 @@ plot_try_external_cmd(const char *script,
 	 continue;
 
       cmd[0]= 0;
+#ifdef T_MINGW
+      // Use cmd /c ""..."" wrapping so quoted executable + quoted script
+      // paths resolve reliably on Windows.
+      if (!plot_cmd_append(cmd, sizeof(cmd), "cmd /c \"")) continue;
+      if (!plot_cmd_append_quoted_raw(cmd, sizeof(cmd), py)) continue;
+      if (!plot_cmd_append(cmd, sizeof(cmd), " ")) continue;
+      if (!plot_cmd_append_quoted_raw(cmd, sizeof(cmd), script)) continue;
+      if (!plot_cmd_append(cmd, sizeof(cmd), arg_tail)) continue;
+      if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL\"")) continue;
+#else
       if (!plot_cmd_append_quoted(cmd, sizeof(cmd), py)) continue;
       if (!plot_cmd_append_quoted(cmd, sizeof(cmd), script)) continue;
       if (!plot_cmd_append(cmd, sizeof(cmd), arg_tail)) continue;
-#ifdef T_MINGW
-      if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL")) continue;
-#else
       if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null 2>&1")) continue;
 #endif
 
+      if (plot_external_debug())
+	 warn("Plot backend try: py='%s' script='%s' cmd=%s",
+	      py, script, cmd);
       rc= system(cmd);
-      if (rc == 0 && file_exists_regular(out_fname))
-	 return 1;
+      if (plot_external_debug())
+	 warn("Plot backend rc=%d out='%s' exists=%d",
+	      rc, out_fname, file_exists_regular(out_fname));
+      if (rc == 0 && file_exists_regular(out_fname)) {
+	 ok= 1;
+	 break;
+      }
    }
 
-   if (force_external)
+   if (!ok && force_external)
       error("External Python/Cairo plot backend requested but unavailable or failed (set SBAGENX_PLOT_BACKEND=internal to force built-in plotting)");
 
-   return 0;
+   return ok;
 }
 
 int
