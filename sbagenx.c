@@ -2064,10 +2064,9 @@ write_sigmoid_graph_png(const char *fmt, double level,
    y_min -= y_pad;
    y_max += y_pad;
    y_span= y_max - y_min;
-   y_tick_step= y_span / 8.0;
-   if (y_tick_step < 0.5) y_tick_step= 0.5;
-   y_tick_step= floor(y_tick_step * 2.0 + 0.5) / 2.0;
-   if (y_tick_step < 0.5) y_tick_step= 0.5;
+   // Use whole-number Y ticks for readability (match Python/Cairo renderer).
+   y_tick_step= floor(y_span / 8.0 + 0.5);
+   if (y_tick_step < 1.0) y_tick_step= 1.0;
    y_tick_first= ceil((y_min - 1e-9) / y_tick_step) * y_tick_step;
    y_tick_last= floor((y_max + 1e-9) / y_tick_step) * y_tick_step;
 
@@ -2142,9 +2141,9 @@ write_sigmoid_graph_png(const char *fmt, double level,
       font5x7_draw_text(img_hi, hw, hh, x0, y0, y_label, label_scale, 1, 30, 30, 30);
    }
 
-   snprintf(ptxt1, sizeof(ptxt1), "START=%.3fHZ TARGET=%.3fHZ D=%dMIN",
+   snprintf(ptxt1, sizeof(ptxt1), "start=%.3fHz target=%.3fHz D=%dmin",
 	    beat_start, beat_target, len0/60);
-   snprintf(ptxt2, sizeof(ptxt2), "L=%.4f H=%.4f A=%.4f B=%.4f",
+   snprintf(ptxt2, sizeof(ptxt2), "l=%.4f h=%.4f a=%.4f b=%.4f",
 	    sig_l, sig_h, sig_a, sig_b);
    {
       int tw1= font5x7_text_width(ptxt1, param_scale);
@@ -2355,13 +2354,13 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
       font5x7_draw_text(img_hi, hw, hh, x0, y02, y2_label, label_scale, 1, 30, 30, 30);
    }
 
-   snprintf(ptxt1, sizeof(ptxt1), "C=%.1fHZ P=%.2fHZ A=%.1f%% W=%s",
+   snprintf(ptxt1, sizeof(ptxt1), "c=%.1fHz p=%.2fHz a=%.1f%% w=%s",
 	    carr_hz, pulse_hz, amp_pct, waveform_name[waveform]);
    if (opt_I) {
-      snprintf(ptxt2, sizeof(ptxt2), "I:S=%.4f D=%.4f A=%.2f R=%.2f E=%d",
+      snprintf(ptxt2, sizeof(ptxt2), "I:s=%.4f d=%.4f a=%.2f r=%.2f e=%d",
 	       opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
    } else {
-      snprintf(ptxt2, sizeof(ptxt2), "I=DEFAULT THRESHOLD GATE");
+      snprintf(ptxt2, sizeof(ptxt2), "I=default threshold gate");
    }
    {
       int tw1= font5x7_text_width(ptxt1, param_scale);

@@ -108,8 +108,8 @@ def render_sigmoid(args):
     y_max += y_pad
     y_span = y_max - y_min
 
-    y_tick_step = max((y_span / 8.0), 0.5)
-    y_tick_step = max(round(y_tick_step * 2.0) / 2.0, 0.5)
+    # Use whole-number Y ticks for readability.
+    y_tick_step = max(1.0, round(y_span / 8.0))
 
     y_tick_first = math.ceil((y_min - 1e-9) / y_tick_step) * y_tick_step
     y_ticks = []
@@ -208,12 +208,12 @@ def render_sigmoid(args):
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
     ctx.set_font_size(14)
     line1 = (
-        f"START={args.beat_start:.3f}HZ  TARGET={args.beat_target:.3f}HZ  "
-        f"D={args.drop_min:.1f}MIN"
+        f"start={args.beat_start:.3f}Hz  target={args.beat_target:.3f}Hz  "
+        f"D={args.drop_min:.1f}min"
     )
     line2 = (
-        f"L={args.sig_l:.4f}  H={args.sig_h:.4f}  "
-        f"A={args.sig_a:.4f}  B={args.sig_b:.4f}"
+        f"l={args.sig_l:.4f}  h={args.sig_h:.4f}  "
+        f"a={args.sig_a:.4f}  b={args.sig_b:.4f}"
     )
     ext = ctx.text_extents(line1)
     ctx.move_to(ml + (pw - ext.width) / 2, height - 40)
@@ -426,7 +426,8 @@ def render_iso_cycle(args):
 
     x_label = "TIME SEC"
     ext = ctx.text_extents(x_label)
-    ctx.move_to(ml + (pw - ext.width) / 2, bot_y0 + ph + 34)
+    # Keep the x-axis label clear of tick labels.
+    ctx.move_to(ml + (pw - ext.width) / 2, bot_y0 + ph + 56)
     ctx.show_text(x_label)
 
     for label, y0 in (("ENVELOPE", top_y0 + ph / 2), ("WAVEFORM", bot_y0 + ph / 2)):
@@ -441,15 +442,15 @@ def render_iso_cycle(args):
     # parameter lines
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
     ctx.set_font_size(13)
-    wave_name = ["SINE", "SQUARE", "TRIANGLE", "SAWTOOTH"][waveform]
-    line1 = f"C={args.carrier_hz:.1f}HZ  P={args.pulse_hz:.2f}HZ  A={args.amp_pct:.1f}%  W={wave_name}"
+    wave_name = ["sine", "square", "triangle", "sawtooth"][waveform]
+    line1 = f"c={args.carrier_hz:.1f}Hz  p={args.pulse_hz:.2f}Hz  a={args.amp_pct:.1f}%  w={wave_name}"
     if args.opt_i:
         line2 = (
-            f"I:S={args.i_s:.4f} D={args.i_d:.4f} "
-            f"A={args.i_a:.2f} R={args.i_r:.2f} E={int(args.i_e)}"
+            f"I:s={args.i_s:.4f} d={args.i_d:.4f} "
+            f"a={args.i_a:.2f} r={args.i_r:.2f} e={int(args.i_e)}"
         )
     else:
-        line2 = "I=LEGACY THRESHOLD GATE"
+        line2 = "I=default threshold gate"
 
     ext = ctx.text_extents(line1)
     ctx.move_to(ml + (pw - ext.width) / 2, height - 54)
