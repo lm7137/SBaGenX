@@ -2,6 +2,8 @@
 
 SBaGenX is a command-line tool for generating binaural beats, monaural beats and isochronic tones, designed to assist with meditation, relaxation, and altering states of consciousness.
 
+Project website: [sbagenx.com](https://www.sbagenx.com)
+
 > **SBaGenX is a fork of the project SBaGen+, which is no longer under active development.**  
 > Full credit is due, first and foremost, to the father of SBaGen, Jim Peters, and also to the creator of the SBaGen+ fork, Ruan Klein, who added isochronic beats as well as making numerous enhancements.
 
