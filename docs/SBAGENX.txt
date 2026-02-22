@@ -628,14 +628,14 @@ For native FLAC files, set the same tag with:
 The tag contains entries as follows, optionally separated by white
 space:
 
+  i             If this is the first char after SBAGEN_LOOPER= and is
+                followed by whitespace, play the
+                section from start-of-file up to d<min> once as an intro
   s<dur>        Set segment size to given duration in seconds
   s<min>-<max>  Set segment size to randomly vary within given range
   f<dur>        Set duration for cross-fades
   c<cnt>        Number of channels: 1 or 2
   w<bool>       Swap stereo on second channel? 0 no, or 1 yes
-  i             If this is the first char after SBAGEN_LOOPER= and is
-                followed by whitespace, play the
-                section from start-of-file up to d<min> once as an intro
   d<min>-<max>  Select section of OGG/FLAC file data to use as source audio
   #<digits>     Following settings apply only to one section
   
