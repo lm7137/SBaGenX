@@ -258,7 +258,33 @@ extract_zip_file() {
         return $?
     fi
 
-    warning "Cannot extract ${archive}: need unzip or bsdtar"
+    # Fallback for minimal CI environments where unzip/bsdtar are unavailable.
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$archive" "$dest_dir" <<'PY'
+import sys
+import zipfile
+
+archive = sys.argv[1]
+dest = sys.argv[2]
+with zipfile.ZipFile(archive, "r") as zf:
+    zf.extractall(dest)
+PY
+        return $?
+    fi
+    if command -v python >/dev/null 2>&1; then
+        python - "$archive" "$dest_dir" <<'PY'
+import sys
+import zipfile
+
+archive = sys.argv[1]
+dest = sys.argv[2]
+with zipfile.ZipFile(archive, "r") as zf:
+    zf.extractall(dest)
+PY
+        return $?
+    fi
+
+    warning "Cannot extract ${archive}: need unzip, bsdtar, or python with zipfile support"
     return 1
 }
 

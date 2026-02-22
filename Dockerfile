@@ -7,7 +7,10 @@ RUN apt-get update && apt-get install -y \
     libtool \
     automake \
     autoconf \
-    curl
+    curl \
+    unzip \
+    libarchive-tools \
+    python3
 
 RUN if [ "$(uname -m)" = "x86_64" ]; then \
         # Compile for 32-bit and for Windows 32-bit/64-bit
