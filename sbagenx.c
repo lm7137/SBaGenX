@@ -357,7 +357,7 @@ help() {
 		  NL "          -J q      MP3 quality (0-9, lower is better, default 2)"
 		  NL "          -X q      MP3 VBR quality (0-9, lower is better; enables VBR)"
 		  NL "          -U q      OGG Vorbis quality (0-10, default library setting)"
-		  NL "          -Z lvl    FLAC compression level (0-12, default library setting)"
+		  NL "          -Z level  FLAC compression level (0-12, default library setting)"
 		  NL "          -O        Output raw data to the standard output"
 	  NL "          -W        Output a WAV-format file instead of raw data"
 	  NL "          -m file   Read audio data from the given file and mix it with"
