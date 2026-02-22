@@ -261,12 +261,22 @@ void write_sigmoid_graph_png(const char *fmt, double level,
 			     double beat_start, double beat_target,
 			     double sig_l, double sig_h,
 			     double sig_a, double sig_b);
+void write_drop_graph_png(const char *fmt, double level,
+			  char depth_ch, int len0, int len1, int len2,
+			  double beat_start, double beat_target,
+			  int slide, int n_step, int steplen,
+			  int isisochronic, int ismono);
 void write_iso_cycle_graph_png_from_sequence(void);
 int try_external_sigmoid_graph_png(const char *out_fname,
 				   int len0_sec,
 				   double beat_start, double beat_target,
 				   double sig_l, double sig_h,
 				   double sig_a, double sig_b);
+int try_external_drop_graph_png(const char *out_fname,
+				int len0_sec,
+				double beat_start, double beat_target,
+				int slide, int n_step, int steplen_sec,
+				int mode_kind);
 int try_external_iso_cycle_graph_png(const char *out_fname,
 				     double carr_hz, double pulse_hz,
 				     double amp_pct, int waveform);
@@ -313,7 +323,7 @@ help() {
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
 		  NL "          -P        Plot graph as PNG and exit (prefers Python/Cairo when available)"
-		  NL "                     With -p sigmoid: plots beat/pulse sigmoid curve"
+		  NL "                     With -p drop/-p sigmoid: plots beat/pulse drop curve"
 		  NL "                     Otherwise: plots one-cycle isochronic waveform"
 		  NL "          -G        Legacy alias for sigmoid plotting (-P with -p sigmoid)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
@@ -505,6 +515,7 @@ int opt_D;
 int opt_G;			// Legacy graph flag for -p sigmoid (-G)
 int opt_P;			// Unified plot flag (-P)
 int opt_P_sigmoid;		// -P used with -p sigmoid, so render sigmoid graph
+int opt_P_drop;		// -P used with -p drop, so render drop graph
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -1961,6 +1972,30 @@ try_external_sigmoid_graph_png(const char *out_fname,
 }
 
 int
+try_external_drop_graph_png(const char *out_fname,
+			    int len0_sec,
+			    double beat_start, double beat_target,
+			    int slide, int n_step, int steplen_sec,
+			    int mode_kind) {
+   char script[PATH_MAX];
+   char args[2048];
+   int force_external= plot_external_force();
+
+   if (!plot_find_script(script, sizeof(script))) {
+      if (force_external)
+	 error("External Python/Cairo plot backend requested but plot script was not found (set SBAGENX_PLOT_SCRIPT or use SBAGENX_PLOT_BACKEND=internal)");
+      return 0;
+   }
+
+   snprintf(args, sizeof(args),
+	    " drop --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --slide %d --n-step %d --step-len-sec %d --mode-kind %d",
+	    out_fname, len0_sec / 60.0, beat_start, beat_target,
+	    slide ? 1 : 0, n_step, steplen_sec, mode_kind);
+
+   return plot_try_external_cmd(script, out_fname, args);
+}
+
+int
 try_external_iso_cycle_graph_png(const char *out_fname,
 				 double carr_hz, double pulse_hz,
 				 double amp_pct, int waveform) {
@@ -1987,6 +2022,248 @@ sigmoid_eval(double t_min, double d_min, double beat_target,
 	     double sig_l, double sig_h, double sig_a, double sig_b) {
    if (t_min >= d_min) return beat_target;
    return sig_a * tanh(sig_l * (t_min - d_min/2 - sig_h)) + sig_b;
+}
+
+static int
+build_integer_axis_ticks(double max_v, double *ticks, int max_ticks) {
+   double step, xv;
+   int n= 0;
+   if (max_ticks < 2) return 0;
+   if (max_v <= 0.0) {
+      ticks[0]= 0.0;
+      ticks[1]= 1.0;
+      return 2;
+   }
+   step= floor(max_v / 10.0 + 0.5);
+   if (step < 1.0) step= 1.0;
+   xv= 0.0;
+   while (xv <= max_v + 1e-9 && n < max_ticks) {
+      ticks[n++]= xv;
+      xv += step;
+   }
+   if (n < 1) ticks[n++]= 0.0;
+   if (n < max_ticks && fabs(ticks[n-1] - max_v) > 1e-9)
+      ticks[n++]= max_v;
+   return n;
+}
+
+static double
+drop_eval(double t_min, double d_min, double beat_target,
+	  int slide, int n_step, int steplen_sec) {
+   if (d_min <= 0.0) return beat_target;
+   if (t_min < 0.0) t_min= 0.0;
+   if (t_min > d_min) t_min= d_min;
+
+   if (!slide && n_step > 1 && steplen_sec > 0) {
+      int idx= (int)(t_min * 60.0 / steplen_sec);
+      if (idx < 0) idx= 0;
+      if (idx > n_step-1) idx= n_step-1;
+      return 10.0 * exp(log(beat_target/10.0) * idx / (double)(n_step-1));
+   }
+
+   return 10.0 * exp(log(beat_target/10.0) * t_min / d_min);
+}
+
+static const char *
+drop_mode_label(int mode_kind) {
+   if (mode_kind == 2) return "monaural beat";
+   if (mode_kind == 1) return "pulse";
+   return "binaural beat";
+}
+
+void
+write_drop_graph_png(const char *fmt, double level,
+		     char depth_ch, int len0, int len1, int len2,
+		     double beat_start, double beat_target,
+		     int slide, int n_step, int steplen,
+		     int isisochronic, int ismono) {
+   int w= 1200, h= 700, ss= 4;
+   int hw= w * ss, hh= h * ss;
+   int ml= 150 * ss, mr= 40 * ss, mt= 40 * ss, mb= 120 * ss;
+   int pw= hw - ml - mr, ph= hh - mt - mb;
+   int a, gy;
+   unsigned char *img_hi;
+   unsigned char *img;
+   double d_min= len0 / 60.0;
+   double y_min= 1e30, y_max= -1e30;
+   double y_pad, y_span;
+   double y_tick_step, y_tick_first, y_tick_last;
+   int start_y= -1, end_y= -1;
+   int label_scale= 3 * ss;
+   int tick_scale= 2 * ss;
+   int param_scale= (3 * ss) / 2;
+   int prev_x= -1, prev_y= -1;
+   char fmt_tok[256], lvl_tok[64];
+   char tick_txt[64];
+   char ptxt1[256], ptxt2[256];
+   char fname[512];
+   char mode_ch, curve_ch;
+   int mode_kind= ismono ? 2 : (isisochronic ? 1 : 0);
+   const char *mode_label= drop_mode_label(mode_kind);
+   double x_ticks[64];
+   int nx;
+   const char *x_label= "TIME MIN";
+   const char *y_label= "FREQ HZ";
+
+   if (pw < 10 || ph < 10)
+      error("Graph dimensions are invalid");
+   if (d_min <= 0.0)
+      error("Drop graph requires a drop-time > 0");
+
+   sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
+   double_to_token(level, lvl_tok, sizeof(lvl_tok));
+   mode_ch= ismono ? 'm' : (isisochronic ? 'p' : 'b');
+   curve_ch= slide ? 's' : 'k';
+   snprintf(fname, sizeof(fname),
+	    "drop_%s_L%s_d%c_t%d_%d_%d_%c%c.png",
+	    fmt_tok, lvl_tok, tolower((unsigned char)depth_ch),
+	    len0/60, len1/60, len2/60, mode_ch, curve_ch);
+
+   if (try_external_drop_graph_png(fname, len0, beat_start, beat_target,
+				   slide, n_step, steplen, mode_kind)) {
+      if (!opt_Q)
+	 warn("Drop graph saved to: %s (Python/Cairo)", fname);
+      return;
+   }
+
+   img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
+   plot_fill(img_hi, hw, hh, 255, 255, 255);
+
+   nx= build_integer_axis_ticks(d_min, x_ticks, sizeof(x_ticks)/sizeof(x_ticks[0]));
+   if (nx < 2) {
+      x_ticks[0]= 0.0;
+      x_ticks[1]= d_min;
+      nx= 2;
+   }
+   for (a= 0; a<nx; a++) {
+      int gx= ml + (int)((pw-1) * x_ticks[a] / d_min + 0.5);
+      plot_vline(img_hi, hw, hh, gx, mt, mt+ph-1, 236, 236, 236);
+   }
+
+   for (a= 0; a<=2000; a++) {
+      double t_min= d_min * a / 2000.0;
+      double y= drop_eval(t_min, d_min, beat_target, slide, n_step, steplen);
+      if (y < y_min) y_min= y;
+      if (y > y_max) y_max= y;
+   }
+   if (beat_start < y_min) y_min= beat_start;
+   if (beat_start > y_max) y_max= beat_start;
+   if (beat_target < y_min) y_min= beat_target;
+   if (beat_target > y_max) y_max= beat_target;
+
+   if (y_max - y_min < 1e-6) {
+      y_min -= 1.0;
+      y_max += 1.0;
+   }
+   y_pad= (y_max - y_min) * 0.08;
+   if (y_pad < 0.1) y_pad= 0.1;
+   y_min -= y_pad;
+   y_max += y_pad;
+   y_span= y_max - y_min;
+   y_tick_step= floor(y_span / 8.0 + 0.5);
+   if (y_tick_step < 1.0) y_tick_step= 1.0;
+   y_tick_first= ceil((y_min - 1e-9) / y_tick_step) * y_tick_step;
+   y_tick_last= floor((y_max + 1e-9) / y_tick_step) * y_tick_step;
+
+   {
+      double yv;
+      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
+	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+	 plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
+      }
+   }
+
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt, 90, 90, 90);
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt+ph-1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml, mt, mt+ph-1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml+pw-1, mt, mt+ph-1, 90, 90, 90);
+
+   for (a= 0; a<pw; a++) {
+      double t_min= d_min * a / (double)(pw-1);
+      double y= drop_eval(t_min, d_min, beat_target, slide, n_step, steplen);
+      int px= ml + a;
+      int py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
+      if (a == 0) start_y= py;
+      if (a == pw-1) end_y= py;
+      if (prev_x >= 0)
+	 plot_line_thick(img_hi, hw, hh, prev_x, prev_y, px, py, ss+1, 34, 94, 224);
+      prev_x= px;
+      prev_y= py;
+   }
+
+   for (a= 0; a<nx; a++) {
+      int gx= ml + (int)((pw-1) * x_ticks[a] / d_min + 0.5);
+      int tw, tx, ty;
+      format_tick_value(x_ticks[a], tick_txt, sizeof(tick_txt));
+      plot_vline(img_hi, hw, hh, gx, mt+ph-1, mt+ph+4*ss, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= gx - tw/2;
+      ty= mt + ph + 10*ss;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   {
+      double yv;
+      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
+	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+	 int tw, tx, ty;
+	 format_tick_value(yv, tick_txt, sizeof(tick_txt));
+	 plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
+	 tw= font5x7_text_width(tick_txt, tick_scale);
+	 tx= ml - 8*ss - tw;
+	 ty= gy - (7 * tick_scale) / 2;
+	 font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+      }
+   }
+
+   for (a= -4*ss; a<=4*ss; a++) {
+      plot_set_px(img_hi, hw, hh, ml + a, start_y, 220, 40, 40);
+      plot_set_px(img_hi, hw, hh, ml + pw - 1 + a, end_y, 220, 40, 40);
+   }
+
+   {
+      int xw= font5x7_text_width(x_label, label_scale);
+      int x0= ml + (pw - xw) / 2;
+      int y0= mt + ph + 24*ss;
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, x_label, label_scale, 0, 30, 30, 30);
+   }
+
+   {
+      int yh= font5x7_text_height_rot90(y_label, label_scale);
+      int x0= 20*ss;
+      int y0= mt + (ph - yh) / 2;
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, y_label, label_scale, 1, 30, 30, 30);
+   }
+
+   snprintf(ptxt1, sizeof(ptxt1), "start=%.3fHz target=%.3fHz D=%dmin",
+	    beat_start, beat_target, len0/60);
+   if (slide)
+      snprintf(ptxt2, sizeof(ptxt2), "%s mode: continuous exponential (s)", mode_label);
+   else
+      snprintf(ptxt2, sizeof(ptxt2), "%s mode: stepped exponential (k/default), step=%ds n=%d",
+	       mode_label, steplen, n_step);
+   {
+      int tw1= font5x7_text_width(ptxt1, param_scale);
+      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tx1= ml + (pw - tw1) / 2;
+      int tx2= ml + (pw - tw2) / 2;
+      int phh= 7 * param_scale;
+      int pgap= 4 * ss;
+      int ty2= hh - (8 * ss + phh);
+      int ty1= ty2 - (phh + pgap);
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+   }
+
+   img= plot_downsample_box(img_hi, hw, hh, ss);
+   free(img_hi);
+
+   if (!stbi_write_png(fname, w, h, 3, img, w*3))
+      error("Failed to write drop graph PNG file");
+   if (!opt_Q)
+      warn("Drop graph saved to: %s", fname);
+
+   free(img);
 }
 
 void
@@ -2456,7 +2733,7 @@ main(int argc, char **argv) {
    } else if (rv == 'p') {
       // Pre-programmed sequence
       readPreProg(argc, argv);
-      if (opt_G || opt_P_sigmoid) return 0;
+      if (opt_G || opt_P_sigmoid || opt_P_drop) return 0;
    } else {
       // Sequenced mode -- sequence may include options, so options
       // are not settled until below this point
@@ -6232,6 +6509,7 @@ readPreProg(int ac, char **av) {
    clear_func_curve();
    clear_mix_mod_curve();
    opt_P_sigmoid= 0;
+   opt_P_drop= 0;
 
    if (ac < 1) 
       error("Expecting a pre-programmed sequence description.  Examples:" 
@@ -6244,7 +6522,7 @@ readPreProg(int ac, char **av) {
       error("-A requires a mix input stream; use -m <file> or -M");
 
    if (opt_G && strcmp(av[0], "sigmoid") != 0)
-      error("-G is only supported with -p sigmoid (or use -P for isochronic waveform plots)");
+      error("-G is only supported with -p sigmoid (or use -P for -p drop/-p sigmoid curve plots, or isochronic waveform plots)");
    
    // Handle 'drop'
    if (0 == strcmp(av[0], "drop")) {
@@ -6392,6 +6670,7 @@ create_drop(int ac, char **av) {
 #undef BAD
       
    n_step= 1 + (len0-1) / steplen;	// Round up
+   if (n_step < 2) n_step= 2;
    len0= n_step * steplen;
    if (!slide) len1= (1 + (len1-1) / steplen) * steplen;
 
@@ -6404,6 +6683,16 @@ create_drop(int ac, char **av) {
 
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
+
+   if (opt_P) {
+      opt_P_drop= 1;
+      write_drop_graph_png(fmt, (200.0 - carr) / 2.0, (char)('a' + a),
+			   len0, len1, len2,
+			   10.0, beat_target,
+			   slide, n_step, steplen,
+			   isisochronic, ismono);
+      return;
+   }
 
    // Calculate beats
    for (a= 0; a<n_step; a++)

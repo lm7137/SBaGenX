@@ -32,6 +32,7 @@ TREMOR_LIB_PATH_ARM64="libs/linux-arm64-libvorbisidec.a"
 
 # Get the version number from the VERSION file
 VERSION=$(cat VERSION)
+PLOT_SCRIPT_SRC="scripts/sbagenx_plot.py"
 
 # Skip 32-bit build on ARM64
 SKIP_32BIT=0
@@ -173,5 +174,16 @@ fi
 
 # Remove the temporary file
 rm -f sbagenx.tmp.c
+
+# Bundle Python/Cairo plot backend script for dist binaries
+section_header "Bundling plot backend script..."
+if [ -f "$PLOT_SCRIPT_SRC" ]; then
+    mkdir -p dist/scripts
+    cp "$PLOT_SCRIPT_SRC" dist/scripts/sbagenx_plot.py
+    success "Bundled plot script: dist/scripts/sbagenx_plot.py"
+else
+    warning "Plot script not found at $PLOT_SCRIPT_SRC"
+    warning "Graph plotting may fall back to built-in renderer only"
+fi
 
 section_header "Build process completed!" 
