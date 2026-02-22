@@ -11,6 +11,7 @@ Project website: [sbagenx.com](https://www.sbagenx.com)
 
 - [About This Project](#-about-this-project)
 - [Installation](#-installation)
+  - [Try SBaGenX in 60 Seconds](#-try-sbagenx-in-60-seconds)
   - [Using Docker for Builds](#-using-docker-for-builds)
   - [Download Pre-built Binaries](#️-download-pre-built-binaries)
   - [Installing on Linux](#-installing-on-linux)
@@ -40,6 +41,43 @@ The name was changed from **"Sequenced Binaural Beat Generator"** to **"Sequence
 ## Installation
 
 Download assets from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
+
+### Try SBaGenX in 60 Seconds
+
+#### Windows
+
+1. Download and install:
+
+   - [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/latest/download/sbagenx-windows-setup.exe)
+
+2. Verify installation:
+
+   ```bash
+   sbagenx -h
+   ```
+
+3. Run a quick built-in session:
+
+   ```bash
+   sbagenx -m river1.ogg -p drop 00ds+ mix/99
+   ```
+
+#### Ubuntu (amd64)
+
+```bash
+wget -O sbagenx_2.1.0-1_amd64.deb \
+  https://github.com/lm7137/SBaGenX/releases/download/v2.1.0/sbagenx_2.1.0-1_amd64.deb
+sudo apt install ./sbagenx_2.1.0-1_amd64.deb
+sbagenx -h
+```
+
+#### Plot Example (No Audio Output)
+
+```bash
+sbagenx -P -p sigmoid t30,30,0 00ls+:l=0.2:h=0
+```
+
+This writes a PNG curve to the current directory.
 
 ### Using Docker for Builds
 
