@@ -10,6 +10,7 @@ Project website: [sbagenx.com](https://www.sbagenx.com)
 ## Table of Contents
 
 - [About This Project](#-about-this-project)
+- [What SBaGenX Adds](#-what-sbagenx-adds)
 - [Installation](#-installation)
   - [Try SBaGenX in 60 Seconds](#-try-sbagenx-in-60-seconds)
   - [Using Docker for Builds](#-using-docker-for-builds)
@@ -37,6 +38,55 @@ its core structure. Updates focus on compatibility fixes and practical
 feature additions, without major refactoring of the original codebase.
 
 The name was changed from **"Sequenced Binaural Beat Generator"** to **"Sequenced Brainwave Generator"** in the SBaGen+ fork to better reflect its expanded functionality. Since SBaGen+ added support for isochronic tones in addition to binaural beats, and SBaGenX added monaural beat support for the built-in programs, the original name no longer fully represented its capabilities.
+
+## What SBaGenX Adds
+
+This fork introduces substantial functional changes beyond maintenance:
+
+1. **Function-driven real-time curves in built-in programs**  
+   Built-in programs use direct runtime curve evaluation instead of only
+   coarse piece-wise linear approximations in sliding modes.
+
+2. **`-p sigmoid` built-in program**  
+   Added for smoother transitions of embedded beat/pulse frequency during
+   drop sessions.
+
+3. **Configurable sigmoid shape parameters**  
+   `-p sigmoid` supports `:l=<value>:h=<value>` (order-independent) to tune
+   curve steepness and horizontal shift.
+
+4. **FLAC input mix support with loop metadata**  
+   Mix input now supports FLAC (in addition to WAV/OGG/MP3), including
+   `SBAGEN_LOOPER` metadata handling.
+
+5. **`SBAGEN_LOOPER` intro extension (`i `)**  
+   Added support for one-time intro playback from `t=0` to `d<start>` when
+   the tag value begins with `i ` (including required trailing space).
+
+6. **Native output encoding for OGG/FLAC/MP3**  
+   Output format is selected by output filename extension, with quality/
+   compression controls exposed by CLI options.
+
+7. **Isochronic envelope customization (`-I`)**  
+   Added user controls for cycle-relative envelope timing and edge-shape
+   behavior.
+
+8. **Curve plotting (`-P`)**  
+   Added PNG plotting for:
+   - built-in `-p drop` and `-p sigmoid` beat/pulse curves
+   - one-cycle isochronic envelope + waveform views  
+     This is designed to preview session behavior before running audio.
+
+9. **Mix amplitude modulation (`-A`)**  
+   Added optional parameterized mix modulation curve with default and
+   user-defined constants.  
+   Conjecture: gradual linear mix reduction may be calming, while short
+   periodic dips may briefly increase awareness.
+
+10. **Additional notable additions**
+    - Built-in **monaural mode** via `M` in `drop`/`sigmoid`/`slide` specs
+    - **Signed level values** (including negatives) to reach higher starting
+      carriers while preserving built-in sequence behavior
 
 ## Installation
 
