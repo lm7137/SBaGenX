@@ -293,4 +293,6 @@ Third-party dependency license texts are included in
 
 Original SBaGen was developed by Jim Peters. See [SBaGen project](https://uazu.net/sbagen/).
 
+The SBaGen+ fork was developed by Ruan Klein. See [SBaGen+ project](https://github.com/ruanklein/sbagen-plus)
+
 ALSA support is based from this [patch](https://github.com/jave/sbagen-alsa/blob/master/sbagen.c).
