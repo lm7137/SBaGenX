@@ -26,7 +26,7 @@ SBaGenX is a command-line tool for generating binaural beats, monaural beats and
 
 ## About This Project
 
-SBaGenX is a fork of SBaGen+, which is itself a fork of the original
+SBaGenX is a fork of SBaGen+, created by Ruan Klein, which is itself a fork of the original
 SBaGen (Sequenced Binaural Beat Generator) created by Jim Peters. The
 original project has not been maintained for many years, and SBaGenX
 aims to keep the lineage functional on modern systems while preserving
