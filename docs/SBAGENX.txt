@@ -56,6 +56,7 @@ Contents of this document:
 5: Conclusion
 
 A: User-defined waveforms
+B: Plot backend and Windows runtime notes
 
 
 0: Legal notice
@@ -1449,45 +1450,8 @@ follows:
               Constraint: a+r <= 1.
               e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
 
-Plot backend environment overrides:
-
-  SBAGENX_PLOT_BACKEND=internal|python|cairo|external
-    internal  force built-in C renderer
-    python    force external Python/Cairo backend (error if unavailable)
-  SBAGENX_PLOT_PYTHON=<path>
-    absolute path to Python executable to use for plotting
-  SBAGENX_PLOT_SCRIPT=<path>
-    absolute path to sbagenx_plot.py
-
-Windows build/runtime bundling notes:
-
-  windows-build-sbagenx.sh now treats Python+Cairo runtimes as required.
-  It bundles both architectures and fails the build if either one cannot
-  be prepared.
-
-  Runtime sources are checked in this order:
-    1) pre-populated runtime trees:
-       libs/windows-win32-python-runtime/
-       libs/windows-win64-python-runtime/
-    2) archives (auto-extracted):
-       libs/windows-win32-python-runtime.zip
-       libs/windows-win64-python-runtime.zip
-       (or paths via SBAGENX_WIN32_PY_RUNTIME_ARCHIVE /
-        SBAGENX_WIN64_PY_RUNTIME_ARCHIVE)
-    3) official auto-prep:
-       - CPython embeddable package
-       - matching pycairo wheel
-       defaults:
-         SBAGENX_PY_EMBED_VERSION=3.13.12
-         SBAGENX_PYCAIRO_VERSION=1.29.0
-
-  Additional controls:
-    SBAGENX_AUTO_PREPARE_PY_RUNTIME=1|0  (default 1)
-    SBAGENX_REQUIRE_PY_RUNTIME=1|0       (default 1)
-    SBAGENX_WIN32_PY_RUNTIME_URL
-    SBAGENX_WIN64_PY_RUNTIME_URL
   -i ...    Generate the whole sequence from an 'immediate' spec
-  -p ...    Generate the whole sequence from a prodefined sequence type,
+  -p ...    Generate the whole sequence from a predefined sequence type,
               e.g. -p drop or -p slide
   -V level  Set global volume level (1-100, default 100)
   -w type   Set waveform type: sine, square, triangle, sawtooth (default sine)
@@ -2122,5 +2086,47 @@ out of these docs, but for now at least it is still here:
   with this, at least the code is there now for you to play with and
   modify.  If you make any progress, let me have the improved code, and
   I'll include it in the next release.
+
+
+Appendix-B: Plot backend and Windows runtime notes
+--------------------------------------------------
+
+Plot backend environment overrides:
+
+  SBAGENX_PLOT_BACKEND=internal|python|cairo|external
+    internal  force built-in C renderer
+    python    force external Python/Cairo backend (error if unavailable)
+  SBAGENX_PLOT_PYTHON=<path>
+    absolute path to Python executable to use for plotting
+  SBAGENX_PLOT_SCRIPT=<path>
+    absolute path to sbagenx_plot.py
+
+Windows build/runtime bundling notes:
+
+  windows-build-sbagenx.sh now treats Python+Cairo runtimes as required.
+  It bundles both architectures and fails the build if either one cannot
+  be prepared.
+
+  Runtime sources are checked in this order:
+    1) pre-populated runtime trees:
+       libs/windows-win32-python-runtime/
+       libs/windows-win64-python-runtime/
+    2) archives (auto-extracted):
+       libs/windows-win32-python-runtime.zip
+       libs/windows-win64-python-runtime.zip
+       (or paths via SBAGENX_WIN32_PY_RUNTIME_ARCHIVE /
+        SBAGENX_WIN64_PY_RUNTIME_ARCHIVE)
+    3) official auto-prep:
+       - CPython embeddable package
+       - matching pycairo wheel
+       defaults:
+         SBAGENX_PY_EMBED_VERSION=3.13.12
+         SBAGENX_PYCAIRO_VERSION=1.29.0
+
+  Additional controls:
+    SBAGENX_AUTO_PREPARE_PY_RUNTIME=1|0  (default 1)
+    SBAGENX_REQUIRE_PY_RUNTIME=1|0       (default 1)
+    SBAGENX_WIN32_PY_RUNTIME_URL
+    SBAGENX_WIN64_PY_RUNTIME_URL
   
 --------------------------------------------------------------------------------
