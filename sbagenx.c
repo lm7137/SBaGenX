@@ -297,7 +297,14 @@ int try_external_iso_cycle_graph_png(const char *out_fname,
 #endif
 
 // Tiny expression parser/evaluator used for .sbgf custom curves.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
 #include "libs/tinyexpr.c"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #ifdef WIN_AUDIO
 void CALLBACK win32_audio_callback(HWAVEOUT, UINT, DWORD, DWORD, DWORD);
@@ -7916,8 +7923,7 @@ create_curve(int ac, char **av) {
 	    error("Too many curve parameter overrides in -p curve spec");
 	 ov_val[ov_count]= strtod(p, &p);
 	 if (p == q) BAD;
-	 strncpy(ov_name[ov_count], name, CURVE_NAME_MAX-1);
-	 ov_name[ov_count][CURVE_NAME_MAX-1]= 0;
+	 memcpy(ov_name[ov_count], name, (size_t)ni + 1);
 	 ov_count++;
 	 continue;
       }
