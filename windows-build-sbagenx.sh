@@ -23,6 +23,17 @@ create_dir_if_not_exists "libs"
 # Check distribution directory
 create_dir_if_not_exists "dist"
 
+# Prefer original icon if present; keep fallback for older checkouts.
+ICON_PATH_WINDOWS_RESOURCE=""
+if [ -f "assets/sbagen.ico" ]; then
+    ICON_PATH_WINDOWS_RESOURCE="assets/sbagen.ico"
+elif [ -f "assets/sbagenx.ico" ]; then
+    ICON_PATH_WINDOWS_RESOURCE="assets/sbagenx.ico"
+else
+    error "No Windows icon found (expected assets/sbagen.ico or assets/sbagenx.ico)"
+fi
+info "Embedding executable icon: ${ICON_PATH_WINDOWS_RESOURCE}"
+
 # Get version from VERSION file
 VERSION=$(cat VERSION)
 
@@ -44,7 +55,7 @@ cat > /tmp/sbagen.rc << EOF
 #include <windows.h>
 
 // Include icon
-1 ICON "assets/sbagenx.ico"
+1 ICON "${ICON_PATH_WINDOWS_RESOURCE}"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     $VERSION_RC

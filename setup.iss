@@ -1,9 +1,9 @@
 #define MyAppName "SBaGenX"
-#define MyAppVersion "2.1.1"
+#define MyAppVersion "2.1.2"
 #define MyAppPublisher "Lech Madrzyk"
 #define MyAppURL "https://github.com/lm7137/SBaGenX"
 #define MyAppExeName "sbagenx.exe"
-#define MyAppIcon "assets\sbagenx.ico"
+#define MyAppIcon "assets\sbagen.ico"
 #define MyAppAssocName "SBaGenX Sequence File"
 #define MyAppAssocExt ".sbg"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
