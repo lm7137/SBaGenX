@@ -1,0 +1,19 @@
+# SBaGenX custom curve example (.sbgf)
+# Piecewise beat shape using helper functions implemented in C.
+#
+# Usage example:
+#   sbagenx -p curve examples/basics/curve-piecewise-demo.sbgf \
+#     t30,30,0 00ls+:p1=8:p2=18
+
+param p1 = 8m
+param p2 = 18m
+
+# Three linear segments:
+#   [0, p1]   : b0 -> 6Hz
+#   [p1, p2]  : 6Hz -> 3Hz
+#   [p2, D]   : 3Hz -> b1
+beat<p1 = seg(m,0,p1,b0,6)
+beat<p2 = seg(m,p1,p2,6,3)
+beat>=p2 = seg(m,p2,D,3,b1)
+
+carrier = c0 + (c1 - c0) * ramp(m, 0, T)

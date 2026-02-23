@@ -1,0 +1,20 @@
+# SBaGenX custom curve example (.sbgf)
+# A sigmoid-like beat curve with optional user parameters.
+#
+# Usage example:
+#   sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf 00ls:l=0.2:h=0
+
+param l = 0.125
+param h = 0
+
+# Runtime variables:
+#   m  = minutes from start of main session
+#   D  = drop-time in minutes
+#   b0 = start beat/pulse (Hz)
+#   b1 = target beat/pulse (Hz)
+#   c0 = start carrier (Hz)
+#   c1 = end carrier (Hz)
+#   T  = total main time in minutes (drop + hold)
+
+beat = b0 + (b1 - b0) * (0.5 + 0.5 * tanh(l * (m - D/2 - h)))
+carrier = c0 + (c1 - c0) * ramp(m, 0, T)

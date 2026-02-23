@@ -42,6 +42,8 @@ Contents of this document:
 2.10: The 'sigmoid' sequences
 2.10.1: More detailed notes on -p sigmoid options
 2.10.2: Adjusting the length of a -p sigmoid session
+2.11: The 'curve' sequences
+2.11.1: The .sbgf function file format
 
 3: Writing sequence files
 3.1: The sequence-file format
@@ -1373,6 +1375,213 @@ As with `-p drop`, lengths are whole-minute based and may be rounded
 further depending on step mode.
 
 
+2.11: The 'curve' sequences
+---------------------------
+
+`-p curve` lets you drive built-in sessions from expressions stored in
+an external function file.  The file extension is `.sbgf` (required).
+
+Usage:
+
+  -p curve <curve-file.sbgf> [t<drop>,<hold>,<wake>]
+      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:name=value ...]
+      <tone-specs> ...
+
+Examples:
+
+  sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf \
+    00ls:l=0.2:h=0
+  sbagenx -p curve examples/basics/curve-piecewise-demo.sbgf \
+    t30,30,0 00ls+:p1=8:p2=18
+  sbagenx -m river1.ogg \
+    -p curve examples/basics/curve-sigmoid-like.sbgf 00ls+ mix/99
+
+The level/depth/time modifiers are interpreted the same way as in
+`-p drop`/`-p sigmoid`:
+
+  - Signed level selects starting carrier baseline.
+  - Letter `a-l` selects target beat/pulse endpoint (`b1`).
+  - `s` = continuous runtime curve evaluation.
+  - `k` or default = stepped checkpoints sampled from the expression.
+  - `+`, `^`, `@`, `M`, `/amp` behave as in other built-in programs.
+
+`@` (isochronic) and `M` (monaural) are mutually exclusive.
+
+`-P`/`-G` plotting is currently not supported with `-p curve`.
+
+
+2.11.1: The .sbgf function file format
+--------------------------------------
+
+Supported line types:
+
+  param <name> = <number>[m|s]
+  beat = <expression>          (required)
+  carrier = <expression>       (optional)
+  beat<expr = <expression>     (piecewise, optional)
+  beat<=expr = <expression>    (piecewise, optional)
+  beat>expr = <expression>     (piecewise, optional)
+  beat>=expr = <expression>    (piecewise, optional)
+  carrier<expr = <expression>  (piecewise, optional)
+  carrier<=expr = <expression> (piecewise, optional)
+  carrier>expr = <expression>  (piecewise, optional)
+  carrier>=expr = <expression> (piecewise, optional)
+
+Comments can start with `#`, `;` or `//`.
+Each expression must be on a single line.
+For each target (`beat` or `carrier`), use either:
+  1) one plain expression line (`beat = ...`), or
+  2) piecewise lines (`beat<...`, `beat>...`, etc).
+Mixing plain and piecewise lines for the same target is not allowed.
+
+Expression variables available at runtime:
+
+  t    seconds from start of main session
+  m    minutes from start of main session
+  D    drop-time in minutes
+  H    hold-time in minutes
+  T    total main time in minutes (drop + hold)
+  U    wake-time in minutes
+  b0   start beat/pulse frequency in Hz (normally 10.0)
+  b1   target beat/pulse frequency in Hz (from depth letter)
+  c0   start carrier frequency in Hz
+  c1   end carrier frequency in Hz (after drop/hold)
+
+Helper functions (implemented in C):
+
+  ifelse(cond,a,b), step(x), clamp(x,lo,hi), lerp(a,b,u)
+  ramp(x,x0,x1), smoothstep(edge0,edge1,x), smootherstep(edge0,edge1,x)
+  between(x,a,b), pulse(x,start,end), seg(x,x0,x1,y0,y1)
+  lt(a,b), le(a,b), gt(a,b), ge(a,b), eq(a,b), ne(a,b)
+  min2(a,b), max2(a,b)
+
+Quick reference:
+
+  ifelse(cond,a,b)
+    Returns a if cond is non-zero, otherwise b.
+
+  step(x)
+    Returns 1 when x >= 0, else 0.
+
+  lt/le/gt/ge/eq/ne(a,b)
+    Comparison helpers that return 1 (true) or 0 (false).
+
+  clamp(x,lo,hi)
+    Clamps x into the [lo, hi] range.
+    If x <= lo, returns lo.
+    If x >= hi, returns hi.
+    If lo < x < hi, returns x.
+    If lo > hi, bounds are swapped internally.
+    Examples:
+      clamp(12,0,10) = 10
+      clamp(-3,0,10) = 0
+      clamp(5,0,10) = 5
+
+  lerp(a,b,u)
+    Linear interpolation from a to b by factor u.
+    Formula: a + (b-a)*u
+    (u=0 -> a, u=1 -> b)
+    Note: lerp does not clamp u.
+    Examples:
+      lerp(10,20,0.25) = 12.5
+      lerp(10,20,1.5) = 25
+      lerp(10,20,clamp(1.5,0,1)) = 20
+
+  ramp(x,x0,x1)
+    Normalized linear ramp from 0 to 1 between x0 and x1,
+    clamped outside that interval.
+    Examples:
+      ramp(2,5,15) = 0
+      ramp(10,5,15) = 0.5
+      ramp(20,5,15) = 1
+    Practical use:
+      lerp(10,4,ramp(m,0,30))
+      gives a linear drop from 10 to 4 over 30 minutes.
+
+  smoothstep(edge0,edge1,x)
+    Smoothed 0..1 transition (cubic easing) between edge0 and edge1.
+    Internal normalized variable:
+      u = ramp(x,edge0,edge1)
+    Formula:
+      smoothstep = u*u*(3 - 2*u)
+    Qualitative behavior:
+      starts gently, speeds up in the middle, then slows gently again.
+
+  smootherstep(edge0,edge1,x)
+    Even smoother 0..1 transition (quintic easing).
+    Internal normalized variable:
+      u = ramp(x,edge0,edge1)
+    Formula:
+      smootherstep = u*u*u*(u*(u*6 - 15) + 10)
+    Qualitative behavior:
+      similar to smoothstep, but with even softer entry/exit.
+
+  between(x,a,b)
+    Inclusive range test: 1 when x is between a and b, else 0.
+
+  pulse(x,start,end)
+    Alias for between(x,start,end).
+
+  seg(x,x0,x1,y0,y1)
+    Linear segment from (x0,y0) to (x1,y1), clamped at both ends.
+    Useful for piecewise curves.
+
+  min2/max2(a,b)
+    min2(a,b) returns the smaller of a and b.
+    max2(a,b) returns the larger of a and b.
+    Examples:
+      min2(3,7) = 3
+      max2(3,7) = 7
+    Practical use:
+      max2(b1, lerp(b0,b1,ramp(m,0,D)))
+      keeps the value from dropping below b1.
+      min2(10, expr) can cap expr at 10.
+
+Examples:
+
+  beat = lerp(b0,b1,ramp(m,0,D))
+  beat = ifelse(lt(m,10), b0, b1)
+  beat = b0 + 2 * pulse(m,5,7)
+
+Parameter names in `.sbgf` are case-sensitive.  Values can be
+overridden from the command line using `:name=value` tokens in the
+curve spec.  Order does not matter.
+
+Parameter unit suffixes:
+  - `m` means minutes
+  - `s` means seconds (internally converted to minutes)
+  - no suffix keeps previous behavior (plain numeric value)
+
+Piecewise line behavior:
+  - Conditions are checked in file order.
+  - The first matching condition is used.
+  - If none match, the last piecewise expression for that target is used
+    as the fallback.
+
+Example `.sbgf` (sigmoid-like beat with optional carrier override):
+
+  param l = 0.125
+  param h = 0
+  beat = b0 + (b1-b0) * (0.5 + 0.5*tanh(l*(m-D/2-h)))
+  carrier = c0 + (c1-c0) * ramp(m,0,T)
+
+Example `.sbgf` piecewise beat:
+
+  param p1 = 8m
+  param p2 = 18m
+  beat<p1 = seg(m,0,p1,b0,6)
+  beat<p2 = seg(m,p1,p2,6,3)
+  beat>=p2 = seg(m,p2,D,3,b1)
+
+The same example in seconds:
+
+  param p1 = 480s
+  param p2 = 1080s
+  beat<p1 = seg(m,0,p1,b0,6)
+  beat<p2 = seg(m,p1,p2,6,3)
+  beat>=p2 = seg(m,p2,D,3,b1)
+
+
 3: Writing sequence files
 -------------------------
 
@@ -1931,9 +2140,13 @@ The most commonly used predefined sequences are:
    sigmoid curve over the drop period.  Example:
    `sbagenx -p sigmoid 00ds+:l=0.125:h=0`
 
+4. **curve** - Uses expressions from a `.sbgf` file to define beat/pulse
+   (and optionally carrier) over time.  Example:
+   `sbagenx -p curve <file.sbgf> 00ls:l=0.2:h=0`
+
 These predefined sequences accept various parameters to customize their behavior.
-See sections 2.6, 2.7 and 2.10 for detailed information on existing
-parameters and options.  The sigmoid sequence accepts the same
+See sections 2.6, 2.7, 2.10 and 2.11 for detailed information on
+existing parameters and options.  The sigmoid sequence accepts the same
 drop-style format plus optional shape parameters `:l=<value>` and
 `:h=<value>` (order does not matter), with defaults `l=0.125` and
 `h=0`.

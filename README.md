@@ -55,35 +55,40 @@ This fork introduces substantial functional changes beyond maintenance:
    `-p sigmoid` supports `:l=<value>:h=<value>` (order-independent) to tune
    curve steepness and horizontal shift.
 
-4. **FLAC input mix support with loop metadata**  
+4. **Custom function curves from `.sbgf` files (`-p curve`)**  
+   Added expression-driven built-in sessions using external function
+   files, with helper functions implemented in C and cleaner piecewise
+   syntax such as `beat<p1 = ...`, `beat<p2 = ...`, `beat>p2 = ...`.
+
+5. **FLAC input mix support with loop metadata**  
    Mix input now supports FLAC (in addition to WAV/OGG/MP3), including
    `SBAGEN_LOOPER` metadata handling.
 
-5. **`SBAGEN_LOOPER` intro extension (`i `)**  
+6. **`SBAGEN_LOOPER` intro extension (`i `)**  
    Added support for one-time intro playback from `t=0` to `d<start>` when
    the tag value begins with `i ` (including required trailing space).
 
-6. **Native output encoding for OGG/FLAC/MP3**  
+7. **Native output encoding for OGG/FLAC/MP3**  
    Output format is selected by output filename extension, with quality/
    compression controls exposed by CLI options.
 
-7. **Isochronic envelope customization (`-I`)**  
+8. **Isochronic envelope customization (`-I`)**  
    Added user controls for cycle-relative envelope timing and edge-shape
    behavior.
 
-8. **Curve plotting (`-P`)**  
+9. **Curve plotting (`-P`)**  
    Added PNG plotting for:
    - built-in `-p drop` and `-p sigmoid` beat/pulse curves
    - one-cycle isochronic envelope + waveform views  
      This is designed to preview session behavior before running audio.
 
-9. **Mix amplitude modulation (`-A`)**  
+10. **Mix amplitude modulation (`-A`)**  
    Added optional parameterized mix modulation curve with default and
    user-defined constants.  
    Conjecture: gradual linear mix reduction may be calming, while short
    periodic dips may briefly increase awareness.
 
-10. **Additional notable additions**
+11. **Additional notable additions**
     - Built-in **monaural mode** via `M` in `drop`/`sigmoid`/`slide` specs
     - **Signed level values** (including negatives) to reach higher starting
       carriers while preserving built-in sequence behavior
@@ -128,6 +133,12 @@ sbagenx -P -p sigmoid t30,30,0 00ls+:l=0.2:h=0
 ```
 
 This writes a PNG curve to the current directory.
+
+#### Custom Curve Example (`.sbgf`)
+
+```bash
+sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf 00ls:l=0.2:h=0
+```
 
 ### Using Docker for Builds
 
