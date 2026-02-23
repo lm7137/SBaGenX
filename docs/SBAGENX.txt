@@ -1979,15 +1979,9 @@ Appendix-A: User-defined waveforms
 
 Note: This feature is not related to the functionality of adding waveforms directly to tone sets.
 
-This was a bright idea I had at one point in the distant past, but it
-never worked out.  Some day I think I will cut it out of SBaGen and
-out of these docs, but for now at least it is still here:
- 
-  This is a more complex form of binaural synthesis (maybe too complex!), 
-  and right at this moment, I'm not sure whether it really works or not
-  either, so this section is only for die-hard (b)leading-edge hackers
-  and experimenters.  The code is in place to do this synthesis, but it
-  doesn't seem to work right.  If you're still interested, read on ...
+This feature started as an older experimental idea, but in SBaGenX it
+is now implemented and usable.  The `waveNN` data is interpolated into
+a smooth 0-100% envelope and used directly for custom beat modulation.
   
   The purest form of binaural beat synthesis is based on two sine waves
   of slightly differing frequency.  The interference between these two
@@ -2037,17 +2031,14 @@ out of these docs, but for now at least it is still here:
   feed them into waveNN: lines, and then play them at appropriate
   beat-frequencies.
   
-  Well, that's the theory, but not everything seems to be working
-  according to plan from my experiments.  Here is the basis on which the
-  code works to generate the tones:
-  
-  If you take the 0-100% scaled and smoothed amplitude waveform, and
-  draw it twice, and invert the second version, you have a wave that can
-  be played at audio frequencies.  If you play this in the left ear at
-  102Hz (for example), and in the right ear you play the same thing at
-  98Hz BUT WITH THE SAMPLE REVERSED, then in theory you should get the
-  correct amplitude envelope.  Here is the mathematical basis for this
-  (from the mailing list):
+  Implementation note (SBaGenX):
+
+  The custom waveform is treated as an amplitude envelope over one beat
+  cycle.  It is scaled to 0-100%, smoothed by periodic sinc
+  interpolation, and then applied at the beat rate while the underlying
+  left/right carriers are still generated at `carrier +/- beat/2`.
+
+  The historical derivation below is retained for reference:
   
   > Let's say we have a brain-wave waveform of f(T) (T is theta),
   > expressed as a fourier series (using complex maths because it's

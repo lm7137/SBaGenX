@@ -6,6 +6,7 @@ Modes:
   - sigmoid:   beat/pulse curve used by -G
   - drop:      beat/pulse curve used by -P with -p drop
   - iso-cycle: one-cycle isochronic envelope + waveform used by -P
+  - wave-lr:   one-cycle custom waveNN envelope + L/R waveforms
 """
 
 import argparse
@@ -89,6 +90,70 @@ def _build_integer_ticks(max_v: float):
     if abs(ticks[-1] - max_v) > 1e-9:
         ticks.append(float(max_v))
     return ticks
+
+
+def _build_linear_ticks(max_v: float, n: int = 10):
+    if n <= 0:
+        return [0.0, max_v]
+    return [max_v * i / float(n) for i in range(n + 1)]
+
+
+def _parse_wave_samples(spec: str):
+    vals = []
+    for tok in spec.replace(",", " ").split():
+        vals.append(float(tok))
+    if len(vals) < 2:
+        raise ValueError("Need at least two samples in --samples")
+    vmin = min(vals)
+    vmax = max(vals)
+    if abs(vmax - vmin) < 1e-12:
+        raise ValueError("Wave samples must not all be identical")
+    return vals
+
+
+def _build_wave_env_table(samples, table_size: int = 16384):
+    # Match C implementation (sinc_interpolate) used by waveNN runtime.
+    if table_size <= 0 or (table_size & (table_size - 1)) != 0:
+        raise ValueError("table_size must be a power of 2")
+
+    vmin = min(samples)
+    vmax = max(samples)
+    norm = [(v - vmin) / (vmax - vmin) for v in samples]
+    np_samp = len(norm)
+
+    sinc = [0.0] * table_size
+    sinc[0] = 1.0
+    half = table_size // 2
+    for a in range(half, 0, -1):
+        tt = a / float(table_size)
+        t2 = tt * tt
+        adj = 1.0 - 4.0 * t2
+        xx = 2.0 * np_samp * PI * tt
+        vv = adj * math.sin(xx) / xx
+        sinc[a] = vv
+        sinc[table_size - a] = vv
+
+    out = [0.0] * table_size
+    for b, val in enumerate(norm):
+        off = (b * table_size) // np_samp
+        for a, sv in enumerate(sinc):
+            out[(a + off) & (table_size - 1)] += sv * val
+
+    dmin = min(out)
+    dmax = max(out)
+    span = dmax - dmin
+    if span < 1e-12:
+        raise ValueError("Interpolated waveform has near-zero dynamic range")
+
+    env = []
+    for v in out:
+        u = (v - dmin) / span
+        if u < 0.0:
+            u = 0.0
+        elif u > 1.0:
+            u = 1.0
+        env.append(u)
+    return env
 
 
 def _sigmoid_eval(t_min, d_min, beat_target, sig_l, sig_h, sig_a, sig_b):
@@ -647,6 +712,204 @@ def render_iso_cycle(args):
     surface.write_to_png(args.out)
 
 
+def render_wave_lr(args):
+    width, height = 1900, 1120
+    ml, mr, mt, mb = 110, 40, 44, 160
+    hgap, vgap = 70, 84
+    pw = (width - ml - mr - hgap) / 2.0
+    ph = (height - mt - mb - vgap) / 2.0
+
+    carrier_hz = float(args.carrier_hz)
+    beat_hz = float(args.beat_hz)
+    beat_abs = abs(beat_hz)
+    amp = max(0.0, args.amp_pct / 100.0)
+    waveform = int(args.waveform)
+    waveform = waveform if 0 <= waveform <= 3 else 0
+    cycles = max(0.25, float(args.cycles))
+
+    if beat_abs <= 0.0:
+        raise ValueError("beat-hz must be non-zero")
+
+    env_table = _build_wave_env_table(_parse_wave_samples(args.samples))
+    table_size = len(env_table)
+    duration_sec = cycles / beat_abs
+
+    x0_l = ml
+    x0_r = ml + pw + hgap
+    y0_top = mt
+    y0_bot = mt + ph + vgap
+
+    freq_l = carrier_hz + beat_hz / 2.0
+    freq_r = carrier_hz - beat_hz / 2.0
+
+    surface, ctx = _setup_canvas(width, height)
+
+    def x_map(x0, t):
+        return x0 + (pw - 1) * (t / duration_sec)
+
+    def y_env_map(y0, v):
+        return y0 + (1.0 - v) * (ph - 1)
+
+    def y_wave_map(y0, v):
+        return y0 + (1.0 - ((v + 1.0) * 0.5)) * (ph - 1)
+
+    env_ticks = [1.0 - 0.1 * i for i in range(11)]
+    wave_ticks = [1.0, 0.5, 0.0, -0.5, -1.0]
+    x_ticks = _build_linear_ticks(duration_sec, 10)
+
+    _draw_grid_box(ctx, x0_l, y0_top, pw, ph, 10, env_ticks, lambda v: y_env_map(y0_top, v))
+    _draw_grid_box(ctx, x0_r, y0_top, pw, ph, 10, env_ticks, lambda v: y_env_map(y0_top, v))
+    _draw_grid_box(ctx, x0_l, y0_bot, pw, ph, 10, wave_ticks, lambda v: y_wave_map(y0_bot, v))
+    _draw_grid_box(ctx, x0_r, y0_bot, pw, ph, 10, wave_ticks, lambda v: y_wave_map(y0_bot, v))
+
+    def env_at(t):
+        phase = (beat_abs * t) % 1.0
+        idx = int(phase * table_size) & (table_size - 1)
+        return env_table[idx]
+
+    def plot_panel(x0, y0, y_map_fn, fn, color, line_w):
+        ctx.set_source_rgb(*color)
+        ctx.set_line_width(line_w)
+        first = True
+        n = 12000
+        for i in range(n + 1):
+            t = duration_sec * i / n
+            y = fn(t)
+            px = x_map(x0, t)
+            py = y_map_fn(y0, y)
+            if first:
+                ctx.move_to(px, py)
+                first = False
+            else:
+                ctx.line_to(px, py)
+        ctx.stroke()
+
+    # Envelopes (same shape in both channels)
+    plot_panel(x0_l, y0_top, y_env_map, lambda t: env_at(t), (0.86, 0.16, 0.16), 2.0)
+    plot_panel(x0_r, y0_top, y_env_map, lambda t: env_at(t), (0.86, 0.16, 0.16), 2.0)
+
+    # Waveforms
+    plot_panel(
+        x0_l,
+        y0_bot,
+        y_wave_map,
+        lambda t: _wave_sample(waveform, freq_l * t) * env_at(t) * amp,
+        (0.13, 0.37, 0.88),
+        1.5,
+    )
+    plot_panel(
+        x0_r,
+        y0_bot,
+        y_wave_map,
+        lambda t: _wave_sample(waveform, freq_r * t) * env_at(t) * amp,
+        (0.13, 0.37, 0.88),
+        1.5,
+    )
+
+    # Titles
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_source_rgb(0.12, 0.12, 0.12)
+    ctx.set_font_size(22)
+    title = args.title
+    ext = ctx.text_extents(title)
+    ctx.move_to(ml + (width - ml - mr - ext.width) / 2.0, 30)
+    ctx.show_text(title)
+
+    ctx.set_font_size(17)
+    for txt, x0, y0 in (
+        ("LEFT CHANNEL ENVELOPE", x0_l, y0_top),
+        ("RIGHT CHANNEL ENVELOPE", x0_r, y0_top),
+        ("LEFT CHANNEL WAVEFORM", x0_l, y0_bot),
+        ("RIGHT CHANNEL WAVEFORM", x0_r, y0_bot),
+    ):
+        ext = ctx.text_extents(txt)
+        ctx.move_to(x0 + (pw - ext.width) / 2.0, y0 - 12)
+        ctx.show_text(txt)
+
+    # Tick labels
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(14)
+
+    def draw_y_ticks(x0, y0, ticks, map_fn):
+        for yv in ticks:
+            y = map_fn(y0, yv)
+            txt = _fmt_tick(yv)
+            ext = ctx.text_extents(txt)
+            ctx.set_source_rgb(0.35, 0.35, 0.35)
+            ctx.move_to(x0 - 4, y)
+            ctx.line_to(x0, y)
+            ctx.stroke()
+            ctx.set_source_rgb(0.15, 0.15, 0.15)
+            ctx.move_to(x0 - 8 - ext.width, y + ext.height / 2)
+            ctx.show_text(txt)
+
+    draw_y_ticks(x0_l, y0_top, env_ticks, y_env_map)
+    draw_y_ticks(x0_r, y0_top, env_ticks, y_env_map)
+    draw_y_ticks(x0_l, y0_bot, wave_ticks, y_wave_map)
+    draw_y_ticks(x0_r, y0_bot, wave_ticks, y_wave_map)
+
+    # X ticks on bottom row only (both columns)
+    for x0 in (x0_l, x0_r):
+        for t in x_ticks:
+            x = x_map(x0, t)
+            ctx.set_source_rgb(0.35, 0.35, 0.35)
+            ctx.move_to(x, y0_bot + ph - 1)
+            ctx.line_to(x, y0_bot + ph + 4)
+            ctx.stroke()
+            txt = _fmt_tick(t)
+            ext = ctx.text_extents(txt)
+            ctx.set_source_rgb(0.15, 0.15, 0.15)
+            ctx.move_to(x - ext.width / 2, y0_bot + ph + 22)
+            ctx.show_text(txt)
+
+    # Axis labels
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_font_size(18)
+    x_label = "TIME SEC"
+    for x0 in (x0_l, x0_r):
+        ext = ctx.text_extents(x_label)
+        ctx.move_to(x0 + (pw - ext.width) / 2.0, y0_bot + ph + 54)
+        ctx.show_text(x_label)
+
+    for txt, x0, y0 in (
+        ("ENVELOPE", x0_l, y0_top),
+        ("ENVELOPE", x0_r, y0_top),
+        ("WAVEFORM", x0_l, y0_bot),
+        ("WAVEFORM", x0_r, y0_bot),
+    ):
+        ctx.save()
+        ctx.translate(x0 - 74, y0 + ph / 2.0)
+        ctx.rotate(-PI / 2.0)
+        ext = ctx.text_extents(txt)
+        ctx.move_to(-ext.width / 2.0, 0)
+        ctx.show_text(txt)
+        ctx.restore()
+
+    # Bottom parameter lines
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(14)
+    wave_name = ["sine", "square", "triangle", "sawtooth"][waveform]
+    line1 = (
+        f"carrier={carrier_hz:.3f}Hz  beat={beat_hz:.3f}Hz  amp={args.amp_pct:.1f}%  "
+        f"waveform={wave_name}  duration={duration_sec:.4f}s ({cycles:.2f} beat cycles)"
+    )
+    sample_list = _parse_wave_samples(args.samples)
+    sample_text = ", ".join(_fmt_tick(v) for v in sample_list[:16])
+    if len(sample_list) > 16:
+        sample_text += ", ..."
+    line2 = f"waveNN samples ({len(sample_list)}): {sample_text}"
+
+    ext = ctx.text_extents(line1)
+    ctx.move_to(ml + (width - ml - mr - ext.width) / 2.0, height - 52)
+    ctx.show_text(line1)
+    ext = ctx.text_extents(line2)
+    ctx.move_to(ml + (width - ml - mr - ext.width) / 2.0, height - 26)
+    ctx.show_text(line2)
+
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    surface.write_to_png(args.out)
+
+
 def main():
     parser = argparse.ArgumentParser(description="SBaGenX Cairo plot backend")
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -684,6 +947,16 @@ def main():
     ip.add_argument("--i-r", type=float, required=True)
     ip.add_argument("--i-e", type=int, required=True)
 
+    wp = sub.add_parser("wave-lr", help="Render custom waveNN left/right plot")
+    wp.add_argument("--out", required=True)
+    wp.add_argument("--carrier-hz", type=float, required=True)
+    wp.add_argument("--beat-hz", type=float, required=True)
+    wp.add_argument("--amp-pct", type=float, default=100.0)
+    wp.add_argument("--waveform", type=int, default=0)
+    wp.add_argument("--samples", required=True, help="WaveNN samples, comma or space separated")
+    wp.add_argument("--cycles", type=float, default=1.0, help="Beat cycles shown on x-axis")
+    wp.add_argument("--title", default="CUSTOM WAVENN LEFT/RIGHT PLOT")
+
     args = parser.parse_args()
     if args.mode == "sigmoid":
         render_sigmoid(args)
@@ -691,6 +964,8 @@ def main():
         render_drop(args)
     elif args.mode == "iso-cycle":
         render_iso_cycle(args)
+    elif args.mode == "wave-lr":
+        render_wave_lr(args)
     else:
         raise ValueError("Unknown mode")
 

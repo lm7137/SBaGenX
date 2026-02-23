@@ -441,6 +441,7 @@ struct Channel {
   int amp, amp2;		// Current state, according to current type
   int inc1, off1;		//  ::  (for binaural tones, offset + increment into sine 
   int inc2, off2;		//  ::   table * 65536)
+  int inc3, off3;		//  ::   extra phase for custom waveform envelope
 };
 
 struct Period {
@@ -4454,14 +4455,20 @@ outChunk() {
             tot2 += spin_right;
           }
           break;
-       default:	// Waveform-based binaural tones
+       default:	// Custom-envelope binaural tones (wave00..wave99)
 	  tab= waves[-1 - ch->typ];
 	  ch->off1 += ch->inc1;
 	  ch->off1 &= (ST_SIZ << 16) - 1;
-	  tot1 += ch->amp * tab[ch->off1 >> 16];
 	  ch->off2 += ch->inc2;
 	  ch->off2 &= (ST_SIZ << 16) - 1;
-	  tot2 += ch->amp * tab[ch->off2 >> 16];
+	  ch->off3 += ch->inc3;
+	  ch->off3 &= (ST_SIZ << 16) - 1;
+	  {
+	     int env= tab[ch->off3 >> 16];
+	     int env_amp= (int)(((S64)ch->amp * env + ST_AMP/2) / ST_AMP);
+	     tot1 += env_amp * sin_tables[ch->v.waveform][ch->off1 >> 16];
+	     tot2 += env_amp * sin_tables[ch->v.waveform][ch->off2 >> 16];
+	  }
 	  break;
       }
 
@@ -4716,7 +4723,7 @@ corrVal(int running) {
 	  case 12:  // Wspin - spinning white noise
 	     ch->off1= ch->off2= 0; break;
 	  default:
-	     ch->off1= ch->off2= 0; break;
+	     ch->off1= ch->off2= ch->off3= 0; break;
 	 }
       }
       
@@ -4770,25 +4777,26 @@ corrVal(int running) {
           break;
        case 11:  // Bspin - spinning brown noise
           vv->amp= rat0 * v0->amp + rat1 * v1->amp;
-	        vv->carr= rat0 * v0->carr + rat1 * v1->carr;
-	        vv->res= rat0 * v0->res + rat1 * v1->res;
-	        if (vv->carr > spin_carr_max) vv->carr= spin_carr_max; // Clipping sweep width
-	        if (vv->carr < -spin_carr_max) vv->carr= -spin_carr_max;
+          vv->carr= rat0 * v0->carr + rat1 * v1->carr;
+          vv->res= rat0 * v0->res + rat1 * v1->res;
+          if (vv->carr > spin_carr_max) vv->carr= spin_carr_max; // Clipping sweep width
+          if (vv->carr < -spin_carr_max) vv->carr= -spin_carr_max;
           vv->waveform= v0->waveform;
           break;
        case 12:  // Wspin - spinning white noise
-         vv->amp= rat0 * v0->amp + rat1 * v1->amp;
-	       vv->carr= rat0 * v0->carr + rat1 * v1->carr;
-	       vv->res= rat0 * v0->res + rat1 * v1->res;
-	       if (vv->carr > spin_carr_max) vv->carr= spin_carr_max; // Clipping sweep width
-	       if (vv->carr < -spin_carr_max) vv->carr= -spin_carr_max;
-         vv->waveform= v0->waveform;
-         break;
+          vv->amp= rat0 * v0->amp + rat1 * v1->amp;
+          vv->carr= rat0 * v0->carr + rat1 * v1->carr;
+          vv->res= rat0 * v0->res + rat1 * v1->res;
+          if (vv->carr > spin_carr_max) vv->carr= spin_carr_max; // Clipping sweep width
+          if (vv->carr < -spin_carr_max) vv->carr= -spin_carr_max;
+          vv->waveform= v0->waveform;
+          break;
        default:		// Waveform based binaural
-	 vv->amp= rat0 * v0->amp + rat1 * v1->amp;
-	 vv->carr= rat0 * v0->carr + rat1 * v1->carr;
-	 vv->res= rat0 * v0->res + rat1 * v1->res;
-	 break;
+          vv->amp= rat0 * v0->amp + rat1 * v1->amp;
+          vv->carr= rat0 * v0->carr + rat1 * v1->carr;
+          vv->res= rat0 * v0->res + rat1 * v1->res;
+          vv->waveform= v0->waveform;
+          break;
       }
 
       // For selected built-in modes, evaluate carrier/beat directly
@@ -4888,14 +4896,11 @@ corrVal(int running) {
           ch->inc1= (int)(vv->res / out_rate * ST_SIZ * 65536);
           ch->inc2= (int)(vv->carr * 1E-6 * out_rate * (1<<24) / ST_AMP);
           break;
-       default:		// Waveform based binaural
+       default:		// Custom-envelope binaural (waveNN)
 	  ch->amp= (int)vv->amp;
 	  ch->inc1= (int)((vv->carr + vv->res/2) / out_rate * ST_SIZ * 65536);
 	  ch->inc2= (int)((vv->carr - vv->res/2) / out_rate * ST_SIZ * 65536);
-	  if (ch->inc1 > ch->inc2) 
-	     ch->inc2= -ch->inc2;
-	  else 
-	     ch->inc1= -ch->inc1;
+	  ch->inc3= (int)(fabs(vv->res) / out_rate * ST_SIZ * 65536);
 	  break;
       }
    }
@@ -5830,6 +5835,9 @@ readNameDef() {
      if (np < 2) 
 	error("Expecting at least two samples in the waveform, line %d:\n  %s",
 	      in_lin, lin_copy);
+     if (dmax == dmin)
+	error("Waveform samples must not all be identical, line %d:\n  %s",
+	      in_lin, lin_copy);
 
      // Adjust to range 0-1
      for (dp= dp0; dp < dp1; dp++)
@@ -5957,6 +5965,7 @@ readNameDef() {
        if (!waves[wave])
 	  error("Waveform %02d has not been defined, line: %d\n  %s", wave, in_lin, lin_copy);
        nd->vv[ch].typ= -1-wave;
+       nd->vv[ch].waveform= opt_w;
        nd->vv[ch].carr= carr;
        nd->vv[ch].res= res;
        nd->vv[ch].amp= AMP_DA(amp);	
@@ -6439,10 +6448,10 @@ readTime(char *p, int *timp) {		// Rets chars consumed, or 0 error
 }
 
 //
-//	Takes a set of points and repeats them twice, inverting the
-//	second set, and then interpolates them using a periodic sinc
-//	function (see http://www-ccrma.stanford.edu/~jos/resample/)
-//	and writes them to arr[] in the same format as the sin_table[].
+//	Takes a set of points over one cycle and interpolates them
+//	using a periodic sinc kernel (see
+//	http://www-ccrma.stanford.edu/~jos/resample/) and writes
+//	the resulting unipolar table (0..ST_AMP) to arr[].
 //
 
 void sinc_interpolate(double *dp, int np, int *arr) {
@@ -6450,7 +6459,7 @@ void sinc_interpolate(double *dp, int np, int *arr) {
    double *out;		// Temporary output table
    int a, b;
    double dmax, dmin;
-   double adj, off;
+   double adj;
 
    // Generate a modified periodic sin(x)/x function to be used for
    // each of the points.  Really this should be sin(x)/x modified
@@ -6472,14 +6481,13 @@ void sinc_interpolate(double *dp, int np, int *arr) {
       sinc[ST_SIZ-a]= vv;
    }
    
-   // Build waveform into buffer
+   // Build one-cycle waveform into buffer
    out= (double *)Alloc(ST_SIZ * sizeof(double));
    for (b= 0; b<np; b++) {
-      int off= b * ST_SIZ / np / 2;
+      int off= b * ST_SIZ / np;
       double val= dp[b];
       for (a= 0; a<ST_SIZ; a++) {
 	 out[(a + off)&(ST_SIZ-1)] += sinc[a] * val;
-	 out[(a + off + ST_SIZ/2)&(ST_SIZ-1)] -= sinc[a] * val;
       }
    }
 
@@ -6490,11 +6498,14 @@ void sinc_interpolate(double *dp, int np, int *arr) {
       if (out[a] < dmin) dmin= out[a];
    }
 
-   // Write out to output buffer
-   off= -0.5 * (dmax + dmin);
-   adj= ST_AMP / ((dmax - dmin) / 2);
-   for (a= 0; a<ST_SIZ; a++)
-      arr[a]= (int)((out[a] + off) * adj);
+   // Write out to output buffer as unipolar amplitude (0..ST_AMP)
+   adj= ST_AMP / (dmax - dmin);
+   for (a= 0; a<ST_SIZ; a++) {
+      double vv= (out[a] - dmin) * adj;
+      if (vv < 0) vv= 0;
+      if (vv > ST_AMP) vv= ST_AMP;
+      arr[a]= (int)(vv + 0.5);
+   }
 
    free(sinc);
    free(out);

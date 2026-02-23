@@ -1,0 +1,13 @@
+## Minimal custom waveNN example (Appendix-A style envelope)
+##
+## Play immediately from file start:
+##   sbagenx -S examples/basics/prog-wave-custom-envelope-demo.sbg
+##
+## Render 2 minutes to WAV:
+##   sbagenx -S -L 00:02 -W -o wave-demo.wav examples/basics/prog-wave-custom-envelope-demo.sbg
+
+wave00: 0 0.2 1.0 0.2 0
+
+ts-wave-demo: wave00:200+4/50
+
+00:00 ts-wave-demo
