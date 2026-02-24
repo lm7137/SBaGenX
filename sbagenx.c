@@ -3288,13 +3288,21 @@ write_curve_plot_samples_file(const double *samples, int n,
 #ifdef T_MINGW
    {
       char tdir[PATH_MAX];
+      char tfile[PATH_MAX];
       DWORD len= GetTempPathA((DWORD)sizeof(tdir), tdir);
-      if (len > 0 && len < sizeof(tdir)-1)
-	 snprintf(out_path, out_path_sz, "%ssbagenx_curve_%lu_%ld_%d.dat",
-		  tdir, (unsigned long)GetCurrentProcessId(), now, curve_plot_tmp_counter++);
-      else
+      UINT trv= 0;
+      if (len > 0 && len < sizeof(tdir)-1) {
+	 trv= GetTempFileNameA(tdir, "sgx", 0, tfile);
+      }
+      if (trv != 0 && tfile[0]) {
+	 int ncpy= (int)strlen(tfile);
+	 if (ncpy >= out_path_sz) ncpy= out_path_sz-1;
+	 memcpy(out_path, tfile, ncpy);
+	 out_path[ncpy]= 0;
+      } else {
 	 snprintf(out_path, out_path_sz, "sbagenx_curve_%ld_%d.dat",
 		  now, curve_plot_tmp_counter++);
+      }
    }
 #else
    snprintf(out_path, out_path_sz, "/tmp/sbagenx_curve_%ld_%ld_%d.dat",
