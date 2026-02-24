@@ -12,9 +12,8 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
   actions: read
-  packages: write
 
 jobs:
   build-linux-windows:
@@ -153,76 +152,3 @@ jobs:
             artifacts/
             checksums-macos.txt
           retention-days: 90
-
-  create-release:
-    needs: [build-linux-windows, build-macos]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Linux/Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: sbagenx-stable-${{ needs.build-linux-windows.outputs.version }}
-          path: linux-windows/
-
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: sbagenx-macos-stable-${{ needs.build-macos.outputs.version }}
-          path: macos/
-
-      - name: Combine artifacts
-        run: |
-          mkdir -p all-artifacts
-
-          # Copy Linux/Windows artifacts
-          if [ -d "linux-windows/artifacts" ]; then
-            cp linux-windows/artifacts/* all-artifacts/ 2>/dev/null || true
-          fi
-
-          # Copy macOS artifacts
-          if [ -d "macos/artifacts" ]; then
-            cp macos/artifacts/* all-artifacts/ 2>/dev/null || true
-          fi
-
-          # Merge checksums
-          if [ -f "macos/checksums-macos.txt" ]; then
-            cat macos/checksums-macos.txt >> all-artifacts/checksums.txt
-            rm -f macos/checksums-macos.txt
-          fi
-
-      - name: Generate release body from ChangeLog
-        run: |
-          # Update VERSION file to match the release version
-          echo "${{ needs.build-linux-windows.outputs.version }}" > VERSION
-
-          # Extract changelog for this version
-          if [ -f "ChangeLog.txt" ]; then
-            echo "## What's Changed" >> release_body.md
-            echo "" >> release_body.md
-            
-            # Extract changelog entries for this version using the provided command
-            CHANGELOG_CONTENT=$(grep "^$(cat VERSION):" ChangeLog.txt | sed -r 's/^[0-9]+.[0-9]+.[0-9]+:/*/g' || true)
-            
-            if [ -n "$CHANGELOG_CONTENT" ]; then
-              echo "$CHANGELOG_CONTENT" >> release_body.md
-            else
-              echo "* Release notes not found in ChangeLog.txt for version ${{ needs.build-linux-windows.outputs.version }}" >> release_body.md
-            fi
-          fi
-
-      - name: Create Stable Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ needs.build-linux-windows.outputs.version }}
-          name: "v${{ needs.build-linux-windows.outputs.version }}"
-          body_path: release_body.md
-          files: |
-            all-artifacts/*
-          prerelease: false
-          draft: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

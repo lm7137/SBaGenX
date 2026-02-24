@@ -3,9 +3,8 @@ name: Development Release
 on: workflow_dispatch
 
 permissions:
-  contents: write
+  contents: read
   actions: read
-  packages: write
 
 jobs:
   build-linux-windows:
@@ -135,60 +134,3 @@ jobs:
             artifacts/
             checksums-macos.txt
           retention-days: 30
-
-  create-release:
-    needs: [build-linux-windows, build-macos]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Linux/Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: sbagenx-${{ needs.build-linux-windows.outputs.version }}
-          path: linux-windows/
-
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: sbagenx-macos-${{ needs.build-macos.outputs.version }}
-          path: macos/
-
-      - name: Combine artifacts
-        run: |
-          mkdir -p all-artifacts
-
-          # Copy Linux/Windows artifacts
-          if [ -d "linux-windows/artifacts" ]; then
-            cp linux-windows/artifacts/* all-artifacts/ 2>/dev/null || true
-          fi
-
-          # Copy macOS artifacts
-          if [ -d "macos/artifacts" ]; then
-            cp macos/artifacts/* all-artifacts/ 2>/dev/null || true
-          fi
-
-          # Merge checksums
-          if [ -f "macos/checksums-macos.txt" ]; then
-            cat macos/checksums-macos.txt >> all-artifacts/checksums.txt
-            rm -f macos/checksums-macos.txt
-          fi
-
-      - name: Generate release body with checksums
-        run: |
-          echo "**This is a development version and may contain bugs or unstable features.**" > release_body.md
-
-      - name: Create Development Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ needs.build-linux-windows.outputs.version }}
-          name: "Development Release v${{ needs.build-linux-windows.outputs.version }}"
-          body_path: release_body.md
-          files: |
-            all-artifacts/*
-          prerelease: true
-          draft: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
