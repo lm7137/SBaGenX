@@ -7,6 +7,9 @@
 #define MyAppAssocName "SBaGenX Sequence File"
 #define MyAppAssocExt ".sbg"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
+#define MyAppFuncAssocName "SBaGenX Function File"
+#define MyAppFuncAssocExt ".sbgf"
+#define MyAppFuncAssocKey StringChange(MyAppFuncAssocName, " ", "") + MyAppFuncAssocExt
 #define MyAppUserDocsDir "{userdocs}\SBaGenX"
 
 [Setup]
@@ -60,7 +63,7 @@ NoticeCaption=Important Notice
 NoticeDescription=Please read this important notice before continuing:
 
 [Tasks]
-Name: "associatewithfiles"; Description: "Associate .sbg files with {#MyAppName}"; GroupDescription: "File associations:";
+Name: "associatewithfiles"; Description: "Associate .sbg/.sbgf files with {#MyAppName}"; GroupDescription: "File associations:";
 Name: "addtopath"; Description: "Add {#MyAppName} to PATH environment variable"; GroupDescription: "System integration:"; Flags: unchecked
 
 [Files]
@@ -150,8 +153,21 @@ Root: HKCU; Subkey: "Software\Classes\{#MyAppAssocKey}\shell\writetoWAV30"; Valu
 Root: HKCU; Subkey: "Software\Classes\{#MyAppAssocKey}\shell\writetoWAV30"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletekey; Tasks: associatewithfiles
 Root: HKCU; Subkey: "Software\Classes\{#MyAppAssocKey}\shell\writetoWAV30\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" -L 00:30:00 -Wo ""output.wav"" ""%1"""; Flags: uninsdeletekey; Tasks: associatewithfiles
 
+; File association for .sbgf files (User Level)
+Root: HKCU; Subkey: "Software\Classes\{#MyAppFuncAssocExt}"; ValueType: string; ValueName: ""; ValueData: "{#MyAppFuncAssocKey}"; Flags: uninsdeletevalue; Tasks: associatewithfiles
+Root: HKCU; Subkey: "Software\Classes\{#MyAppFuncAssocExt}\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppFuncAssocKey}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associatewithfiles
+Root: HKCU; Subkey: "Software\Classes\{#MyAppFuncAssocKey}"; ValueType: string; ValueName: ""; ValueData: "{#MyAppFuncAssocName}"; Flags: uninsdeletekey; Tasks: associatewithfiles
+Root: HKCU; Subkey: "Software\Classes\{#MyAppFuncAssocKey}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},0"; Tasks: associatewithfiles
+Root: HKCU; Subkey: "Software\Classes\{#MyAppFuncAssocKey}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: "notepad.exe ""%1"""; Tasks: associatewithfiles
+
+; Context menu for .sbgf files - Edit functions option
+Root: HKCU; Subkey: "Software\Classes\{#MyAppFuncAssocKey}\shell\editfunctions"; ValueType: string; ValueName: ""; ValueData: "Edit functions"; Flags: uninsdeletekey; Tasks: associatewithfiles
+Root: HKCU; Subkey: "Software\Classes\{#MyAppFuncAssocKey}\shell\editfunctions"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletekey; Tasks: associatewithfiles
+Root: HKCU; Subkey: "Software\Classes\{#MyAppFuncAssocKey}\shell\editfunctions\command"; ValueType: string; ValueName: ""; ValueData: "notepad.exe ""%1"""; Flags: uninsdeletekey; Tasks: associatewithfiles
+
 ; Force Windows to refresh shell icons
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{#MyAppAssocExt}"; ValueType: none; ValueName: ""; Flags: deletekey; Tasks: associatewithfiles
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\{#MyAppFuncAssocExt}"; ValueType: none; ValueName: ""; Flags: deletekey; Tasks: associatewithfiles
 
 ; Add installation directory to user PATH
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "PATH"; ValueData: "{olddata};{app}"; Check: NeedsAddPath('{app}'); Tasks: addtopath
