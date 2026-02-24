@@ -1,0 +1,11 @@
+# SBaGenX custom curve example (.sbgf)
+# Exponential beat curve with constants solved from boundary conditions.
+#
+# Usage example:
+#   sbagenx -P -p curve examples/basics/curve-expfit-solve-demo.sbgf 00ls:l=-0.15
+
+param l = -0.15
+solve A,C : A*exp(l*0)+C=b0 ; A*exp(l*D)+C=b1
+
+beat = A*exp(l*m) + C
+carrier = c0 + (c1-c0) * ramp(m,0,T)

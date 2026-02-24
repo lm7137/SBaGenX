@@ -1401,6 +1401,10 @@ Examples:
     -p curve examples/basics/curve-amp-mix-demo.sbgf 00ls+ mix/97
   sbagenx -m river1.ogg \
     -p curve examples/basics/curve-sigmoid-like.sbgf 00ls+ mix/99
+  sbagenx -P -p curve examples/basics/curve-sigmoid-like.sbgf \
+    00ls:l=0.2:h=0
+  sbagenx -P -p curve examples/basics/curve-expfit-solve-demo.sbgf \
+    00ls:l=-0.15
 
 The level/depth/time modifiers are interpreted the same way as in
 `-p drop`/`-p sigmoid`:
@@ -1417,7 +1421,8 @@ For `amp` and `mixamp`:
 
 `@` (isochronic) and `M` (monaural) are mutually exclusive.
 
-`-P`/`-G` plotting is currently not supported with `-p curve`.
+With `-P`, `-p curve` plots the evaluated beat/pulse frequency curve
+over the drop period (`D`) and exits.
 
 
 2.11.1: The .sbgf function file format
@@ -1426,6 +1431,7 @@ For `amp` and `mixamp`:
 Supported line types:
 
   param <name> = <number>[m|s] (optional unit suffix: m=minutes, s=seconds)
+  solve <u1>,<u2>,... : <lhs1>=<rhs1> ; <lhs2>=<rhs2> ; ... (optional)
   beat = <expression>          (required)
   carrier = <expression>       (optional)
   amp = <expression>           (optional, beat/iso/mono amplitude in %)
@@ -1453,6 +1459,11 @@ For each target (`beat`, `carrier`, `amp`, `mixamp`), use either:
   1) one plain expression line (`beat = ...`), or
   2) piecewise lines (`beat<...`, `beat>...`, etc).
 Mixing plain and piecewise lines for the same target is not allowed.
+
+`solve` is evaluated once at setup time (not per sample).  It solves
+constants/parameters so your runtime formulas can stay simple.
+Current implementation supports one `solve` line per file and requires
+a square system (`#equations == #unknowns`).
 
 Expression variables available at runtime:
 
@@ -1574,6 +1585,35 @@ overridden from the command line using `:name=value` tokens in the
 curve spec.  These names are not fixed keywords; they are user-defined
 `param` names from the `.sbgf` file.  Order does not matter.
 
+`solve` unknown names use the same naming rules as `param` names.
+If not already defined with `param`, they are created automatically
+with initial value `0`.  You can still provide `:name=value` overrides
+to change initial guesses before solving.
+
+Common `solve` errors:
+
+  1) Non-square system (not currently supported):
+       solve A,C : A+C=b0
+     Here, unknowns=2 and equations=1.
+
+  2) Missing ':' separator:
+       solve A,C A+C=b0 ; A-C=b1
+     Correct form is:
+       solve A,C : A+C=b0 ; A-C=b1
+
+  3) Missing '=' in one equation chunk:
+       solve A,C : A+C ; A-C=b1
+     Here the first chunk (`A+C`) has no '='.
+     Every semicolon-separated chunk must be <lhs>=<rhs>.
+
+  4) Duplicate unknown names:
+       solve A,A : A+C=b0 ; A-C=b1
+     Unknown names must be unique.
+
+Valid minimal example:
+
+  solve A,C : A*exp(l*0)+C=b0 ; A*exp(l*D)+C=b1
+
 Parameter unit suffixes:
   - `m` means minutes
   - `s` means seconds (internally converted to minutes)
@@ -1609,6 +1649,14 @@ The same example in seconds:
   beat<p1 = seg(m,0,p1,b0,6)
   beat<p2 = seg(m,p1,p2,6,3)
   beat>=p2 = seg(m,p2,D,3,b1)
+
+Example `.sbgf` using auto-solved constants:
+
+  # Target model: beat(m) = A*exp(l*m) + C
+  param l = -0.15
+  solve A,C : A*exp(l*0)+C=b0 ; A*exp(l*D)+C=b1
+  beat = A*exp(l*m) + C
+  carrier = c0 + (c1-c0) * ramp(m,0,T)
 
 
 3: Writing sequence files
@@ -1677,7 +1725,7 @@ follows:
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
   -P        Plot graph as PNG and exit.
-              With -p drop/-p sigmoid: renders beat/pulse curve graph.
+              With -p drop/-p sigmoid/-p curve: renders beat/pulse curve graph.
               Otherwise: renders one-cycle isochronic (@) waveform
               using current tone and `-I` settings.
               Python+Cairo backend is preferred; otherwise built-in

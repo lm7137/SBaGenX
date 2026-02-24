@@ -268,6 +268,11 @@ void write_drop_graph_png(const char *fmt, double level,
 			  double beat_start, double beat_target,
 			  int slide, int n_step, int steplen,
 			  int isisochronic, int ismono);
+void write_curve_graph_png(const char *fmt, double level,
+			   char depth_ch, int len0, int len1, int len2,
+			   int slide, int n_step, int steplen,
+			   int isisochronic, int ismono,
+			   double beat_start, double beat_target);
 void write_iso_cycle_graph_png_from_sequence(void);
 int try_external_sigmoid_graph_png(const char *out_fname,
 				   int len0_sec,
@@ -279,6 +284,12 @@ int try_external_drop_graph_png(const char *out_fname,
 				double beat_start, double beat_target,
 				int slide, int n_step, int steplen_sec,
 				int mode_kind);
+int try_external_curve_graph_png(const char *out_fname,
+				 int len0_sec,
+				 double beat_start, double beat_target,
+				 int mode_kind,
+				 int slide, int n_step, int steplen_sec,
+				 const char *sample_file);
 int try_external_iso_cycle_graph_png(const char *out_fname,
 				     double carr_hz, double pulse_hz,
 				     double amp_pct, int waveform);
@@ -335,7 +346,7 @@ help() {
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
 		  NL "          -P        Plot graph as PNG and exit (prefers Python/Cairo when available)"
-		  NL "                     With -p drop/-p sigmoid: plots beat/pulse drop curve"
+		  NL "                     With -p drop/-p sigmoid/-p curve: plots beat/pulse curve"
 		  NL "                     Otherwise: plots one-cycle isochronic waveform"
 		  NL "          -G        Legacy alias for sigmoid plotting (-P with -p sigmoid)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
@@ -530,6 +541,7 @@ int opt_G;			// Legacy graph flag for -p sigmoid (-G)
 int opt_P;			// Unified plot flag (-P)
 int opt_P_sigmoid;		// -P used with -p sigmoid, so render sigmoid graph
 int opt_P_drop;		// -P used with -p drop, so render drop graph
+int opt_P_curve;		// -P used with -p curve, so render curve graph
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -660,6 +672,8 @@ Mp3EncState mp3_enc;
 #define CURVE_NAME_MAX 64
 #define CURVE_EXPR_MAX 1024
 #define CURVE_FILE_MAX 1024
+#define CURVE_MAX_SOLVE_UNK 8
+#define CURVE_MAX_SOLVE_EQ CURVE_MAX_SOLVE_UNK
 
 typedef struct {
    int active;			// Function-driven modulation enabled?
@@ -700,6 +714,13 @@ typedef struct {
    char amp_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
    char mixamp_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
    char mixamp_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
+   int have_solve;
+   int solve_unknown_count;
+   int solve_eq_count;
+   char solve_unknown_names[CURVE_MAX_SOLVE_UNK][CURVE_NAME_MAX];
+   int solve_unknown_param_idx[CURVE_MAX_SOLVE_UNK];
+   char solve_eq_lhs_src[CURVE_MAX_SOLVE_EQ][CURVE_EXPR_MAX];
+   char solve_eq_rhs_src[CURVE_MAX_SOLVE_EQ][CURVE_EXPR_MAX];
    int param_count;
    char param_names[CURVE_MAX_PARAMS][CURVE_NAME_MAX];
    double param_values[CURVE_MAX_PARAMS];
@@ -1012,6 +1033,7 @@ curve_name_reserved(const char *name) {
       "t", "m", "D", "H", "T", "U",
       "b0", "b1", "c0", "c1", "a0", "m0",
       "amp", "mixamp", "beat", "carrier",
+      "solve",
       "pi", "e",
       "ifelse", "step", "clamp", "lerp", "ramp",
       "smoothstep", "smootherstep",
@@ -1249,6 +1271,343 @@ curve_parse_piece_line(char *s, int lno, const char *path,
 }
 
 static void
+curve_parse_solve_line(char *line, int lno, const char *path) {
+   char *p= line;
+   char *colon;
+   char *eqs;
+   int nunk= 0, neq= 0;
+
+   if (func_curve.have_solve)
+      error("%s:%d: only one 'solve ...' line is supported per .sbgf file", path, lno);
+
+   while (*p && isspace((unsigned char)*p)) p++;
+   if (!*p)
+      error("%s:%d: solve line requires unknown names and equations", path, lno);
+
+   colon= strchr(p, ':');
+   if (!colon)
+      error("%s:%d: solve line must use ':' between unknown names and equations", path, lno);
+   *colon= 0;
+   p= curve_trim(p);
+   eqs= curve_trim(colon + 1);
+   if (!*p)
+      error("%s:%d: solve line is missing unknown names before ':'", path, lno);
+   if (!*eqs)
+      error("%s:%d: solve line is missing equations after ':'", path, lno);
+
+   while (*p) {
+      char name[CURVE_NAME_MAX];
+      int i= 0, a;
+
+      while (*p && isspace((unsigned char)*p)) p++;
+      if (!*p) break;
+      if (!curve_name_char((unsigned char)*p, 1))
+	 error("%s:%d: bad solve unknown name near '%s'", path, lno, p);
+      while (*p && curve_name_char((unsigned char)*p, i == 0)) {
+	 if (i >= CURVE_NAME_MAX-1)
+	    error("%s:%d: solve unknown name is too long", path, lno);
+	 name[i++]= *p++;
+      }
+      name[i]= 0;
+      for (a= 0; a<nunk; a++)
+	 if (curve_name_eq(name, func_curve.solve_unknown_names[a]))
+	    error("%s:%d: duplicate solve unknown '%s'", path, lno, name);
+      if (curve_name_reserved(name))
+	 error("%s:%d: solve unknown '%s' uses a reserved name", path, lno, name);
+      if (nunk >= CURVE_MAX_SOLVE_UNK)
+	 error("%s:%d: too many solve unknowns (max %d)", path, lno, CURVE_MAX_SOLVE_UNK);
+      strcpy(func_curve.solve_unknown_names[nunk], name);
+      nunk++;
+      if (curve_param_index(name) < 0)
+	 curve_set_param_value(name, 0.0, 1);
+
+      while (*p && isspace((unsigned char)*p)) p++;
+      if (!*p) break;
+      if (*p != ',')
+	 error("%s:%d: expected ',' between solve unknown names near '%s'", path, lno, p);
+      p++;
+   }
+
+   while (*eqs) {
+      char *semi= strchr(eqs, ';');
+      char *seg;
+      char *eq;
+      char *lhs;
+      char *rhs;
+
+      if (semi) *semi= 0;
+      seg= curve_trim(eqs);
+      if (*seg) {
+	 if (neq >= CURVE_MAX_SOLVE_EQ)
+	    error("%s:%d: too many solve equations (max %d)", path, lno, CURVE_MAX_SOLVE_EQ);
+	 eq= strchr(seg, '=');
+	 if (!eq)
+	    error("%s:%d: solve equation #%d must contain '='", path, lno, neq+1);
+	 *eq= 0;
+	 lhs= curve_trim(seg);
+	 rhs= curve_trim(eq + 1);
+	 if (!*lhs || !*rhs)
+	    error("%s:%d: solve equation #%d must have both lhs and rhs expressions", path, lno, neq+1);
+	 if ((int)strlen(lhs) >= CURVE_EXPR_MAX || (int)strlen(rhs) >= CURVE_EXPR_MAX)
+	    error("%s:%d: solve equation #%d is too long", path, lno, neq+1);
+	 strcpy(func_curve.solve_eq_lhs_src[neq], lhs);
+	 strcpy(func_curve.solve_eq_rhs_src[neq], rhs);
+	 neq++;
+      }
+      if (!semi) break;
+      eqs= semi + 1;
+   }
+
+   if (nunk <= 0)
+      error("%s:%d: solve line must declare at least one unknown", path, lno);
+   if (neq <= 0)
+      error("%s:%d: solve line must include at least one equation", path, lno);
+   if (neq != nunk)
+      error("%s:%d: solve currently requires a square system (#equations == #unknowns)"
+	    NL "       unknowns=%d equations=%d",
+	    path, lno, nunk, neq);
+
+   func_curve.have_solve= 1;
+   func_curve.solve_unknown_count= nunk;
+   func_curve.solve_eq_count= neq;
+}
+
+static double
+curve_vec_norm_inf(int n, const double *v) {
+   int i;
+   double m= 0.0;
+   for (i= 0; i<n; i++) {
+      double a= fabs(v[i]);
+      if (a > m) m= a;
+   }
+   return m;
+}
+
+static int
+curve_linear_solve(int n,
+		   double a[CURVE_MAX_SOLVE_UNK][CURVE_MAX_SOLVE_UNK],
+		   double b[CURVE_MAX_SOLVE_UNK],
+		   double x[CURVE_MAX_SOLVE_UNK]) {
+   int i, j, k;
+   for (i= 0; i<n; i++) {
+      int piv= i;
+      double pivv= fabs(a[i][i]);
+      for (j= i+1; j<n; j++) {
+	 double v= fabs(a[j][i]);
+	 if (v > pivv) { pivv= v; piv= j; }
+      }
+      if (pivv < 1e-14) return 0;
+      if (piv != i) {
+	 double tb= b[i];
+	 b[i]= b[piv];
+	 b[piv]= tb;
+	 for (k= i; k<n; k++) {
+	    double ta= a[i][k];
+	    a[i][k]= a[piv][k];
+	    a[piv][k]= ta;
+	 }
+      }
+      for (j= i+1; j<n; j++) {
+	 double f= a[j][i] / a[i][i];
+	 if (f == 0.0) continue;
+	 a[j][i]= 0.0;
+	 for (k= i+1; k<n; k++)
+	    a[j][k]-= f * a[i][k];
+	 b[j]-= f * b[i];
+      }
+   }
+   for (i= n-1; i>=0; i--) {
+      double s= b[i];
+      for (j= i+1; j<n; j++)
+	 s-= a[i][j] * x[j];
+      if (fabs(a[i][i]) < 1e-14) return 0;
+      x[i]= s / a[i][i];
+   }
+   return 1;
+}
+
+static void
+curve_set_unknown_vector(int n, const double *x) {
+   int i;
+   for (i= 0; i<n; i++) {
+      int idx= func_curve.solve_unknown_param_idx[i];
+      if (idx >= 0 && idx < func_curve.param_count)
+	 func_curve.param_values[idx]= x[i];
+   }
+}
+
+static int
+curve_eval_solve_residuals(int n, te_expr **lhs, te_expr **rhs, double *resid) {
+   int i;
+   for (i= 0; i<n; i++) {
+      double lv= te_eval(lhs[i]);
+      double rv= te_eval(rhs[i]);
+      if (!isfinite(lv) || !isfinite(rv)) return 0;
+      resid[i]= lv - rv;
+   }
+   return 1;
+}
+
+static void
+curve_apply_solve(te_variable *vars, int vcnt) {
+   te_expr *lhs[CURVE_MAX_SOLVE_EQ];
+   te_expr *rhs[CURVE_MAX_SOLVE_EQ];
+   double x[CURVE_MAX_SOLVE_UNK];
+   double r0[CURVE_MAX_SOLVE_EQ];
+   double r1[CURVE_MAX_SOLVE_EQ];
+   double r2[CURVE_MAX_SOLVE_EQ];
+   double jac[CURVE_MAX_SOLVE_UNK][CURVE_MAX_SOLVE_UNK];
+   int n, i, j, iter, ok= 0;
+   double best= 0.0;
+   int err= 0;
+
+   if (!func_curve.have_solve) return;
+   n= func_curve.solve_unknown_count;
+   if (n <= 0 || n > CURVE_MAX_SOLVE_UNK)
+      error("%s: internal solve setup error (unknown count=%d)", func_curve.src_file, n);
+   if (func_curve.solve_eq_count != n)
+      error("%s: solve requires equal equation/unknown counts", func_curve.src_file);
+
+   memset(lhs, 0, sizeof(lhs));
+   memset(rhs, 0, sizeof(rhs));
+
+   for (i= 0; i<n; i++) {
+      int idx= curve_param_index(func_curve.solve_unknown_names[i]);
+      if (idx < 0)
+	 error("%s: solve unknown '%s' is not a defined parameter",
+	       func_curve.src_file, func_curve.solve_unknown_names[i]);
+      func_curve.solve_unknown_param_idx[i]= idx;
+      x[i]= func_curve.param_values[idx];
+   }
+   curve_set_unknown_vector(n, x);
+
+   for (i= 0; i<n; i++) {
+      err= 0;
+      lhs[i]= te_compile(func_curve.solve_eq_lhs_src[i], vars, vcnt, &err);
+      if (!lhs[i])
+	 error("%s: solve equation #%d lhs failed near column %d",
+	       func_curve.src_file, i+1, err);
+      err= 0;
+      rhs[i]= te_compile(func_curve.solve_eq_rhs_src[i], vars, vcnt, &err);
+      if (!rhs[i])
+	 error("%s: solve equation #%d rhs failed near column %d",
+	       func_curve.src_file, i+1, err);
+   }
+
+   for (iter= 0; iter<40; iter++) {
+      double step[CURVE_MAX_SOLVE_UNK];
+      double anorm;
+      double snorm;
+      int accepted= 0;
+      double alpha;
+
+      curve_set_unknown_vector(n, x);
+      if (!curve_eval_solve_residuals(n, lhs, rhs, r0))
+	 error("%s: solve evaluation failed at iteration %d (non-finite residual)",
+	       func_curve.src_file, iter+1);
+      best= curve_vec_norm_inf(n, r0);
+      if (best < 1e-9) { ok= 1; break; }
+
+      for (j= 0; j<n; j++) {
+	 double xj= x[j];
+	 double h= 1e-6 * (fabs(xj) + 1.0);
+	 double xph= xj + h;
+	 double xmh= xj - h;
+	 int good_plus= 0, good_minus= 0;
+
+	 x[j]= xph;
+	 curve_set_unknown_vector(n, x);
+	 good_plus= curve_eval_solve_residuals(n, lhs, rhs, r1);
+
+	 x[j]= xmh;
+	 curve_set_unknown_vector(n, x);
+	 good_minus= curve_eval_solve_residuals(n, lhs, rhs, r2);
+
+	 x[j]= xj;
+	 curve_set_unknown_vector(n, x);
+
+	 if (good_plus && good_minus) {
+	    for (i= 0; i<n; i++)
+	       jac[i][j]= (r1[i] - r2[i]) / (2.0 * h);
+	 } else if (good_plus) {
+	    for (i= 0; i<n; i++)
+	       jac[i][j]= (r1[i] - r0[i]) / h;
+	 } else {
+	    error("%s: solve Jacobian failed for unknown '%s' at iteration %d",
+		  func_curve.src_file, func_curve.solve_unknown_names[j], iter+1);
+	 }
+      }
+
+      {
+	 double a[CURVE_MAX_SOLVE_UNK][CURVE_MAX_SOLVE_UNK];
+	 double b[CURVE_MAX_SOLVE_UNK];
+	 for (i= 0; i<n; i++) {
+	    for (j= 0; j<n; j++)
+	       a[i][j]= jac[i][j];
+	    b[i]= -r0[i];
+	    step[i]= 0.0;
+	 }
+	 if (!curve_linear_solve(n, a, b, step))
+	    error("%s: solve Jacobian is singular/ill-conditioned at iteration %d",
+		  func_curve.src_file, iter+1);
+      }
+
+      snorm= curve_vec_norm_inf(n, step);
+      alpha= 1.0;
+      for (i= 0; i<12; i++) {
+	 double trial[CURVE_MAX_SOLVE_UNK];
+	 double trial_norm;
+	 for (j= 0; j<n; j++)
+	    trial[j]= x[j] + alpha * step[j];
+	 curve_set_unknown_vector(n, trial);
+	 if (!curve_eval_solve_residuals(n, lhs, rhs, r1)) {
+	    alpha *= 0.5;
+	    continue;
+	 }
+	 trial_norm= curve_vec_norm_inf(n, r1);
+	 if (trial_norm < best || trial_norm < 1e-9) {
+	    for (j= 0; j<n; j++)
+	       x[j]= trial[j];
+	    best= trial_norm;
+	    accepted= 1;
+	    break;
+	 }
+	 alpha *= 0.5;
+      }
+      if (!accepted) {
+	 if (snorm < 1e-12 && best < 1e-7) {
+	    ok= 1;
+	    break;
+	 }
+	 error("%s: solve failed to find a descent step at iteration %d"
+	       NL "       try better initial guesses (param values) or a different model",
+	       func_curve.src_file, iter+1);
+      }
+      anorm= alpha * snorm;
+      if (best < 1e-9 || anorm < 1e-12) {
+	 ok= 1;
+	 break;
+      }
+   }
+
+   if (!ok)
+      error("%s: solve did not converge after 40 iterations", func_curve.src_file);
+
+   curve_set_unknown_vector(n, x);
+   if (!opt_Q) {
+      fprintf(stderr, " Solved constants:");
+      for (i= 0; i<n; i++)
+	 fprintf(stderr, " %s=%g", func_curve.solve_unknown_names[i], x[i]);
+      fprintf(stderr, "\n");
+   }
+
+   for (i= 0; i<n; i++) {
+      if (lhs[i]) te_free(lhs[i]);
+      if (rhs[i]) te_free(rhs[i]);
+   }
+}
+
+static void
 load_curve_file(const char *path) {
    FILE *fp;
    char line[4096];
@@ -1275,6 +1634,9 @@ load_curve_file(const char *path) {
    func_curve.carr_piece_count= 0;
    func_curve.amp_piece_count= 0;
    func_curve.mixamp_piece_count= 0;
+   func_curve.have_solve= 0;
+   func_curve.solve_unknown_count= 0;
+   func_curve.solve_eq_count= 0;
    func_curve.param_count= 0;
 
    while (fgets(line, sizeof(line), fp)) {
@@ -1288,6 +1650,10 @@ load_curve_file(const char *path) {
 
       if (!strncmp(s, "param", 5) && isspace((unsigned char)s[5])) {
 	 curve_parse_param_line(s + 5, lno, path);
+	 continue;
+      }
+      if (!strncmp(s, "solve", 5) && isspace((unsigned char)s[5])) {
+	 curve_parse_solve_line(s + 5, lno, path);
 	 continue;
       }
       if (!strncmp(s, "beat", 4) &&
@@ -1356,7 +1722,7 @@ load_curve_file(const char *path) {
 	 continue;
       }
 
-      error("%s:%d: unknown line in .sbgf (expected 'param', 'beat', 'beat<...>',"
+      error("%s:%d: unknown line in .sbgf (expected 'param', 'solve', 'beat', 'beat<...>',"
 	    " 'carrier', 'carrier<...>', 'amp', 'amp<...>', 'mixamp', or 'mixamp<...>'): %s",
 	    path, lno, s);
    }
@@ -1475,6 +1841,8 @@ setup_custom_func_curve(int chan, int typ, int start_ms,
 
    for (i= 0; i<func_curve.param_count; i++)
       ADD_VAR(func_curve.param_names[i], &func_curve.param_values[i]);
+
+   curve_apply_solve(vars, vcnt);
 
    if (func_curve.beat_piece_count > 0) {
       for (i= 0; i<func_curve.beat_piece_count; i++) {
@@ -2905,6 +3273,79 @@ try_external_drop_graph_png(const char *out_fname,
    return plot_try_external_cmd(script, out_fname, args);
 }
 
+static int curve_plot_tmp_counter= 0;
+
+static int
+write_curve_plot_samples_file(const double *samples, int n,
+			      char *out_path, int out_path_sz) {
+   FILE *fp;
+   int i;
+   long now= (long)time(0);
+
+   if (!samples || n < 2 || !out_path || out_path_sz < 8)
+      return 0;
+
+#ifdef T_MINGW
+   {
+      char tdir[PATH_MAX];
+      DWORD len= GetTempPathA((DWORD)sizeof(tdir), tdir);
+      if (len > 0 && len < sizeof(tdir)-1)
+	 snprintf(out_path, out_path_sz, "%ssbagenx_curve_%lu_%ld_%d.dat",
+		  tdir, (unsigned long)GetCurrentProcessId(), now, curve_plot_tmp_counter++);
+      else
+	 snprintf(out_path, out_path_sz, "sbagenx_curve_%ld_%d.dat",
+		  now, curve_plot_tmp_counter++);
+   }
+#else
+   snprintf(out_path, out_path_sz, "/tmp/sbagenx_curve_%ld_%ld_%d.dat",
+	    (long)getpid(), now, curve_plot_tmp_counter++);
+#endif
+
+   fp= fopen(out_path, "w");
+   if (!fp)
+      return 0;
+   for (i= 0; i<n; i++) {
+      if (fprintf(fp, "%.12g\n", samples[i]) < 0) {
+	 fclose(fp);
+	 remove(out_path);
+	 return 0;
+      }
+   }
+   if (fclose(fp) != 0) {
+      remove(out_path);
+      return 0;
+   }
+   return 1;
+}
+
+int
+try_external_curve_graph_png(const char *out_fname,
+			     int len0_sec,
+			     double beat_start, double beat_target,
+			     int mode_kind,
+			     int slide, int n_step, int steplen_sec,
+			     const char *sample_file) {
+   char script[PATH_MAX];
+   char args[2048];
+   int force_external= plot_external_force();
+
+   if (!plot_find_script(script, sizeof(script))) {
+      if (force_external)
+	 error("External Python/Cairo plot backend requested but plot script was not found (set SBAGENX_PLOT_SCRIPT or use SBAGENX_PLOT_BACKEND=internal)");
+      return 0;
+   }
+
+   if (!sample_file || !*sample_file || !file_exists_regular(sample_file))
+      return 0;
+
+   snprintf(args, sizeof(args),
+	    " curve --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --mode-kind %d --slide %d --n-step %d --step-len-sec %d --sample-file \"%s\"",
+	    out_fname, len0_sec / 60.0, beat_start, beat_target, mode_kind,
+	    slide ? 1 : 0, n_step, steplen_sec, sample_file);
+
+   return plot_try_external_cmd(script, out_fname, args);
+}
+
 int
 try_external_iso_cycle_graph_png(const char *out_fname,
 				 double carr_hz, double pulse_hz,
@@ -3174,6 +3615,235 @@ write_drop_graph_png(const char *fmt, double level,
       warn("Drop graph saved to: %s", fname);
 
    free(img);
+}
+
+void
+write_curve_graph_png(const char *fmt, double level,
+		      char depth_ch, int len0, int len1, int len2,
+		      int slide, int n_step, int steplen,
+		      int isisochronic, int ismono,
+		      double beat_start, double beat_target) {
+   int w= 1200, h= 700, ss= 4;
+   int hw= w * ss, hh= h * ss;
+   int ml= 150 * ss, mr= 40 * ss, mt= 40 * ss, mb= 120 * ss;
+   int pw= hw - ml - mr, ph= hh - mt - mb;
+   int a, gy;
+   unsigned char *img_hi;
+   unsigned char *img;
+   double d_min= len0 / 60.0;
+   double y_min= 1e30, y_max= -1e30;
+   double y_pad, y_span;
+   double y_tick_step, y_tick_first, y_tick_last;
+   int start_y= -1, end_y= -1;
+   int label_scale= 3 * ss;
+   int tick_scale= 2 * ss;
+   int param_scale= (3 * ss) / 2;
+   int prev_x= -1, prev_y= -1;
+   char fmt_tok[256], lvl_tok[64];
+   char tick_txt[64];
+   char ptxt1[256], ptxt2[256];
+   char fname[512];
+   char mode_ch, curve_ch;
+   int mode_kind= ismono ? 2 : (isisochronic ? 1 : 0);
+   const char *mode_label= drop_mode_label(mode_kind);
+   double x_ticks[64];
+   int nx;
+   const char *x_label= "TIME MIN";
+   const char *y_label= "FREQ HZ";
+   int n_curve= 2001;
+   double *curve_y= 0;
+   char sample_file[PATH_MAX];
+
+   if (pw < 10 || ph < 10)
+      error("Graph dimensions are invalid");
+   if (d_min <= 0.0)
+      error("Curve graph requires a drop-time > 0");
+
+   curve_y= ALLOC_ARR(n_curve, double);
+   for (a= 0; a<n_curve; a++) {
+      double tim= len0 * a / (double)(n_curve-1);
+      double tim_eval= tim;
+      double beatv, carrv, ampv, mixv;
+      if (!slide && n_step > 1 && steplen > 0) {
+	 int idx= (int)(tim / steplen);
+	 if (idx < 0) idx= 0;
+	 if (idx > n_step-1) idx= n_step-1;
+	 tim_eval= idx * len0 / (double)(n_step-1);
+      }
+      if (!eval_custom_curve_point(tim_eval, &beatv, &carrv, &ampv, &mixv)) {
+	 free(curve_y);
+	 error("Custom curve evaluation failed at t=%g seconds while plotting", tim_eval);
+      }
+      curve_y[a]= beatv;
+      if (beatv < y_min) y_min= beatv;
+      if (beatv > y_max) y_max= beatv;
+   }
+
+   sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
+   double_to_token(level, lvl_tok, sizeof(lvl_tok));
+   mode_ch= ismono ? 'm' : (isisochronic ? 'p' : 'b');
+   curve_ch= slide ? 's' : 'k';
+   snprintf(fname, sizeof(fname),
+	    "curve_%s_L%s_d%c_t%d_%d_%d_%c%c.png",
+	    fmt_tok, lvl_tok, tolower((unsigned char)depth_ch),
+	    len0/60, len1/60, len2/60, mode_ch, curve_ch);
+
+   sample_file[0]= 0;
+   if (write_curve_plot_samples_file(curve_y, n_curve, sample_file, sizeof(sample_file))) {
+      if (try_external_curve_graph_png(fname, len0,
+				       beat_start, beat_target,
+				       mode_kind, slide, n_step, steplen,
+				       sample_file)) {
+	 if (!opt_Q)
+	    warn("Curve graph saved to: %s (Python/Cairo)", fname);
+	 remove(sample_file);
+	 free(curve_y);
+	 return;
+      }
+      remove(sample_file);
+   }
+
+   if (beat_start < y_min) y_min= beat_start;
+   if (beat_start > y_max) y_max= beat_start;
+   if (beat_target < y_min) y_min= beat_target;
+   if (beat_target > y_max) y_max= beat_target;
+   if (y_max - y_min < 1e-6) {
+      y_min -= 1.0;
+      y_max += 1.0;
+   }
+
+   y_pad= (y_max - y_min) * 0.08;
+   if (y_pad < 0.1) y_pad= 0.1;
+   y_min -= y_pad;
+   y_max += y_pad;
+   y_span= y_max - y_min;
+   y_tick_step= floor(y_span / 8.0 + 0.5);
+   if (y_tick_step < 1.0) y_tick_step= 1.0;
+   y_tick_first= ceil((y_min - 1e-9) / y_tick_step) * y_tick_step;
+   y_tick_last= floor((y_max + 1e-9) / y_tick_step) * y_tick_step;
+
+   img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
+   plot_fill(img_hi, hw, hh, 255, 255, 255);
+
+   nx= build_integer_axis_ticks(d_min, x_ticks, sizeof(x_ticks)/sizeof(x_ticks[0]));
+   if (nx < 2) {
+      x_ticks[0]= 0.0;
+      x_ticks[1]= d_min;
+      nx= 2;
+   }
+   for (a= 0; a<nx; a++) {
+      int gx= ml + (int)((pw-1) * x_ticks[a] / d_min + 0.5);
+      plot_vline(img_hi, hw, hh, gx, mt, mt+ph-1, 236, 236, 236);
+   }
+
+   {
+      double yv;
+      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
+	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+	 plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
+      }
+   }
+
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt, 90, 90, 90);
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt+ph-1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml, mt, mt+ph-1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml+pw-1, mt, mt+ph-1, 90, 90, 90);
+
+   for (a= 0; a<pw; a++) {
+      double pos= (n_curve-1) * a / (double)(pw-1);
+      int i0= (int)floor(pos);
+      int i1= i0 + 1;
+      double rat, yv;
+      int px= ml + a;
+      int py;
+      if (i0 < 0) i0= 0;
+      if (i1 >= n_curve) i1= n_curve-1;
+      rat= pos - i0;
+      yv= curve_y[i0] + (curve_y[i1] - curve_y[i0]) * rat;
+      py= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+      if (a == 0) start_y= py;
+      if (a == pw-1) end_y= py;
+      if (prev_x >= 0)
+	 plot_line_thick(img_hi, hw, hh, prev_x, prev_y, px, py, ss+1, 34, 94, 224);
+      prev_x= px;
+      prev_y= py;
+   }
+
+   for (a= 0; a<nx; a++) {
+      int gx= ml + (int)((pw-1) * x_ticks[a] / d_min + 0.5);
+      int tw, tx, ty;
+      format_tick_value(x_ticks[a], tick_txt, sizeof(tick_txt));
+      plot_vline(img_hi, hw, hh, gx, mt+ph-1, mt+ph+4*ss, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= gx - tw/2;
+      ty= mt + ph + 10*ss;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   {
+      double yv;
+      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
+	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+	 int tw, tx, ty;
+	 format_tick_value(yv, tick_txt, sizeof(tick_txt));
+	 plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
+	 tw= font5x7_text_width(tick_txt, tick_scale);
+	 tx= ml - 8*ss - tw;
+	 ty= gy - (7 * tick_scale) / 2;
+	 font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+      }
+   }
+
+   for (a= -4*ss; a<=4*ss; a++) {
+      plot_set_px(img_hi, hw, hh, ml + a, start_y, 220, 40, 40);
+      plot_set_px(img_hi, hw, hh, ml + pw - 1 + a, end_y, 220, 40, 40);
+   }
+
+   {
+      int xw= font5x7_text_width(x_label, label_scale);
+      int x0= ml + (pw - xw) / 2;
+      int y0= mt + ph + 24*ss;
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, x_label, label_scale, 0, 30, 30, 30);
+   }
+
+   {
+      int yh= font5x7_text_height_rot90(y_label, label_scale);
+      int x0= 20*ss;
+      int y0= mt + (ph - yh) / 2;
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, y_label, label_scale, 1, 30, 30, 30);
+   }
+
+   snprintf(ptxt1, sizeof(ptxt1), "start=%.3fHz target=%.3fHz D=%dmin",
+	    beat_start, beat_target, len0/60);
+   if (slide)
+      snprintf(ptxt2, sizeof(ptxt2), "%s mode: custom function curve (.sbgf), continuous (s)",
+	       mode_label);
+   else
+      snprintf(ptxt2, sizeof(ptxt2), "%s mode: sampled custom curve (k/default), step=%ds n=%d",
+	       mode_label, steplen, n_step);
+   {
+      int tw1= font5x7_text_width(ptxt1, param_scale);
+      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tx1= ml + (pw - tw1) / 2;
+      int tx2= ml + (pw - tw2) / 2;
+      int phh= 7 * param_scale;
+      int pgap= 4 * ss;
+      int ty2= hh - (8 * ss + phh);
+      int ty1= ty2 - (phh + pgap);
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+   }
+
+   img= plot_downsample_box(img_hi, hw, hh, ss);
+   free(img_hi);
+
+   if (!stbi_write_png(fname, w, h, 3, img, w*3))
+      error("Failed to write curve graph PNG file");
+   if (!opt_Q)
+      warn("Curve graph saved to: %s", fname);
+
+   free(img);
+   free(curve_y);
 }
 
 void
@@ -3643,7 +4313,7 @@ main(int argc, char **argv) {
    } else if (rv == 'p') {
       // Pre-programmed sequence
       readPreProg(argc, argv);
-      if (opt_G || opt_P_sigmoid || opt_P_drop) return 0;
+      if (opt_G || opt_P_sigmoid || opt_P_drop || opt_P_curve) return 0;
    } else {
       // Sequenced mode -- sequence may include options, so options
       // are not settled until below this point
@@ -7430,6 +8100,7 @@ readPreProg(int ac, char **av) {
    clear_mix_mod_curve();
    opt_P_sigmoid= 0;
    opt_P_drop= 0;
+   opt_P_curve= 0;
 
    if (ac < 1) 
       error("Expecting a pre-programmed sequence description.  Examples:" 
@@ -7443,7 +8114,7 @@ readPreProg(int ac, char **av) {
       error("-A requires a mix input stream; use -m <file> or -M");
 
    if (opt_G && strcmp(av[0], "sigmoid") != 0)
-      error("-G is only supported with -p sigmoid (or use -P for -p drop/-p sigmoid curve plots, or isochronic waveform plots)");
+      error("-G is only supported with -p sigmoid (or use -P for -p drop/-p sigmoid/-p curve plots, or isochronic waveform plots)");
    
    // Handle 'drop'
    if (0 == strcmp(av[0], "drop")) {
@@ -8060,7 +8731,8 @@ bad_curve() {
 	 NL "  or piecewise lines such as 'beat<p1 = <expression>'"
 	 NL "Optional lines in .sbgf: carrier = <expression>, amp = <expression>,"
 	 NL "  mixamp = <expression>, and piecewise variants of carrier/amp/mixamp,"
-	 NL "  param <name> = <value>[m|s]"
+	 NL "  param <name> = <value>[m|s],"
+	 NL "  solve <u1>,<u2>,... : <lhs1>=<rhs1> ; <lhs2>=<rhs2> ; ..."
 	 NL "<curve-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:<name>=<value>...]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
@@ -8109,8 +8781,8 @@ create_curve(int ac, char **av) {
 
 #define BAD bad_curve()
 
-   if (opt_P || opt_G)
-      error("Graph plotting (-P/-G) is currently not supported with -p curve");
+   if (opt_G)
+      error("-G is only supported with -p sigmoid");
 
    if (ac < 2) BAD;
    curve_file= *av++;
@@ -8252,6 +8924,17 @@ create_curve(int ac, char **av) {
       error("Custom curve evaluation failed at end of main session");
    if (!eval_custom_curve_point(0.0, &beat_start_eval, &carr_start_eval, &amp_start_eval, &mix_start_eval))
       error("Custom curve evaluation failed at session start");
+
+   if (opt_P) {
+      opt_P_curve= 1;
+      write_curve_graph_png(fmt, level, depth_ch,
+			    len0, len1, len2,
+			    slide, n_step, steplen,
+			    isisochronic, ismono,
+			    beat_start_eval, beat_end);
+      clear_func_curve();
+      return;
+   }
 
    // Display summary
    warn("CURVE summary:");

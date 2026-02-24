@@ -5,6 +5,7 @@ High-quality SBaGenX plot renderer (Python + Cairo).
 Modes:
   - sigmoid:   beat/pulse curve used by -G
   - drop:      beat/pulse curve used by -P with -p drop
+  - curve:     beat/pulse curve used by -P with -p curve
   - iso-cycle: one-cycle isochronic envelope + waveform used by -P
   - wave-lr:   one-cycle custom waveNN envelope + L/R waveforms
 """
@@ -461,6 +462,159 @@ def render_drop(args):
     else:
         line2 = (
             f"{mode_label} mode: stepped exponential (k/default), "
+            f"step={step_len_sec}s n={n_step}"
+        )
+
+    ext = ctx.text_extents(line1)
+    ctx.move_to(ml + (pw - ext.width) / 2, height - 40)
+    ctx.show_text(line1)
+    ext = ctx.text_extents(line2)
+    ctx.move_to(ml + (pw - ext.width) / 2, height - 18)
+    ctx.show_text(line2)
+
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    surface.write_to_png(args.out)
+
+
+def render_curve(args):
+    width, height = 1200, 700
+    ml, mr, mt, mb = 150, 40, 40, 120
+    pw, ph = width - ml - mr, height - mt - mb
+
+    d_min = args.drop_min
+    if d_min <= 0:
+        raise ValueError("drop-min must be > 0")
+
+    samples = []
+    with open(args.sample_file, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            samples.append(float(line))
+    if len(samples) < 2:
+        raise ValueError("sample-file must contain at least two numeric values")
+
+    slide = bool(args.slide)
+    n_step = int(args.n_step)
+    step_len_sec = int(args.step_len_sec)
+
+    y_min = min(samples + [args.beat_start, args.beat_target])
+    y_max = max(samples + [args.beat_start, args.beat_target])
+    if abs(y_max - y_min) < 1e-6:
+        y_min -= 1.0
+        y_max += 1.0
+
+    y_pad = max((y_max - y_min) * 0.08, 0.1)
+    y_min -= y_pad
+    y_max += y_pad
+    y_span = y_max - y_min
+
+    y_tick_step = max(1.0, round(y_span / 8.0))
+    y_tick_first = math.ceil((y_min - 1e-9) / y_tick_step) * y_tick_step
+    y_ticks = []
+    yv = y_tick_first
+    while yv <= y_max + y_tick_step * 0.25:
+        y_ticks.append(yv)
+        yv += y_tick_step
+    x_ticks = _build_integer_ticks(d_min)
+
+    surface, ctx = _setup_canvas(width, height)
+
+    def x_map(t):
+        return ml + (pw - 1) * (t / d_min)
+
+    def y_map(v):
+        return mt + (y_max - v) * (ph - 1) / y_span
+
+    _draw_grid_box(ctx, ml, mt, pw, ph, 10, y_ticks, y_map)
+
+    # curve
+    ctx.set_source_rgb(0.13, 0.37, 0.88)
+    ctx.set_line_width(2.0)
+    first = True
+    n = len(samples)
+    for i, y in enumerate(samples):
+        t = d_min * i / (n - 1)
+        px = x_map(t)
+        py = y_map(y)
+        if first:
+            ctx.move_to(px, py)
+            first = False
+        else:
+            ctx.line_to(px, py)
+    ctx.stroke()
+
+    # endpoint markers
+    for t, y in ((0.0, samples[0]), (d_min, samples[-1])):
+        px = x_map(t)
+        py = y_map(y)
+        ctx.set_source_rgb(0.86, 0.16, 0.16)
+        ctx.arc(px, py, 2.8, 0.0, 2.0 * PI)
+        ctx.fill()
+
+    # tick marks + labels
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(16)
+    ctx.set_source_rgb(0.15, 0.15, 0.15)
+
+    for t in x_ticks:
+        x = x_map(t)
+        ctx.set_source_rgb(0.35, 0.35, 0.35)
+        ctx.set_line_width(1.0)
+        ctx.move_to(x, mt + ph - 1)
+        ctx.line_to(x, mt + ph + 4)
+        ctx.stroke()
+        txt = _fmt_tick(t)
+        ext = ctx.text_extents(txt)
+        ctx.set_source_rgb(0.15, 0.15, 0.15)
+        ctx.move_to(x - ext.width / 2, mt + ph + 22)
+        ctx.show_text(txt)
+
+    for yv in y_ticks:
+        y = y_map(yv)
+        txt = _fmt_tick(yv)
+        ext = ctx.text_extents(txt)
+        ctx.set_source_rgb(0.35, 0.35, 0.35)
+        ctx.move_to(ml - 4, y)
+        ctx.line_to(ml, y)
+        ctx.stroke()
+        ctx.set_source_rgb(0.15, 0.15, 0.15)
+        ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
+        ctx.show_text(txt)
+
+    # axis labels
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_font_size(18)
+    x_label = "TIME MIN"
+    y_label = "FREQ HZ"
+
+    ext = ctx.text_extents(x_label)
+    ctx.move_to(ml + (pw - ext.width) / 2, height - 70)
+    ctx.show_text(x_label)
+
+    ctx.save()
+    ctx.translate(38, mt + ph / 2)
+    ctx.rotate(-PI / 2.0)
+    ext = ctx.text_extents(y_label)
+    ctx.move_to(-ext.width / 2, 0)
+    ctx.show_text(y_label)
+    ctx.restore()
+
+    # parameter lines (bottom)
+    mode_map = {0: "binaural beat", 1: "pulse", 2: "monaural beat"}
+    mode_label = mode_map.get(int(args.mode_kind), "binaural beat")
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(14)
+    line1 = (
+        f"start={args.beat_start:.3f}Hz  target={args.beat_target:.3f}Hz  "
+        f"D={args.drop_min:.1f}min"
+    )
+    if slide:
+        line2 = f"{mode_label} mode: custom function curve (.sbgf), continuous (s)"
+    else:
+        line2 = (
+            f"{mode_label} mode: sampled custom curve (k/default), "
             f"step={step_len_sec}s n={n_step}"
         )
 
@@ -934,6 +1088,17 @@ def main():
     dp.add_argument("--step-len-sec", type=int, required=True)
     dp.add_argument("--mode-kind", type=int, required=True)
 
+    cp = sub.add_parser("curve", help="Render custom .sbgf beat/pulse curve plot")
+    cp.add_argument("--out", required=True)
+    cp.add_argument("--drop-min", type=float, required=True)
+    cp.add_argument("--beat-start", type=float, required=True)
+    cp.add_argument("--beat-target", type=float, required=True)
+    cp.add_argument("--mode-kind", type=int, required=True)
+    cp.add_argument("--slide", type=int, required=True)
+    cp.add_argument("--n-step", type=int, required=True)
+    cp.add_argument("--step-len-sec", type=int, required=True)
+    cp.add_argument("--sample-file", required=True)
+
     ip = sub.add_parser("iso-cycle", help="Render isochronic single-cycle plot")
     ip.add_argument("--out", required=True)
     ip.add_argument("--carrier-hz", type=float, required=True)
@@ -962,6 +1127,8 @@ def main():
         render_sigmoid(args)
     elif args.mode == "drop":
         render_drop(args)
+    elif args.mode == "curve":
+        render_curve(args)
     elif args.mode == "iso-cycle":
         render_iso_cycle(args)
     elif args.mode == "wave-lr":
