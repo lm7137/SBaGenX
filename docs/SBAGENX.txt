@@ -1387,6 +1387,10 @@ Usage:
       <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:name=value ...]
       <tone-specs> ...
 
+In `<curve-spec>`, each `:name=value` token overrides a matching
+`param name = ...` in the `.sbgf` file.  The names are generic, so
+`l`/`h` are only examples used by some curve files.
+
 Examples:
 
   sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf \
@@ -1567,7 +1571,8 @@ Examples:
 
 Parameter names in `.sbgf` are case-sensitive.  Values can be
 overridden from the command line using `:name=value` tokens in the
-curve spec.  Order does not matter.
+curve spec.  These names are not fixed keywords; they are user-defined
+`param` names from the `.sbgf` file.  Order does not matter.
 
 Parameter unit suffixes:
   - `m` means minutes
