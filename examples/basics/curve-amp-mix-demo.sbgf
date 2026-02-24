@@ -1,0 +1,12 @@
+# Example: custom curve with beat/carrier plus amplitude formulas.
+#
+# - amp controls the binaural/isochronic/monaural amplitude (%).
+# - mixamp controls mix/<amp> amplitude (%) when a mix tone is present.
+
+param l = 0.125
+param h = 0
+
+beat = b0 + (b1-b0) * (0.5 + 0.5*tanh(l*(m-D/2-h)))
+carrier = c0 + (c1-c0) * ramp(m,0,T)
+amp = a0 * (1 - 0.4*ramp(m,0,D))
+mixamp = m0 * (1 - 0.3*ramp(m,0,T))

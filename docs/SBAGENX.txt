@@ -1394,6 +1394,8 @@ Examples:
   sbagenx -p curve examples/basics/curve-piecewise-demo.sbgf \
     t30,30,0 00ls+:p1=8:p2=18
   sbagenx -m river1.ogg \
+    -p curve examples/basics/curve-amp-mix-demo.sbgf 00ls+ mix/97
+  sbagenx -m river1.ogg \
     -p curve examples/basics/curve-sigmoid-like.sbgf 00ls+ mix/99
 
 The level/depth/time modifiers are interpreted the same way as in
@@ -1405,6 +1407,10 @@ The level/depth/time modifiers are interpreted the same way as in
   - `k` or default = stepped checkpoints sampled from the expression.
   - `+`, `^`, `@`, `M`, `/amp` behave as in other built-in programs.
 
+For `amp` and `mixamp`:
+  - In `s` mode, values are evaluated continuously at runtime.
+  - In stepped mode (`k` or default), values are sampled per checkpoint.
+
 `@` (isochronic) and `M` (monaural) are mutually exclusive.
 
 `-P`/`-G` plotting is currently not supported with `-p curve`.
@@ -1415,9 +1421,11 @@ The level/depth/time modifiers are interpreted the same way as in
 
 Supported line types:
 
-  param <name> = <number>[m|s]
+  param <name> = <number>[m|s] (optional unit suffix: m=minutes, s=seconds)
   beat = <expression>          (required)
   carrier = <expression>       (optional)
+  amp = <expression>           (optional, beat/iso/mono amplitude in %)
+  mixamp = <expression>        (optional, mix/<amp> amplitude in %)
   beat<expr = <expression>     (piecewise, optional)
   beat<=expr = <expression>    (piecewise, optional)
   beat>expr = <expression>     (piecewise, optional)
@@ -1426,10 +1434,18 @@ Supported line types:
   carrier<=expr = <expression> (piecewise, optional)
   carrier>expr = <expression>  (piecewise, optional)
   carrier>=expr = <expression> (piecewise, optional)
+  amp<expr = <expression>      (piecewise, optional)
+  amp<=expr = <expression>     (piecewise, optional)
+  amp>expr = <expression>      (piecewise, optional)
+  amp>=expr = <expression>     (piecewise, optional)
+  mixamp<expr = <expression>   (piecewise, optional)
+  mixamp<=expr = <expression>  (piecewise, optional)
+  mixamp>expr = <expression>   (piecewise, optional)
+  mixamp>=expr = <expression>  (piecewise, optional)
 
 Comments can start with `#`, `;` or `//`.
 Each expression must be on a single line.
-For each target (`beat` or `carrier`), use either:
+For each target (`beat`, `carrier`, `amp`, `mixamp`), use either:
   1) one plain expression line (`beat = ...`), or
   2) piecewise lines (`beat<...`, `beat>...`, etc).
 Mixing plain and piecewise lines for the same target is not allowed.
@@ -1446,6 +1462,12 @@ Expression variables available at runtime:
   b1   target beat/pulse frequency in Hz (from depth letter)
   c0   start carrier frequency in Hz
   c1   end carrier frequency in Hz (after drop/hold)
+  a0   base beat/iso/mono amplitude in % (from /amp in curve spec)
+  m0   base mix amplitude in % (from mix/<amp> tone-spec)
+
+`amp` and `mixamp` expressions return percentages.
+`mixamp` affects runtime mix amplitude only when a `mix/<amp>` tone-spec
+is present.
 
 Helper functions (implemented in C):
 
@@ -1564,6 +1586,8 @@ Example `.sbgf` (sigmoid-like beat with optional carrier override):
   param h = 0
   beat = b0 + (b1-b0) * (0.5 + 0.5*tanh(l*(m-D/2-h)))
   carrier = c0 + (c1-c0) * ramp(m,0,T)
+  amp = a0 * (1 - 0.4*ramp(m,0,D))
+  mixamp = m0 * (1 - 0.3*ramp(m,0,T))
 
 Example `.sbgf` piecewise beat:
 

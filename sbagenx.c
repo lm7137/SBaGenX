@@ -678,28 +678,47 @@ typedef struct {
    double sig_a, sig_b;	// Sigmoid coefficients (beat = a*tanh(..)+b)
    double sig_l, sig_h;	// Sigmoid shape parameters
    double sig_d_min;		// Sigmoid drop duration (minutes)
+   double beat_amp0_pct;	// Base beat/iso/mono amplitude (%)
+   double mix_amp0_pct;	// Base mix amplitude (%) from mix/<amp>
    char src_file[CURVE_FILE_MAX];	// Source .sbgf file for mode 3
    char beat_expr_src[CURVE_EXPR_MAX];
    char carr_expr_src[CURVE_EXPR_MAX];
+   char amp_expr_src[CURVE_EXPR_MAX];
+   char mixamp_expr_src[CURVE_EXPR_MAX];
    int have_carr_expr;
+   int have_amp_expr;
+   int have_mixamp_expr;
    int beat_piece_count;
    int carr_piece_count;
+   int amp_piece_count;
+   int mixamp_piece_count;
    char beat_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
    char beat_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
    char carr_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
    char carr_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
+   char amp_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
+   char amp_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
+   char mixamp_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
+   char mixamp_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
    int param_count;
    char param_names[CURVE_MAX_PARAMS][CURVE_NAME_MAX];
    double param_values[CURVE_MAX_PARAMS];
    te_expr *beat_expr;
    te_expr *carr_expr;
+   te_expr *amp_expr;
+   te_expr *mixamp_expr;
    te_expr *beat_piece_cond[CURVE_MAX_PIECES];
    te_expr *beat_piece_expr[CURVE_MAX_PIECES];
    te_expr *carr_piece_cond[CURVE_MAX_PIECES];
    te_expr *carr_piece_expr[CURVE_MAX_PIECES];
+   te_expr *amp_piece_cond[CURVE_MAX_PIECES];
+   te_expr *amp_piece_expr[CURVE_MAX_PIECES];
+   te_expr *mixamp_piece_cond[CURVE_MAX_PIECES];
+   te_expr *mixamp_piece_expr[CURVE_MAX_PIECES];
    double ev_t, ev_m;		// Runtime variables for expression evaluation
    double ev_D, ev_H, ev_T, ev_U;
    double ev_b0, ev_b1, ev_c0, ev_c1;
+   double ev_a0, ev_m0;
 } FuncCurve;
 FuncCurve func_curve;		// Runtime function curve for pre-programmed sequences
 
@@ -991,7 +1010,8 @@ static int
 curve_name_reserved(const char *name) {
    static const char *reserved[]= {
       "t", "m", "D", "H", "T", "U",
-      "b0", "b1", "c0", "c1",
+      "b0", "b1", "c0", "c1", "a0", "m0",
+      "amp", "mixamp", "beat", "carrier",
       "pi", "e",
       "ifelse", "step", "clamp", "lerp", "ramp",
       "smoothstep", "smootherstep",
@@ -1246,9 +1266,15 @@ load_curve_file(const char *path) {
    func_curve.src_file[sizeof(func_curve.src_file)-1]= 0;
    func_curve.beat_expr_src[0]= 0;
    func_curve.carr_expr_src[0]= 0;
+   func_curve.amp_expr_src[0]= 0;
+   func_curve.mixamp_expr_src[0]= 0;
    func_curve.have_carr_expr= 0;
+   func_curve.have_amp_expr= 0;
+   func_curve.have_mixamp_expr= 0;
    func_curve.beat_piece_count= 0;
    func_curve.carr_piece_count= 0;
+   func_curve.amp_piece_count= 0;
+   func_curve.mixamp_piece_count= 0;
    func_curve.param_count= 0;
 
    while (fgets(line, sizeof(line), fp)) {
@@ -1297,8 +1323,41 @@ load_curve_file(const char *path) {
 	 func_curve.have_carr_expr= 1;
 	 continue;
       }
+      if (!strncmp(s, "amp", 3) &&
+	  (isspace((unsigned char)s[3]) || s[3] == '=' || s[3] == '<' || s[3] == '>')) {
+	 if (curve_parse_piece_line(s, lno, path, "amp", 3,
+				    func_curve.amp_piece_cond_src,
+				    func_curve.amp_piece_expr_src,
+				    &func_curve.amp_piece_count)) {
+	    if (func_curve.have_amp_expr)
+	       error("%s:%d: cannot mix 'amp = ...' with piecewise amp<... lines", path, lno);
+	    continue;
+	 }
+	 if (func_curve.amp_piece_count > 0)
+	    error("%s:%d: cannot mix piecewise amp<... lines with 'amp = ...'", path, lno);
+	 curve_parse_expr_line(s, lno, path, "amp", func_curve.amp_expr_src, sizeof(func_curve.amp_expr_src));
+	 func_curve.have_amp_expr= 1;
+	 continue;
+      }
+      if (!strncmp(s, "mixamp", 6) &&
+	  (isspace((unsigned char)s[6]) || s[6] == '=' || s[6] == '<' || s[6] == '>')) {
+	 if (curve_parse_piece_line(s, lno, path, "mixamp", 6,
+				    func_curve.mixamp_piece_cond_src,
+				    func_curve.mixamp_piece_expr_src,
+				    &func_curve.mixamp_piece_count)) {
+	    if (func_curve.have_mixamp_expr)
+	       error("%s:%d: cannot mix 'mixamp = ...' with piecewise mixamp<... lines", path, lno);
+	    continue;
+	 }
+	 if (func_curve.mixamp_piece_count > 0)
+	    error("%s:%d: cannot mix piecewise mixamp<... lines with 'mixamp = ...'", path, lno);
+	 curve_parse_expr_line(s, lno, path, "mixamp", func_curve.mixamp_expr_src, sizeof(func_curve.mixamp_expr_src));
+	 func_curve.have_mixamp_expr= 1;
+	 continue;
+      }
 
-      error("%s:%d: unknown line in .sbgf (expected 'param', 'beat', 'beat<...>', 'carrier', or 'carrier<...>'): %s",
+      error("%s:%d: unknown line in .sbgf (expected 'param', 'beat', 'beat<...>',"
+	    " 'carrier', 'carrier<...>', 'amp', 'amp<...>', 'mixamp', or 'mixamp<...>'): %s",
 	    path, lno, s);
    }
    fclose(fp);
@@ -1311,8 +1370,9 @@ static int
 setup_custom_func_curve(int chan, int typ, int start_ms,
 			double carr0, double carr1, double carr_span_s,
 			double beat0, double beat1, double beat_span_s,
-			double hold_min, double total_min, double wake_min) {
-   te_variable vars[CURVE_MAX_PARAMS + 32];
+			double hold_min, double total_min, double wake_min,
+			double beat_amp0_pct, double mix_amp0_pct) {
+   te_variable vars[CURVE_MAX_PARAMS + 40];
    int vcnt= 0, err= 0, i;
 
    if (carr_span_s <= 0 || beat_span_s <= 0) return 0;
@@ -1368,6 +1428,8 @@ setup_custom_func_curve(int chan, int typ, int start_ms,
    func_curve.beat0= beat0;
    func_curve.beat1= beat1;
    func_curve.beat_span_s= beat_span_s;
+   func_curve.beat_amp0_pct= beat_amp0_pct;
+   func_curve.mix_amp0_pct= mix_amp0_pct;
    func_curve.ev_D= beat_span_s / 60.0;
    func_curve.ev_H= hold_min;
    func_curve.ev_T= total_min;
@@ -1376,6 +1438,8 @@ setup_custom_func_curve(int chan, int typ, int start_ms,
    func_curve.ev_b1= beat1;
    func_curve.ev_c0= carr0;
    func_curve.ev_c1= carr1;
+   func_curve.ev_a0= beat_amp0_pct;
+   func_curve.ev_m0= mix_amp0_pct;
 
    ADD_VAR("t", &func_curve.ev_t);
    ADD_VAR("m", &func_curve.ev_m);
@@ -1387,6 +1451,8 @@ setup_custom_func_curve(int chan, int typ, int start_ms,
    ADD_VAR("b1", &func_curve.ev_b1);
    ADD_VAR("c0", &func_curve.ev_c0);
    ADD_VAR("c1", &func_curve.ev_c1);
+   ADD_VAR("a0", &func_curve.ev_a0);
+   ADD_VAR("m0", &func_curve.ev_m0);
 
    ADD_FN3("ifelse", curve_fn_ifelse);
    ADD_FN1("step", curve_fn_step);
@@ -1445,6 +1511,42 @@ setup_custom_func_curve(int chan, int typ, int start_ms,
 	 error("%s: error in carrier expression near column %d", func_curve.src_file, err);
    }
 
+   if (func_curve.amp_piece_count > 0) {
+      for (i= 0; i<func_curve.amp_piece_count; i++) {
+	 err= 0;
+	 func_curve.amp_piece_cond[i]= te_compile(func_curve.amp_piece_cond_src[i], vars, vcnt, &err);
+	 if (!func_curve.amp_piece_cond[i])
+	    error("%s: error in amp piece condition #%d near column %d", func_curve.src_file, i+1, err);
+	 err= 0;
+	 func_curve.amp_piece_expr[i]= te_compile(func_curve.amp_piece_expr_src[i], vars, vcnt, &err);
+	 if (!func_curve.amp_piece_expr[i])
+	    error("%s: error in amp piece expression #%d near column %d", func_curve.src_file, i+1, err);
+      }
+   } else if (func_curve.have_amp_expr) {
+      err= 0;
+      func_curve.amp_expr= te_compile(func_curve.amp_expr_src, vars, vcnt, &err);
+      if (!func_curve.amp_expr)
+	 error("%s: error in amp expression near column %d", func_curve.src_file, err);
+   }
+
+   if (func_curve.mixamp_piece_count > 0) {
+      for (i= 0; i<func_curve.mixamp_piece_count; i++) {
+	 err= 0;
+	 func_curve.mixamp_piece_cond[i]= te_compile(func_curve.mixamp_piece_cond_src[i], vars, vcnt, &err);
+	 if (!func_curve.mixamp_piece_cond[i])
+	    error("%s: error in mixamp piece condition #%d near column %d", func_curve.src_file, i+1, err);
+	 err= 0;
+	 func_curve.mixamp_piece_expr[i]= te_compile(func_curve.mixamp_piece_expr_src[i], vars, vcnt, &err);
+	 if (!func_curve.mixamp_piece_expr[i])
+	    error("%s: error in mixamp piece expression #%d near column %d", func_curve.src_file, i+1, err);
+      }
+   } else if (func_curve.have_mixamp_expr) {
+      err= 0;
+      func_curve.mixamp_expr= te_compile(func_curve.mixamp_expr_src, vars, vcnt, &err);
+      if (!func_curve.mixamp_expr)
+	 error("%s: error in mixamp expression near column %d", func_curve.src_file, err);
+   }
+
 #undef ADD_VAR
 #undef ADD_FN1
 #undef ADD_FN2
@@ -1454,10 +1556,12 @@ setup_custom_func_curve(int chan, int typ, int start_ms,
 }
 
 static int
-eval_custom_curve_point(double pos_s, double *beat_out, double *carr_out) {
+eval_custom_curve_point(double pos_s,
+			double *beat_out, double *carr_out,
+			double *amp_pct_out, double *mixamp_pct_out) {
    int i, matched;
    double condv;
-   double beat, carr;
+   double beat, carr, amp_pct, mixamp_pct;
    double t= pos_s;
    if (!func_curve.beat_expr && func_curve.beat_piece_count == 0) return 0;
    if (t < 0.0) t= 0.0;
@@ -1511,9 +1615,121 @@ eval_custom_curve_point(double pos_s, double *beat_out, double *carr_out) {
 	   (func_curve.carr_span_s > 0.0 ? (t / func_curve.carr_span_s) : 0.0);
    }
 
+   amp_pct= func_curve.beat_amp0_pct;
+   if (func_curve.amp_piece_count > 0) {
+      matched= 0;
+      for (i= 0; i<func_curve.amp_piece_count; i++) {
+	 if (!func_curve.amp_piece_cond[i] || !func_curve.amp_piece_expr[i]) return 0;
+	 condv= te_eval(func_curve.amp_piece_cond[i]);
+	 if (!isfinite(condv)) return 0;
+	 if (condv != 0.0) {
+	    amp_pct= te_eval(func_curve.amp_piece_expr[i]);
+	    matched= 1;
+	    break;
+	 }
+      }
+      if (!matched)
+	 amp_pct= te_eval(func_curve.amp_piece_expr[func_curve.amp_piece_count-1]);
+   } else if (func_curve.have_amp_expr && func_curve.amp_expr) {
+      amp_pct= te_eval(func_curve.amp_expr);
+   }
+   if (!isfinite(amp_pct))
+      amp_pct= func_curve.beat_amp0_pct;
+   if (amp_pct < 0.0) amp_pct= 0.0;
+
+   mixamp_pct= func_curve.mix_amp0_pct;
+   if (func_curve.mixamp_piece_count > 0) {
+      matched= 0;
+      for (i= 0; i<func_curve.mixamp_piece_count; i++) {
+	 if (!func_curve.mixamp_piece_cond[i] || !func_curve.mixamp_piece_expr[i]) return 0;
+	 condv= te_eval(func_curve.mixamp_piece_cond[i]);
+	 if (!isfinite(condv)) return 0;
+	 if (condv != 0.0) {
+	    mixamp_pct= te_eval(func_curve.mixamp_piece_expr[i]);
+	    matched= 1;
+	    break;
+	 }
+      }
+      if (!matched)
+	 mixamp_pct= te_eval(func_curve.mixamp_piece_expr[func_curve.mixamp_piece_count-1]);
+   } else if (func_curve.have_mixamp_expr && func_curve.mixamp_expr) {
+      mixamp_pct= te_eval(func_curve.mixamp_expr);
+   }
+   if (!isfinite(mixamp_pct))
+      mixamp_pct= func_curve.mix_amp0_pct;
+   if (mixamp_pct < 0.0) mixamp_pct= 0.0;
+
    *beat_out= beat;
    *carr_out= carr;
+   if (amp_pct_out) *amp_pct_out= amp_pct;
+   if (mixamp_pct_out) *mixamp_pct_out= mixamp_pct;
    return 1;
+}
+
+static int
+curve_parse_mix_amp_token(const char *tok, double *amp_out) {
+   char *q;
+   double v;
+   if (!tok || strncmp(tok, "mix/", 4) != 0) return 0;
+   v= strtod(tok + 4, &q);
+   if (q == tok + 4 || *q) return 0;
+   if (amp_out) *amp_out= v;
+   return 1;
+}
+
+static int
+curve_find_mix_amp_in_extra(const char *extra, double *amp_out) {
+   const char *p= extra;
+   while (p && *p) {
+      const char *s= p;
+      const char *e;
+      int n;
+      char tok[256];
+      while (*s && isspace((unsigned char)*s)) s++;
+      if (!*s) break;
+      e= s;
+      while (*e && !isspace((unsigned char)*e)) e++;
+      n= (int)(e-s);
+      if (n >= (int)sizeof(tok)) n= sizeof(tok)-1;
+      memcpy(tok, s, n);
+      tok[n]= 0;
+      if (curve_parse_mix_amp_token(tok, amp_out))
+	 return 1;
+      p= e;
+   }
+   return 0;
+}
+
+static void
+curve_format_extra_with_mix_amp(const char *extra, int have_mix_override,
+				double mix_amp_pct, char *out, int outsz) {
+   const char *p= extra;
+   int off= 0;
+   out[0]= 0;
+   while (p && *p) {
+      const char *s= p;
+      const char *e;
+      int n, used, rem;
+      char tok[256];
+      while (*s && isspace((unsigned char)*s)) s++;
+      if (!*s) break;
+      e= s;
+      while (*e && !isspace((unsigned char)*e)) e++;
+      n= (int)(e-s);
+      if (n >= (int)sizeof(tok)) n= sizeof(tok)-1;
+      memcpy(tok, s, n);
+      tok[n]= 0;
+      rem= outsz - off;
+      if (have_mix_override && curve_parse_mix_amp_token(tok, 0))
+	 used= snprintf(out + off, rem, " mix/%g", mix_amp_pct);
+      else
+	 used= snprintf(out + off, rem, " %s", tok);
+
+      if (used < 0 || used >= rem)
+	 error("Too many extra tone-specs after -p curve");
+      off += used;
+      p= e;
+   }
 }
 
 // Clear any runtime function-driven curve override.
@@ -1527,6 +1743,14 @@ clear_func_curve() {
    if (func_curve.carr_expr) {
       te_free(func_curve.carr_expr);
       func_curve.carr_expr= 0;
+   }
+   if (func_curve.amp_expr) {
+      te_free(func_curve.amp_expr);
+      func_curve.amp_expr= 0;
+   }
+   if (func_curve.mixamp_expr) {
+      te_free(func_curve.mixamp_expr);
+      func_curve.mixamp_expr= 0;
    }
    for (i= 0; i<CURVE_MAX_PIECES; i++) {
       if (func_curve.beat_piece_cond[i]) {
@@ -1544,6 +1768,22 @@ clear_func_curve() {
       if (func_curve.carr_piece_expr[i]) {
 	 te_free(func_curve.carr_piece_expr[i]);
 	 func_curve.carr_piece_expr[i]= 0;
+      }
+      if (func_curve.amp_piece_cond[i]) {
+	 te_free(func_curve.amp_piece_cond[i]);
+	 func_curve.amp_piece_cond[i]= 0;
+      }
+      if (func_curve.amp_piece_expr[i]) {
+	 te_free(func_curve.amp_piece_expr[i]);
+	 func_curve.amp_piece_expr[i]= 0;
+      }
+      if (func_curve.mixamp_piece_cond[i]) {
+	 te_free(func_curve.mixamp_piece_cond[i]);
+	 func_curve.mixamp_piece_cond[i]= 0;
+      }
+      if (func_curve.mixamp_piece_expr[i]) {
+	 te_free(func_curve.mixamp_piece_expr[i]);
+	 func_curve.mixamp_piece_expr[i]= 0;
       }
    }
    memset(&func_curve, 0, sizeof(func_curve));
@@ -1911,16 +2151,12 @@ setup_func_curve_monaural_pair(int chan0, int chan1) {
 static void
 apply_func_curve(int now_ms, int chan, Voice *vv) {
    double pos_s, carr_s, pos_min;
-   double beat, carr;
+   double beat= 0.0, carr= 0.0;
+   double amp_pct= 0.0, mixamp_pct= 0.0;
    int elapsed_ms, total_ms;
+   int have_amp_curve, have_mixamp_curve;
 
    if (!func_curve.active) return;
-   if (func_curve.monaural) {
-      if ((chan != func_curve.chan && chan != func_curve.chan2) || vv->typ != 1) return;
-   } else {
-      if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
-   }
-
    elapsed_ms= t_per0(func_curve.start_ms, now_ms);
    total_ms= t_per0(func_curve.start_ms, func_curve.end_ms);
    if (elapsed_ms > total_ms) return;
@@ -1929,14 +2165,39 @@ apply_func_curve(int now_ms, int chan, Voice *vv) {
    carr_s= pos_s;
    if (carr_s > func_curve.carr_span_s) carr_s= func_curve.carr_span_s;
 
+   have_amp_curve= func_curve.have_amp_expr || func_curve.amp_piece_count > 0;
+   have_mixamp_curve= func_curve.have_mixamp_expr || func_curve.mixamp_piece_count > 0;
+
    if (func_curve.mode == 3) {
-      if (!eval_custom_curve_point(pos_s, &beat, &carr))
+      if (!eval_custom_curve_point(pos_s, &beat, &carr, &amp_pct, &mixamp_pct))
 	 return;
+
+      // mixamp targets mix/<amp> voices only.
+      if (vv->typ == 5) {
+	 if (have_mixamp_curve)
+	    vv->amp= AMP_DA(mixamp_pct);
+	 return;
+      }
+
+      if (func_curve.monaural) {
+	 if ((chan != func_curve.chan && chan != func_curve.chan2) || vv->typ != 1) return;
+      } else {
+	 if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
+      }
+
       if (func_curve.typ == 8 || func_curve.monaural) {
 	 if (beat < 0.0) beat= -beat;
 	 if (beat < 1e-6) beat= 1e-6;
       }
+
+      if (have_amp_curve)
+	 vv->amp= AMP_DA(amp_pct);
    } else if (func_curve.mode == 2) {
+      if (func_curve.monaural) {
+	 if ((chan != func_curve.chan && chan != func_curve.chan2) || vv->typ != 1) return;
+      } else {
+	 if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
+      }
       if (pos_s >= func_curve.beat_span_s) beat= func_curve.beat1;
       else {
 	 pos_min= pos_s / 60.0;
@@ -1946,6 +2207,11 @@ apply_func_curve(int now_ms, int chan, Voice *vv) {
       }
       carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) * carr_s / func_curve.carr_span_s;
    } else {
+      if (func_curve.monaural) {
+	 if ((chan != func_curve.chan && chan != func_curve.chan2) || vv->typ != 1) return;
+      } else {
+	 if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
+      }
       if (pos_s >= func_curve.beat_span_s) beat= func_curve.beat1;
       else beat= func_curve.beat0 * exp(func_curve.beat_log_ratio * pos_s / func_curve.beat_span_s);
       carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) * carr_s / func_curve.carr_span_s;
@@ -7792,7 +8058,8 @@ bad_curve() {
    error("Bad arguments: expecting -p curve <curve-file.sbgf> [<time-spec>] <curve-spec> [<tone-specs...>]"
 	 NL "<curve-file.sbgf> must define beat either as 'beat = <expression>'"
 	 NL "  or piecewise lines such as 'beat<p1 = <expression>'"
-	 NL "Optional lines in .sbgf: carrier = <expression>, piecewise carrier<...>,"
+	 NL "Optional lines in .sbgf: carrier = <expression>, amp = <expression>,"
+	 NL "  mixamp = <expression>, and piecewise variants of carrier/amp/mixamp,"
 	 NL "  param <name> = <value>[m|s]"
 	 NL "<curve-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:<name>=<value>...]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
@@ -7825,11 +8092,17 @@ create_curve(int ac, char **av) {
    double ov_val[CURVE_MAX_PARAMS];
    double level;
    double carr, amp, c0, c2;
+   double base_mix_amp= 100.0;
    double beat_target, beat_start= 10.0;
    double beat[40], carr_sam[40];
+   double amp_sam[40], mix_sam[40];
    double beat_end, carr_end;
+   double amp_end= 0.0, mix_end= 0.0;
    double beat_start_eval, carr_start_eval;
-   char extra[256];
+   double amp_start_eval= 0.0, mix_start_eval= 0.0;
+   int have_mix_in_extra= 0;
+   int have_amp_curve= 0, have_mixamp_curve= 0;
+   char extra[256], extra_dyn[256];
    static double beat_targets[]= {
       4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
    };
@@ -7867,6 +8140,7 @@ create_curve(int ac, char **av) {
       p += sprintf(p, " %s", av[0]);
       ac--; av++;
    }
+   have_mix_in_extra= curve_find_mix_amp_in_extra(extra, &base_mix_amp);
 
    // Scan the format
    level= strtod(fmt, &p);
@@ -7960,19 +8234,23 @@ create_curve(int ac, char **av) {
 				beat_start, beat_target, len0,
 				islong ? len1/60.0 : 0.0,
 				len/60.0,
-				wakeup ? len2/60.0 : 0.0))
+				wakeup ? len2/60.0 : 0.0,
+				amp, base_mix_amp))
       error("Unable to setup custom curve from %s", curve_file);
    if (ismono)
       setup_func_curve_monaural_pair(0, 1);
 
+   have_amp_curve= func_curve.have_amp_expr || func_curve.amp_piece_count > 0;
+   have_mixamp_curve= func_curve.have_mixamp_expr || func_curve.mixamp_piece_count > 0;
+
    for (a= 0; a<n_step; a++) {
       double tim= a * len0 / (double)(n_step-1);
-      if (!eval_custom_curve_point(tim, &beat[a], &carr_sam[a]))
+      if (!eval_custom_curve_point(tim, &beat[a], &carr_sam[a], &amp_sam[a], &mix_sam[a]))
 	 error("Custom curve evaluation failed at t=%g seconds", tim);
    }
-   if (!eval_custom_curve_point(len, &beat_end, &carr_end))
+   if (!eval_custom_curve_point(len, &beat_end, &carr_end, &amp_end, &mix_end))
       error("Custom curve evaluation failed at end of main session");
-   if (!eval_custom_curve_point(0.0, &beat_start_eval, &carr_start_eval))
+   if (!eval_custom_curve_point(0.0, &beat_start_eval, &carr_start_eval, &amp_start_eval, &mix_start_eval))
       error("Custom curve evaluation failed at session start");
 
    // Display summary
@@ -8001,6 +8279,14 @@ create_curve(int ac, char **av) {
    }
    if (func_curve.have_carr_expr)
       warn(" Carrier expression enabled from .sbgf");
+   if (have_amp_curve)
+      warn(" Beat amplitude expression enabled from .sbgf");
+   if (have_mixamp_curve) {
+      if (have_mix_in_extra)
+	 warn(" Mix amplitude expression enabled from .sbgf");
+      else
+	 warn(" mixamp expression is defined, but no mix/<amp> tone-spec was provided");
+   }
    if (func_curve.param_count > 0) {
       fprintf(stderr, " Parameters:");
       for (a= 0; a<func_curve.param_count; a++)
@@ -8028,26 +8314,34 @@ create_curve(int ac, char **av) {
    if (slide) {
       // Slide version
       for (a= 0; a<n_step; a++) {
+	 double amp_t= have_amp_curve ? amp_sam[a] : amp;
 	 int tim= a * len0 / (n_step-1);
+	 curve_format_extra_with_mix_amp(extra,
+					 have_mixamp_curve && have_mix_in_extra,
+					 mix_sam[a], extra_dyn, sizeof(extra_dyn));
 	 if (ismono) {
 	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
-			  carr_sam[a] - beat[a]/2.0, amp,
-			  carr_sam[a] + beat[a]/2.0, amp, extra);
+			  carr_sam[a] - beat[a]/2.0, amp_t,
+			  carr_sam[a] + beat[a]/2.0, amp_t, extra_dyn);
 	 } else {
 	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
-			  carr_sam[a], signal, beat[a], amp, extra);
+			  carr_sam[a], signal, beat[a], amp_t, extra_dyn);
 	 }
 	 formatTimeLine(tim, "== ts%02d ->", a);
       }
 
       if (islong) {
+	 double amp_t= have_amp_curve ? amp_end : amp;
+	 curve_format_extra_with_mix_amp(extra,
+					 have_mixamp_curve && have_mix_in_extra,
+					 mix_end, extra_dyn, sizeof(extra_dyn));
 	 if (ismono) {
 	    formatNameDef("tsend: %g/%g %g/%g %s",
-			  carr_end - beat_end/2.0, amp,
-			  carr_end + beat_end/2.0, amp, extra);
+			  carr_end - beat_end/2.0, amp_t,
+			  carr_end + beat_end/2.0, amp_t, extra_dyn);
 	 } else {
 	    formatNameDef("tsend: %g%c%g/%g %s",
-			  carr_end, signal, beat_end, amp, extra);
+			  carr_end, signal, beat_end, amp_t, extra_dyn);
 	 }
 	 formatTimeLine(len, "== tsend ->");
       }
@@ -8059,16 +8353,20 @@ create_curve(int ac, char **av) {
       for (a= 0; a<lim; a++) {
 	 int tim0= a * steplen;
 	 int tim1= (a+1) * steplen;
-	 double beat_t, carr_t;
-	 if (!eval_custom_curve_point(tim1, &beat_t, &carr_t))
+	 double beat_t, carr_t, amp_t, mix_t;
+	 if (!eval_custom_curve_point(tim1, &beat_t, &carr_t, &amp_t, &mix_t))
 	    error("Custom curve evaluation failed at t=%d seconds", tim1);
+	 if (!have_amp_curve) amp_t= amp;
+	 curve_format_extra_with_mix_amp(extra,
+					 have_mixamp_curve && have_mix_in_extra,
+					 mix_t, extra_dyn, sizeof(extra_dyn));
 	 if (ismono) {
 	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
-			  carr_t - beat_t/2.0, amp,
-			  carr_t + beat_t/2.0, amp, extra);
+			  carr_t - beat_t/2.0, amp_t,
+			  carr_t + beat_t/2.0, amp_t, extra_dyn);
 	 } else {
 	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
-			  carr_t, signal, beat_t, amp, extra);
+			  carr_t, signal, beat_t, amp_t, extra_dyn);
 	 }
 	 formatTimeLine(tim0, "== ts%02d ->", a);
 	 formatTimeLine(tim1-stepslide, "== ts%02d ->", a);
@@ -8080,13 +8378,17 @@ create_curve(int ac, char **av) {
 
    // Wake-up and ending
    if (wakeup) {
+      double amp_t= have_amp_curve ? amp_start_eval : amp;
+      curve_format_extra_with_mix_amp(extra,
+				      have_mixamp_curve && have_mix_in_extra,
+				      mix_start_eval, extra_dyn, sizeof(extra_dyn));
       if (ismono) {
 	 formatNameDef("tswake: %g/%g %g/%g %s",
-		       carr_start_eval - beat_start_eval/2.0, amp,
-		       carr_start_eval + beat_start_eval/2.0, amp, extra);
+		       carr_start_eval - beat_start_eval/2.0, amp_t,
+		       carr_start_eval + beat_start_eval/2.0, amp_t, extra_dyn);
       } else {
 	 formatNameDef("tswake: %g%c%g/%g %s",
-		       carr_start_eval, signal, beat_start_eval, amp, extra);
+		       carr_start_eval, signal, beat_start_eval, amp_t, extra_dyn);
       }
       formatTimeLine(end+len2, "== tswake ->");
       end += len2;
