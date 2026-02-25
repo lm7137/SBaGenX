@@ -87,6 +87,74 @@ skip_optional_waveform_prefix(const char *spec) {
   return p;
 }
 
+static char *
+sbx_strdup_local(const char *s) {
+  size_t n;
+  char *out;
+  if (!s) return 0;
+  n = strlen(s) + 1;
+  out = (char *)malloc(n);
+  if (!out) return 0;
+  memcpy(out, s, n);
+  return out;
+}
+
+static void
+rstrip_inplace(char *s) {
+  size_t n;
+  if (!s) return;
+  n = strlen(s);
+  while (n > 0 && isspace((unsigned char)s[n - 1])) {
+    s[n - 1] = 0;
+    n--;
+  }
+}
+
+static void
+strip_inline_comment(char *s) {
+  char *p = s;
+  if (!s) return;
+  while (*p) {
+    if (*p == '#') {
+      *p = 0;
+      return;
+    }
+    if (*p == ';') {
+      *p = 0;
+      return;
+    }
+    if (*p == '/' && p[1] == '/') {
+      *p = 0;
+      return;
+    }
+    p++;
+  }
+}
+
+static int
+parse_time_seconds_token(const char *tok, double *out_sec) {
+  char *end = 0;
+  double v;
+  double mul = 1.0;
+  const char *p;
+
+  if (!tok || !*tok || !out_sec) return SBX_EINVAL;
+  v = strtod(tok, &end);
+  if (end == tok || !isfinite(v)) return SBX_EINVAL;
+  p = skip_ws(end);
+
+  if (*p == 0) mul = 1.0;          // default: seconds
+  else if ((p[0] == 's' || p[0] == 'S') && p[1] == 0) mul = 1.0;
+  else if ((p[0] == 'm' || p[0] == 'M') && p[1] == 0) mul = 60.0;
+  else if ((p[0] == 'h' || p[0] == 'H') && p[1] == 0) mul = 3600.0;
+  else return SBX_EINVAL;
+
+  v *= mul;
+  if (!isfinite(v) || v < 0.0) return SBX_EINVAL;
+  *out_sec = v;
+  return SBX_OK;
+}
+
 static int
 normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   if (!tone) return SBX_EINVAL;
@@ -582,6 +650,196 @@ sbx_context_load_keyframes(SbxContext *ctx,
 
   set_ctx_error(ctx, NULL);
   return SBX_OK;
+}
+
+int
+sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
+  char *buf = 0, *line = 0, *next = 0;
+  size_t line_no = 0;
+  SbxProgramKeyframe *frames = 0;
+  size_t count = 0, cap = 0;
+  int rc = SBX_OK;
+
+  if (!ctx || !ctx->eng || !text) return SBX_EINVAL;
+
+  buf = sbx_strdup_local(text);
+  if (!buf) {
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+
+  line = buf;
+  while (line && *line) {
+    char *p, *q;
+    char *time_tok;
+    char *tone_tok;
+    double tsec;
+    SbxToneSpec tone;
+
+    line_no++;
+    next = strchr(line, '\n');
+    if (next) {
+      *next = 0;
+      next++;
+    }
+
+    if (line[0] && line[strlen(line) - 1] == '\r')
+      line[strlen(line) - 1] = 0;
+
+    strip_inline_comment(line);
+    rstrip_inplace(line);
+    p = (char *)skip_ws(line);
+    if (*p == 0) {
+      line = next;
+      continue;
+    }
+
+    q = p;
+    while (*q && !isspace((unsigned char)*q)) q++;
+    if (*q == 0) {
+      char emsg[192];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: expected '<time> <tone-spec>'",
+               (unsigned long)line_no);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+    *q++ = 0;
+    q = (char *)skip_ws(q);
+    if (*q == 0) {
+      char emsg[192];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: missing tone-spec",
+               (unsigned long)line_no);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+
+    time_tok = p;
+    tone_tok = q;
+
+    rc = parse_time_seconds_token(time_tok, &tsec);
+    if (rc != SBX_OK) {
+      char emsg[224];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: invalid time token '%s' (use s/m/h suffix or seconds default)",
+               (unsigned long)line_no, time_tok);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+
+    rc = sbx_parse_tone_spec(tone_tok, &tone);
+    if (rc != SBX_OK) {
+      char emsg[224];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: invalid tone-spec '%s'",
+               (unsigned long)line_no, tone_tok);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+
+    if (count == cap) {
+      size_t ncap = cap ? (cap * 2) : 8;
+      SbxProgramKeyframe *tmp;
+      tmp = (SbxProgramKeyframe *)realloc(frames, ncap * sizeof(*frames));
+      if (!tmp) {
+        set_ctx_error(ctx, "out of memory");
+        rc = SBX_ENOMEM;
+        goto done;
+      }
+      frames = tmp;
+      cap = ncap;
+    }
+
+    frames[count].time_sec = tsec;
+    frames[count].tone = tone;
+    count++;
+    line = next;
+  }
+
+  if (count == 0) {
+    set_ctx_error(ctx, "sequence text contains no keyframes");
+    rc = SBX_EINVAL;
+    goto done;
+  }
+
+  rc = sbx_context_load_keyframes(ctx, frames, count, loop);
+
+done:
+  if (frames) free(frames);
+  if (buf) free(buf);
+  return rc;
+}
+
+int
+sbx_context_load_sequence_file(SbxContext *ctx, const char *path, int loop) {
+  FILE *fp = 0;
+  char chunk[4096];
+  char *text = 0;
+  size_t len = 0, cap = 0;
+  int rc = SBX_OK;
+
+  if (!ctx || !ctx->eng || !path) return SBX_EINVAL;
+
+  fp = fopen(path, "rb");
+  if (!fp) {
+    char emsg[256];
+    snprintf(emsg, sizeof(emsg), "cannot open sequence file: %s", path);
+    set_ctx_error(ctx, emsg);
+    return SBX_EINVAL;
+  }
+
+  for (;;) {
+    size_t n = fread(chunk, 1, sizeof(chunk), fp);
+    if (n > 0) {
+      char *tmp;
+      size_t need = len + n + 1;
+      if (need > cap) {
+        size_t ncap = cap ? cap : 4096;
+        while (ncap < need) ncap *= 2;
+        tmp = (char *)realloc(text, ncap);
+        if (!tmp) {
+          set_ctx_error(ctx, "out of memory");
+          rc = SBX_ENOMEM;
+          goto done;
+        }
+        text = tmp;
+        cap = ncap;
+      }
+      memcpy(text + len, chunk, n);
+      len += n;
+      text[len] = 0;
+    }
+    if (n < sizeof(chunk)) {
+      if (ferror(fp)) {
+        set_ctx_error(ctx, "failed reading sequence file");
+        rc = SBX_EINVAL;
+      }
+      break;
+    }
+  }
+  if (rc != SBX_OK) goto done;
+
+  if (!text) {
+    text = (char *)malloc(1);
+    if (!text) {
+      set_ctx_error(ctx, "out of memory");
+      rc = SBX_ENOMEM;
+      goto done;
+    }
+    text[0] = 0;
+  }
+
+  rc = sbx_context_load_sequence_text(ctx, text, loop);
+
+done:
+  if (fp) fclose(fp);
+  if (text) free(text);
+  return rc;
 }
 
 int

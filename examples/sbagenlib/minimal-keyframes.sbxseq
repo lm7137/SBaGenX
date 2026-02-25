@@ -1,0 +1,16 @@
+# Minimal sbagenlib keyframed sequence format (Phase 3.3)
+# <time><optional-unit> <tone-spec>
+#
+# Units:
+#   (none) or s = seconds
+#   m = minutes
+#   h = hours
+#
+# Tone-specs:
+#   binaural   carrier+beat/amp
+#   monaural   carrierMbeat/amp
+#   isochronic carrier@pulse/amp
+
+0s     200+10/20
+30s    190+8/20
+60s    180+6/20

@@ -32,15 +32,20 @@ Phase 3.1
 - Add block-render path via context (`sbx_context_render_f32`).
 - Keep CLI behavior unchanged while preparing deeper runtime migration.
 
-Phase 3.2 (current slice)
+Phase 3.2
 - Add keyframed time-varying program support in `SbxContext`.
 - Add optional looped playback for keyframed programs.
 - Keep CLI behavior unchanged while library runtime expands.
 
+Phase 3.3 (current slice)
+- Add minimal sequence text/file loader APIs on top of keyframes.
+- Support simple line-based format: `<time> <tone-spec>`.
+- Keep CLI behavior unchanged while increasing reusable library coverage.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.2 Slice)
+Current API (Phase 3.3 Slice)
 ---------------------------
 
 Public header: `sbagenlib.h`
@@ -63,6 +68,8 @@ Public header: `sbagenlib.h`
   - `sbx_context_set_tone()`
   - `sbx_context_load_tone_spec()`
   - `sbx_context_load_keyframes()`
+  - `sbx_context_load_sequence_text()`
+  - `sbx_context_load_sequence_file()`
   - `sbx_context_render_f32()`
   - `sbx_context_time_sec()`
   - `sbx_context_last_error()`
@@ -88,6 +95,19 @@ Keyframed program form (`sbx_context_load_keyframes`):
   - a single tone mode across all keyframes.
 - Rendering interpolates carrier/beat/amplitude/duty linearly between
   keyframes, with optional looping.
+
+Minimal sequence text/file form (Phase 3.3):
+- One keyframe per non-empty line:
+  - `<time-token> <tone-spec>`
+- Time token:
+  - seconds default (e.g. `30`), or suffix `s`, `m`, `h`
+  - examples: `0s`, `45`, `0.5m`, `0.02h`
+- Supported comments:
+  - `# ...`
+  - `; ...`
+  - `// ...`
+- Example file:
+  - `examples/sbagenlib/minimal-keyframes.sbxseq`
 
 Notes
 -----
@@ -148,4 +168,18 @@ Expected output:
 
 ```text
 PASS: sbagenlib keyframe API checks
+```
+
+Sequence Loader Test (Phase 3.3)
+--------------------------------
+
+```bash
+gcc -O2 -I. tests/sbagenlib/test_sequence_loader_api.c sbagenlib.c -lm -o /tmp/test_sbx_seq_loader
+/tmp/test_sbx_seq_loader
+```
+
+Expected output:
+
+```text
+PASS: sbagenlib sequence loader API checks
 ```
