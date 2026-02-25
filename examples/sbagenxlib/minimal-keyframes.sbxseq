@@ -1,4 +1,4 @@
-# Minimal sbagenlib keyframed sequence format (Phase 3.3)
+# Minimal sbagenxlib keyframed sequence format (Phase 3.3)
 # <time><optional-unit> <tone-spec>
 #
 # Units:

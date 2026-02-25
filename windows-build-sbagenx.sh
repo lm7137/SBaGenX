@@ -661,7 +661,7 @@ info "Libraries: $LIBS_32"
 # Replace VERSION with the actual version number
 sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
-i686-w64-mingw32-gcc $CFLAGS_32 sbagenx.tmp.c sbagenlib.c /tmp/sbagen32.res -o dist/sbagenx-win32.exe $LIBS_32
+i686-w64-mingw32-gcc $CFLAGS_32 sbagenx.tmp.c sbagenxlib.c /tmp/sbagen32.res -o dist/sbagenx-win32.exe $LIBS_32
 
 if [ $? -eq 0 ]; then
     success "32-bit compilation successful! Created 32-bit binary: dist/sbagenx-win32.exe"
@@ -714,7 +714,7 @@ fi
 info "Compiling 64-bit version with flags: $CFLAGS_64"
 info "Libraries: $LIBS_64"
 
-x86_64-w64-mingw32-gcc $CFLAGS_64 sbagenx.tmp.c sbagenlib.c /tmp/sbagen64.res -o dist/sbagenx-win64.exe $LIBS_64
+x86_64-w64-mingw32-gcc $CFLAGS_64 sbagenx.tmp.c sbagenxlib.c /tmp/sbagen64.res -o dist/sbagenx-win64.exe $LIBS_64
 
 if [ $? -eq 0 ]; then
     success "64-bit compilation successful! Created 64-bit binary: dist/sbagenx-win64.exe"
@@ -722,39 +722,45 @@ else
     error "64-bit compilation failed!"
 fi
 
-# Build sbagenlib static archives (Phase 1 extraction artifacts)
-section_header "Building sbagenlib static libraries..."
-create_dir_if_not_exists "build/sbagenlib"
+# Build sbagenxlib static archives (Phase 1 extraction artifacts)
+section_header "Building sbagenxlib static libraries..."
+create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
-SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
 
-i686-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenlib.c -o build/sbagenlib/sbagenlib-win32.o
+i686-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win32.o
 if [ $? -eq 0 ]; then
-    i686-w64-mingw32-ar rcs dist/libsbagenx-win32.a build/sbagenlib/sbagenlib-win32.o
+    i686-w64-mingw32-ar rcs dist/libsbagenx-win32.a build/sbagenxlib/sbagenxlib-win32.o
     if [ $? -eq 0 ]; then
-        success "Created sbagenlib archive: dist/libsbagenx-win32.a"
+        success "Created sbagenxlib archive: dist/libsbagenx-win32.a"
     else
         warning "Failed to archive dist/libsbagenx-win32.a"
     fi
 else
-    warning "Failed to compile sbagenlib for win32"
+    warning "Failed to compile sbagenxlib for win32"
 fi
 
-x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenlib.c -o build/sbagenlib/sbagenlib-win64.o
+x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win64.o
 if [ $? -eq 0 ]; then
-    x86_64-w64-mingw32-ar rcs dist/libsbagenx-win64.a build/sbagenlib/sbagenlib-win64.o
+    x86_64-w64-mingw32-ar rcs dist/libsbagenx-win64.a build/sbagenxlib/sbagenxlib-win64.o
     if [ $? -eq 0 ]; then
-        success "Created sbagenlib archive: dist/libsbagenx-win64.a"
+        success "Created sbagenxlib archive: dist/libsbagenx-win64.a"
     else
         warning "Failed to archive dist/libsbagenx-win64.a"
     fi
 else
-    warning "Failed to compile sbagenlib for win64"
+    warning "Failed to compile sbagenxlib for win64"
 fi
 
+cp sbagenxlib.h dist/include/sbagenxlib.h
+if [ $? -eq 0 ]; then
+    success "Bundled public header: dist/include/sbagenxlib.h"
+else
+    warning "Could not copy sbagenxlib.h into dist/include"
+fi
 cp sbagenlib.h dist/include/sbagenlib.h
 if [ $? -eq 0 ]; then
-    success "Bundled public header: dist/include/sbagenlib.h"
+    success "Bundled compatibility header: dist/include/sbagenlib.h"
 else
     warning "Could not copy sbagenlib.h into dist/include"
 fi

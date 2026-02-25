@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "sbagenlib_dsp.h"
+#include "sbagenxlib_dsp.h"
 
 static double legacy_clamp(double v, double lo, double hi) {
   if (v < lo) return lo;
@@ -144,6 +144,6 @@ int main(void) {
     }
   }
 
-  printf("PASS: sbagenlib DSP parity checks\n");
+  printf("PASS: sbagenxlib DSP parity checks\n");
   return 0;
 }

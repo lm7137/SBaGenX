@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sbagenlib.h"
+#include "sbagenxlib.h"
 
 static void fail(const char *msg) {
   fprintf(stderr, "FAIL: %s\n", msg);
@@ -80,6 +80,6 @@ int main(void) {
   free(buf);
   sbx_context_destroy(ctx);
 
-  printf("PASS: sbagenlib context API checks\n");
+  printf("PASS: sbagenxlib context API checks\n");
   return 0;
 }

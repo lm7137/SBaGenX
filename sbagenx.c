@@ -181,8 +181,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "libs/stb_image_write.h"
 #include "libs/tinyexpr.h"
-#include "sbagenlib.h"
-#include "sbagenlib_dsp.h"
+#include "sbagenxlib.h"
+#include "sbagenxlib_dsp.h"
 
 typedef struct Channel Channel;
 typedef struct Voice Voice;
@@ -426,11 +426,12 @@ help() {
 	  NL "          -c spec   Compensate for low-frequency headphone roll-off; see docs"
 	  NL
 	  NL "Environment:"
-	  NL "          SBAGENX_SEQ_BACKEND=auto|legacy|sbagenlib"
+	  NL "          SBAGENX_SEQ_BACKEND=auto|legacy|sbagenxlib"
 	  NL "                     Select seq-file backend (default auto)."
-	  NL "                     auto: try sbagenlib subset then fallback to legacy;"
+	  NL "                     auto: try sbagenxlib subset then fallback to legacy;"
 	  NL "                     legacy: force legacy parser/runtime;"
-	  NL "                     sbagenlib: require subset compatibility."
+	  NL "                     sbagenxlib: require subset compatibility."
+	  NL "                     (alias: sbagenlib)"
 	  NL
 	  );
    exit(0);
@@ -5778,7 +5779,7 @@ loop() {
      dispCurrPer(stderr);	// Display
      status(0);
   } else if (!opt_Q) {
-     warn("SBAGENLIB runtime active");
+     warn("SBAGENXLIB runtime active");
   }
   
   while (1) {
@@ -6166,7 +6167,7 @@ outChunkSbx() {
    double sr= (double)out_rate;
 
    if (!sbx_runtime_ctx)
-      error("Internal error: sbagenlib runtime context is not initialized");
+      error("Internal error: sbagenxlib runtime context is not initialized");
 
    if ((size_t)out_blen > sbx_runtime_fcap) {
       sbx_runtime_fbuf= (float*)realloc(sbx_runtime_fbuf, out_blen * sizeof(float));
@@ -6186,7 +6187,7 @@ outChunkSbx() {
    t0= sbx_context_time_sec(sbx_runtime_ctx);
    rc= sbx_context_render_f32(sbx_runtime_ctx, sbx_runtime_fbuf, frames);
    if (rc != SBX_OK)
-      error("sbagenlib render failed: %s", sbx_context_last_error(sbx_runtime_ctx));
+      error("sbagenxlib render failed: %s", sbx_context_last_error(sbx_runtime_ctx));
 
    if (sbx_runtime_aux_n > 0) {
       size_t ai;
@@ -6200,7 +6201,7 @@ outChunkSbx() {
 	 size_t k;
 	 rc= sbx_context_render_f32(sbx_runtime_aux_ctx[ai], sbx_runtime_aux_fbuf, frames);
 	 if (rc != SBX_OK)
-	    error("sbagenlib aux render failed: %s", sbx_context_last_error(sbx_runtime_aux_ctx[ai]));
+	    error("sbagenxlib aux render failed: %s", sbx_context_last_error(sbx_runtime_aux_ctx[ai]));
 	 for (k= 0; k<nfloat; k++)
 	    sbx_runtime_fbuf[k] += sbx_runtime_aux_fbuf[k];
       }
@@ -7265,7 +7266,7 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       return 1;
    }
 
-   // Runtime playback via sbagenlib context.
+   // Runtime playback via sbagenxlib context.
    sbx_runtime_clear();
    sbx_runtime_ctx= ctx;
    sbx_runtime_active= 1;
@@ -7279,7 +7280,7 @@ sbx_try_readSeq_runtime(int ac, char **av) {
 	 sbx_runtime_total_sec= kf.time_sec;
    }
    if (!opt_Q)
-      warn("Using sbagenlib runtime for sequence file subset: %s", fnam);
+      warn("Using sbagenxlib runtime for sequence file subset: %s", fnam);
    return 1;
 }
 
@@ -7289,8 +7290,9 @@ sbx_seq_backend_mode(void) {
    if (!v || !*v) return 0; /* auto */
    if (0 == strcmp(v, "auto")) return 0;
    if (0 == strcmp(v, "legacy")) return 1;
-   if (0 == strcmp(v, "sbagenlib") || 0 == strcmp(v, "library")) return 2;
-   warn("Unknown SBAGENX_SEQ_BACKEND=%s (expected auto|legacy|sbagenlib); using auto", v);
+   if (0 == strcmp(v, "sbagenxlib") || 0 == strcmp(v, "sbagenlib") ||
+       0 == strcmp(v, "library")) return 2;
+   warn("Unknown SBAGENX_SEQ_BACKEND=%s (expected auto|legacy|sbagenxlib); using auto", v);
    return 0;
 }
 
@@ -7306,7 +7308,7 @@ readSeq(int ac, char **av) {
       if (sbx_try_readSeq_runtime(ac, av))
 	 return;
       if (seq_backend == 2)
-	 error("SBAGENX_SEQ_BACKEND=sbagenlib requested, but sequence input is not compatible with sbagenlib subset loader");
+	 error("SBAGENX_SEQ_BACKEND=sbagenxlib requested, but sequence input is not compatible with sbagenxlib subset loader");
    }
 
    // Setup a 'now' value to use for NOW in the sequence file
@@ -8398,8 +8400,8 @@ readPreProg(int ac, char **av) {
 	    NL "  drop 25gs+/2 mix/60"
 	    NL "  sigmoid 00ds+:l=0.125:h=0"
 	    NL "  curve examples/basics/curve-sigmoid-like.sbgf 00ds+:l=0.2:h=0"
-	    NL "  libseq examples/sbagenlib/minimal-keyframes.sbxseq"
-	    NL "  libsbg examples/sbagenlib/minimal-sbg-timing.sbg"
+	    NL "  libseq examples/sbagenxlib/minimal-keyframes.sbxseq"
+	    NL "  libsbg examples/sbagenxlib/minimal-sbg-timing.sbg"
 	    );
 
    if (opt_A && !opt_m && !opt_M)
@@ -8422,14 +8424,14 @@ readPreProg(int ac, char **av) {
       return;
    }
 
-   // Handle 'libseq' (sbagenlib keyframe file: <time> <tone> [interp])
+   // Handle 'libseq' (sbagenxlib keyframe file: <time> <tone> [interp])
    if (0 == strcmp(av[0], "libseq")) {
       ac--; av++;
       create_libseq(ac, av, 0);
       return;
    }
 
-   // Handle 'libsbg' (sbagenlib HH:MM[:SS] timing subset)
+   // Handle 'libsbg' (sbagenxlib HH:MM[:SS] timing subset)
    if (0 == strcmp(av[0], "libsbg")) {
       ac--; av++;
       create_libseq(ac, av, 1);
@@ -8522,7 +8524,7 @@ sbx_apply_waveform_from_token_or_default(const char *tok, SbxToneSpec *tone) {
 }
 
 static int
-sbagenlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
+sbagenxlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
    double amp_pct;
    const char *wave_name;
    if (!tone || !out || out_sz == 0) return 0;
@@ -8570,9 +8572,9 @@ emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, co
 
    n= sbx_context_keyframe_count(ctx);
    if (n == 0)
-      error("sbagenlib context does not contain keyframes");
+      error("sbagenxlib context does not contain keyframes");
 
-   printf("# sbagenlib keyframes (%d)\n", (int)n);
+   printf("# sbagenxlib keyframes (%d)\n", (int)n);
    if (*extra_tail)
       printf("# extras:%s\n", extra_tail);
    if (loop_requested)
@@ -8583,9 +8585,9 @@ emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, co
       const char *interp;
 
       if (sbx_context_get_keyframe(ctx, i, &kf) != SBX_OK)
-	 error("sbagenlib keyframe retrieval failed at index %d", (int)i);
-      if (!sbagenlib_tone_to_legacy_spec(&kf.tone, spec, sizeof(spec)))
-	 error("sbagenlib keyframe %d has unsupported tone mode %d", (int)i, (int)kf.tone.mode);
+	 error("sbagenxlib keyframe retrieval failed at index %d", (int)i);
+      if (!sbagenxlib_tone_to_legacy_spec(&kf.tone, spec, sizeof(spec)))
+	 error("sbagenxlib keyframe %d has unsupported tone mode %d", (int)i, (int)kf.tone.mode);
       interp= (kf.interp == SBX_INTERP_STEP) ? "step" : "linear";
       printf("%.6f %s%s %s\n", kf.time_sec, spec, extra_tail, interp);
    }
@@ -8627,16 +8629,16 @@ create_libseq(int ac, char **av, int sbg_timing) {
    cfg.channels= 2;
    ctx= sbx_context_create(&cfg);
    if (!ctx)
-      error("Failed to create sbagenlib context");
+      error("Failed to create sbagenxlib context");
    if (sbx_context_set_default_waveform(ctx, opt_w) != SBX_OK)
-      error("Failed to set sbagenlib default waveform");
+      error("Failed to set sbagenxlib default waveform");
 
    if (sbg_timing)
       rc= sbx_context_load_sbg_timing_file(ctx, path, loop_flag);
    else
       rc= sbx_context_load_sequence_file(ctx, path, loop_flag);
    if (rc != SBX_OK)
-      error("sbagenlib failed loading %s: %s", path, sbx_context_last_error(ctx));
+      error("sbagenxlib failed loading %s: %s", path, sbx_context_last_error(ctx));
 
    if (opt_D) {
       emit_periods_from_sbx_context(ctx, loop_flag);
@@ -8644,7 +8646,7 @@ create_libseq(int ac, char **av, int sbg_timing) {
       return;
    }
 
-   // Runtime playback via sbagenlib context.
+   // Runtime playback via sbagenxlib context.
    sbx_runtime_clear();
    sbx_runtime_ctx= ctx;
    sbx_runtime_active= 1;
@@ -8771,7 +8773,7 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
    int rc;
 
    if (!tones || n == 0)
-      error("internal error: empty immediate tone list for sbagenlib runtime");
+      error("internal error: empty immediate tone list for sbagenxlib runtime");
 
    sbx_runtime_clear();
 
@@ -8780,11 +8782,11 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
    cfg.channels= 2;
    sbx_runtime_ctx= sbx_context_create(&cfg);
    if (!sbx_runtime_ctx)
-      error("Failed to create sbagenlib runtime context");
+      error("Failed to create sbagenxlib runtime context");
 
    rc= sbx_context_set_tone(sbx_runtime_ctx, &tones[0]);
    if (rc != SBX_OK)
-      error("Failed to load sbagenlib immediate tone: %s",
+      error("Failed to load sbagenxlib immediate tone: %s",
 	    sbx_context_last_error(sbx_runtime_ctx));
 
    sbx_runtime_active= 1;
@@ -8794,7 +8796,7 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
    if (!sbx_runtime_set_mix_keyframes(0, 0))
       error("Out of memory");
    if (n > 1 && !sbx_runtime_set_aux_tones(tones + 1, n - 1))
-      error("Failed to set sbagenlib runtime auxiliary tones");
+      error("Failed to set sbagenxlib runtime auxiliary tones");
 }
 
 int
@@ -8831,13 +8833,13 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
       warn("mix/<amp> was specified in -i tones but no mix input stream is active");
 
    if (opt_D) {
-      printf("# sbagenlib immediate tones (%d)\n", (int)tone_count);
+      printf("# sbagenxlib immediate tones (%d)\n", (int)tone_count);
       if (have_mix)
 	 printf("# mix/%g\n", mix_amp_pct);
       for (i= 0; i<(int)tone_count; i++) {
 	 char spec[256];
-	 if (!sbagenlib_tone_to_legacy_spec(&tones[i], spec, sizeof(spec)))
-	    error("Failed formatting sbagenlib immediate tone %d", i);
+	 if (!sbagenxlib_tone_to_legacy_spec(&tones[i], spec, sizeof(spec)))
+	    error("Failed formatting sbagenxlib immediate tone %d", i);
 	 printf("%s\n", spec);
       }
       fflush(stdout);
@@ -8894,7 +8896,7 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
    SbxEngineConfig cfg;
    int rc;
    if (!kfs || n == 0)
-      error("internal error: empty sbagenlib runtime keyframe list");
+      error("internal error: empty sbagenxlib runtime keyframe list");
 
    sbx_runtime_clear();
 
@@ -8903,11 +8905,11 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
    cfg.channels= 2;
    sbx_runtime_ctx= sbx_context_create(&cfg);
    if (!sbx_runtime_ctx)
-      error("Failed to create sbagenlib runtime context");
+      error("Failed to create sbagenxlib runtime context");
 
    rc= sbx_context_load_keyframes(sbx_runtime_ctx, kfs, n, loop_flag);
    if (rc != SBX_OK)
-      error("Failed to load sbagenlib runtime keyframes: %s",
+      error("Failed to load sbagenxlib runtime keyframes: %s",
 	    sbx_context_last_error(sbx_runtime_ctx));
 
    sbx_runtime_active= 1;
@@ -8917,7 +8919,7 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
    if (!sbx_runtime_set_mix_keyframes(mkf, mkf_n))
       error("Out of memory");
    if (!sbx_runtime_set_aux_tones(aux_tones, aux_count))
-      error("Failed to set sbagenlib runtime auxiliary tones");
+      error("Failed to set sbagenxlib runtime auxiliary tones");
 }
 
 static void
@@ -8931,10 +8933,10 @@ sbx_emit_periods_from_keyframes_with_extra(const SbxProgramKeyframe *kfs, size_t
    cfg.channels= 2;
    ctx= sbx_context_create(&cfg);
    if (!ctx)
-      error("Failed to create sbagenlib context");
+      error("Failed to create sbagenxlib context");
    rc= sbx_context_load_keyframes(ctx, kfs, n, loop_flag);
    if (rc != SBX_OK)
-      error("Failed to load sbagenlib keyframes: %s", sbx_context_last_error(ctx));
+      error("Failed to load sbagenxlib keyframes: %s", sbx_context_last_error(ctx));
    emit_periods_from_sbx_context_with_extra(ctx, loop_flag, extra);
    sbx_context_destroy(ctx);
 }
@@ -8965,7 +8967,7 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
 	 if (SBX_OK == sbx_parse_tone_spec(tok, &tone)) {
 	    sbx_apply_waveform_from_token_or_default(tok, &tone);
 	    if (spec->aux_count >= SBX_RUNTIME_MAX_AUX)
-	       error("Too many extra sbagenlib tone-specs (max %d)", SBX_RUNTIME_MAX_AUX);
+	       error("Too many extra sbagenxlib tone-specs (max %d)", SBX_RUNTIME_MAX_AUX);
 	    spec->aux_tones[spec->aux_count++]= tone;
 	 } else {
 	    spec->unsupported= 1;
@@ -9263,10 +9265,10 @@ create_drop(int ac, char **av) {
 
       if (extra_spec.unsupported) {
 	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p drop sbagenlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenlib tones (+/-/@/M, single tones), and white/pink/brown noise",
+	    error("Unsupported extra tone-spec '%s' for -p drop sbagenxlib runtime"
+		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), and white/pink/brown noise",
 		  extra_spec.bad_token);
-	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p drop; using legacy timeline bridge for -D output", extra_spec.bad_token);
+	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p drop; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9543,10 +9545,10 @@ create_sigmoid(int ac, char **av) {
 
       if (extra_spec.unsupported) {
 	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenlib tones (+/-/@/M, single tones), and white/pink/brown noise",
+	    error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenxlib runtime"
+		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), and white/pink/brown noise",
 		  extra_spec.bad_token);
-	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p sigmoid; using legacy timeline bridge for -D output", extra_spec.bad_token);
+	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p sigmoid; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9896,12 +9898,12 @@ create_curve(int ac, char **av) {
 
       if (extra_spec.unsupported) {
 	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p curve sbagenlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenlib tones (+/-/@/M, single tones), and white/pink/brown noise",
+	    error("Unsupported extra tone-spec '%s' for -p curve sbagenxlib runtime"
+		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 if (have_mixamp_curve && have_mix_in_extra)
 	    warn("Curve mixamp expression is ignored in legacy -D bridge output");
-	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p curve; using legacy timeline bridge for -D output", extra_spec.bad_token);
+	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p curve; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -10010,10 +10012,10 @@ create_slide(int ac, char **av) {
 
       if (extra_spec.unsupported) {
 	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p slide sbagenlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenlib tones (+/-/@/M, single tones), and white/pink/brown noise",
+	    error("Unsupported extra tone-spec '%s' for -p slide sbagenxlib runtime"
+		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), and white/pink/brown noise",
 		  extra_spec.bad_token);
-	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p slide; using legacy timeline bridge for -D output", extra_spec.bad_token);
+	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p slide; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);

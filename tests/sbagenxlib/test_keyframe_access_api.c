@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "sbagenlib.h"
+#include "sbagenxlib.h"
 
 static void
 fail(const char *msg) {
@@ -61,6 +61,6 @@ main(void) {
     fail("keyframe count should be zero for static tone");
 
   sbx_context_destroy(ctx);
-  printf("PASS: sbagenlib keyframe access API checks\n");
+  printf("PASS: sbagenxlib keyframe access API checks\n");
   return 0;
 }

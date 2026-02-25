@@ -1,4 +1,4 @@
-# Minimal .sbg timing subset for sbagenlib (Phase 3.4)
+# Minimal .sbg timing subset for sbagenxlib (Phase 3.4)
 # Supported format:
 #   HH:MM tone-spec
 #   HH:MM:SS tone-spec

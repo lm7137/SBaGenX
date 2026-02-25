@@ -1,5 +1,5 @@
-#include "sbagenlib.h"
-#include "sbagenlib_dsp.h"
+#include "sbagenxlib.h"
+#include "sbagenxlib_dsp.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -8,8 +8,8 @@
 #include <string.h>
 #include <strings.h>
 
-#ifndef SBAGENLIB_VERSION
-#define SBAGENLIB_VERSION "dev"
+#ifndef SBAGENXLIB_VERSION
+#define SBAGENXLIB_VERSION "dev"
 #endif
 
 #ifndef M_PI
@@ -556,7 +556,7 @@ ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
 
 const char *
 sbx_version(void) {
-  return SBAGENLIB_VERSION;
+  return SBAGENXLIB_VERSION;
 }
 
 int

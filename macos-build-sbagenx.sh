@@ -60,7 +60,7 @@ info "Libraries: $LIBS"
 # Replace VERSION with the actual version number
 sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
-gcc $CFLAGS sbagenx.tmp.c sbagenlib.c -o dist/sbagenx-macos-universal $LIBS
+gcc $CFLAGS sbagenx.tmp.c sbagenxlib.c -o dist/sbagenx-macos-universal $LIBS
 
 if [ $? -eq 0 ]; then
     success "Compilation successful! Universal binary created: dist/sbagenx-macos-universal"
@@ -73,27 +73,33 @@ fi
 # Remove the temporary file
 rm -f sbagenx.tmp.c
 
-# Build sbagenlib universal static archive (Phase 1 extraction artifact)
-section_header "Building sbagenlib universal static library..."
-create_dir_if_not_exists "build/sbagenlib"
+# Build sbagenxlib universal static archive (Phase 1 extraction artifact)
+section_header "Building sbagenxlib universal static library..."
+create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
 
-SBX_LIB_CFLAGS="-Wall -O3 -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -I. -DSBAGENLIB_VERSION=\"\\\"$VERSION\\\"\""
-gcc $SBX_LIB_CFLAGS -c sbagenlib.c -o build/sbagenlib/sbagenlib-macos-universal.o
+SBX_LIB_CFLAGS="-Wall -O3 -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-macos-universal.o
 if [ $? -eq 0 ]; then
-    libtool -static -o dist/libsbagenx-macos-universal.a build/sbagenlib/sbagenlib-macos-universal.o
+    libtool -static -o dist/libsbagenx-macos-universal.a build/sbagenxlib/sbagenxlib-macos-universal.o
     if [ $? -eq 0 ]; then
-        success "Created sbagenlib archive: dist/libsbagenx-macos-universal.a"
+        success "Created sbagenxlib archive: dist/libsbagenx-macos-universal.a"
     else
         warning "Failed to archive dist/libsbagenx-macos-universal.a"
     fi
 else
-    warning "Failed to compile sbagenlib for macOS universal"
+    warning "Failed to compile sbagenxlib for macOS universal"
 fi
 
+cp sbagenxlib.h dist/include/sbagenxlib.h
+if [ $? -eq 0 ]; then
+    success "Bundled public header: dist/include/sbagenxlib.h"
+else
+    warning "Could not copy sbagenxlib.h into dist/include"
+fi
 cp sbagenlib.h dist/include/sbagenlib.h
 if [ $? -eq 0 ]; then
-    success "Bundled public header: dist/include/sbagenlib.h"
+    success "Bundled compatibility header: dist/include/sbagenlib.h"
 else
     warning "Could not copy sbagenlib.h into dist/include"
 fi

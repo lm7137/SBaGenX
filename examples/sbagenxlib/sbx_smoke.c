@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "sbagenlib.h"
+#include "sbagenxlib.h"
 
 int main(void) {
   SbxEngineConfig cfg;
@@ -16,7 +16,7 @@ int main(void) {
   sbx_default_engine_config(&cfg);
   eng = sbx_engine_create(&cfg);
   if (!eng) {
-    fprintf(stderr, "failed to create sbagenlib engine\n");
+    fprintf(stderr, "failed to create sbagenxlib engine\n");
     return 1;
   }
 
@@ -50,7 +50,7 @@ int main(void) {
     sum_r += buf[i * 2 + 1] * buf[i * 2 + 1];
   }
 
-  printf("sbagenlib %s (api %d)\n", sbx_version(), sbx_api_version());
+  printf("sbagenxlib %s (api %d)\n", sbx_version(), sbx_api_version());
   printf("rendered %lu frames, rmsL=%.6f rmsR=%.6f\n",
          (unsigned long)frames,
          sqrt(sum_l / (double)frames),

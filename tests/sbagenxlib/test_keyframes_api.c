@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "sbagenlib.h"
+#include "sbagenxlib.h"
 
 static void
 fail(const char *msg) {
@@ -128,6 +128,6 @@ main(void) {
 
   free(buf);
   sbx_context_destroy(ctx);
-  printf("PASS: sbagenlib keyframe API checks\n");
+  printf("PASS: sbagenxlib keyframe API checks\n");
   return 0;
 }

@@ -77,7 +77,7 @@ if [ $SKIP_32BIT = 0 ]; then
     info "Libraries: $LIBS_32"
 
     # Try to compile with 32-bit support
-    gcc $CFLAGS_32 sbagenx.c sbagenlib.c -o dist/sbagenx-linux32 $LIBS_32
+    gcc $CFLAGS_32 sbagenx.c sbagenxlib.c -o dist/sbagenx-linux32 $LIBS_32
 
     if [ $? -eq 0 ]; then
         success "32-bit compilation successful! Binary created: sbagenx-linux32"
@@ -157,9 +157,9 @@ info "Libraries: $LIBS_64"
 sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
 if [ "$HOST_ARCH" = "aarch64" ]; then
-    gcc $CFLAGS_64 sbagenx.tmp.c sbagenlib.c -o dist/sbagenx-linux-arm64 $LIBS_64
+    gcc $CFLAGS_64 sbagenx.tmp.c sbagenxlib.c -o dist/sbagenx-linux-arm64 $LIBS_64
 else
-    gcc $CFLAGS_64 sbagenx.tmp.c sbagenlib.c -o dist/sbagenx-linux64 $LIBS_64
+    gcc $CFLAGS_64 sbagenx.tmp.c sbagenxlib.c -o dist/sbagenx-linux64 $LIBS_64
 fi
 
 if [ $? -eq 0 ]; then
@@ -175,56 +175,62 @@ fi
 # Remove the temporary file
 rm -f sbagenx.tmp.c
 
-# Build sbagenlib static archives (Phase 1 extraction artifacts)
-section_header "Building sbagenlib static libraries..."
-create_dir_if_not_exists "build/sbagenlib"
+# Build sbagenxlib static archives (Phase 1 extraction artifacts)
+section_header "Building sbagenxlib static libraries..."
+create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
 
-SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
 
 if [ $SKIP_32BIT = 0 ]; then
-    gcc $SBX_LIB_CFLAGS -m32 -c sbagenlib.c -o build/sbagenlib/sbagenlib-linux32.o
+    gcc $SBX_LIB_CFLAGS -m32 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux32.o
     if [ $? -eq 0 ]; then
-        ar rcs dist/libsbagenx-linux32.a build/sbagenlib/sbagenlib-linux32.o
+        ar rcs dist/libsbagenx-linux32.a build/sbagenxlib/sbagenxlib-linux32.o
         if [ $? -eq 0 ]; then
-            success "Created sbagenlib archive: dist/libsbagenx-linux32.a"
+            success "Created sbagenxlib archive: dist/libsbagenx-linux32.a"
         else
             warning "Failed to archive dist/libsbagenx-linux32.a"
         fi
     else
-        warning "Failed to compile sbagenlib for 32-bit"
+        warning "Failed to compile sbagenxlib for 32-bit"
     fi
 fi
 
 if [ "$HOST_ARCH" = "aarch64" ]; then
-    gcc $SBX_LIB_CFLAGS -c sbagenlib.c -o build/sbagenlib/sbagenlib-linux-arm64.o
+    gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux-arm64.o
     if [ $? -eq 0 ]; then
-        ar rcs dist/libsbagenx-linux-arm64.a build/sbagenlib/sbagenlib-linux-arm64.o
+        ar rcs dist/libsbagenx-linux-arm64.a build/sbagenxlib/sbagenxlib-linux-arm64.o
         if [ $? -eq 0 ]; then
-            success "Created sbagenlib archive: dist/libsbagenx-linux-arm64.a"
+            success "Created sbagenxlib archive: dist/libsbagenx-linux-arm64.a"
         else
             warning "Failed to archive dist/libsbagenx-linux-arm64.a"
         fi
     else
-        warning "Failed to compile sbagenlib for ARM64"
+        warning "Failed to compile sbagenxlib for ARM64"
     fi
 else
-    gcc $SBX_LIB_CFLAGS -m64 -c sbagenlib.c -o build/sbagenlib/sbagenlib-linux64.o
+    gcc $SBX_LIB_CFLAGS -m64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux64.o
     if [ $? -eq 0 ]; then
-        ar rcs dist/libsbagenx-linux64.a build/sbagenlib/sbagenlib-linux64.o
+        ar rcs dist/libsbagenx-linux64.a build/sbagenxlib/sbagenxlib-linux64.o
         if [ $? -eq 0 ]; then
-            success "Created sbagenlib archive: dist/libsbagenx-linux64.a"
+            success "Created sbagenxlib archive: dist/libsbagenx-linux64.a"
         else
             warning "Failed to archive dist/libsbagenx-linux64.a"
         fi
     else
-        warning "Failed to compile sbagenlib for 64-bit"
+        warning "Failed to compile sbagenxlib for 64-bit"
     fi
 fi
 
+cp sbagenxlib.h dist/include/sbagenxlib.h
+if [ $? -eq 0 ]; then
+    success "Bundled public header: dist/include/sbagenxlib.h"
+else
+    warning "Could not copy sbagenxlib.h into dist/include"
+fi
 cp sbagenlib.h dist/include/sbagenlib.h
 if [ $? -eq 0 ]; then
-    success "Bundled public header: dist/include/sbagenlib.h"
+    success "Bundled compatibility header: dist/include/sbagenlib.h"
 else
     warning "Could not copy sbagenlib.h into dist/include"
 fi
