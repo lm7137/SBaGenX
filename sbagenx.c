@@ -254,6 +254,9 @@ void create_noise_spin_effect(
   int *left,
   int *right
 ); // Create a spin effect
+void init_mixbeat_hilbert(void);
+void reset_mixbeat_channel_state(int ch_index);
+double mixbeat_hilbert_sample(int ch_index, double x);
 void detect_output_encoder();
 void init_output_encoder();
 void output_encoder_write(short *pcm, int frames);
@@ -497,6 +500,10 @@ int *sin_tables[4]; // 0=sine, 1=square, 2=triangle, 3=sawtooth
 #define AMP_DA(pc) (40.96 * (pc))	// Display value (%age) to ->amp value
 #define AMP_AD(amp) ((amp) / 40.96)	// Amplitude value to display %age
 int *waves[100];		// Pointers are either 0 or point to a sin_table[]-style array of int
+#define MIXBEAT_HILBERT_TAPS 31
+double mixbeat_hilbert_coeff[MIXBEAT_HILBERT_TAPS];
+double mixbeat_hist[N_CH][MIXBEAT_HILBERT_TAPS];
+int mixbeat_hist_pos[N_CH];
 
 Channel chan[N_CH];		// Current channel states
 int now;			// Current time (milliseconds from midnight)
@@ -574,7 +581,7 @@ FILE *mix_in;			// Input stream for mix sound data, or 0
 int mix_cnt;			// Version number from mix filename (#<digits>), or -1
 int bigendian;			// Is this platform Big-endian?
 int mix_flag= 0;		// Has 'mix/*' been used in the sequence?
-double *mix_amp= NULL; // Amplitude of mix sound data to use with mixspin/mixpulse. Default is 100%
+double *mix_amp= NULL; // Amplitude of mix sound data to use with mixspin/mixpulse/mixbeat. Default is 100%
 double mix_amp_current= 4096.0; // Current mix/<amp> value (0-4096)
 
 typedef struct {
@@ -4332,6 +4339,7 @@ main(int argc, char **argv) {
    }
 
    init_sin_table();
+   init_mixbeat_hilbert();
 
    if (opt_P) {
       write_iso_cycle_graph_png_from_sequence();
@@ -4932,6 +4940,10 @@ sprintVoice(char *p, Voice *vp, Voice *dup) {
       if (dup && vp->res == dup->res && vp->amp == dup->amp)
 	return sprintf(p, "  ::");
       return sprintf(p, " %s:mixpulse:%.2f/%.2f", waveform_name[vp->waveform], vp->res, AMP_AD(vp->amp));
+    case 13:  // Mixbeat - frequency-shifted binauralized mix stream
+      if (dup && vp->res == dup->res && vp->amp == dup->amp)
+	return sprintf(p, "  ::");
+      return sprintf(p, " %s:mixbeat:%.2f/%.2f", waveform_name[vp->waveform], vp->res, AMP_AD(vp->amp));
     case 11:  // Bspin - spinning brown noise
       if (dup && vp->carr == dup->carr && vp->res == dup->res && vp->amp == dup->amp)
 	return sprintf(p, "  ::");
@@ -4988,6 +5000,60 @@ init_sin_table() {
   }
 
   // sin_table = sin_tables[opt_w];
+}
+
+void
+init_mixbeat_hilbert(void) {
+  int k;
+  int mid = MIXBEAT_HILBERT_TAPS / 2;
+  double pi = 3.14159265358979323846;
+
+  memset(mixbeat_hilbert_coeff, 0, sizeof(mixbeat_hilbert_coeff));
+  memset(mixbeat_hist, 0, sizeof(mixbeat_hist));
+  memset(mixbeat_hist_pos, 0, sizeof(mixbeat_hist_pos));
+
+  for (k = 0; k < MIXBEAT_HILBERT_TAPS; k++) {
+    int n = k - mid;
+    double h = 0.0;
+    double win;
+
+    // Ideal discrete-time Hilbert kernel: 2/(pi*n) on odd n, 0 on even n.
+    if (n != 0 && (n & 1))
+      h = 2.0 / (pi * (double)n);
+
+    // Smooth finite-tap response to reduce ringing.
+    win = 0.54 - 0.46 * cos((2.0 * pi * k) / (MIXBEAT_HILBERT_TAPS - 1));
+    mixbeat_hilbert_coeff[k] = h * win;
+  }
+}
+
+void
+reset_mixbeat_channel_state(int ch_index) {
+  if (ch_index < 0 || ch_index >= N_CH) return;
+  memset(mixbeat_hist[ch_index], 0, sizeof(mixbeat_hist[ch_index]));
+  mixbeat_hist_pos[ch_index] = 0;
+}
+
+double
+mixbeat_hilbert_sample(int ch_index, double x) {
+  int k, pos, idx;
+  double q = 0.0;
+
+  if (ch_index < 0 || ch_index >= N_CH) return 0.0;
+
+  pos = mixbeat_hist_pos[ch_index];
+  mixbeat_hist[ch_index][pos] = x;
+
+  idx = pos;
+  for (k = 0; k < MIXBEAT_HILBERT_TAPS; k++) {
+    q += mixbeat_hilbert_coeff[k] * mixbeat_hist[ch_index][idx];
+    if (--idx < 0) idx = MIXBEAT_HILBERT_TAPS - 1;
+  }
+
+  pos++;
+  if (pos >= MIXBEAT_HILBERT_TAPS) pos = 0;
+  mixbeat_hist_pos[ch_index] = pos;
+  return q;
 }
 
 void 
@@ -6002,6 +6068,37 @@ outChunk() {
             tot2 += (int)(base_amp * mix2 * gain);
           }
           break;
+       case 13:	// Mixbeat - Hilbert frequency-shifted mix stream
+          ch->off2 += ch->inc2;
+          ch->off2 &= (ST_SIZ << 16) - 1;
+
+          {
+            int phase = (ch->off2 >> 16) & (ST_SIZ - 1);
+            int phase_q = (phase + (ST_SIZ >> 2)) & (ST_SIZ - 1);
+            double s = sin_tables[ch->v.waveform][phase] / (double)ST_AMP;
+            double c = sin_tables[ch->v.waveform][phase_q] / (double)ST_AMP;
+            double mono = 0.5 * (mix1 + mix2);
+            double q = mixbeat_hilbert_sample(a, mono);
+            double up = mono * c - q * s;   // +shift (right)
+            double down = mono * c + q * s; // -shift (left)
+            double effect_intensity = ch->amp / 4096.0;
+            double wet_l, wet_r, out_l, out_r;
+            double base_amp;
+
+            if (effect_intensity < 0.0) effect_intensity = 0.0;
+            if (effect_intensity > 1.0) effect_intensity = 1.0;
+
+            wet_l = down;
+            wet_r = up;
+            out_l = mix1 * (1.0 - effect_intensity) + wet_l * effect_intensity;
+            out_r = mix2 * (1.0 - effect_intensity) + wet_r * effect_intensity;
+
+            // Keep same base volume rule as other mix effects.
+            base_amp = mix_amp_current * 0.7 * mix_mod_mul;
+            tot1 += (int)(base_amp * out_l);
+            tot2 += (int)(base_amp * out_r);
+          }
+          break;
 	       case 8:  // Isochronic tones
 	          ch->off1 += ch->inc1;  // Carrier (tone frequency)
 	          ch->off1 &= (ST_SIZ << 16) - 1;
@@ -6283,7 +6380,7 @@ corrVal(int running) {
       v1= &per->v1[a];
       vv= &ch->v;
 
-      // Pointer to the amplitude of the mix to use with mixspin/mixpulse
+      // Pointer to the amplitude of the mix to use with mix effects.
       if(vv->typ == 5 && mix_amp == NULL)
         mix_amp= &vv->amp;
       
@@ -6305,6 +6402,10 @@ corrVal(int running) {
 	     ch->off1= ch->off2= 0; break;
 	  case 7:  // Mixpulse
 	     ch->off1= ch->off2= 0; break;
+	  case 13:  // Mixbeat
+	     ch->off1= ch->off2= 0;
+	     reset_mixbeat_channel_state(a);
+	     break;
 	  case 11:  // Bspin - spinning brown noise
 	     ch->off1= ch->off2= 0; break;
 	  case 12:  // Wspin - spinning white noise
@@ -6358,6 +6459,11 @@ corrVal(int running) {
           vv->waveform= v0->waveform;
           break;
        case 7:  // Mixpulse
+          vv->amp= rat0 * v0->amp + rat1 * v1->amp;
+          vv->res= rat0 * v0->res + rat1 * v1->res;
+          vv->waveform= v0->waveform;
+          break;
+       case 13:  // Mixbeat
           vv->amp= rat0 * v0->amp + rat1 * v1->amp;
           vv->res= rat0 * v0->res + rat1 * v1->res;
           vv->waveform= v0->waveform;
@@ -6473,6 +6579,11 @@ corrVal(int running) {
           // Modulator (pulse frequency)
           ch->inc2= (int)(vv->res / out_rate * ST_SIZ * 65536);
           break;
+       case 13:  // Mixbeat
+          ch->amp= (int)vv->amp;
+          // Oscillator at beat/2: L and R receive opposite frequency shifts.
+          ch->inc2= (int)((vv->res * 0.5) / out_rate * ST_SIZ * 65536);
+          break;
        case 11:  // Bspin - spinning brown noise
           ch->amp= (int)vv->amp;
           ch->inc1= (int)(vv->res / out_rate * ST_SIZ * 65536);
@@ -6492,7 +6603,7 @@ corrVal(int running) {
       }
    }
 
-   // Track current mix/<amp> value for mixspin/mixpulse base volume logic.
+   // Track current mix/<amp> value for mix-effect base volume logic.
    mix_amp_current= 4096.0;
    for (a= 0; a<N_CH; a++) {
       if (chan[a].typ == 5) {
@@ -7801,6 +7912,46 @@ readNameDef() {
       nd->vv[ch].waveform= opt_w;
       nd->vv[ch].res= res;
       nd->vv[ch].amp= AMP_DA(amp);	
+      continue;
+    }
+    if (2 == sscanf(p, "sine:mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
+      checkMixInSequence();
+      nd->vv[ch].typ= 13;
+      nd->vv[ch].waveform= 0; // Sine
+      nd->vv[ch].res= res;
+      nd->vv[ch].amp= AMP_DA(amp);
+      continue;
+    }
+    if (2 == sscanf(p, "square:mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
+      checkMixInSequence();
+      nd->vv[ch].typ= 13;
+      nd->vv[ch].waveform= 1; // Square
+      nd->vv[ch].res= res;
+      nd->vv[ch].amp= AMP_DA(amp);
+      continue;
+    }
+    if (2 == sscanf(p, "triangle:mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
+      checkMixInSequence();
+      nd->vv[ch].typ= 13;
+      nd->vv[ch].waveform= 2; // Triangle
+      nd->vv[ch].res= res;
+      nd->vv[ch].amp= AMP_DA(amp);
+      continue;
+    }
+    if (2 == sscanf(p, "sawtooth:mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
+      checkMixInSequence();
+      nd->vv[ch].typ= 13;
+      nd->vv[ch].waveform= 3; // Sawtooth
+      nd->vv[ch].res= res;
+      nd->vv[ch].amp= AMP_DA(amp);
+      continue;
+    }
+    if (2 == sscanf(p, "mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
+      checkMixInSequence();
+      nd->vv[ch].typ= 13;
+      nd->vv[ch].waveform= opt_w;
+      nd->vv[ch].res= res;
+      nd->vv[ch].amp= AMP_DA(amp);
       continue;
     }
     if (3 == sscanf(p, "sine:bspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
@@ -9193,26 +9344,26 @@ create_slide(int ac, char **av) {
 void normalizeAmplitude(Voice *voices, int numChannels, const char *line, int lineNum) {
   double totalAmplitude = 0.0;
   
-  // First, check mixspin/mixpulse separately (these have different logic)
+  // First, check mixspin/mixpulse/mixbeat separately (these have different logic)
   for (int ch = 0; ch < numChannels; ch++) {
-    if (voices[ch].typ == 6 || voices[ch].typ == 7) {
+    if (voices[ch].typ == 6 || voices[ch].typ == 7 || voices[ch].typ == 13) {
       double ampPercentage = voices[ch].amp / 40.96;
       if (ampPercentage > 100.0) {
-        error("Total intensity of mixspin/mixpulse exceeds 100%% (%.2f%%) at line %d:\n  %s", 
+        error("Total intensity of mixspin/mixpulse/mixbeat exceeds 100%% (%.2f%%) at line %d:\n  %s",
               ampPercentage, lineNum, line);
       }
     }
   }
   
-  // Calculate the total amplitude of all voices (excluding mixspin/mixpulse)
+  // Calculate the total amplitude of all voices (excluding mixspin/mixpulse/mixbeat)
   for (int ch = 0; ch < numChannels; ch++) {
-    if (voices[ch].typ != 0 && voices[ch].typ != 6 && voices[ch].typ != 7) {
+    if (voices[ch].typ != 0 && voices[ch].typ != 6 && voices[ch].typ != 7 && voices[ch].typ != 13) {
       double ampPercentage = voices[ch].amp / 40.96;
       totalAmplitude += ampPercentage;
     }
   }
   
-  // If total amplitude exceeds 100%, normalize all active voices (except mixspin/mixpulse)
+  // If total amplitude exceeds 100%, normalize all active voices (except mix effects)
   if (opt_N && totalAmplitude > 100.0) {
     double normalizationFactor = 100.0 / totalAmplitude;
     
@@ -9221,9 +9372,9 @@ void normalizeAmplitude(Voice *voices, int numChannels, const char *line, int li
            totalAmplitude, lineNum, normalizationFactor);
     }
     
-    // Apply normalization to all active voices (except mixspin/mixpulse)
+    // Apply normalization to all active voices (except mix effects)
     for (int ch = 0; ch < numChannels; ch++) {
-      if (voices[ch].typ != 0 && voices[ch].typ != 6 && voices[ch].typ != 7) {
+      if (voices[ch].typ != 0 && voices[ch].typ != 6 && voices[ch].typ != 7 && voices[ch].typ != 13) {
         voices[ch].amp *= normalizationFactor;
       }
     }
@@ -9255,7 +9406,7 @@ void checkMixInSequence() {
   }
 
   if(!mix_exists)
-    error("mixspin/mixpulse without mix/<amp> specified, line %d:\n  %s", in_lin, lin_copy);
+    error("mixspin/mixpulse/mixbeat without mix/<amp> specified, line %d:\n  %s", in_lin, lin_copy);
 }
 
 // END //

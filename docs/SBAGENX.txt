@@ -347,6 +347,14 @@ audio input instead of to pink noise:
 The mixpulse effect creates a rhythmic pulse effect where the sound intensity
 fluctuates at the given rate. The pulse rate is 10Hz and the intensity is 50%.
 
+You can also try the 'mixbeat' effect, which applies opposite frequency shifts
+to left/right channels (Hilbert method) to embed a beat into the mix stream:
+
+>> sbagenx -m river1.ogg -i mix/80 mixbeat:6/45
+
+In this example, the embedded beat target is 6Hz and the effect intensity is
+45%. The cleanest result is usually with the default sine waveform.
+
 If you're having trouble with your soundcard or CPU usage on a very
 old machine, use the -r or -b options to run at a lower output rate or
 bit-width.  For example:
@@ -1808,6 +1816,7 @@ Examples:
   energizing: square:400+15/30 sawtooth:600+20/15 white/10
   spatial-mix: mix/80 triangle:mixspin:400+6.0/40
   rhythmic-mix: mix/75 square:mixpulse:8/50
+  binauralized-mix: mix/80 mixbeat:6/45
 
 The name starts with a letter, and may continue with letters, numbers,
 '_' or '-'.  Following the colon is a list of one or more tone
@@ -1829,12 +1838,14 @@ Here are the different types:
   wspin:<width>+<freq>/<amp>          # Spinning variable-delay white noise
   mixspin:<width>+<freq>/<intensity>  # Spinning effect on mix input
   mixpulse:<pulse>/<intensity>        # Pulse effect on mix input
+  mixbeat:<beat>/<intensity>          # Hilbert-shifted binauralized mix
   <carrier>@<pulse>/<amp>             # Isochronic tones
   <waveform>:<carrier><sign><freq>/<amp> # Binaural tones with specific waveform
   <waveform>:<carrier>@<pulse>/<amp>  # Isochronic tones with specific waveform
   <waveform>:<carrier>/<amp>          # Simple tones with specific waveform
   <waveform>:mixspin:<width>+<freq>/<intensity> # Mixspin with specific waveform modulation
   <waveform>:mixpulse:<pulse>/<intensity>       # Mixpulse with specific waveform modulation
+  <waveform>:mixbeat:<beat>/<intensity>         # Mixbeat with waveform modulation
 
 The amplitudes are expressed on a scale 0-100.  By default, SBaGenX 
 automatically normalizes amplitudes when the total exceeds 100% to prevent 
@@ -1880,6 +1891,7 @@ Examples:
   sawtooth:400/10         # Simple tone using sawtooth wave
   triangle:mixspin:400+6.0/40  # Mixspin with triangle wave modulation
   square:mixpulse:8/60    # Mixpulse with square wave modulation
+  sine:mixbeat:6/45       # Mixbeat with sine modulation
 
 This feature allows for precise control over the waveform characteristics of 
 individual elements within a tone-set. For example, you might want to use a 
@@ -1908,9 +1920,11 @@ The waveform specification can be applied to:
 - Simple tones (<carrier>/<amp>)
 - Mixspin effects (triangle:mixspin:<width>+<freq>/<intensity>)
 - Mixpulse effects (square:mixpulse:<pulse>/<intensity>)
+- Mixbeat effects (sine:mixbeat:<beat>/<intensity>)
 
-Note: For mixspin and mixpulse effects, the waveform modulates the spatial effect 
-intensity, creating pulsing or rhythmic variations in the spatial processing.
+Note: For mixspin/mixpulse/mixbeat effects, the waveform modulates the
+effect envelope. For mixbeat, a sine waveform is recommended for the
+cleanest spectral result.
 
 The isochronic tones use amplitude modulation of a single carrier frequency
 to create a pulsing effect. The <carrier> is the frequency of the tone in Hz,
@@ -1985,6 +1999,17 @@ pulse effect where the sound intensity fluctuates at the given rate.
 Waveforms can also be applied to mixpulse effects to shape the pulse envelope.
 For example, square:mixpulse:8/60 uses a square wave to create sharp on/off 
 pulses, while sine:mixpulse:8/60 creates smoother pulsing variations.
+
+The mixbeat effect applies a Hilbert-transform frequency shift to the mix
+stream (specified with mix/<amp>) and routes opposite shifts to left/right
+channels to embed a binaural-style beat into existing audio. The <beat>
+parameter is the target beat frequency in Hz and <intensity> controls wet
+mix amount (0-100%). For example, mixbeat:6/45 creates a 6Hz embedded beat
+at 45% effect intensity.
+
+Waveforms can also be applied to mixbeat modulation. For example,
+sine:mixbeat:6/45 is the clean default behavior; non-sine waveforms can
+introduce additional sidebands and a more textured sound.
 
 Binaural tones generated using wave<num> work just the same way as
 normal binaural tones.  See the section later on for details.
