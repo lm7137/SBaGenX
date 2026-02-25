@@ -52,16 +52,23 @@ Phase 3.5
 - Handle boundary behavior at exact keyframe times deterministically.
 - Add timing/interpolation edge-case validation in loaders and tests.
 
-Phase 3.6 (current slice)
+Phase 3.6
 - Add keyframe introspection APIs on `SbxContext`.
 - Expose keyframe count and indexed keyframe retrieval for adapter/front-end
   migration work.
 - Add direct API tests for keyframe access behavior.
 
+Phase 3.7 (current slice)
+- Wire an initial `sbagenx` CLI bridge that can load sbagenlib keyframes from
+  external files.
+- Add `-p libseq` (minimal keyframe text) and `-p libsbg` (HH:MM subset) paths.
+- Keep legacy runtime unchanged for existing `drop`/`sigmoid`/`curve`/`slide`
+  flows while proving end-to-end library-to-CLI integration.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.6 Slice)
+Current API (Phase 3.7 Slice)
 ---------------------------
 
 Public header: `sbagenlib.h`
@@ -251,3 +258,17 @@ Expected output:
 ```text
 PASS: sbagenlib keyframe access API checks
 ```
+
+CLI Bridge Smoke Test (Phase 3.7)
+---------------------------------
+
+```bash
+./dist/sbagenx-linux64 -D -p libseq examples/sbagenlib/minimal-keyframes.sbxseq
+./dist/sbagenx-linux64 -D -p libsbg examples/sbagenlib/minimal-sbg-timing.sbg
+```
+
+Notes:
+
+- `libseq` reads the Phase 3.3 line format: `<time> <tone-spec> [interp]`.
+- `libsbg` reads the Phase 3.4 timing subset: `<HH:MM[:SS]> <tone-spec> [interp]`.
+- Optional trailing `loop` token is accepted by both bridge commands.

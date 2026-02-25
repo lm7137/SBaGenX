@@ -181,6 +181,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "libs/stb_image_write.h"
 #include "libs/tinyexpr.h"
+#include "sbagenlib.h"
 #include "sbagenlib_dsp.h"
 
 typedef struct Channel Channel;
@@ -237,6 +238,7 @@ void create_drop(int ac, char **av);
 void create_sigmoid(int ac, char **av);
 void create_curve(int ac, char **av);
 void create_slide(int ac, char **av);
+void create_libseq(int ac, char **av, int sbg_timing);
 int is_mix_mod_option_spec(const char *spec);
 void parse_mix_mod_option_spec(const char *spec);
 int is_iso_gate_option_spec(const char *spec);
@@ -358,6 +360,8 @@ help() {
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
 	  NL "                     line to be a type and arguments, e.g. \"drop 00ds+\""
 	  NL "                     or \"curve path/to/file.sbgf 00ls:l=0.2:h=0\""
+	  NL "                     or \"libseq file.sbxseq [loop]\""
+	  NL "                     or \"libsbg file.sbg [loop]\""
 	  NL "          -q mult   Quick.  Run through quickly (real time x 'mult') from the"
 	  NL "                     start time, rather than wait for real time to pass"
 	  NL
@@ -8224,6 +8228,8 @@ readPreProg(int ac, char **av) {
 	    NL "  drop 25gs+/2 mix/60"
 	    NL "  sigmoid 00ds+:l=0.125:h=0"
 	    NL "  curve examples/basics/curve-sigmoid-like.sbgf 00ds+:l=0.2:h=0"
+	    NL "  libseq examples/sbagenlib/minimal-keyframes.sbxseq"
+	    NL "  libsbg examples/sbagenlib/minimal-sbg-timing.sbg"
 	    );
 
    if (opt_A && !opt_m && !opt_M)
@@ -8246,6 +8252,20 @@ readPreProg(int ac, char **av) {
       return;
    }
 
+   // Handle 'libseq' (sbagenlib keyframe file: <time> <tone> [interp])
+   if (0 == strcmp(av[0], "libseq")) {
+      ac--; av++;
+      create_libseq(ac, av, 0);
+      return;
+   }
+
+   // Handle 'libsbg' (sbagenlib HH:MM[:SS] timing subset)
+   if (0 == strcmp(av[0], "libsbg")) {
+      ac--; av++;
+      create_libseq(ac, av, 1);
+      return;
+   }
+
    // Handle 'slide'
    if (0 == strcmp(av[0], "slide")) {
       if (opt_A && !opt_Q)
@@ -8265,6 +8285,148 @@ readPreProg(int ac, char **av) {
    }
 
    error("Unknown pre-programmed sequence type: %s", av[0]);
+}
+
+static int
+is_loop_flag_token(const char *s) {
+   if (!s) return 0;
+   return 0 == strcmp(s, "loop");
+}
+
+static int
+sbagenlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
+   double amp_pct;
+   if (!tone || !out || out_sz == 0) return 0;
+   amp_pct= tone->amplitude * 100.0;
+   if (!isfinite(amp_pct) || amp_pct < 0.0) amp_pct= 0.0;
+
+   switch (tone->mode) {
+    case SBX_TONE_BINAURAL: {
+       char sign= tone->beat_hz < 0.0 ? '-' : '+';
+       double beat= fabs(tone->beat_hz);
+       snprintf(out, out_sz, "%g%c%g/%g", tone->carrier_hz, sign, beat, amp_pct);
+       return 1;
+    }
+    case SBX_TONE_MONAURAL: {
+       double beat= fabs(tone->beat_hz);
+       double f1= tone->carrier_hz - beat * 0.5;
+       double f2= tone->carrier_hz + beat * 0.5;
+       snprintf(out, out_sz, "%g/%g %g/%g", f1, amp_pct, f2, amp_pct);
+       return 1;
+    }
+    case SBX_TONE_ISOCHRONIC: {
+       double pulse= fabs(tone->beat_hz);
+       snprintf(out, out_sz, "%g@%g/%g", tone->carrier_hz, pulse, amp_pct);
+       return 1;
+    }
+    default:
+       return 0;
+   }
+}
+
+static void
+emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested) {
+   size_t i, n;
+   int end_sec= 0;
+   int warned_frac= 0;
+   char first_name[32];
+
+   n= sbx_context_keyframe_count(ctx);
+   if (n == 0)
+      error("sbagenlib context does not contain keyframes");
+
+   handleOptions("-SE");
+   in_lin= 0;
+   formatNameDef("off: -");
+   formatTimeLine(86395, "== off ->");
+
+   first_name[0]= 0;
+   for (i= 0; i<n; i++) {
+      SbxProgramKeyframe kf;
+      char name[32];
+      char spec[256];
+      int t_sec;
+      int sec_int;
+      double frac;
+
+      if (sbx_context_get_keyframe(ctx, i, &kf) != SBX_OK)
+	 error("sbagenlib keyframe retrieval failed at index %d", (int)i);
+      if (!sbagenlib_tone_to_legacy_spec(&kf.tone, spec, sizeof(spec)))
+	 error("sbagenlib keyframe %d has unsupported tone mode %d", (int)i, (int)kf.tone.mode);
+
+      snprintf(name, sizeof(name), "kf%03d", (int)i);
+      if (i == 0) {
+	 strncpy(first_name, name, sizeof(first_name)-1);
+	 first_name[sizeof(first_name)-1]= 0;
+      }
+      formatNameDef("%s: %s", name, spec);
+
+      sec_int= (int)kf.time_sec;
+      frac= fabs(kf.time_sec - (double)sec_int);
+      if (frac > 1e-9 && !warned_frac) {
+	 warn("libseq/libsbg bridge rounds fractional keyframe seconds to nearest integer");
+	 warned_frac= 1;
+      }
+      t_sec= (int)(kf.time_sec + 0.5);
+      if (t_sec < 0) t_sec= 0;
+      if (t_sec > 86399) t_sec= 86399;
+      formatTimeLine(t_sec, "== %s ->", name);
+      if (t_sec > end_sec) end_sec= t_sec;
+   }
+
+   if (loop_requested && n > 1 && first_name[0]) {
+      int loop_t= end_sec + 1;
+      if (loop_t <= 86399)
+	 formatTimeLine(loop_t, "== %s ->", first_name);
+      else
+	 warn("loop flag ignored because sequence end is too close to 24h boundary");
+   } else {
+      formatTimeLine(end_sec + 10, "== off");
+   }
+
+   correctPeriods();
+}
+
+void
+create_libseq(int ac, char **av, int sbg_timing) {
+   const char *path;
+   int loop_flag= 0;
+   int rc;
+   SbxEngineConfig cfg;
+   SbxContext *ctx;
+
+   if (ac < 1)
+      error("Bad arguments: expecting -p %s <file> [loop]",
+	    sbg_timing ? "libsbg" : "libseq");
+
+   path= av[0];
+   ac--; av++;
+   if (ac > 1)
+      error("Bad arguments: expecting -p %s <file> [loop]",
+	    sbg_timing ? "libsbg" : "libseq");
+   if (ac == 1) {
+      if (!is_loop_flag_token(av[0]))
+	 error("Unknown trailing token for -p %s: %s (expected 'loop')",
+	       sbg_timing ? "libsbg" : "libseq", av[0]);
+      loop_flag= 1;
+   }
+
+   sbx_default_engine_config(&cfg);
+   cfg.sample_rate= (double)out_rate;
+   cfg.channels= 2;
+   ctx= sbx_context_create(&cfg);
+   if (!ctx)
+      error("Failed to create sbagenlib context");
+
+   if (sbg_timing)
+      rc= sbx_context_load_sbg_timing_file(ctx, path, loop_flag);
+   else
+      rc= sbx_context_load_sequence_file(ctx, path, loop_flag);
+   if (rc != SBX_OK)
+      error("sbagenlib failed loading %s: %s", path, sbx_context_last_error(ctx));
+
+   emit_periods_from_sbx_context(ctx, loop_flag);
+   sbx_context_destroy(ctx);
 }
 
 //

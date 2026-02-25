@@ -77,7 +77,7 @@ if [ $SKIP_32BIT = 0 ]; then
     info "Libraries: $LIBS_32"
 
     # Try to compile with 32-bit support
-    gcc $CFLAGS_32 sbagenx.c -o dist/sbagenx-linux32 $LIBS_32
+    gcc $CFLAGS_32 sbagenx.c sbagenlib.c -o dist/sbagenx-linux32 $LIBS_32
 
     if [ $? -eq 0 ]; then
         success "32-bit compilation successful! Binary created: sbagenx-linux32"
@@ -157,9 +157,9 @@ info "Libraries: $LIBS_64"
 sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
 if [ "$HOST_ARCH" = "aarch64" ]; then
-    gcc $CFLAGS_64 sbagenx.tmp.c -o dist/sbagenx-linux-arm64 $LIBS_64
+    gcc $CFLAGS_64 sbagenx.tmp.c sbagenlib.c -o dist/sbagenx-linux-arm64 $LIBS_64
 else
-    gcc $CFLAGS_64 sbagenx.tmp.c -o dist/sbagenx-linux64 $LIBS_64
+    gcc $CFLAGS_64 sbagenx.tmp.c sbagenlib.c -o dist/sbagenx-linux64 $LIBS_64
 fi
 
 if [ $? -eq 0 ]; then

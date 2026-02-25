@@ -60,7 +60,7 @@ info "Libraries: $LIBS"
 # Replace VERSION with the actual version number
 sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
-gcc $CFLAGS sbagenx.tmp.c -o dist/sbagenx-macos-universal $LIBS
+gcc $CFLAGS sbagenx.tmp.c sbagenlib.c -o dist/sbagenx-macos-universal $LIBS
 
 if [ $? -eq 0 ]; then
     success "Compilation successful! Universal binary created: dist/sbagenx-macos-universal"

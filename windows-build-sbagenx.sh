@@ -661,7 +661,7 @@ info "Libraries: $LIBS_32"
 # Replace VERSION with the actual version number
 sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
-i686-w64-mingw32-gcc $CFLAGS_32 sbagenx.tmp.c /tmp/sbagen32.res -o dist/sbagenx-win32.exe $LIBS_32
+i686-w64-mingw32-gcc $CFLAGS_32 sbagenx.tmp.c sbagenlib.c /tmp/sbagen32.res -o dist/sbagenx-win32.exe $LIBS_32
 
 if [ $? -eq 0 ]; then
     success "32-bit compilation successful! Created 32-bit binary: dist/sbagenx-win32.exe"
@@ -714,7 +714,7 @@ fi
 info "Compiling 64-bit version with flags: $CFLAGS_64"
 info "Libraries: $LIBS_64"
 
-x86_64-w64-mingw32-gcc $CFLAGS_64 sbagenx.tmp.c /tmp/sbagen64.res -o dist/sbagenx-win64.exe $LIBS_64
+x86_64-w64-mingw32-gcc $CFLAGS_64 sbagenx.tmp.c sbagenlib.c /tmp/sbagen64.res -o dist/sbagenx-win64.exe $LIBS_64
 
 if [ $? -eq 0 ]; then
     success "64-bit compilation successful! Created 64-bit binary: dist/sbagenx-win64.exe"
