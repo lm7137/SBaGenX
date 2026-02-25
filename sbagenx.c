@@ -7295,7 +7295,7 @@ sbx_seq_backend_mode(void) {
 void 
 readSeq(int ac, char **av) {
    int seq_backend= sbx_seq_backend_mode();
-   if (seq_backend != 1) {
+   if (seq_backend != 1 && !(seq_backend == 0 && opt_D)) {
       if (sbx_try_readSeq_runtime(ac, av))
 	 return;
       if (seq_backend == 2)

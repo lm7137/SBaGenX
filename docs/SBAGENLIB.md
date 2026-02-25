@@ -127,17 +127,23 @@ Phase 3.18
 - Keep automatic fallback to the legacy parser/runtime for full-feature `.sbg`
   constructs that are outside current sbagenlib subset support.
 
-Phase 3.19 (current slice)
+Phase 3.19
 - Add `SBAGENX_SEQ_BACKEND=auto|legacy|sbagenlib` runtime selector for
   `seq-file` loading:
   - `auto` (default): try sbagenlib subset route, then fall back to legacy.
+    For `-D` dumps, `auto` keeps legacy output format by default.
   - `legacy`: force existing legacy parser/runtime path.
   - `sbagenlib`: require sbagenlib subset compatibility (error otherwise).
+
+Phase 3.20 (current slice)
+- Preserve default legacy `-D` semantics for normal `seq-file` usage in
+  `SBAGENX_SEQ_BACKEND=auto`, while keeping explicit sbagenlib dump behavior
+  available via `SBAGENX_SEQ_BACKEND=sbagenlib` (or `-p libseq` / `-p libsbg`).
 
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.19 Slice)
+Current API (Phase 3.20 Slice)
 ------------------------------
 
 Public header: `sbagenlib.h`
