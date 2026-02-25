@@ -156,17 +156,24 @@ Phase 3.23
 - Extend sbagenx/sbagenxlib bridge formatting and extra-tone diagnostics to
   include spin-family tones in library-native runtime paths.
 
-Phase 3.24 (current slice)
+Phase 3.24
 - Add bell tone support to sbagenxlib:
   - parse `bell<carrier>/<amp>` (with waveform prefixes/defaults),
   - render bell envelope decay in the library runtime,
   - include bell in sbagenx/sbagenxlib bridge formatting and runtime
     extra-tone diagnostics.
 
+Phase 3.25 (current slice)
+- Extend sbagenx/sbagenxlib runtime adapter to accept preprogram extra mix
+  effects in library-backed paths:
+  - `mixspin`, `mixpulse`, `mixbeat` token parsing,
+  - runtime mix-stream effect processing in `outChunkSbx`,
+  - validation requiring both a mix input stream and explicit `mix/<amp>`.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.24 Slice)
+Current API (Phase 3.25 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -390,5 +397,8 @@ Notes:
   render via sbagenxlib runtime in normal playback mode.
 - In sbagenxlib runtime, extra tone-spec overlays that are parseable as
   sbagenxlib tones are mixed as auxiliary library contexts.
+- In sbagenxlib-backed preprogram runtime, extra mix effects
+  (`mixspin`/`mixpulse`/`mixbeat`) are now handled by the sbagenx adapter
+  when mix input is active and `mix/<amp>` is present.
 - Immediate mode (`-i`) now uses sbagenxlib runtime when all provided tone-specs
   are sbagenxlib-parseable (legacy-only specs automatically fall back).

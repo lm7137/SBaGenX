@@ -775,11 +775,30 @@ typedef struct {
 
 #define SBX_RUNTIME_MAX_AUX 16
 
+typedef enum {
+   SBX_MIXFX_NONE= 0,
+   SBX_MIXFX_SPIN= 1,
+   SBX_MIXFX_PULSE= 2,
+   SBX_MIXFX_BEAT= 3
+} SbxMixFxType;
+
+typedef struct {
+   int type;		// SBX_MIXFX_*
+   int waveform;	// SBX_WAVE_*
+   double carr;	// For mixspin: spin width in microseconds
+   double res;		// Modulation/spin frequency in Hz
+   double amp;		// 0..1 effect amount
+   double phase;	// Runtime phase in cycles [0,1)
+   int hilbert_slot;	// Runtime state slot for mixbeat
+} SbxMixFxState;
+
 typedef struct {
    int have_mix;
    double mix_amp_pct;
    SbxToneSpec aux_tones[SBX_RUNTIME_MAX_AUX];
    size_t aux_count;
+   SbxMixFxState mix_fx[SBX_RUNTIME_MAX_AUX];
+   size_t mix_fx_count;
    int unsupported;
    char bad_token[128];
 } SbxRuntimeExtraSpec;
@@ -788,6 +807,7 @@ static void sbx_runtime_clear(void);
 static void sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
 						double mix_amp_pct,
 						const SbxToneSpec *aux_tones, size_t aux_count,
+						const SbxMixFxState *mix_fx, size_t mix_fx_count,
 						const SbxMixAmpKeyframe *mkf, size_t mkf_n);
 static double sbx_runtime_mix_amp_at(double t_sec);
 static int sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec);
@@ -806,6 +826,8 @@ SbxContext *sbx_runtime_aux_ctx[SBX_RUNTIME_MAX_AUX];
 size_t sbx_runtime_aux_n= 0;
 float *sbx_runtime_aux_fbuf= 0;
 size_t sbx_runtime_aux_fcap= 0;
+SbxMixFxState sbx_runtime_mix_fx[SBX_RUNTIME_MAX_AUX];
+size_t sbx_runtime_mix_fx_n= 0;
 
 int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
@@ -6165,6 +6187,7 @@ outChunkSbx() {
    int rc;
    double t0;
    double sr= (double)out_rate;
+   double mix_mod_mul= mix_mod_multiplier(now);
 
    if (!sbx_runtime_ctx)
       error("Internal error: sbagenxlib runtime context is not initialized");
@@ -6220,9 +6243,91 @@ outChunkSbx() {
       if (mix_in) {
 	 double t_sec= t0 + frm / sr;
 	 double mix_pct= sbx_runtime_mix_amp_at(t_sec);
-	 double mix_mul= (mix_pct / 100.0) * mix_mod_multiplier(now);
+	 double mix_mul= (mix_pct / 100.0) * mix_mod_mul;
+	 double mix_l= (mix1 >> 4);
+	 double mix_r= (mix2 >> 4);
 	 out_l += ((mix1 >> 4) * mix_mul);
 	 out_r += ((mix2 >> 4) * mix_mul);
+
+	 if (sbx_runtime_mix_fx_n > 0) {
+	    size_t fi;
+	    double base_amp= mix_mul * 0.7;
+	    for (fi= 0; fi<sbx_runtime_mix_fx_n; fi++) {
+	       SbxMixFxState *fx= &sbx_runtime_mix_fx[fi];
+	       switch (fx->type) {
+		case SBX_MIXFX_SPIN: {
+		   double wav;
+		   double val;
+		   double intensity_factor;
+		   double amplified_val;
+		   double pos_val;
+		   double fx_l, fx_r;
+		   fx->phase= sbx_dsp_wrap_unit(fx->phase + fx->res / sr);
+		   wav= wave_sample_phase(fx->waveform, fx->phase);
+		   val= fx->carr * 1.0e-6 * sr * wav;
+		   intensity_factor= 0.5 + fx->amp * 3.5;
+		   amplified_val= val * intensity_factor;
+		   if (amplified_val > 127.0) amplified_val= 127.0;
+		   if (amplified_val < -128.0) amplified_val= -128.0;
+		   pos_val= fabs(amplified_val);
+
+		   if (amplified_val >= 0.0) {
+		      fx_l= (mix_l * (128.0 - pos_val)) / 128.0;
+		      fx_r= mix_r + (mix_l * pos_val) / 128.0;
+		   } else {
+		      fx_l= mix_l + (mix_r * pos_val) / 128.0;
+		      fx_r= (mix_r * (128.0 - pos_val)) / 128.0;
+		   }
+		   out_l += base_amp * fx_l;
+		   out_r += base_amp * fx_r;
+		   break;
+		}
+		case SBX_MIXFX_PULSE: {
+		   double wav;
+		   double mod_factor= 0.0;
+		   double effect_intensity;
+		   double gain;
+		   fx->phase= sbx_dsp_wrap_unit(fx->phase + fx->res / sr);
+		   wav= wave_sample_phase(fx->waveform, fx->phase);
+		   if (wav > 0.3) {
+		      mod_factor= (wav - 0.3) / 0.7;
+		      mod_factor= sbx_dsp_smoothstep01(mod_factor);
+		   }
+		   effect_intensity= fx->amp * 1.5;
+		   if (effect_intensity < 0.0) effect_intensity= 0.0;
+		   if (effect_intensity > 1.0) effect_intensity= 1.0;
+		   gain= (1.0 - effect_intensity) + (effect_intensity * mod_factor);
+		   out_l += base_amp * mix_l * gain;
+		   out_r += base_amp * mix_r * gain;
+		   break;
+		}
+		case SBX_MIXFX_BEAT: {
+		   double s, c;
+		   double mono, q;
+		   double up, down;
+		   double effect_intensity;
+		   double fx_l, fx_r;
+		   fx->phase= sbx_dsp_wrap_unit(fx->phase + (fx->res * 0.5) / sr);
+		   s= wave_sample_phase(fx->waveform, fx->phase);
+		   c= wave_sample_phase(fx->waveform, fx->phase + 0.25);
+		   mono= 0.5 * (mix_l + mix_r);
+		   q= mixbeat_hilbert_sample(fx->hilbert_slot, mono);
+		   up= mono * c - q * s;
+		   down= mono * c + q * s;
+		   effect_intensity= fx->amp;
+		   if (effect_intensity < 0.0) effect_intensity= 0.0;
+		   if (effect_intensity > 1.0) effect_intensity= 1.0;
+		   fx_l= mix_l * (1.0 - effect_intensity) + down * effect_intensity;
+		   fx_r= mix_r * (1.0 - effect_intensity) + up * effect_intensity;
+		   out_l += base_amp * fx_l;
+		   out_r += base_amp * fx_r;
+		   break;
+		}
+		default:
+		   break;
+	       }
+	    }
+	 }
       }
 
       if (opt_V != 100) {
@@ -8528,6 +8633,60 @@ sbx_apply_waveform_from_token_or_default(const char *tok, SbxToneSpec *tone) {
 }
 
 static int
+sbx_parse_mix_fx_token(const char *tok, SbxMixFxState *fx_out) {
+   const char *p= tok;
+   double carr= 0.0, res= 0.0, amp= 0.0;
+   char dmy;
+   SbxMixFxState fx;
+
+   if (!tok || !fx_out) return 0;
+   memset(&fx, 0, sizeof(fx));
+   fx.type= SBX_MIXFX_NONE;
+   fx.waveform= opt_w;
+   fx.hilbert_slot= -1;
+
+   while (*p && isspace((unsigned char)*p)) p++;
+   if (sbx_streq_prefix_nocase_local(p, "sine:")) {
+      fx.waveform= SBX_WAVE_SINE;
+      p += 5;
+   } else if (sbx_streq_prefix_nocase_local(p, "square:")) {
+      fx.waveform= SBX_WAVE_SQUARE;
+      p += 7;
+   } else if (sbx_streq_prefix_nocase_local(p, "triangle:")) {
+      fx.waveform= SBX_WAVE_TRIANGLE;
+      p += 9;
+   } else if (sbx_streq_prefix_nocase_local(p, "sawtooth:")) {
+      fx.waveform= SBX_WAVE_SAWTOOTH;
+      p += 9;
+   }
+
+   if (3 == sscanf(p, "mixspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
+      fx.type= SBX_MIXFX_SPIN;
+      fx.carr= carr;
+      fx.res= res;
+      fx.amp= amp / 100.0;
+   } else if (2 == sscanf(p, "mixpulse:%lf/%lf %c", &res, &amp, &dmy)) {
+      fx.type= SBX_MIXFX_PULSE;
+      fx.res= res;
+      fx.amp= amp / 100.0;
+   } else if (2 == sscanf(p, "mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
+      fx.type= SBX_MIXFX_BEAT;
+      fx.res= res;
+      fx.amp= amp / 100.0;
+   } else {
+      return 0;
+   }
+
+   if (!isfinite(fx.carr) || !isfinite(fx.res) || !isfinite(fx.amp) || fx.amp < 0.0)
+      return 0;
+   if (fx.waveform < SBX_WAVE_SINE || fx.waveform > SBX_WAVE_SAWTOOTH)
+      return 0;
+
+   *fx_out= fx;
+   return 1;
+}
+
+static int
 sbagenxlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
    double amp_pct;
    const char *wave_name;
@@ -8711,6 +8870,7 @@ sbx_runtime_clear(void) {
       sbx_runtime_aux_fbuf= 0;
       sbx_runtime_aux_fcap= 0;
    }
+   sbx_runtime_mix_fx_n= 0;
 }
 
 static int
@@ -8783,6 +8943,33 @@ sbx_runtime_set_aux_tones(const SbxToneSpec *tones, size_t n) {
    return 1;
 }
 
+static int
+sbx_runtime_set_mix_fx(const SbxMixFxState *fxv, size_t n) {
+   size_t i;
+   int beat_slots= 0;
+
+   sbx_runtime_mix_fx_n= 0;
+   if (!fxv || n == 0)
+      return 1;
+   if (n > SBX_RUNTIME_MAX_AUX)
+      return 0;
+
+   for (i= 0; i<n; i++) {
+      sbx_runtime_mix_fx[i]= fxv[i];
+      sbx_runtime_mix_fx[i].phase= 0.0;
+      sbx_runtime_mix_fx[i].hilbert_slot= -1;
+      if (sbx_runtime_mix_fx[i].type == SBX_MIXFX_BEAT) {
+	 if (beat_slots >= N_CH)
+	    return 0;
+	 sbx_runtime_mix_fx[i].hilbert_slot= beat_slots;
+	 reset_mixbeat_channel_state(beat_slots);
+	 beat_slots++;
+      }
+   }
+   sbx_runtime_mix_fx_n= n;
+   return 1;
+}
+
 static void
 sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double mix_amp_pct) {
    SbxEngineConfig cfg;
@@ -8811,6 +8998,8 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
    sbx_runtime_mix_amp_pct= mix_amp_pct;
    if (!sbx_runtime_set_mix_keyframes(0, 0))
       error("Out of memory");
+   if (!sbx_runtime_set_mix_fx(0, 0))
+      error("Internal error setting sbagenxlib runtime mix effects");
    if (n > 1 && !sbx_runtime_set_aux_tones(tones + 1, n - 1))
       error("Failed to set sbagenxlib runtime auxiliary tones");
 }
@@ -8908,6 +9097,7 @@ static void
 sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
 				    double mix_amp_pct,
 				    const SbxToneSpec *aux_tones, size_t aux_count,
+				    const SbxMixFxState *mix_fx, size_t mix_fx_count,
 				    const SbxMixAmpKeyframe *mkf, size_t mkf_n) {
    SbxEngineConfig cfg;
    int rc;
@@ -8934,6 +9124,8 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
    sbx_runtime_mix_amp_pct= mix_amp_pct;
    if (!sbx_runtime_set_mix_keyframes(mkf, mkf_n))
       error("Out of memory");
+   if (!sbx_runtime_set_mix_fx(mix_fx, mix_fx_count))
+      error("Failed to set sbagenxlib runtime mix effects");
    if (!sbx_runtime_set_aux_tones(aux_tones, aux_count))
       error("Failed to set sbagenxlib runtime auxiliary tones");
 }
@@ -8979,6 +9171,14 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
       if (curve_parse_mix_amp_token(tok, &spec->mix_amp_pct)) {
 	 spec->have_mix= 1;
       } else {
+	 SbxMixFxState mix_fx;
+	 if (sbx_parse_mix_fx_token(tok, &mix_fx)) {
+	    if (spec->mix_fx_count >= SBX_RUNTIME_MAX_AUX)
+	       error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_RUNTIME_MAX_AUX);
+	    spec->mix_fx[spec->mix_fx_count++]= mix_fx;
+	    p= e;
+	    continue;
+	 }
 	 SbxToneSpec tone;
 	 if (SBX_OK == sbx_parse_tone_spec(tok, &tone)) {
 	    sbx_apply_waveform_from_token_or_default(tok, &tone);
@@ -8996,6 +9196,16 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
       p= e;
    }
    return 1;
+}
+
+static void
+sbx_validate_runtime_extra_mix_fx(const char *prog_name, const SbxRuntimeExtraSpec *spec) {
+   if (!spec || spec->mix_fx_count == 0)
+      return;
+   if (!mix_in && !opt_m && !opt_M)
+      error("%s mix effects require a mix input stream (-m / -M)", prog_name ? prog_name : "sbagenx");
+   if (!spec->have_mix)
+      error("%s mix effects require mix/<amp> in extra tone-specs", prog_name ? prog_name : "sbagenx");
 }
 
 typedef struct {
@@ -9207,6 +9417,7 @@ create_drop(int ac, char **av) {
 	 error("Internal error parsing -p drop extra tone-specs");
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p drop extras but no mix input stream is active");
+      sbx_validate_runtime_extra_mix_fx("-p drop", &extra_spec);
 
       // Display summary
       warn("DROP summary:");
@@ -9282,7 +9493,7 @@ create_drop(int ac, char **av) {
       if (extra_spec.unsupported) {
 	 if (!opt_D)
 	    error("Unsupported extra tone-spec '%s' for -p drop sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+		  NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p drop; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9292,6 +9503,7 @@ create_drop(int ac, char **av) {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
 					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 					     extra_spec.aux_tones, extra_spec.aux_count,
+					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);
       }
 
@@ -9486,6 +9698,7 @@ create_sigmoid(int ac, char **av) {
 	 error("Internal error parsing -p sigmoid extra tone-specs");
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p sigmoid extras but no mix input stream is active");
+      sbx_validate_runtime_extra_mix_fx("-p sigmoid", &extra_spec);
 
       // Display summary
       warn("SIGMOID summary:");
@@ -9562,7 +9775,7 @@ create_sigmoid(int ac, char **av) {
       if (extra_spec.unsupported) {
 	 if (!opt_D)
 	    error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+		  NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p sigmoid; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9572,6 +9785,7 @@ create_sigmoid(int ac, char **av) {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
 					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 					     extra_spec.aux_tones, extra_spec.aux_count,
+					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);
       }
 
@@ -9806,6 +10020,7 @@ create_curve(int ac, char **av) {
       have_mix_in_extra= extra_spec.have_mix;
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p curve extras but no mix input stream is active");
+      sbx_validate_runtime_extra_mix_fx("-p curve", &extra_spec);
 
       // Display summary
       warn("CURVE summary:");
@@ -9915,7 +10130,7 @@ create_curve(int ac, char **av) {
       if (extra_spec.unsupported) {
 	 if (!opt_D)
 	    error("Unsupported extra tone-spec '%s' for -p curve sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+		  NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 if (have_mixamp_curve && have_mix_in_extra)
 	    warn("Curve mixamp expression is ignored in legacy -D bridge output");
@@ -9927,6 +10142,7 @@ create_curve(int ac, char **av) {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
 					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 					     extra_spec.aux_tones, extra_spec.aux_count,
+					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     (have_mixamp_curve && have_mix_in_extra) ? mkfb.v : 0,
 					     (have_mixamp_curve && have_mix_in_extra) ? mkfb.n : 0);
       }
@@ -10007,6 +10223,7 @@ create_slide(int ac, char **av) {
 	 error("Internal error parsing -p slide extra tone-specs");
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p slide extras but no mix input stream is active");
+      sbx_validate_runtime_extra_mix_fx("-p slide", &extra_spec);
 
       // Summary
       warn("SLIDE summary:");
@@ -10029,7 +10246,7 @@ create_slide(int ac, char **av) {
       if (extra_spec.unsupported) {
 	 if (!opt_D)
 	    error("Unsupported extra tone-spec '%s' for -p slide sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+		  NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p slide; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -10039,6 +10256,7 @@ create_slide(int ac, char **av) {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
 					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 					     extra_spec.aux_tones, extra_spec.aux_count,
+					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);
       }
 
