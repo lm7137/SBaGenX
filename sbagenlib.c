@@ -16,6 +16,9 @@
 #endif
 
 #define SBX_TAU (2.0 * M_PI)
+#define SBX_CTX_SRC_NONE 0
+#define SBX_CTX_SRC_STATIC 1
+#define SBX_CTX_SRC_KEYFRAMES 2
 
 struct SbxEngine {
   SbxEngineConfig cfg;
@@ -30,6 +33,13 @@ struct SbxContext {
   SbxEngine *eng;
   int loaded;
   char last_error[256];
+  int source_mode;
+  SbxProgramKeyframe *kfs;
+  size_t kf_count;
+  int kf_loop;
+  size_t kf_seg;
+  double kf_duration_sec;
+  double t_sec;
 };
 
 static void
@@ -75,6 +85,188 @@ skip_optional_waveform_prefix(const char *spec) {
   if (streq_prefix_nocase(p, "triangle:")) return p + 9;
   if (streq_prefix_nocase(p, "sawtooth:")) return p + 9;
   return p;
+}
+
+static int
+normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
+  if (!tone) return SBX_EINVAL;
+  if (err && err_sz) err[0] = 0;
+
+  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_ISOCHRONIC) {
+    if (err && err_sz) snprintf(err, err_sz, "%s", "unsupported tone mode");
+    return SBX_EINVAL;
+  }
+
+  if (tone->mode != SBX_TONE_NONE) {
+    if (tone->carrier_hz <= 0.0 || !isfinite(tone->carrier_hz)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "carrier_hz must be finite and > 0");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(tone->beat_hz)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "beat_hz must be finite");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(tone->amplitude)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "amplitude must be finite");
+      return SBX_EINVAL;
+    }
+    tone->amplitude = sbx_dsp_clamp(tone->amplitude, 0.0, 1.0);
+  }
+
+  if (tone->mode == SBX_TONE_MONAURAL || tone->mode == SBX_TONE_ISOCHRONIC)
+    tone->beat_hz = fabs(tone->beat_hz);
+
+  if (tone->mode == SBX_TONE_ISOCHRONIC) {
+    if (tone->beat_hz <= 0.0) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "isochronic beat_hz must be > 0");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(tone->duty_cycle)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "duty_cycle must be finite");
+      return SBX_EINVAL;
+    }
+    tone->duty_cycle = sbx_dsp_clamp(tone->duty_cycle, 0.01, 1.0);
+  }
+
+  return SBX_OK;
+}
+
+static int
+engine_apply_tone(SbxEngine *eng, const SbxToneSpec *tone_in, int reset_phase) {
+  SbxToneSpec tone;
+  char err[160];
+  int rc;
+
+  if (!eng || !tone_in) return SBX_EINVAL;
+  tone = *tone_in;
+  rc = normalize_tone(&tone, err, sizeof(err));
+  if (rc != SBX_OK) {
+    set_last_error(eng, err);
+    return rc;
+  }
+
+  eng->tone = tone;
+  if (reset_phase)
+    sbx_engine_reset(eng);
+  set_last_error(eng, NULL);
+  return SBX_OK;
+}
+
+static void
+engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
+  double sr = eng->cfg.sample_rate;
+  double amp = eng->tone.amplitude;
+  double left = 0.0, right = 0.0;
+
+  if (eng->tone.mode == SBX_TONE_BINAURAL) {
+    double f_l = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
+    double f_r = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
+    left = amp * sin(eng->phase_l);
+    right = amp * sin(eng->phase_r);
+    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f_l / sr, SBX_TAU);
+    eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f_r / sr, SBX_TAU);
+  } else if (eng->tone.mode == SBX_TONE_MONAURAL) {
+    double f1 = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
+    double f2 = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
+    double mono = 0.5 * amp * (sin(eng->phase_l) + sin(eng->phase_r));
+    left = mono;
+    right = mono;
+    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f1 / sr, SBX_TAU);
+    eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f2 / sr, SBX_TAU);
+  } else if (eng->tone.mode == SBX_TONE_ISOCHRONIC) {
+    double env = 0.0;
+    double duty = eng->tone.duty_cycle;
+    double pos;
+    double carrier;
+
+    carrier = sin(eng->phase_l);
+    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr, SBX_TAU);
+
+    eng->pulse_phase += eng->tone.beat_hz / sr;
+    while (eng->pulse_phase >= 1.0) eng->pulse_phase -= 1.0;
+    pos = eng->pulse_phase;
+
+    env = sbx_dsp_iso_mod_factor_custom(pos, 0.0, duty, 0.15, 0.15, 2);
+
+    left = right = amp * env * carrier;
+  }
+
+  *out_l = (float)left;
+  *out_r = (float)right;
+}
+
+static double
+sbx_lerp(double a, double b, double u) {
+  return a + (b - a) * u;
+}
+
+static void
+ctx_clear_keyframes(SbxContext *ctx) {
+  if (!ctx) return;
+  if (ctx->kfs) free(ctx->kfs);
+  ctx->kfs = 0;
+  ctx->kf_count = 0;
+  ctx->kf_loop = 0;
+  ctx->kf_seg = 0;
+  ctx->kf_duration_sec = 0.0;
+}
+
+static void
+ctx_reset_runtime(SbxContext *ctx) {
+  if (!ctx || !ctx->eng) return;
+  sbx_engine_reset(ctx->eng);
+  ctx->t_sec = 0.0;
+  ctx->kf_seg = 0;
+}
+
+static void
+ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
+  size_t i0, i1;
+  double t0, t1, u;
+  const SbxProgramKeyframe *k0, *k1;
+  size_t n = ctx->kf_count;
+
+  if (n == 0) {
+    sbx_default_tone_spec(out);
+    out->mode = SBX_TONE_NONE;
+    return;
+  }
+  if (n == 1 || t_sec <= ctx->kfs[0].time_sec) {
+    *out = ctx->kfs[0].tone;
+    return;
+  }
+  if (t_sec >= ctx->kfs[n - 1].time_sec) {
+    *out = ctx->kfs[n - 1].tone;
+    return;
+  }
+
+  if (ctx->kf_seg >= n - 1) ctx->kf_seg = n - 2;
+  while (ctx->kf_seg + 1 < n && t_sec > ctx->kfs[ctx->kf_seg + 1].time_sec)
+    ctx->kf_seg++;
+  while (ctx->kf_seg > 0 && t_sec < ctx->kfs[ctx->kf_seg].time_sec)
+    ctx->kf_seg--;
+
+  i0 = ctx->kf_seg;
+  i1 = i0 + 1;
+  if (i1 >= n) i1 = n - 1;
+  k0 = &ctx->kfs[i0];
+  k1 = &ctx->kfs[i1];
+
+  t0 = k0->time_sec;
+  t1 = k1->time_sec;
+  if (t1 <= t0) {
+    *out = k0->tone;
+    return;
+  }
+  u = (t_sec - t0) / (t1 - t0);
+  if (u < 0.0) u = 0.0;
+  if (u > 1.0) u = 1.0;
+
+  out->mode = k0->tone.mode;
+  out->carrier_hz = sbx_lerp(k0->tone.carrier_hz, k1->tone.carrier_hz, u);
+  out->beat_hz = sbx_lerp(k0->tone.beat_hz, k1->tone.beat_hz, u);
+  out->amplitude = sbx_lerp(k0->tone.amplitude, k1->tone.amplitude, u);
+  out->duty_cycle = sbx_lerp(k0->tone.duty_cycle, k1->tone.duty_cycle, u);
 }
 
 const char *
@@ -217,59 +409,12 @@ sbx_engine_reset(SbxEngine *eng) {
 
 int
 sbx_engine_set_tone(SbxEngine *eng, const SbxToneSpec *tone_in) {
-  SbxToneSpec tone;
-
-  if (!eng || !tone_in) return SBX_EINVAL;
-  tone = *tone_in;
-
-  if (tone.mode < SBX_TONE_NONE || tone.mode > SBX_TONE_ISOCHRONIC) {
-    set_last_error(eng, "unsupported tone mode");
-    return SBX_EINVAL;
-  }
-
-  if (tone.mode != SBX_TONE_NONE) {
-    if (tone.carrier_hz <= 0.0 || !isfinite(tone.carrier_hz)) {
-      set_last_error(eng, "carrier_hz must be finite and > 0");
-      return SBX_EINVAL;
-    }
-    if (!isfinite(tone.beat_hz)) {
-      set_last_error(eng, "beat_hz must be finite");
-      return SBX_EINVAL;
-    }
-    if (!isfinite(tone.amplitude)) {
-      set_last_error(eng, "amplitude must be finite");
-      return SBX_EINVAL;
-    }
-    tone.amplitude = sbx_dsp_clamp(tone.amplitude, 0.0, 1.0);
-  }
-
-  if (tone.mode == SBX_TONE_MONAURAL || tone.mode == SBX_TONE_ISOCHRONIC) {
-    tone.beat_hz = fabs(tone.beat_hz);
-  }
-
-  if (tone.mode == SBX_TONE_ISOCHRONIC) {
-    if (tone.beat_hz <= 0.0) {
-      set_last_error(eng, "isochronic beat_hz must be > 0");
-      return SBX_EINVAL;
-    }
-    if (!isfinite(tone.duty_cycle)) {
-      set_last_error(eng, "duty_cycle must be finite");
-      return SBX_EINVAL;
-    }
-    tone.duty_cycle = sbx_dsp_clamp(tone.duty_cycle, 0.01, 1.0);
-  }
-
-  eng->tone = tone;
-  sbx_engine_reset(eng);
-  set_last_error(eng, NULL);
-  return SBX_OK;
+  return engine_apply_tone(eng, tone_in, 1);
 }
 
 int
 sbx_engine_render_f32(SbxEngine *eng, float *out, size_t frames) {
   size_t i;
-  double sr;
-  double amp;
 
   if (!eng || !out) return SBX_EINVAL;
   if (eng->cfg.channels != 2 || eng->cfg.sample_rate <= 0.0) {
@@ -277,53 +422,16 @@ sbx_engine_render_f32(SbxEngine *eng, float *out, size_t frames) {
     return SBX_ENOTREADY;
   }
 
-  sr = eng->cfg.sample_rate;
-  amp = eng->tone.amplitude;
-
   if (eng->tone.mode == SBX_TONE_NONE) {
     memset(out, 0, frames * eng->cfg.channels * sizeof(float));
     return SBX_OK;
   }
 
   for (i = 0; i < frames; i++) {
-    double left = 0.0;
-    double right = 0.0;
-
-    if (eng->tone.mode == SBX_TONE_BINAURAL) {
-      double f_l = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
-      double f_r = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
-      left = amp * sin(eng->phase_l);
-      right = amp * sin(eng->phase_r);
-      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f_l / sr, SBX_TAU);
-      eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f_r / sr, SBX_TAU);
-    } else if (eng->tone.mode == SBX_TONE_MONAURAL) {
-      double f1 = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
-      double f2 = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
-      double mono = 0.5 * amp * (sin(eng->phase_l) + sin(eng->phase_r));
-      left = mono;
-      right = mono;
-      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f1 / sr, SBX_TAU);
-      eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f2 / sr, SBX_TAU);
-    } else {
-      double env = 0.0;
-      double duty = eng->tone.duty_cycle;
-      double pos;
-      double carrier;
-
-      carrier = sin(eng->phase_l);
-      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr, SBX_TAU);
-
-      eng->pulse_phase += eng->tone.beat_hz / sr;
-      while (eng->pulse_phase >= 1.0) eng->pulse_phase -= 1.0;
-      pos = eng->pulse_phase;
-
-      env = sbx_dsp_iso_mod_factor_custom(pos, 0.0, duty, 0.15, 0.15, 2);
-
-      left = right = amp * env * carrier;
-    }
-
-    out[i * 2] = (float)left;
-    out[i * 2 + 1] = (float)right;
+    float left = 0.0f, right = 0.0f;
+    engine_render_sample(eng, &left, &right);
+    out[i * 2] = left;
+    out[i * 2 + 1] = right;
   }
 
   return SBX_OK;
@@ -347,6 +455,13 @@ sbx_context_create(const SbxEngineConfig *cfg) {
     return NULL;
   }
   ctx->loaded = 0;
+  ctx->source_mode = SBX_CTX_SRC_NONE;
+  ctx->kfs = 0;
+  ctx->kf_count = 0;
+  ctx->kf_loop = 0;
+  ctx->kf_seg = 0;
+  ctx->kf_duration_sec = 0.0;
+  ctx->t_sec = 0.0;
   set_ctx_error(ctx, NULL);
   return ctx;
 }
@@ -354,6 +469,7 @@ sbx_context_create(const SbxEngineConfig *cfg) {
 void
 sbx_context_destroy(SbxContext *ctx) {
   if (!ctx) return;
+  ctx_clear_keyframes(ctx);
   sbx_engine_destroy(ctx->eng);
   free(ctx);
 }
@@ -361,7 +477,7 @@ sbx_context_destroy(SbxContext *ctx) {
 void
 sbx_context_reset(SbxContext *ctx) {
   if (!ctx || !ctx->eng) return;
-  sbx_engine_reset(ctx->eng);
+  ctx_reset_runtime(ctx);
   set_ctx_error(ctx, NULL);
 }
 
@@ -370,12 +486,15 @@ sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone) {
   int rc;
   if (!ctx || !ctx->eng || !tone) return SBX_EINVAL;
 
-  rc = sbx_engine_set_tone(ctx->eng, tone);
+  rc = engine_apply_tone(ctx->eng, tone, 1);
   if (rc != SBX_OK) {
     set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
     return rc;
   }
+  ctx_clear_keyframes(ctx);
+  ctx->source_mode = SBX_CTX_SRC_STATIC;
   ctx->loaded = 1;
+  ctx->t_sec = 0.0;
   set_ctx_error(ctx, NULL);
   return SBX_OK;
 }
@@ -396,20 +515,135 @@ sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec) {
 }
 
 int
+sbx_context_load_keyframes(SbxContext *ctx,
+                           const SbxProgramKeyframe *frames,
+                           size_t frame_count,
+                           int loop) {
+  SbxProgramKeyframe *copy = 0;
+  size_t i;
+  SbxToneMode mode0 = SBX_TONE_NONE;
+  char err[160];
+  int rc;
+
+  if (!ctx || !ctx->eng || !frames || frame_count == 0) return SBX_EINVAL;
+  copy = (SbxProgramKeyframe *)calloc(frame_count, sizeof(*copy));
+  if (!copy) {
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+
+  for (i = 0; i < frame_count; i++) {
+    copy[i] = frames[i];
+    if (!isfinite(copy[i].time_sec) || copy[i].time_sec < 0.0) {
+      free(copy);
+      set_ctx_error(ctx, "keyframe time_sec must be finite and >= 0");
+      return SBX_EINVAL;
+    }
+    if (i > 0 && !(copy[i].time_sec > copy[i - 1].time_sec)) {
+      free(copy);
+      set_ctx_error(ctx, "keyframe time_sec values must be strictly increasing");
+      return SBX_EINVAL;
+    }
+    rc = normalize_tone(&copy[i].tone, err, sizeof(err));
+    if (rc != SBX_OK) {
+      free(copy);
+      set_ctx_error(ctx, err);
+      return rc;
+    }
+    if (i == 0) mode0 = copy[i].tone.mode;
+    else if (copy[i].tone.mode != mode0) {
+      free(copy);
+      set_ctx_error(ctx, "all keyframes must use the same tone mode");
+      return SBX_EINVAL;
+    }
+  }
+
+  if (loop && copy[frame_count - 1].time_sec <= 0.0) {
+    free(copy);
+    set_ctx_error(ctx, "looped keyframes require final time_sec > 0");
+    return SBX_EINVAL;
+  }
+
+  ctx_clear_keyframes(ctx);
+  ctx->kfs = copy;
+  ctx->kf_count = frame_count;
+  ctx->kf_loop = loop ? 1 : 0;
+  ctx->kf_seg = 0;
+  ctx->kf_duration_sec = copy[frame_count - 1].time_sec;
+  ctx->source_mode = SBX_CTX_SRC_KEYFRAMES;
+  ctx->loaded = 1;
+  ctx->t_sec = 0.0;
+
+  rc = engine_apply_tone(ctx->eng, &ctx->kfs[0].tone, 1);
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
+    return rc;
+  }
+
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
 sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   int rc;
+  size_t i;
+  double sr;
   if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
   if (!ctx->loaded) {
     set_ctx_error(ctx, "no tone/program loaded");
     return SBX_ENOTREADY;
   }
 
-  rc = sbx_engine_render_f32(ctx->eng, out, frames);
-  if (rc != SBX_OK) {
-    set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
-    return rc;
+  if (ctx->source_mode != SBX_CTX_SRC_KEYFRAMES) {
+    rc = sbx_engine_render_f32(ctx->eng, out, frames);
+    if (rc != SBX_OK) {
+      set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
+      return rc;
+    }
+    sr = ctx->eng->cfg.sample_rate;
+    if (isfinite(sr) && sr > 0.0)
+      ctx->t_sec += (double)frames / sr;
+    return SBX_OK;
   }
+
+  if (!ctx->kfs || ctx->kf_count == 0) {
+    set_ctx_error(ctx, "no keyframes loaded");
+    return SBX_ENOTREADY;
+  }
+
+  sr = ctx->eng->cfg.sample_rate;
+  if (!(isfinite(sr) && sr > 0.0)) {
+    set_ctx_error(ctx, "engine configuration is invalid");
+    return SBX_ENOTREADY;
+  }
+
+  for (i = 0; i < frames; i++) {
+    float l = 0.0f, r = 0.0f;
+    SbxToneSpec tone;
+
+    if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+      while (ctx->t_sec >= ctx->kf_duration_sec) {
+        ctx->t_sec -= ctx->kf_duration_sec;
+        ctx->kf_seg = 0;
+      }
+    }
+
+    ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
+    ctx->eng->tone = tone;
+    engine_render_sample(ctx->eng, &l, &r);
+    out[i * 2] = l;
+    out[i * 2 + 1] = r;
+    ctx->t_sec += 1.0 / sr;
+  }
+
   return SBX_OK;
+}
+
+double
+sbx_context_time_sec(const SbxContext *ctx) {
+  if (!ctx) return 0.0;
+  return ctx->t_sec;
 }
 
 const char *

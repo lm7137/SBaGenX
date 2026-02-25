@@ -37,6 +37,11 @@ typedef struct {
   double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.4) */
 } SbxToneSpec;
 
+typedef struct {
+  double time_sec; /* keyframe timestamp, >= 0, increasing */
+  SbxToneSpec tone;
+} SbxProgramKeyframe;
+
 typedef struct SbxEngine SbxEngine;
 typedef struct SbxContext SbxContext;
 
@@ -70,7 +75,12 @@ void sbx_context_destroy(SbxContext *ctx);
 void sbx_context_reset(SbxContext *ctx);
 int sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone);
 int sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec);
+int sbx_context_load_keyframes(SbxContext *ctx,
+                               const SbxProgramKeyframe *frames,
+                               size_t frame_count,
+                               int loop);
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);
+double sbx_context_time_sec(const SbxContext *ctx);
 const char *sbx_context_last_error(const SbxContext *ctx);
 
 #ifdef __cplusplus

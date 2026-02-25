@@ -26,16 +26,21 @@ Phase 2
 - Reuse those primitives from both `sbagenx.c` and `sbagenlib.c`.
 - Add parity tests that compare shared primitives against legacy formulas.
 
-Phase 3 (current slice)
+Phase 3.1
 - Add a reusable `SbxContext` API that wraps engine lifecycle + load state.
 - Add tone-spec parsing (`sbx_parse_tone_spec`) and context load helpers.
 - Add block-render path via context (`sbx_context_render_f32`).
 - Keep CLI behavior unchanged while preparing deeper runtime migration.
 
+Phase 3.2 (current slice)
+- Add keyframed time-varying program support in `SbxContext`.
+- Add optional looped playback for keyframed programs.
+- Keep CLI behavior unchanged while library runtime expands.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3 Slice)
+Current API (Phase 3.2 Slice)
 ---------------------------
 
 Public header: `sbagenlib.h`
@@ -57,7 +62,9 @@ Public header: `sbagenlib.h`
   - `sbx_context_reset()`
   - `sbx_context_set_tone()`
   - `sbx_context_load_tone_spec()`
+  - `sbx_context_load_keyframes()`
   - `sbx_context_render_f32()`
+  - `sbx_context_time_sec()`
   - `sbx_context_last_error()`
 
 Supported tone modes in this first extraction:
@@ -73,6 +80,14 @@ Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `<carrier>/<amp>` (single tone, mapped to binaural with beat=0)
 - Optional waveform name prefixes are accepted and ignored by the parser:
   `sine:`, `square:`, `triangle:`, `sawtooth:`
+
+Keyframed program form (`sbx_context_load_keyframes`):
+- Load an array of `SbxProgramKeyframe` with:
+  - increasing `time_sec` (seconds),
+  - one tone spec per keyframe,
+  - a single tone mode across all keyframes.
+- Rendering interpolates carrier/beat/amplitude/duty linearly between
+  keyframes, with optional looping.
 
 Notes
 -----
@@ -119,4 +134,18 @@ Expected output:
 
 ```text
 PASS: sbagenlib context API checks
+```
+
+Keyframe API Test (Phase 3.2)
+-----------------------------
+
+```bash
+gcc -O2 -I. tests/sbagenlib/test_keyframes_api.c sbagenlib.c -lm -o /tmp/test_sbx_keyframes_api
+/tmp/test_sbx_keyframes_api
+```
+
+Expected output:
+
+```text
+PASS: sbagenlib keyframe API checks
 ```
