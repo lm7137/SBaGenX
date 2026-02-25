@@ -24,6 +24,11 @@ typedef enum {
   SBX_TONE_ISOCHRONIC = 3
 } SbxToneMode;
 
+typedef enum {
+  SBX_INTERP_LINEAR = 0,
+  SBX_INTERP_STEP = 1
+} SbxInterpMode;
+
 typedef struct {
   double sample_rate; /* Hz, e.g. 44100 */
   int channels;       /* currently 2 (stereo) */
@@ -40,6 +45,7 @@ typedef struct {
 typedef struct {
   double time_sec; /* keyframe timestamp, >= 0, increasing */
   SbxToneSpec tone;
+  int interp; /* interpolation mode to next keyframe: SBX_INTERP_* */
 } SbxProgramKeyframe;
 
 typedef struct SbxEngine SbxEngine;

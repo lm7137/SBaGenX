@@ -35,6 +35,7 @@ main(void) {
   size_t loop_frames;
   double t_expected, t_actual;
   int zc0, zc1;
+  size_t step_frames;
 
   sbx_default_engine_config(&cfg);
   cfg.sample_rate = 44100.0;
@@ -49,6 +50,7 @@ main(void) {
   kf[0].tone.carrier_hz = 100.0;
   kf[0].tone.beat_hz = 0.0;
   kf[0].tone.amplitude = 0.5;
+  kf[0].interp = SBX_INTERP_LINEAR;
 
   kf[1] = kf[0];
   kf[1].time_sec = 1.0;
@@ -70,6 +72,30 @@ main(void) {
   t_actual = sbx_context_time_sec(ctx);
   if (fabs(t_actual - 1.0) > 1e-3)
     fail("context time after 1 second render is out of range");
+
+  /* Step mode should hold first frequency until the keyframe boundary. */
+  kf[1] = kf[0];
+  kf[1].time_sec = 1.0;
+  kf[1].tone.carrier_hz = 300.0;
+  kf[0].interp = SBX_INTERP_STEP;
+  if (sbx_context_load_keyframes(ctx, kf, 2, 0) != SBX_OK)
+    fail("load_keyframes (step mode) failed");
+  step_frames = (size_t)(1.2 * cfg.sample_rate);
+  free(buf);
+  buf = (float *)calloc(step_frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (step mode)");
+  if (sbx_context_render_f32(ctx, buf, step_frames) != SBX_OK)
+    fail("render failed for step mode");
+  zc0 = zero_crossings_left(buf, (size_t)(0.4 * cfg.sample_rate));
+  zc1 = zero_crossings_left(buf + ((size_t)(1.0 * cfg.sample_rate)) * 2,
+                            (size_t)(0.2 * cfg.sample_rate));
+  if (!(zc1 > (int)(1.2 * zc0)))
+    fail("step mode should jump strongly at boundary");
+  kf[0].interp = SBX_INTERP_LINEAR;
+
+  free(buf);
+  buf = (float *)calloc(frames_1s * 2, sizeof(float));
+  if (!buf) fail("alloc failed");
 
   /* Validation checks. */
   kf[1] = kf[0];

@@ -45,7 +45,7 @@ main(void) {
   int rc;
   const char *sbg_text =
       "# minimal sbg timing subset\n"
-      "00:00 100+0/50\n"
+      "00:00 100+0/50 step\n"
       "00:00:06 240+0/50\n";
   const char *tmp_path = "/tmp/sbx_sbg_timing_test.sbg";
   double t_actual, t_expect;
@@ -58,19 +58,20 @@ main(void) {
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_text, 0);
   if (rc != SBX_OK) fail("load_sbg_timing_text failed");
 
-  frames = (size_t)(6.0 * cfg.sample_rate);
+  frames = (size_t)(6.6 * cfg.sample_rate);
   buf = (float *)calloc(frames * 2, sizeof(float));
   if (!buf) fail("alloc failed");
   if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
     fail("render failed");
 
-  zc_lo = zero_crossings_left(buf, frames / 4);
-  zc_hi = zero_crossings_left(buf + (frames * 3 / 4) * 2, frames / 4);
-  if (!(zc_hi > (int)(1.5 * zc_lo)))
+  zc_lo = zero_crossings_left(buf, (size_t)(0.4 * cfg.sample_rate));
+  zc_hi = zero_crossings_left(buf + ((size_t)(6.1 * cfg.sample_rate)) * 2,
+                              (size_t)(0.4 * cfg.sample_rate));
+  if (!(zc_hi > (int)(2.0 * zc_lo)))
     fail("expected higher crossing rate near end of sbg timing segment");
 
   t_actual = sbx_context_time_sec(ctx);
-  if (fabs(t_actual - 6.0) > 5e-3)
+  if (fabs(t_actual - 6.6) > 5e-3)
     fail("time tracking after sbg timing render is out of range");
 
   rc = sbx_context_load_sbg_timing_text(ctx, "00:00\n", 0);
@@ -80,6 +81,10 @@ main(void) {
   rc = sbx_context_load_sbg_timing_text(ctx, "0s 100+0/40\n", 0);
   if (rc != SBX_EINVAL)
     fail("non-HH:MM token should fail for sbg timing loader");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, "00:00 100+0/40 smooth\n", 0);
+  if (rc != SBX_EINVAL)
+    fail("unknown interpolation token should fail");
 
   write_text_file(tmp_path, sbg_text);
   rc = sbx_context_load_sbg_timing_file(ctx, tmp_path, 0);

@@ -51,6 +51,9 @@ main(void) {
       "; minutes-supported time token\n"
       "0m 120+0/30\n"
       "0.002m 240+0/30\n";
+  const char *seq_step =
+      "0s 100+0/40 step\n"
+      "0.1s 220+0/40\n";
   const char *tmp_path = "/tmp/sbx_seq_loader_test.sbxseq";
   double t_actual, t_expect;
 
@@ -80,9 +83,16 @@ main(void) {
   rc = sbx_context_load_sequence_text(ctx, seq_units, 0);
   if (rc != SBX_OK) fail("load_sequence_text with minute suffix failed");
 
+  rc = sbx_context_load_sequence_text(ctx, seq_step, 0);
+  if (rc != SBX_OK) fail("load_sequence_text with step interpolation failed");
+
   rc = sbx_context_load_sequence_text(ctx, "0s\n", 0);
   if (rc != SBX_EINVAL)
     fail("invalid sequence line should fail");
+
+  rc = sbx_context_load_sequence_text(ctx, "0s 100+0/40 smooth\n", 0);
+  if (rc != SBX_EINVAL)
+    fail("unknown interpolation token should fail");
 
   write_text_file(tmp_path, seq_text);
   rc = sbx_context_load_sequence_file(ctx, tmp_path, 0);

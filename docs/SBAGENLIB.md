@@ -42,15 +42,20 @@ Phase 3.3
 - Support simple line-based format: `<time> <tone-spec>`.
 - Keep CLI behavior unchanged while increasing reusable library coverage.
 
-Phase 3.4 (current slice)
+Phase 3.4
 - Add a thin subset loader for real `.sbg` timing-style lines.
 - Support `HH:MM` and `HH:MM:SS` timing tokens with tone-specs.
 - Keep CLI behavior unchanged while moving sequence parsing into the library.
 
+Phase 3.5 (current slice)
+- Add transition semantics on keyframe segments (`linear`/`step`).
+- Handle boundary behavior at exact keyframe times deterministically.
+- Add timing/interpolation edge-case validation in loaders and tests.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.4 Slice)
+Current API (Phase 3.5 Slice)
 ---------------------------
 
 Public header: `sbagenlib.h`
@@ -102,10 +107,13 @@ Keyframed program form (`sbx_context_load_keyframes`):
   - a single tone mode across all keyframes.
 - Rendering interpolates carrier/beat/amplitude/duty linearly between
   keyframes, with optional looping.
+- `SbxProgramKeyframe.interp` sets segment behavior to next keyframe:
+  - `SBX_INTERP_LINEAR`
+  - `SBX_INTERP_STEP`
 
 Minimal sequence text/file form (Phase 3.3):
 - One keyframe per non-empty line:
-  - `<time-token> <tone-spec>`
+  - `<time-token> <tone-spec> [linear|ramp|step|hold]`
 - Time token:
   - seconds default (e.g. `30`), or suffix `s`, `m`, `h`
   - examples: `0s`, `45`, `0.5m`, `0.02h`
@@ -118,8 +126,8 @@ Minimal sequence text/file form (Phase 3.3):
 
 SBG timing subset form (Phase 3.4):
 - One keyframe line per non-empty line:
-  - `<HH:MM> <tone-spec>`
-  - `<HH:MM:SS> <tone-spec>`
+  - `<HH:MM> <tone-spec> [linear|ramp|step|hold]`
+  - `<HH:MM:SS> <tone-spec> [linear|ramp|step|hold]`
 - Supported comments:
   - `# ...`
   - `; ...`
@@ -215,3 +223,9 @@ Expected output:
 ```text
 PASS: sbagenlib sbg timing loader checks
 ```
+
+Transition Semantics Note (Phase 3.5)
+-------------------------------------
+
+- `step`/`hold` keeps the current keyframe tone until the next keyframe time.
+- At exact keyframe boundaries, the new keyframe tone is selected.

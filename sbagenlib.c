@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #ifndef SBAGENLIB_VERSION
 #define SBAGENLIB_VERSION "dev"
@@ -169,6 +170,20 @@ parse_hhmmss_token(const char *tok, double *out_sec) {
   if (sscanf(tok, "%d:%d%1s", &hh, &mm, tail) == 2) {
     if (hh < 0 || mm < 0 || mm >= 60) return SBX_EINVAL;
     *out_sec = (double)hh * 3600.0 + (double)mm * 60.0;
+    return SBX_OK;
+  }
+  return SBX_EINVAL;
+}
+
+static int
+parse_interp_mode_token(const char *tok, int *out_interp) {
+  if (!tok || !*tok || !out_interp) return SBX_EINVAL;
+  if (strcasecmp(tok, "linear") == 0 || strcasecmp(tok, "ramp") == 0) {
+    *out_interp = SBX_INTERP_LINEAR;
+    return SBX_OK;
+  }
+  if (strcasecmp(tok, "step") == 0 || strcasecmp(tok, "hold") == 0) {
+    *out_interp = SBX_INTERP_STEP;
     return SBX_OK;
   }
   return SBX_EINVAL;
@@ -400,9 +415,15 @@ ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
     *out = k0->tone;
     return;
   }
+  if (t_sec >= t1) {
+    *out = k1->tone;
+    return;
+  }
   u = (t_sec - t0) / (t1 - t0);
   if (u < 0.0) u = 0.0;
   if (u > 1.0) u = 1.0;
+  if (k0->interp == SBX_INTERP_STEP)
+    u = 0.0;
 
   out->mode = k0->tone.mode;
   out->carrier_hz = sbx_lerp(k0->tone.carrier_hz, k1->tone.carrier_hz, u);
@@ -686,6 +707,12 @@ sbx_context_load_keyframes(SbxContext *ctx,
       set_ctx_error(ctx, "keyframe time_sec values must be strictly increasing");
       return SBX_EINVAL;
     }
+    if (copy[i].interp != SBX_INTERP_LINEAR &&
+        copy[i].interp != SBX_INTERP_STEP) {
+      free(copy);
+      set_ctx_error(ctx, "keyframe interp must be SBX_INTERP_LINEAR or SBX_INTERP_STEP");
+      return SBX_EINVAL;
+    }
     rc = normalize_tone(&copy[i].tone, err, sizeof(err));
     if (rc != SBX_OK) {
       free(copy);
@@ -747,6 +774,8 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
     char *p, *q;
     char *time_tok;
     char *tone_tok;
+    char *interp_tok = 0;
+    int interp = SBX_INTERP_LINEAR;
     double tsec;
     SbxToneSpec tone;
 
@@ -794,6 +823,32 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
     time_tok = p;
     tone_tok = q;
 
+    {
+      char *r = q;
+      while (*r && !isspace((unsigned char)*r)) r++;
+      if (*r) {
+        *r++ = 0;
+        r = (char *)skip_ws(r);
+        if (*r) {
+          interp_tok = r;
+          while (*r && !isspace((unsigned char)*r)) r++;
+          if (*r) {
+            *r++ = 0;
+            r = (char *)skip_ws(r);
+            if (*r) {
+              char emsg[224];
+              snprintf(emsg, sizeof(emsg),
+                       "line %lu: unexpected trailing token '%s'",
+                       (unsigned long)line_no, r);
+              set_ctx_error(ctx, emsg);
+              rc = SBX_EINVAL;
+              goto done;
+            }
+          }
+        }
+      }
+    }
+
     rc = parse_time_seconds_token(time_tok, &tsec);
     if (rc != SBX_OK) {
       char emsg[224];
@@ -816,6 +871,19 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
       goto done;
     }
 
+    if (interp_tok) {
+      rc = parse_interp_mode_token(interp_tok, &interp);
+      if (rc != SBX_OK) {
+        char emsg[224];
+        snprintf(emsg, sizeof(emsg),
+                 "line %lu: invalid interpolation token '%s' (use linear|ramp|step|hold)",
+                 (unsigned long)line_no, interp_tok);
+        set_ctx_error(ctx, emsg);
+        rc = SBX_EINVAL;
+        goto done;
+      }
+    }
+
     if (count == cap) {
       size_t ncap = cap ? (cap * 2) : 8;
       SbxProgramKeyframe *tmp;
@@ -831,6 +899,7 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
 
     frames[count].time_sec = tsec;
     frames[count].tone = tone;
+    frames[count].interp = interp;
     count++;
     line = next;
   }
@@ -897,6 +966,8 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     char *p, *q;
     char *time_tok;
     char *tone_tok;
+    char *interp_tok = 0;
+    int interp = SBX_INTERP_LINEAR;
     double tsec;
     SbxToneSpec tone;
 
@@ -944,6 +1015,32 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     time_tok = p;
     tone_tok = q;
 
+    {
+      char *r = q;
+      while (*r && !isspace((unsigned char)*r)) r++;
+      if (*r) {
+        *r++ = 0;
+        r = (char *)skip_ws(r);
+        if (*r) {
+          interp_tok = r;
+          while (*r && !isspace((unsigned char)*r)) r++;
+          if (*r) {
+            *r++ = 0;
+            r = (char *)skip_ws(r);
+            if (*r) {
+              char emsg[224];
+              snprintf(emsg, sizeof(emsg),
+                       "line %lu: unexpected trailing token '%s'",
+                       (unsigned long)line_no, r);
+              set_ctx_error(ctx, emsg);
+              rc = SBX_EINVAL;
+              goto done;
+            }
+          }
+        }
+      }
+    }
+
     rc = parse_hhmmss_token(time_tok, &tsec);
     if (rc != SBX_OK) {
       char emsg[224];
@@ -966,6 +1063,19 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       goto done;
     }
 
+    if (interp_tok) {
+      rc = parse_interp_mode_token(interp_tok, &interp);
+      if (rc != SBX_OK) {
+        char emsg[224];
+        snprintf(emsg, sizeof(emsg),
+                 "line %lu: invalid interpolation token '%s' (use linear|ramp|step|hold)",
+                 (unsigned long)line_no, interp_tok);
+        set_ctx_error(ctx, emsg);
+        rc = SBX_EINVAL;
+        goto done;
+      }
+    }
+
     if (count == cap) {
       size_t ncap = cap ? (cap * 2) : 8;
       SbxProgramKeyframe *tmp;
@@ -981,6 +1091,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
 
     frames[count].time_sec = tsec;
     frames[count].tone = tone;
+    frames[count].interp = interp;
     count++;
     line = next;
   }
