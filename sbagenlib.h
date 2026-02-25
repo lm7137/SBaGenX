@@ -38,6 +38,7 @@ typedef struct {
 } SbxToneSpec;
 
 typedef struct SbxEngine SbxEngine;
+typedef struct SbxContext SbxContext;
 
 const char *sbx_version(void);
 int sbx_api_version(void);
@@ -56,6 +57,21 @@ int sbx_engine_set_tone(SbxEngine *eng, const SbxToneSpec *tone);
 int sbx_engine_render_f32(SbxEngine *eng, float *out, size_t frames);
 
 const char *sbx_engine_last_error(const SbxEngine *eng);
+
+/*
+ * Phase 3 context API (entry point for future sequence/program loading).
+ * This keeps frontend state out of callers and prepares the transition from
+ * monolithic sbagenx.c runtime to a reusable core context.
+ */
+int sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone);
+
+SbxContext *sbx_context_create(const SbxEngineConfig *cfg);
+void sbx_context_destroy(SbxContext *ctx);
+void sbx_context_reset(SbxContext *ctx);
+int sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone);
+int sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec);
+int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);
+const char *sbx_context_last_error(const SbxContext *ctx);
 
 #ifdef __cplusplus
 }

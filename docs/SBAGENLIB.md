@@ -16,7 +16,7 @@ Why
 Phase Plan
 ----------
 
-Phase 1 (current)
+Phase 1
 - Add public library API header and implementation.
 - Ship build artifacts (`libsbagenx-*.a`) from existing build scripts.
 - Keep `sbagenx` behavior unchanged.
@@ -26,15 +26,17 @@ Phase 2
 - Reuse those primitives from both `sbagenx.c` and `sbagenlib.c`.
 - Add parity tests that compare shared primitives against legacy formulas.
 
-Phase 3
-- Move sequence loading/period engine into the library.
-- Keep CLI as a thin frontend.
+Phase 3 (current slice)
+- Add a reusable `SbxContext` API that wraps engine lifecycle + load state.
+- Add tone-spec parsing (`sbx_parse_tone_spec`) and context load helpers.
+- Add block-render path via context (`sbx_context_render_f32`).
+- Keep CLI behavior unchanged while preparing deeper runtime migration.
 
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 1)
----------------------
+Current API (Phase 3 Slice)
+---------------------------
 
 Public header: `sbagenlib.h`
 
@@ -49,11 +51,28 @@ Public header: `sbagenlib.h`
   - `sbx_default_tone_spec()`
   - `sbx_engine_set_tone()`
   - `sbx_engine_render_f32()`
+- Context + load API:
+  - `sbx_parse_tone_spec()`
+  - `sbx_context_create()` / `sbx_context_destroy()`
+  - `sbx_context_reset()`
+  - `sbx_context_set_tone()`
+  - `sbx_context_load_tone_spec()`
+  - `sbx_context_render_f32()`
+  - `sbx_context_last_error()`
 
 Supported tone modes in this first extraction:
 - binaural,
 - monaural,
 - isochronic (simple gated model).
+
+Supported tone-spec forms (for `sbx_parse_tone_spec`):
+- `<carrier>+<beat>/<amp>` (binaural)
+- `<carrier>-<beat>/<amp>` (binaural)
+- `<carrier>M<beat>/<amp>` or `<carrier>m<beat>/<amp>` (monaural)
+- `<carrier>@<pulse>/<amp>` (isochronic)
+- `<carrier>/<amp>` (single tone, mapped to binaural with beat=0)
+- Optional waveform name prefixes are accepted and ignored by the parser:
+  `sine:`, `square:`, `triangle:`, `sawtooth:`
 
 Notes
 -----
@@ -86,4 +105,18 @@ Expected output:
 
 ```text
 PASS: sbagenlib DSP parity checks
+```
+
+Context API Test (Phase 3)
+--------------------------
+
+```bash
+gcc -O2 -I. tests/sbagenlib/test_context_api.c sbagenlib.c -lm -o /tmp/test_sbx_context_api
+/tmp/test_sbx_context_api
+```
+
+Expected output:
+
+```text
+PASS: sbagenlib context API checks
 ```

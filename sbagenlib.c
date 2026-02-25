@@ -1,6 +1,7 @@
 #include "sbagenlib.h"
 #include "sbagenlib_dsp.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,12 @@ struct SbxEngine {
   char last_error[256];
 };
 
+struct SbxContext {
+  SbxEngine *eng;
+  int loaded;
+  char last_error[256];
+};
+
 static void
 set_last_error(SbxEngine *eng, const char *msg) {
   if (!eng) return;
@@ -33,6 +40,41 @@ set_last_error(SbxEngine *eng, const char *msg) {
     return;
   }
   snprintf(eng->last_error, sizeof(eng->last_error), "%s", msg);
+}
+
+static void
+set_ctx_error(SbxContext *ctx, const char *msg) {
+  if (!ctx) return;
+  if (!msg) {
+    ctx->last_error[0] = 0;
+    return;
+  }
+  snprintf(ctx->last_error, sizeof(ctx->last_error), "%s", msg);
+}
+
+static const char *
+skip_ws(const char *p) {
+  while (*p && isspace((unsigned char)*p)) p++;
+  return p;
+}
+
+static int
+streq_prefix_nocase(const char *s, const char *prefix) {
+  while (*prefix) {
+    if (tolower((unsigned char)*s++) != tolower((unsigned char)*prefix++))
+      return 0;
+  }
+  return 1;
+}
+
+static const char *
+skip_optional_waveform_prefix(const char *spec) {
+  const char *p = spec;
+  if (streq_prefix_nocase(p, "sine:")) return p + 5;
+  if (streq_prefix_nocase(p, "square:")) return p + 7;
+  if (streq_prefix_nocase(p, "triangle:")) return p + 9;
+  if (streq_prefix_nocase(p, "sawtooth:")) return p + 9;
+  return p;
 }
 
 const char *
@@ -54,6 +96,72 @@ sbx_status_string(int status) {
     case SBX_ENOTREADY: return "engine not ready";
     default: return "unknown status";
   }
+}
+
+int
+sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
+  const char *p;
+  int n = 0;
+  double carrier = 0.0, beat = 0.0, amp_pct = 0.0;
+  char c = 0;
+
+  if (!spec || !out_tone) return SBX_EINVAL;
+
+  p = skip_ws(spec);
+  p = skip_optional_waveform_prefix(p);
+  sbx_default_tone_spec(out_tone);
+
+  // Isochronic: <carrier>@<pulse>/<amp>
+  if (sscanf(p, "%lf@%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
+      *skip_ws(p + n) == 0) {
+    if (carrier <= 0.0 || !isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_ISOCHRONIC;
+    out_tone->carrier_hz = carrier;
+    out_tone->beat_hz = fabs(beat);
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+
+  // Monaural: <carrier>M<beat>/<amp> (M or m)
+  if (sscanf(p, "%lf%c%lf/%lf %n", &carrier, &c, &beat, &amp_pct, &n) == 4 &&
+      *skip_ws(p + n) == 0 &&
+      (c == 'M' || c == 'm')) {
+    if (carrier <= 0.0 || !isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_MONAURAL;
+    out_tone->carrier_hz = carrier;
+    out_tone->beat_hz = fabs(beat);
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+
+  // Binaural: <carrier><+|-><beat>/<amp>
+  if (sscanf(p, "%lf%c%lf/%lf %n", &carrier, &c, &beat, &amp_pct, &n) == 4 &&
+      *skip_ws(p + n) == 0 &&
+      (c == '+' || c == '-')) {
+    if (carrier <= 0.0 || !isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_BINAURAL;
+    out_tone->carrier_hz = carrier;
+    out_tone->beat_hz = (c == '-') ? -fabs(beat) : fabs(beat);
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+
+  // Simple tone: <carrier>/<amp> (binaural with beat=0)
+  if (sscanf(p, "%lf/%lf %n", &carrier, &amp_pct, &n) == 2 &&
+      *skip_ws(p + n) == 0) {
+    if (carrier <= 0.0 || !isfinite(carrier) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_BINAURAL;
+    out_tone->carrier_hz = carrier;
+    out_tone->beat_hz = 0.0;
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+
+  return SBX_EINVAL;
 }
 
 void
@@ -226,4 +334,87 @@ sbx_engine_last_error(const SbxEngine *eng) {
   if (!eng) return "null engine";
   if (!eng->last_error[0]) return "";
   return eng->last_error;
+}
+
+SbxContext *
+sbx_context_create(const SbxEngineConfig *cfg) {
+  SbxContext *ctx = (SbxContext *)calloc(1, sizeof(*ctx));
+  if (!ctx) return NULL;
+
+  ctx->eng = sbx_engine_create(cfg);
+  if (!ctx->eng) {
+    free(ctx);
+    return NULL;
+  }
+  ctx->loaded = 0;
+  set_ctx_error(ctx, NULL);
+  return ctx;
+}
+
+void
+sbx_context_destroy(SbxContext *ctx) {
+  if (!ctx) return;
+  sbx_engine_destroy(ctx->eng);
+  free(ctx);
+}
+
+void
+sbx_context_reset(SbxContext *ctx) {
+  if (!ctx || !ctx->eng) return;
+  sbx_engine_reset(ctx->eng);
+  set_ctx_error(ctx, NULL);
+}
+
+int
+sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone) {
+  int rc;
+  if (!ctx || !ctx->eng || !tone) return SBX_EINVAL;
+
+  rc = sbx_engine_set_tone(ctx->eng, tone);
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
+    return rc;
+  }
+  ctx->loaded = 1;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
+sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec) {
+  SbxToneSpec tone;
+  int rc;
+
+  if (!ctx || !ctx->eng || !tone_spec) return SBX_EINVAL;
+
+  rc = sbx_parse_tone_spec(tone_spec, &tone);
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, "invalid tone spec");
+    return rc;
+  }
+  return sbx_context_set_tone(ctx, &tone);
+}
+
+int
+sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
+  int rc;
+  if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
+  if (!ctx->loaded) {
+    set_ctx_error(ctx, "no tone/program loaded");
+    return SBX_ENOTREADY;
+  }
+
+  rc = sbx_engine_render_f32(ctx->eng, out, frames);
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
+    return rc;
+  }
+  return SBX_OK;
+}
+
+const char *
+sbx_context_last_error(const SbxContext *ctx) {
+  if (!ctx) return "null context";
+  if (ctx->last_error[0]) return ctx->last_error;
+  return sbx_engine_last_error(ctx->eng);
 }
