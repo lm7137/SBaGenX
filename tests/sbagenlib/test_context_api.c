@@ -55,6 +55,10 @@ int main(void) {
   sbx_default_engine_config(&cfg);
   ctx = sbx_context_create(&cfg);
   if (!ctx) fail("context create failed");
+  if (sbx_context_set_default_waveform(ctx, 99) != SBX_EINVAL)
+    fail("invalid default waveform should fail");
+  if (sbx_context_set_default_waveform(ctx, SBX_WAVE_TRIANGLE) != SBX_OK)
+    fail("setting default waveform failed");
 
   buf = (float *)calloc(frames * 2, sizeof(float));
   if (!buf) fail("alloc failed");

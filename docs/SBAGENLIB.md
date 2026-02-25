@@ -103,7 +103,7 @@ Phase 3.15
 - Improve runtime diagnostics for unsupported extra tone-specs in preprogram
   sbagenlib paths with explicit supported-token guidance.
 
-Phase 3.16 (current slice)
+Phase 3.16
 - Add waveform-aware tone handling in sbagenlib (`sine/square/triangle/sawtooth`)
   for binaural, monaural, and isochronic tones.
 - Preserve waveform in parser output, keyframe evaluation, runtime rendering,
@@ -111,10 +111,19 @@ Phase 3.16 (current slice)
 - Apply CLI global waveform default (`-w`) to sbagenlib-backed immediate and
   preprogram tone generation when no explicit waveform prefix is provided.
 
+Phase 3.17 (current slice)
+- Add context-level default waveform control via
+  `sbx_context_set_default_waveform()`.
+- Apply the default waveform to unprefixed tones loaded through
+  `sbx_context_load_tone_spec()`, `sbx_context_load_sequence_*()`, and
+  `sbx_context_load_sbg_timing_*()`.
+- Wire `sbagenx -p libseq` / `-p libsbg` to pass CLI global `-w` as the
+  sbagenlib context default waveform.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.16 Slice)
+Current API (Phase 3.17 Slice)
 ------------------------------
 
 Public header: `sbagenlib.h`
@@ -135,6 +144,7 @@ Public header: `sbagenlib.h`
   - `sbx_context_create()` / `sbx_context_destroy()`
   - `sbx_context_reset()`
   - `sbx_context_set_tone()`
+  - `sbx_context_set_default_waveform()`
   - `sbx_context_load_tone_spec()`
   - `sbx_context_load_keyframes()`
   - `sbx_context_load_sequence_text()`
@@ -162,6 +172,9 @@ Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `white/<amp>`, `pink/<amp>`, `brown/<amp>` (noise tones)
 - Optional waveform name prefixes are parsed and stored in
   `SbxToneSpec.waveform`: `sine:`, `square:`, `triangle:`, `sawtooth:`
+- When loading through a context, unprefixed tonal specs use that context's
+  default waveform (set by `sbx_context_set_default_waveform()`), otherwise
+  they default to sine.
 
 Keyframed program form (`sbx_context_load_keyframes`):
 - Load an array of `SbxProgramKeyframe` with:

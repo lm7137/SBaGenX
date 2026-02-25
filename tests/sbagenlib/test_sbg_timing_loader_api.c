@@ -39,6 +39,7 @@ int
 main(void) {
   SbxEngineConfig cfg;
   SbxContext *ctx;
+  SbxProgramKeyframe kf;
   float *buf;
   size_t frames;
   int zc_lo, zc_hi;
@@ -54,9 +55,15 @@ main(void) {
   cfg.sample_rate = 44100.0;
   ctx = sbx_context_create(&cfg);
   if (!ctx) fail("context create failed");
+  if (sbx_context_set_default_waveform(ctx, SBX_WAVE_TRIANGLE) != SBX_OK)
+    fail("set_default_waveform failed");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_text, 0);
   if (rc != SBX_OK) fail("load_sbg_timing_text failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("keyframe retrieval failed");
+  if (kf.tone.waveform != SBX_WAVE_TRIANGLE)
+    fail("default waveform should apply to unprefixed sbg timing tones");
 
   frames = (size_t)(6.6 * cfg.sample_rate);
   buf = (float *)calloc(frames * 2, sizeof(float));

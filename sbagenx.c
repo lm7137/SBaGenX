@@ -8541,6 +8541,8 @@ create_libseq(int ac, char **av, int sbg_timing) {
    ctx= sbx_context_create(&cfg);
    if (!ctx)
       error("Failed to create sbagenlib context");
+   if (sbx_context_set_default_waveform(ctx, opt_w) != SBX_OK)
+      error("Failed to set sbagenlib default waveform");
 
    if (sbg_timing)
       rc= sbx_context_load_sbg_timing_file(ctx, path, loop_flag);

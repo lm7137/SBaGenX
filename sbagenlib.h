@@ -91,6 +91,7 @@ SbxContext *sbx_context_create(const SbxEngineConfig *cfg);
 void sbx_context_destroy(SbxContext *ctx);
 void sbx_context_reset(SbxContext *ctx);
 int sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone);
+int sbx_context_set_default_waveform(SbxContext *ctx, int waveform);
 int sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec);
 int sbx_context_load_keyframes(SbxContext *ctx,
                                const SbxProgramKeyframe *frames,

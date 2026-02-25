@@ -39,6 +39,7 @@ struct SbxContext {
   SbxEngine *eng;
   int loaded;
   char last_error[256];
+  int default_waveform;
   int source_mode;
   SbxProgramKeyframe *kfs;
   size_t kf_count;
@@ -574,9 +575,12 @@ sbx_status_string(int status) {
   }
 }
 
-int
-sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
+static int
+parse_tone_spec_with_default_waveform(const char *spec,
+                                      int default_waveform,
+                                      SbxToneSpec *out_tone) {
   const char *p;
+  const char *p0;
   int waveform = SBX_WAVE_SINE;
   int n = 0;
   double carrier = 0.0, beat = 0.0, amp_pct = 0.0;
@@ -585,9 +589,15 @@ sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
   if (!spec || !out_tone) return SBX_EINVAL;
 
   p = skip_ws(spec);
+  p0 = p;
   sbx_default_tone_spec(out_tone);
   p = skip_optional_waveform_prefix(p, &waveform);
-  out_tone->waveform = waveform;
+  if (p != p0) {
+    out_tone->waveform = waveform;
+  } else if (default_waveform >= SBX_WAVE_SINE &&
+             default_waveform <= SBX_WAVE_SAWTOOTH) {
+    out_tone->waveform = default_waveform;
+  }
 
   // Noise tones: pink/<amp>, white/<amp>, brown/<amp>
   if (sscanf(p, "pink/%lf %n", &amp_pct, &n) == 1 &&
@@ -663,6 +673,11 @@ sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
   }
 
   return SBX_EINVAL;
+}
+
+int
+sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
+  return parse_tone_spec_with_default_waveform(spec, SBX_WAVE_SINE, out_tone);
 }
 
 void
@@ -770,6 +785,7 @@ sbx_context_create(const SbxEngineConfig *cfg) {
     return NULL;
   }
   ctx->loaded = 0;
+  ctx->default_waveform = SBX_WAVE_SINE;
   ctx->source_mode = SBX_CTX_SRC_NONE;
   ctx->kfs = 0;
   ctx->kf_count = 0;
@@ -815,13 +831,25 @@ sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone) {
 }
 
 int
+sbx_context_set_default_waveform(SbxContext *ctx, int waveform) {
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (waveform < SBX_WAVE_SINE || waveform > SBX_WAVE_SAWTOOTH) {
+    set_ctx_error(ctx, "default waveform must be SBX_WAVE_*");
+    return SBX_EINVAL;
+  }
+  ctx->default_waveform = waveform;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
 sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec) {
   SbxToneSpec tone;
   int rc;
 
   if (!ctx || !ctx->eng || !tone_spec) return SBX_EINVAL;
 
-  rc = sbx_parse_tone_spec(tone_spec, &tone);
+  rc = parse_tone_spec_with_default_waveform(tone_spec, ctx->default_waveform, &tone);
   if (rc != SBX_OK) {
     set_ctx_error(ctx, "invalid tone spec");
     return rc;
@@ -1012,7 +1040,7 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
       goto done;
     }
 
-    rc = sbx_parse_tone_spec(tone_tok, &tone);
+    rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &tone);
     if (rc != SBX_OK) {
       char emsg[224];
       snprintf(emsg, sizeof(emsg),
@@ -1204,7 +1232,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       goto done;
     }
 
-    rc = sbx_parse_tone_spec(tone_tok, &tone);
+    rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &tone);
     if (rc != SBX_OK) {
       char emsg[224];
       snprintf(emsg, sizeof(emsg),
