@@ -2103,38 +2103,6 @@ curve_find_mix_amp_in_extra(const char *extra, double *amp_out) {
    return 0;
 }
 
-static void
-curve_format_extra_with_mix_amp(const char *extra, int have_mix_override,
-				double mix_amp_pct, char *out, int outsz) {
-   const char *p= extra;
-   int off= 0;
-   out[0]= 0;
-   while (p && *p) {
-      const char *s= p;
-      const char *e;
-      int n, used, rem;
-      char tok[256];
-      while (*s && isspace((unsigned char)*s)) s++;
-      if (!*s) break;
-      e= s;
-      while (*e && !isspace((unsigned char)*e)) e++;
-      n= (int)(e-s);
-      if (n >= (int)sizeof(tok)) n= sizeof(tok)-1;
-      memcpy(tok, s, n);
-      tok[n]= 0;
-      rem= outsz - off;
-      if (have_mix_override && curve_parse_mix_amp_token(tok, 0))
-	 used= snprintf(out + off, rem, " mix/%g", mix_amp_pct);
-      else
-	 used= snprintf(out + off, rem, " %s", tok);
-
-      if (used < 0 || used >= rem)
-	 error("Too many extra tone-specs after -p curve");
-      off += used;
-      p= e;
-   }
-}
-
 // Clear any runtime function-driven curve override.
 static void
 clear_func_curve() {
@@ -2429,72 +2397,6 @@ isochronic_mod_factor(Channel *ch) {
    if (opt_I)
       return isochronic_mod_factor_phase_custom(phase, opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
    return isochronic_mod_factor_phase_legacy(phase, ch->v.waveform);
-}
-
-// Register function-driven exponential beat/pulse drop for one channel.
-static void
-setup_drop_func_curve(int chan, int typ, int start_ms,
-		      double carr0, double carr1, double carr_span_s,
-		      double beat0, double beat1, double beat_span_s) {
-   clear_func_curve();
-   if (carr_span_s <= 0 || beat_span_s <= 0 || beat0 <= 0 || beat1 <= 0)
-      return;
-
-   func_curve.active= 1;
-   func_curve.mode= 1;
-   func_curve.chan= chan;
-   func_curve.chan2= -1;
-   func_curve.typ= typ;
-   func_curve.monaural= 0;
-   func_curve.start_ms= start_ms;
-   func_curve.end_ms= (start_ms + (int)(1000.0 * carr_span_s + 0.5)) % H24;
-   func_curve.carr0= carr0;
-   func_curve.carr1= carr1;
-   func_curve.carr_span_s= carr_span_s;
-   func_curve.beat0= beat0;
-   func_curve.beat1= beat1;
-   func_curve.beat_span_s= beat_span_s;
-   func_curve.beat_log_ratio= log(beat1 / beat0);
-}
-
-// Register function-driven sigmoid beat/pulse drop for one channel.
-// l and h are defined in minutes.
-static int
-setup_sigmoid_func_curve(int chan, int typ, int start_ms,
-			 double carr0, double carr1, double carr_span_s,
-			 double beat0, double beat1, double beat_span_s,
-			 double sig_l, double sig_h) {
-   double d_min, u0, u1, den;
-
-   clear_func_curve();
-   if (carr_span_s <= 0 || beat_span_s <= 0) return 0;
-
-   d_min= beat_span_s / 60.0;
-   u0= tanh(sig_l * (0.0 - d_min/2 - sig_h));
-   u1= tanh(sig_l * (d_min - d_min/2 - sig_h));
-   den= u1 - u0;
-   if (fabs(den) < 1e-9) return 0;
-
-   func_curve.active= 1;
-   func_curve.mode= 2;
-   func_curve.chan= chan;
-   func_curve.chan2= -1;
-   func_curve.typ= typ;
-   func_curve.monaural= 0;
-   func_curve.start_ms= start_ms;
-   func_curve.end_ms= (start_ms + (int)(1000.0 * carr_span_s + 0.5)) % H24;
-   func_curve.carr0= carr0;
-   func_curve.carr1= carr1;
-   func_curve.carr_span_s= carr_span_s;
-   func_curve.beat0= beat0;
-   func_curve.beat1= beat1;
-   func_curve.beat_span_s= beat_span_s;
-   func_curve.sig_l= sig_l;
-   func_curve.sig_h= sig_h;
-   func_curve.sig_d_min= d_min;
-   func_curve.sig_a= (beat1 - beat0) / den;
-   func_curve.sig_b= beat0 - func_curve.sig_a * u0;
-   return 1;
 }
 
 // Configure monaural twin routing for the registered curve.
@@ -8848,7 +8750,6 @@ void
 create_drop(int ac, char **av) {
    char *fmt;
    char *p, *q;
-   char signal;
    int a;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
@@ -8860,7 +8761,7 @@ create_drop(int ac, char **av) {
    };
    char extra[256];
    int len, len0= 1800, len1= 1800, len2= 180;
-   int steplen, end;
+   int steplen;
    
 #define BAD bad_drop()
 
@@ -9011,7 +8912,6 @@ create_drop(int ac, char **av) {
 	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
       }
 
-      signal= isisochronic ? '@' : '+';
       if (slide) {
 	 for (a= 0; a<n_step; a++) {
 	    double tim= a * len0 / (double)(n_step-1);
@@ -9084,7 +8984,6 @@ void
 create_sigmoid(int ac, char **av) {
    char *fmt;
    char *p, *q;
-   char signal;
    char depth_ch;
    int a;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
@@ -9098,7 +8997,7 @@ create_sigmoid(int ac, char **av) {
    };
    char extra[256];
    int len, len0= 1800, len1= 1800, len2= 180;
-   int steplen, end;
+   int steplen;
    double sig_l= 0.125, sig_h= 0.0;
    double d_min, u0, u1, den, sig_a, sig_b;
 
@@ -9283,7 +9182,6 @@ create_sigmoid(int ac, char **av) {
 	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
       }
 
-      signal= isisochronic ? '@' : '+';
       if (slide) {
 	 for (a= 0; a<n_step; a++) {
 	    double tim= a * len0 / (double)(n_step-1);
@@ -9361,13 +9259,12 @@ create_curve(int ac, char **av) {
    char *curve_file;
    char *fmt;
    char *p, *q;
-   char signal;
    char depth_ch;
    int a;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    int len, len0= 1800, len1= 1800, len2= 180;
-   int steplen, end;
+   int steplen;
    int ov_count= 0;
    char ov_name[CURVE_MAX_PARAMS][CURVE_NAME_MAX];
    double ov_val[CURVE_MAX_PARAMS];
@@ -9608,7 +9505,6 @@ create_curve(int ac, char **av) {
 	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
       }
 
-      signal= isisochronic ? '@' : '+';
       if (slide) {
 	 for (a= 0; a<n_step; a++) {
 	    double amp_t= have_amp_curve ? amp_sam[a] : amp;
