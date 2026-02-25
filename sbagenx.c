@@ -762,12 +762,24 @@ typedef struct {
    int interp;		// SBX_INTERP_*
 } SbxMixAmpKeyframe;
 
+#define SBX_RUNTIME_MAX_AUX 16
+
+typedef struct {
+   int have_mix;
+   double mix_amp_pct;
+   SbxToneSpec aux_tones[SBX_RUNTIME_MAX_AUX];
+   size_t aux_count;
+   int unsupported;
+   char bad_token[128];
+} SbxRuntimeExtraSpec;
+
 static void sbx_runtime_clear(void);
 static void sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
 						double mix_amp_pct,
+						const SbxToneSpec *aux_tones, size_t aux_count,
 						const SbxMixAmpKeyframe *mkf, size_t mkf_n);
 static double sbx_runtime_mix_amp_at(double t_sec);
-static int sbx_parse_supported_extra_tokens(const char *extra, int *have_mix, double *mix_amp_pct);
+static int sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec);
 
 int sbx_runtime_active= 0;
 int sbx_runtime_loop= 0;
@@ -779,6 +791,10 @@ size_t sbx_runtime_fcap= 0;
 SbxMixAmpKeyframe *sbx_runtime_mix_kf= 0;
 size_t sbx_runtime_mix_n= 0;
 size_t sbx_runtime_mix_seg= 0;
+SbxContext *sbx_runtime_aux_ctx[SBX_RUNTIME_MAX_AUX];
+size_t sbx_runtime_aux_n= 0;
+float *sbx_runtime_aux_fbuf= 0;
+size_t sbx_runtime_aux_fcap= 0;
 
 int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
@@ -6162,6 +6178,24 @@ outChunkSbx() {
    if (rc != SBX_OK)
       error("sbagenlib render failed: %s", sbx_context_last_error(sbx_runtime_ctx));
 
+   if (sbx_runtime_aux_n > 0) {
+      size_t ai;
+      size_t nfloat= (size_t)out_blen;
+      if (nfloat > sbx_runtime_aux_fcap) {
+	 sbx_runtime_aux_fbuf= (float*)realloc(sbx_runtime_aux_fbuf, nfloat * sizeof(float));
+	 if (!sbx_runtime_aux_fbuf) error("Out of memory");
+	 sbx_runtime_aux_fcap= nfloat;
+      }
+      for (ai= 0; ai<sbx_runtime_aux_n; ai++) {
+	 size_t k;
+	 rc= sbx_context_render_f32(sbx_runtime_aux_ctx[ai], sbx_runtime_aux_fbuf, frames);
+	 if (rc != SBX_OK)
+	    error("sbagenlib aux render failed: %s", sbx_context_last_error(sbx_runtime_aux_ctx[ai]));
+	 for (k= 0; k<nfloat; k++)
+	    sbx_runtime_fbuf[k] += sbx_runtime_aux_fbuf[k];
+      }
+   }
+
    while (off < out_blen) {
       int mix1= mix_in ? tmp_buf[off] : 0;
       int mix2= mix_in ? tmp_buf[off+1] : 0;
@@ -8370,7 +8404,7 @@ sbagenlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz)
 }
 
 static void
-emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested) {
+emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, const char *extra) {
    size_t i, n;
    int end_sec= 0;
    int warned_frac= 0;
@@ -8404,7 +8438,10 @@ emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested) {
 	 strncpy(first_name, name, sizeof(first_name)-1);
 	 first_name[sizeof(first_name)-1]= 0;
       }
-      formatNameDef("%s: %s", name, spec);
+      if (extra && *extra)
+	 formatNameDef("%s: %s%s", name, spec, extra);
+      else
+	 formatNameDef("%s: %s", name, spec);
 
       sec_int= (int)kf.time_sec;
       frac= fabs(kf.time_sec - (double)sec_int);
@@ -8440,6 +8477,11 @@ emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested) {
    }
 
    correctPeriods();
+}
+
+static void
+emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested) {
+   emit_periods_from_sbx_context_with_extra(ctx, loop_requested, 0);
 }
 
 void
@@ -8487,16 +8529,7 @@ create_libseq(int ac, char **av, int sbg_timing) {
    }
 
    // Runtime playback via sbagenlib context.
-   if (sbx_runtime_ctx) {
-      sbx_context_destroy(sbx_runtime_ctx);
-      sbx_runtime_ctx= 0;
-   }
-   if (sbx_runtime_mix_kf) {
-      free(sbx_runtime_mix_kf);
-      sbx_runtime_mix_kf= 0;
-      sbx_runtime_mix_n= 0;
-      sbx_runtime_mix_seg= 0;
-   }
+   sbx_runtime_clear();
    sbx_runtime_ctx= ctx;
    sbx_runtime_active= 1;
    sbx_runtime_loop= loop_flag ? 1 : 0;
@@ -8512,6 +8545,7 @@ create_libseq(int ac, char **av, int sbg_timing) {
 
 static void
 sbx_runtime_clear(void) {
+   size_t i;
    sbx_runtime_active= 0;
    sbx_runtime_loop= 0;
    sbx_runtime_total_sec= 0.0;
@@ -8531,6 +8565,18 @@ sbx_runtime_clear(void) {
       sbx_runtime_mix_kf= 0;
       sbx_runtime_mix_n= 0;
    }
+   for (i= 0; i<sbx_runtime_aux_n; i++) {
+      if (sbx_runtime_aux_ctx[i]) {
+	 sbx_context_destroy(sbx_runtime_aux_ctx[i]);
+	 sbx_runtime_aux_ctx[i]= 0;
+      }
+   }
+   sbx_runtime_aux_n= 0;
+   if (sbx_runtime_aux_fbuf) {
+      free(sbx_runtime_aux_fbuf);
+      sbx_runtime_aux_fbuf= 0;
+      sbx_runtime_aux_fcap= 0;
+   }
 }
 
 static int
@@ -8547,6 +8593,59 @@ sbx_runtime_set_mix_keyframes(const SbxMixAmpKeyframe *kfs, size_t n) {
    memcpy(sbx_runtime_mix_kf, kfs, n * sizeof(*kfs));
    sbx_runtime_mix_n= n;
    sbx_runtime_mix_seg= 0;
+   return 1;
+}
+
+static int
+sbx_runtime_set_aux_tones(const SbxToneSpec *tones, size_t n) {
+   size_t i;
+   SbxEngineConfig cfg;
+
+   for (i= 0; i<sbx_runtime_aux_n; i++) {
+      if (sbx_runtime_aux_ctx[i]) {
+	 sbx_context_destroy(sbx_runtime_aux_ctx[i]);
+	 sbx_runtime_aux_ctx[i]= 0;
+      }
+   }
+   sbx_runtime_aux_n= 0;
+
+   if (!tones || n == 0)
+      return 1;
+   if (n > SBX_RUNTIME_MAX_AUX)
+      return 0;
+
+   sbx_default_engine_config(&cfg);
+   cfg.sample_rate= (double)out_rate;
+   cfg.channels= 2;
+
+   for (i= 0; i<n; i++) {
+      int rc;
+      sbx_runtime_aux_ctx[i]= sbx_context_create(&cfg);
+      if (!sbx_runtime_aux_ctx[i]) {
+	 size_t j;
+	 for (j= 0; j<i; j++) {
+	    if (sbx_runtime_aux_ctx[j]) {
+	       sbx_context_destroy(sbx_runtime_aux_ctx[j]);
+	       sbx_runtime_aux_ctx[j]= 0;
+	    }
+	 }
+	 return 0;
+      }
+      rc= sbx_context_set_tone(sbx_runtime_aux_ctx[i], &tones[i]);
+      if (rc != SBX_OK) {
+	 size_t j;
+	 sbx_context_destroy(sbx_runtime_aux_ctx[i]);
+	 sbx_runtime_aux_ctx[i]= 0;
+	 for (j= 0; j<i; j++) {
+	    if (sbx_runtime_aux_ctx[j]) {
+	       sbx_context_destroy(sbx_runtime_aux_ctx[j]);
+	       sbx_runtime_aux_ctx[j]= 0;
+	    }
+	 }
+	 return 0;
+      }
+   }
+   sbx_runtime_aux_n= n;
    return 1;
 }
 
@@ -8591,6 +8690,7 @@ sbx_runtime_mix_amp_at(double t_sec) {
 static void
 sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
 				    double mix_amp_pct,
+				    const SbxToneSpec *aux_tones, size_t aux_count,
 				    const SbxMixAmpKeyframe *mkf, size_t mkf_n) {
    SbxEngineConfig cfg;
    int rc;
@@ -8617,10 +8717,13 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
    sbx_runtime_mix_amp_pct= mix_amp_pct;
    if (!sbx_runtime_set_mix_keyframes(mkf, mkf_n))
       error("Out of memory");
+   if (!sbx_runtime_set_aux_tones(aux_tones, aux_count))
+      error("Failed to set sbagenlib runtime auxiliary tones");
 }
 
 static void
-sbx_emit_periods_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag) {
+sbx_emit_periods_from_keyframes_with_extra(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
+					   const char *extra) {
    SbxEngineConfig cfg;
    SbxContext *ctx;
    int rc;
@@ -8633,15 +8736,16 @@ sbx_emit_periods_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loo
    rc= sbx_context_load_keyframes(ctx, kfs, n, loop_flag);
    if (rc != SBX_OK)
       error("Failed to load sbagenlib keyframes: %s", sbx_context_last_error(ctx));
-   emit_periods_from_sbx_context(ctx, loop_flag);
+   emit_periods_from_sbx_context_with_extra(ctx, loop_flag, extra);
    sbx_context_destroy(ctx);
 }
 
 static int
-sbx_parse_supported_extra_tokens(const char *extra, int *have_mix, double *mix_amp_pct) {
+sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
    const char *p= extra;
-   int seen_mix= 0;
-   double mix_amp= 100.0;
+   if (!spec) return 0;
+   memset(spec, 0, sizeof(*spec));
+   spec->mix_amp_pct= 100.0;
    while (p && *p) {
       const char *s= p;
       const char *e;
@@ -8655,15 +8759,24 @@ sbx_parse_supported_extra_tokens(const char *extra, int *have_mix, double *mix_a
       if (n >= (int)sizeof(tok)) n= sizeof(tok)-1;
       memcpy(tok, s, n);
       tok[n]= 0;
-      if (curve_parse_mix_amp_token(tok, &mix_amp)) {
-	 seen_mix= 1;
+      if (curve_parse_mix_amp_token(tok, &spec->mix_amp_pct)) {
+	 spec->have_mix= 1;
       } else {
-	 return 0;
+	 SbxToneSpec tone;
+	 if (SBX_OK == sbx_parse_tone_spec(tok, &tone)) {
+	    if (spec->aux_count >= SBX_RUNTIME_MAX_AUX)
+	       error("Too many extra sbagenlib tone-specs (max %d)", SBX_RUNTIME_MAX_AUX);
+	    spec->aux_tones[spec->aux_count++]= tone;
+	 } else {
+	    spec->unsupported= 1;
+	    if (!spec->bad_token[0]) {
+	       strncpy(spec->bad_token, tok, sizeof(spec->bad_token)-1);
+	       spec->bad_token[sizeof(spec->bad_token)-1]= 0;
+	    }
+	 }
       }
       p= e;
    }
-   if (have_mix) *have_mix= seen_mix;
-   if (mix_amp_pct) *mix_amp_pct= mix_amp;
    return 1;
 }
 
@@ -8866,15 +8979,14 @@ create_drop(int ac, char **av) {
       beat[a]= 10 * exp(log(beat_target/10) * a / (n_step-1));
 
    {
-      int have_mix= 0;
-      double mix_amp_pct= 100.0;
+      SbxRuntimeExtraSpec extra_spec;
       SbxKfBuilder kfb= {0};
       SbxToneSpec tone;
       int end_sec;
 
-      if (!sbx_parse_supported_extra_tokens(extra, &have_mix, &mix_amp_pct))
-	 error("-p drop with sbagenlib runtime currently supports only optional mix/<amp> extra tone-spec");
-      if (have_mix && !mix_in && !opt_m && !opt_M)
+      if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
+	 error("Internal error parsing -p drop extra tone-specs");
+      if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p drop extras but no mix input stream is active");
 
       // Display summary
@@ -8948,10 +9060,19 @@ create_drop(int ac, char **av) {
       sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
       sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
-      if (opt_D)
-	 sbx_emit_periods_from_keyframes(kfb.v, kfb.n, 0);
-      else
-	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0, have_mix ? mix_amp_pct : 100.0, 0, 0);
+      if (extra_spec.unsupported) {
+	 if (!opt_D)
+	    error("Unsupported extra tone-spec '%s' for -p drop sbagenlib runtime", extra_spec.bad_token);
+	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p drop; using legacy timeline bridge for -D output", extra_spec.bad_token);
+	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+      } else if (opt_D) {
+	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+      } else {
+	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
+					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+					     extra_spec.aux_tones, extra_spec.aux_count,
+					     0, 0);
+      }
 
       if (kfb.v) free(kfb.v);
    }
@@ -9135,15 +9256,14 @@ create_sigmoid(int ac, char **av) {
    }
 
    {
-      int have_mix= 0;
-      double mix_amp_pct= 100.0;
+      SbxRuntimeExtraSpec extra_spec;
       SbxKfBuilder kfb= {0};
       SbxToneSpec tone;
       int end_sec;
 
-      if (!sbx_parse_supported_extra_tokens(extra, &have_mix, &mix_amp_pct))
-	 error("-p sigmoid with sbagenlib runtime currently supports only optional mix/<amp> extra tone-spec");
-      if (have_mix && !mix_in && !opt_m && !opt_M)
+      if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
+	 error("Internal error parsing -p sigmoid extra tone-specs");
+      if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p sigmoid extras but no mix input stream is active");
 
       // Display summary
@@ -9218,10 +9338,19 @@ create_sigmoid(int ac, char **av) {
       sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
       sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
-      if (opt_D)
-	 sbx_emit_periods_from_keyframes(kfb.v, kfb.n, 0);
-      else
-	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0, have_mix ? mix_amp_pct : 100.0, 0, 0);
+      if (extra_spec.unsupported) {
+	 if (!opt_D)
+	    error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenlib runtime", extra_spec.bad_token);
+	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p sigmoid; using legacy timeline bridge for -D output", extra_spec.bad_token);
+	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+      } else if (opt_D) {
+	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+      } else {
+	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
+					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+					     extra_spec.aux_tones, extra_spec.aux_count,
+					     0, 0);
+      }
 
       if (kfb.v) free(kfb.v);
    }
@@ -9443,16 +9572,16 @@ create_curve(int ac, char **av) {
    }
 
    {
-      int have_mix= 0;
-      double mix_amp_pct= 100.0;
+      SbxRuntimeExtraSpec extra_spec;
       int end_sec;
       SbxKfBuilder kfb= {0};
       SbxMixKfBuilder mkfb= {0};
       SbxToneSpec tone;
 
-      if (!sbx_parse_supported_extra_tokens(extra, &have_mix, &mix_amp_pct))
-	 error("-p curve with sbagenlib runtime currently supports only optional mix/<amp> extra tone-spec");
-      if (have_mix && !mix_in && !opt_m && !opt_M)
+      if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
+	 error("Internal error parsing -p curve extra tone-specs");
+      have_mix_in_extra= extra_spec.have_mix;
+      if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p curve extras but no mix input stream is active");
 
       // Display summary
@@ -9560,13 +9689,22 @@ create_curve(int ac, char **av) {
       if (have_mixamp_curve && have_mix_in_extra)
 	 sbx_mixkfb_add(&mkfb, (double)(end_sec + 10), wakeup ? mix_start_eval : mix_end, SBX_INTERP_LINEAR);
 
-      if (opt_D)
-	 sbx_emit_periods_from_keyframes(kfb.v, kfb.n, 0);
-      else
+      if (extra_spec.unsupported) {
+	 if (!opt_D)
+	    error("Unsupported extra tone-spec '%s' for -p curve sbagenlib runtime", extra_spec.bad_token);
+	 if (have_mixamp_curve && have_mix_in_extra)
+	    warn("Curve mixamp expression is ignored in legacy -D bridge output");
+	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p curve; using legacy timeline bridge for -D output", extra_spec.bad_token);
+	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+      } else if (opt_D) {
+	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+      } else {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
-					     have_mix ? mix_amp_pct : 100.0,
+					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+					     extra_spec.aux_tones, extra_spec.aux_count,
 					     (have_mixamp_curve && have_mix_in_extra) ? mkfb.v : 0,
 					     (have_mixamp_curve && have_mix_in_extra) ? mkfb.n : 0);
+      }
 
       if (kfb.v) free(kfb.v);
       if (mkfb.v) free(mkfb.v);
@@ -9636,14 +9774,13 @@ create_slide(int ac, char **av) {
    }
 
    {
-      int have_mix= 0;
-      double mix_amp_pct= 100.0;
+      SbxRuntimeExtraSpec extra_spec;
       SbxKfBuilder kfb= {0};
       SbxToneSpec tone;
 
-      if (!sbx_parse_supported_extra_tokens(extra, &have_mix, &mix_amp_pct))
-	 error("-p slide with sbagenlib runtime currently supports only optional mix/<amp> extra tone-spec");
-      if (have_mix && !mix_in && !opt_m && !opt_M)
+      if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
+	 error("Internal error parsing -p slide extra tone-specs");
+      if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p slide extras but no mix input stream is active");
 
       // Summary
@@ -9664,10 +9801,19 @@ create_slide(int ac, char **av) {
       sbx_fill_tone_spec(&tone, signal == '@', ismono, c1, signal == '-' ? -beat_abs : beat_abs, 0.0);
       sbx_kfb_add(&kfb, (double)len + 10.0, &tone, SBX_INTERP_LINEAR);
 
-      if (opt_D)
-	 sbx_emit_periods_from_keyframes(kfb.v, kfb.n, 0);
-      else
-	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0, have_mix ? mix_amp_pct : 100.0, 0, 0);
+      if (extra_spec.unsupported) {
+	 if (!opt_D)
+	    error("Unsupported extra tone-spec '%s' for -p slide sbagenlib runtime", extra_spec.bad_token);
+	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p slide; using legacy timeline bridge for -D output", extra_spec.bad_token);
+	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+      } else if (opt_D) {
+	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+      } else {
+	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
+					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+					     extra_spec.aux_tones, extra_spec.aux_count,
+					     0, 0);
+      }
 
       if (kfb.v) free(kfb.v);
    }
