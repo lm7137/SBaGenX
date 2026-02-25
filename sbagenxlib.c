@@ -32,6 +32,9 @@ struct SbxEngine {
   double pink_r[7];
   double brown_l;
   double brown_r;
+  double bell_env;
+  int bell_tick;
+  int bell_tick_period;
   char last_error[256];
 };
 
@@ -281,7 +284,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   if (!tone) return SBX_EINVAL;
   if (err && err_sz) err[0] = 0;
 
-  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_SPIN_WHITE) {
+  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_BELL) {
     if (err && err_sz) snprintf(err, err_sz, "%s", "unsupported tone mode");
     return SBX_EINVAL;
   }
@@ -289,12 +292,14 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   uses_carrier = (tone->mode == SBX_TONE_BINAURAL ||
                   tone->mode == SBX_TONE_MONAURAL ||
                   tone->mode == SBX_TONE_ISOCHRONIC ||
+                  tone->mode == SBX_TONE_BELL ||
                   tone->mode == SBX_TONE_SPIN_PINK ||
                   tone->mode == SBX_TONE_SPIN_BROWN ||
                   tone->mode == SBX_TONE_SPIN_WHITE);
   strict_carrier_positive = (tone->mode == SBX_TONE_BINAURAL ||
                              tone->mode == SBX_TONE_MONAURAL ||
-                             tone->mode == SBX_TONE_ISOCHRONIC);
+                             tone->mode == SBX_TONE_ISOCHRONIC ||
+                             tone->mode == SBX_TONE_BELL);
 
   if (uses_carrier) {
     if (tone->waveform < SBX_WAVE_SINE || tone->waveform > SBX_WAVE_SAWTOOTH) {
@@ -332,6 +337,8 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
 
   if (tone->mode == SBX_TONE_MONAURAL || tone->mode == SBX_TONE_ISOCHRONIC)
     tone->beat_hz = fabs(tone->beat_hz);
+  if (tone->mode == SBX_TONE_BELL)
+    tone->beat_hz = 0.0;
 
   if (tone->mode == SBX_TONE_ISOCHRONIC) {
     if (tone->beat_hz <= 0.0) {
@@ -351,10 +358,12 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
 static int
 engine_apply_tone(SbxEngine *eng, const SbxToneSpec *tone_in, int reset_phase) {
   SbxToneSpec tone;
+  SbxToneMode prev_mode;
   char err[160];
   int rc;
 
   if (!eng || !tone_in) return SBX_EINVAL;
+  prev_mode = eng->tone.mode;
   tone = *tone_in;
   rc = normalize_tone(&tone, err, sizeof(err));
   if (rc != SBX_OK) {
@@ -365,6 +374,18 @@ engine_apply_tone(SbxEngine *eng, const SbxToneSpec *tone_in, int reset_phase) {
   eng->tone = tone;
   if (reset_phase)
     sbx_engine_reset(eng);
+
+  if (eng->tone.mode == SBX_TONE_BELL &&
+      (reset_phase || prev_mode != SBX_TONE_BELL)) {
+    eng->bell_env = eng->tone.amplitude;
+    eng->bell_tick = 0;
+    eng->bell_tick_period = (int)(eng->cfg.sample_rate / 20.0);
+    if (eng->bell_tick_period < 1) eng->bell_tick_period = 1;
+  } else if (eng->tone.mode != SBX_TONE_BELL && prev_mode == SBX_TONE_BELL) {
+    eng->bell_env = 0.0;
+    eng->bell_tick = 0;
+  }
+
   set_last_error(eng, NULL);
   return SBX_OK;
 }
@@ -485,6 +506,20 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     env = sbx_dsp_iso_mod_factor_custom(pos, 0.0, duty, 0.15, 0.15, 2);
 
     left = right = amp * env * carrier;
+  } else if (eng->tone.mode == SBX_TONE_BELL) {
+    double bell_wave = 0.0;
+    if (eng->bell_env > 0.0) {
+      engine_wave_sample(eng->tone.waveform, eng->phase_l, &bell_wave);
+      left = right = bell_wave * eng->bell_env;
+      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr, SBX_TAU);
+
+      eng->bell_tick++;
+      if (eng->bell_tick >= eng->bell_tick_period) {
+        eng->bell_tick = 0;
+        eng->bell_env = eng->bell_env * (11.0 / 12.0) - (1.0 / 4096.0);
+        if (eng->bell_env < 0.0) eng->bell_env = 0.0;
+      }
+    }
   } else if (eng->tone.mode == SBX_TONE_WHITE_NOISE) {
     left = amp * engine_next_white(eng);
     right = amp * engine_next_white(eng);
@@ -677,6 +712,18 @@ parse_tone_spec_with_default_waveform(const char *spec,
     return SBX_OK;
   }
 
+  // Bell tone: bell<carrier>/<amp>
+  if (sscanf(p, "bell%lf/%lf %n", &carrier, &amp_pct, &n) == 2 &&
+      *skip_ws(p + n) == 0) {
+    if (carrier <= 0.0 || !isfinite(carrier) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_BELL;
+    out_tone->carrier_hz = carrier;
+    out_tone->beat_hz = 0.0;
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+
   // Spin-noise tones:
   //  spin:<width-us><spin-hz>/<amp>   (pink noise base)
   //  bspin:<width-us><spin-hz>/<amp>  (brown noise base)
@@ -825,6 +872,10 @@ sbx_engine_reset(SbxEngine *eng) {
   memset(eng->pink_r, 0, sizeof(eng->pink_r));
   eng->brown_l = 0.0;
   eng->brown_r = 0.0;
+  eng->bell_env = 0.0;
+  eng->bell_tick = 0;
+  eng->bell_tick_period = (int)(eng->cfg.sample_rate / 20.0);
+  if (eng->bell_tick_period < 1) eng->bell_tick_period = 1;
 }
 
 int

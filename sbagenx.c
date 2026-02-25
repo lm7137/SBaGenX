@@ -8516,6 +8516,7 @@ sbx_apply_waveform_from_token_or_default(const char *tok, SbxToneSpec *tone) {
    if (!(tone->mode == SBX_TONE_BINAURAL ||
 	 tone->mode == SBX_TONE_MONAURAL ||
 	 tone->mode == SBX_TONE_ISOCHRONIC ||
+	 tone->mode == SBX_TONE_BELL ||
 	 tone->mode == SBX_TONE_SPIN_PINK ||
 	 tone->mode == SBX_TONE_SPIN_BROWN ||
 	 tone->mode == SBX_TONE_SPIN_WHITE))
@@ -8562,6 +8563,9 @@ sbagenxlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz
        return 1;
     case SBX_TONE_BROWN_NOISE:
        snprintf(out, out_sz, "brown/%g", amp_pct);
+       return 1;
+    case SBX_TONE_BELL:
+       snprintf(out, out_sz, "%s:bell%g/%g", wave_name, tone->carrier_hz, amp_pct);
        return 1;
     case SBX_TONE_SPIN_PINK:
        snprintf(out, out_sz, "%s:spin:%g%+g/%g", wave_name, tone->carrier_hz, tone->beat_hz, amp_pct);
@@ -9278,7 +9282,7 @@ create_drop(int ac, char **av) {
       if (extra_spec.unsupported) {
 	 if (!opt_D)
 	    error("Unsupported extra tone-spec '%s' for -p drop sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), spin/bspin/wspin, and white/pink/brown noise",
+		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p drop; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9558,7 +9562,7 @@ create_sigmoid(int ac, char **av) {
       if (extra_spec.unsupported) {
 	 if (!opt_D)
 	    error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), spin/bspin/wspin, and white/pink/brown noise",
+		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p sigmoid; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9911,7 +9915,7 @@ create_curve(int ac, char **av) {
       if (extra_spec.unsupported) {
 	 if (!opt_D)
 	    error("Unsupported extra tone-spec '%s' for -p curve sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), spin/bspin/wspin, and white/pink/brown noise",
+		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 if (have_mixamp_curve && have_mix_in_extra)
 	    warn("Curve mixamp expression is ignored in legacy -D bridge output");
@@ -10025,7 +10029,7 @@ create_slide(int ac, char **av) {
       if (extra_spec.unsupported) {
 	 if (!opt_D)
 	    error("Unsupported extra tone-spec '%s' for -p slide sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), spin/bspin/wspin, and white/pink/brown noise",
+		  NL "Supported extras: mix/<amp>, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p slide; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);

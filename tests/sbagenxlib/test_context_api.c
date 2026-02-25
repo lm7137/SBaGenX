@@ -28,6 +28,20 @@ static int has_stereo_difference(const float *buf, size_t frames) {
   return d > 1e-6;
 }
 
+static double rms_left_window(const float *buf, size_t i0, size_t i1) {
+  size_t i;
+  double e = 0.0;
+  size_t n = 0;
+  if (i1 <= i0) return 0.0;
+  for (i = i0; i < i1; i++) {
+    double v = (double)buf[i * 2];
+    e += v * v;
+    n++;
+  }
+  if (!n) return 0.0;
+  return sqrt(e / (double)n);
+}
+
 static void assert_parse(const char *spec, SbxToneMode mode, double carrier, double beat, double amp, int abs_beat, int waveform) {
   SbxToneSpec t;
   if (sbx_parse_tone_spec(spec, &t) != SBX_OK) fail("parse failed unexpectedly");
@@ -54,6 +68,7 @@ int main(void) {
   assert_parse("200@4/30", SBX_TONE_ISOCHRONIC, 200.0, 4.0, 0.30, 1, SBX_WAVE_SINE);
   assert_parse("triangle:300@8/15", SBX_TONE_ISOCHRONIC, 300.0, 8.0, 0.15, 1, SBX_WAVE_TRIANGLE);
   assert_parse("sawtooth:150/25", SBX_TONE_BINAURAL, 150.0, 0.0, 0.25, 0, SBX_WAVE_SAWTOOTH);
+  assert_parse("square:bell300/25", SBX_TONE_BELL, 300.0, 0.0, 0.25, 0, SBX_WAVE_SQUARE);
   assert_parse("spin:80+1/40", SBX_TONE_SPIN_PINK, 80.0, 1.0, 0.40, 0, SBX_WAVE_SINE);
   assert_parse("triangle:bspin:120-1.5/35", SBX_TONE_SPIN_BROWN, 120.0, -1.5, 0.35, 0, SBX_WAVE_TRIANGLE);
   assert_parse("square:wspin:60+0.75/25", SBX_TONE_SPIN_WHITE, 60.0, 0.75, 0.25, 0, SBX_WAVE_SQUARE);
@@ -95,6 +110,25 @@ int main(void) {
     fail("spin render output appears silent");
   if (!has_stereo_difference(buf, frames))
     fail("spin render should produce L/R differences");
+
+  if (sbx_context_load_tone_spec(ctx, "bell320/40") != SBX_OK)
+    fail("load bell tone spec failed");
+  {
+    const size_t bell_frames = (size_t)(cfg.sample_rate * 2.0);
+    float *bell_buf = (float *)calloc(bell_frames * 2, sizeof(float));
+    if (!bell_buf) fail("alloc failed (bell)");
+    if (sbx_context_render_f32(ctx, bell_buf, bell_frames) != SBX_OK)
+      fail("render after bell load failed");
+    if (!has_energy(bell_buf, bell_frames * 2))
+      fail("bell render output appears silent");
+    {
+      double e0 = rms_left_window(bell_buf, 0, bell_frames / 8);
+      double e1 = rms_left_window(bell_buf, bell_frames * 3 / 4, bell_frames);
+      if (!(e0 > e1 * 3.0))
+        fail("bell should decay over time");
+    }
+    free(bell_buf);
+  }
 
   if (sbx_context_load_tone_spec(ctx, "invalid") != SBX_EINVAL)
     fail("invalid tone spec should fail");

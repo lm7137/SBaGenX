@@ -149,17 +149,24 @@ Phase 3.22
 - Complete repository/library naming migration from `sbagenlib` to
   `sbagenxlib`, with compatibility aliases retained where needed.
 
-Phase 3.23 (current slice)
+Phase 3.23
 - Add spin-noise tone support to sbagenxlib:
   - `spin:` (pink base), `bspin:` (brown base), `wspin:` (white base)
   - waveform-aware spin modulation via existing waveform prefixes/defaults.
 - Extend sbagenx/sbagenxlib bridge formatting and extra-tone diagnostics to
   include spin-family tones in library-native runtime paths.
 
+Phase 3.24 (current slice)
+- Add bell tone support to sbagenxlib:
+  - parse `bell<carrier>/<amp>` (with waveform prefixes/defaults),
+  - render bell envelope decay in the library runtime,
+  - include bell in sbagenx/sbagenxlib bridge formatting and runtime
+    extra-tone diagnostics.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.23 Slice)
+Current API (Phase 3.24 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -198,6 +205,7 @@ Supported tone modes in this first extraction:
 - monaural,
 - isochronic (simple gated model),
 - white/pink/brown noise,
+- bell,
 - spin-noise tones (`spin`, `bspin`, `wspin`).
 
 Supported tone-spec forms (for `sbx_parse_tone_spec`):
@@ -205,6 +213,7 @@ Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `<carrier>-<beat>/<amp>` (binaural)
 - `<carrier>M<beat>/<amp>` or `<carrier>m<beat>/<amp>` (monaural)
 - `<carrier>@<pulse>/<amp>` (isochronic)
+- `bell<carrier>/<amp>` (bell)
 - `<carrier>/<amp>` (single tone, mapped to binaural with beat=0)
 - `white/<amp>`, `pink/<amp>`, `brown/<amp>` (noise tones)
 - `spin:<width-us><spin-hz>/<amp>` (pink-noise spin)

@@ -27,7 +27,8 @@ typedef enum {
   SBX_TONE_BROWN_NOISE = 6,
   SBX_TONE_SPIN_PINK = 7,
   SBX_TONE_SPIN_BROWN = 8,
-  SBX_TONE_SPIN_WHITE = 9
+  SBX_TONE_SPIN_WHITE = 9,
+  SBX_TONE_BELL = 10
 } SbxToneMode;
 
 typedef enum {
