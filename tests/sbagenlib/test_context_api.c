@@ -19,7 +19,7 @@ static int has_energy(const float *buf, size_t n) {
   return e > 1e-6;
 }
 
-static void assert_parse(const char *spec, SbxToneMode mode, double carrier, double beat, double amp, int abs_beat) {
+static void assert_parse(const char *spec, SbxToneMode mode, double carrier, double beat, double amp, int abs_beat, int waveform) {
   SbxToneSpec t;
   if (sbx_parse_tone_spec(spec, &t) != SBX_OK) fail("parse failed unexpectedly");
   if (t.mode != mode) fail("parsed mode mismatch");
@@ -30,6 +30,7 @@ static void assert_parse(const char *spec, SbxToneMode mode, double carrier, dou
     if (fabs(t.beat_hz - beat) > 1e-9) fail("parsed beat mismatch");
   }
   if (fabs(t.amplitude - amp) > 1e-9) fail("parsed amplitude mismatch");
+  if (t.waveform != waveform) fail("parsed waveform mismatch");
 }
 
 int main(void) {
@@ -38,12 +39,12 @@ int main(void) {
   float *buf;
   const size_t frames = 4096;
 
-  assert_parse("200+10/20", SBX_TONE_BINAURAL, 200.0, 10.0, 0.20, 0);
-  assert_parse("200-10/20", SBX_TONE_BINAURAL, 200.0, -10.0, 0.20, 0);
-  assert_parse("200M10/20", SBX_TONE_MONAURAL, 200.0, 10.0, 0.20, 1);
-  assert_parse("200@4/30", SBX_TONE_ISOCHRONIC, 200.0, 4.0, 0.30, 1);
-  assert_parse("triangle:300@8/15", SBX_TONE_ISOCHRONIC, 300.0, 8.0, 0.15, 1);
-  assert_parse("150/25", SBX_TONE_BINAURAL, 150.0, 0.0, 0.25, 0);
+  assert_parse("200+10/20", SBX_TONE_BINAURAL, 200.0, 10.0, 0.20, 0, SBX_WAVE_SINE);
+  assert_parse("200-10/20", SBX_TONE_BINAURAL, 200.0, -10.0, 0.20, 0, SBX_WAVE_SINE);
+  assert_parse("square:200M10/20", SBX_TONE_MONAURAL, 200.0, 10.0, 0.20, 1, SBX_WAVE_SQUARE);
+  assert_parse("200@4/30", SBX_TONE_ISOCHRONIC, 200.0, 4.0, 0.30, 1, SBX_WAVE_SINE);
+  assert_parse("triangle:300@8/15", SBX_TONE_ISOCHRONIC, 300.0, 8.0, 0.15, 1, SBX_WAVE_TRIANGLE);
+  assert_parse("sawtooth:150/25", SBX_TONE_BINAURAL, 150.0, 0.0, 0.25, 0, SBX_WAVE_SAWTOOTH);
 
   {
     SbxToneSpec t;

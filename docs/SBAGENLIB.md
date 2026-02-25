@@ -99,14 +99,22 @@ Phase 3.14
 - Extend sbagenlib tone model with white/pink/brown noise modes.
 - Make noise tone-specs parseable in sbagenlib contexts and runtime overlays.
 
-Phase 3.15 (current slice)
+Phase 3.15
 - Improve runtime diagnostics for unsupported extra tone-specs in preprogram
   sbagenlib paths with explicit supported-token guidance.
+
+Phase 3.16 (current slice)
+- Add waveform-aware tone handling in sbagenlib (`sine/square/triangle/sawtooth`)
+  for binaural, monaural, and isochronic tones.
+- Preserve waveform in parser output, keyframe evaluation, runtime rendering,
+  and sbagenx adapter formatting (`-D` dumps).
+- Apply CLI global waveform default (`-w`) to sbagenlib-backed immediate and
+  preprogram tone generation when no explicit waveform prefix is provided.
 
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.15 Slice)
+Current API (Phase 3.16 Slice)
 ------------------------------
 
 Public header: `sbagenlib.h`
@@ -152,8 +160,8 @@ Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `<carrier>@<pulse>/<amp>` (isochronic)
 - `<carrier>/<amp>` (single tone, mapped to binaural with beat=0)
 - `white/<amp>`, `pink/<amp>`, `brown/<amp>` (noise tones)
-- Optional waveform name prefixes are accepted and ignored by the parser:
-  `sine:`, `square:`, `triangle:`, `sawtooth:`
+- Optional waveform name prefixes are parsed and stored in
+  `SbxToneSpec.waveform`: `sine:`, `square:`, `triangle:`, `sawtooth:`
 
 Keyframed program form (`sbx_context_load_keyframes`):
 - Load an array of `SbxProgramKeyframe` with:

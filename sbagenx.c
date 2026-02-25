@@ -8376,30 +8376,90 @@ is_loop_flag_token(const char *s) {
    return 0 == strcmp(s, "loop");
 }
 
+static const char *
+sbx_waveform_name_for_spec(int waveform) {
+   switch (waveform) {
+    case SBX_WAVE_SQUARE: return "square";
+    case SBX_WAVE_TRIANGLE: return "triangle";
+    case SBX_WAVE_SAWTOOTH: return "sawtooth";
+    case SBX_WAVE_SINE:
+    default: return "sine";
+   }
+}
+
+static int
+sbx_streq_prefix_nocase_local(const char *s, const char *prefix) {
+   while (*prefix) {
+      if (tolower((unsigned char)*s++) != tolower((unsigned char)*prefix++))
+	 return 0;
+   }
+   return 1;
+}
+
+static int
+sbx_parse_waveform_prefix_token(const char *tok, int *out_waveform) {
+   const char *p= tok;
+   if (!tok) return 0;
+   while (*p && isspace((unsigned char)*p)) p++;
+   if (sbx_streq_prefix_nocase_local(p, "sine:")) {
+      if (out_waveform) *out_waveform= SBX_WAVE_SINE;
+      return 1;
+   }
+   if (sbx_streq_prefix_nocase_local(p, "square:")) {
+      if (out_waveform) *out_waveform= SBX_WAVE_SQUARE;
+      return 1;
+   }
+   if (sbx_streq_prefix_nocase_local(p, "triangle:")) {
+      if (out_waveform) *out_waveform= SBX_WAVE_TRIANGLE;
+      return 1;
+   }
+   if (sbx_streq_prefix_nocase_local(p, "sawtooth:")) {
+      if (out_waveform) *out_waveform= SBX_WAVE_SAWTOOTH;
+      return 1;
+   }
+   return 0;
+}
+
+static void
+sbx_apply_waveform_from_token_or_default(const char *tok, SbxToneSpec *tone) {
+   int wf= SBX_WAVE_SINE;
+   if (!tone) return;
+   if (!(tone->mode == SBX_TONE_BINAURAL ||
+	 tone->mode == SBX_TONE_MONAURAL ||
+	 tone->mode == SBX_TONE_ISOCHRONIC))
+      return;
+   if (sbx_parse_waveform_prefix_token(tok, &wf))
+      tone->waveform= wf;
+   else
+      tone->waveform= opt_w;
+}
+
 static int
 sbagenlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
    double amp_pct;
+   const char *wave_name;
    if (!tone || !out || out_sz == 0) return 0;
    amp_pct= tone->amplitude * 100.0;
    if (!isfinite(amp_pct) || amp_pct < 0.0) amp_pct= 0.0;
+   wave_name= sbx_waveform_name_for_spec(tone->waveform);
 
    switch (tone->mode) {
     case SBX_TONE_BINAURAL: {
        char sign= tone->beat_hz < 0.0 ? '-' : '+';
        double beat= fabs(tone->beat_hz);
-       snprintf(out, out_sz, "%g%c%g/%g", tone->carrier_hz, sign, beat, amp_pct);
+       snprintf(out, out_sz, "%s:%g%c%g/%g", wave_name, tone->carrier_hz, sign, beat, amp_pct);
        return 1;
     }
     case SBX_TONE_MONAURAL: {
        double beat= fabs(tone->beat_hz);
        double f1= tone->carrier_hz - beat * 0.5;
        double f2= tone->carrier_hz + beat * 0.5;
-       snprintf(out, out_sz, "%g/%g %g/%g", f1, amp_pct, f2, amp_pct);
+       snprintf(out, out_sz, "%s:%g/%g %s:%g/%g", wave_name, f1, amp_pct, wave_name, f2, amp_pct);
        return 1;
     }
     case SBX_TONE_ISOCHRONIC: {
        double pulse= fabs(tone->beat_hz);
-       snprintf(out, out_sz, "%g@%g/%g", tone->carrier_hz, pulse, amp_pct);
+       snprintf(out, out_sz, "%s:%g@%g/%g", wave_name, tone->carrier_hz, pulse, amp_pct);
        return 1;
     }
     case SBX_TONE_WHITE_NOISE:
@@ -8668,6 +8728,7 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
       if (tone_count >= SBX_RUNTIME_MAX_AUX + 1)
 	 return 0;
       if (SBX_OK == sbx_parse_tone_spec(tok, &tones[tone_count])) {
+	 sbx_apply_waveform_from_token_or_default(tok, &tones[tone_count]);
 	 tone_count++;
 	 continue;
       }
@@ -8813,6 +8874,7 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
       } else {
 	 SbxToneSpec tone;
 	 if (SBX_OK == sbx_parse_tone_spec(tok, &tone)) {
+	    sbx_apply_waveform_from_token_or_default(tok, &tone);
 	    if (spec->aux_count >= SBX_RUNTIME_MAX_AUX)
 	       error("Too many extra sbagenlib tone-specs (max %d)", SBX_RUNTIME_MAX_AUX);
 	    spec->aux_tones[spec->aux_count++]= tone;
@@ -8879,6 +8941,7 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
    tone->carrier_hz= carr_hz;
    tone->beat_hz= beat_hz;
    tone->amplitude= amp_pct / 100.0;
+   tone->waveform= opt_w;
    tone->duty_cycle= opt_I ? opt_I_d : 0.4;
 }
 

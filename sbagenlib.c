@@ -96,12 +96,24 @@ streq_prefix_nocase(const char *s, const char *prefix) {
 }
 
 static const char *
-skip_optional_waveform_prefix(const char *spec) {
+skip_optional_waveform_prefix(const char *spec, int *out_waveform) {
   const char *p = spec;
-  if (streq_prefix_nocase(p, "sine:")) return p + 5;
-  if (streq_prefix_nocase(p, "square:")) return p + 7;
-  if (streq_prefix_nocase(p, "triangle:")) return p + 9;
-  if (streq_prefix_nocase(p, "sawtooth:")) return p + 9;
+  if (streq_prefix_nocase(p, "sine:")) {
+    if (out_waveform) *out_waveform = SBX_WAVE_SINE;
+    return p + 5;
+  }
+  if (streq_prefix_nocase(p, "square:")) {
+    if (out_waveform) *out_waveform = SBX_WAVE_SQUARE;
+    return p + 7;
+  }
+  if (streq_prefix_nocase(p, "triangle:")) {
+    if (out_waveform) *out_waveform = SBX_WAVE_TRIANGLE;
+    return p + 9;
+  }
+  if (streq_prefix_nocase(p, "sawtooth:")) {
+    if (out_waveform) *out_waveform = SBX_WAVE_SAWTOOTH;
+    return p + 9;
+  }
   return p;
 }
 
@@ -276,6 +288,15 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
                   tone->mode == SBX_TONE_MONAURAL ||
                   tone->mode == SBX_TONE_ISOCHRONIC);
 
+  if (uses_carrier) {
+    if (tone->waveform < SBX_WAVE_SINE || tone->waveform > SBX_WAVE_SAWTOOTH) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "waveform must be a valid SBX_WAVE_* value");
+      return SBX_EINVAL;
+    }
+  } else {
+    tone->waveform = SBX_WAVE_SINE;
+  }
+
   if (tone->mode != SBX_TONE_NONE) {
     if (tone->carrier_hz <= 0.0 || !isfinite(tone->carrier_hz)) {
       if (uses_carrier) {
@@ -336,6 +357,32 @@ engine_apply_tone(SbxEngine *eng, const SbxToneSpec *tone_in, int reset_phase) {
 }
 
 static void
+engine_wave_sample(int waveform, double phase, double *out_sample) {
+  double u;
+  if (!out_sample) return;
+  switch (waveform) {
+    case SBX_WAVE_SQUARE:
+      u = sbx_dsp_wrap_cycle(phase, SBX_TAU) / SBX_TAU;
+      *out_sample = (u < 0.5) ? 1.0 : -1.0;
+      return;
+    case SBX_WAVE_TRIANGLE:
+      u = sbx_dsp_wrap_cycle(phase, SBX_TAU) / SBX_TAU;
+      if (u < 0.25) *out_sample = 4.0 * u;
+      else if (u < 0.75) *out_sample = 2.0 - 4.0 * u;
+      else *out_sample = -4.0 + 4.0 * u;
+      return;
+    case SBX_WAVE_SAWTOOTH:
+      u = sbx_dsp_wrap_cycle(phase, SBX_TAU) / SBX_TAU;
+      *out_sample = -1.0 + 2.0 * u;
+      return;
+    case SBX_WAVE_SINE:
+    default:
+      *out_sample = sin(phase);
+      return;
+  }
+}
+
+static void
 engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
   double sr = eng->cfg.sample_rate;
   double amp = eng->tone.amplitude;
@@ -344,14 +391,20 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
   if (eng->tone.mode == SBX_TONE_BINAURAL) {
     double f_l = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
     double f_r = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
-    left = amp * sin(eng->phase_l);
-    right = amp * sin(eng->phase_r);
+    engine_wave_sample(eng->tone.waveform, eng->phase_l, &left);
+    engine_wave_sample(eng->tone.waveform, eng->phase_r, &right);
+    left *= amp;
+    right *= amp;
     eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f_l / sr, SBX_TAU);
     eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f_r / sr, SBX_TAU);
   } else if (eng->tone.mode == SBX_TONE_MONAURAL) {
     double f1 = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
     double f2 = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
-    double mono = 0.5 * amp * (sin(eng->phase_l) + sin(eng->phase_r));
+    double s1 = 0.0, s2 = 0.0;
+    double mono;
+    engine_wave_sample(eng->tone.waveform, eng->phase_l, &s1);
+    engine_wave_sample(eng->tone.waveform, eng->phase_r, &s2);
+    mono = 0.5 * amp * (s1 + s2);
     left = mono;
     right = mono;
     eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f1 / sr, SBX_TAU);
@@ -362,7 +415,7 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     double pos;
     double carrier;
 
-    carrier = sin(eng->phase_l);
+    engine_wave_sample(eng->tone.waveform, eng->phase_l, &carrier);
     eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr, SBX_TAU);
 
     eng->pulse_phase += eng->tone.beat_hz / sr;
@@ -496,6 +549,7 @@ ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
   out->carrier_hz = sbx_lerp(k0->tone.carrier_hz, k1->tone.carrier_hz, u);
   out->beat_hz = sbx_lerp(k0->tone.beat_hz, k1->tone.beat_hz, u);
   out->amplitude = sbx_lerp(k0->tone.amplitude, k1->tone.amplitude, u);
+  out->waveform = k0->tone.waveform;
   out->duty_cycle = sbx_lerp(k0->tone.duty_cycle, k1->tone.duty_cycle, u);
 }
 
@@ -523,6 +577,7 @@ sbx_status_string(int status) {
 int
 sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
   const char *p;
+  int waveform = SBX_WAVE_SINE;
   int n = 0;
   double carrier = 0.0, beat = 0.0, amp_pct = 0.0;
   char c = 0;
@@ -530,8 +585,9 @@ sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
   if (!spec || !out_tone) return SBX_EINVAL;
 
   p = skip_ws(spec);
-  p = skip_optional_waveform_prefix(p);
   sbx_default_tone_spec(out_tone);
+  p = skip_optional_waveform_prefix(p, &waveform);
+  out_tone->waveform = waveform;
 
   // Noise tones: pink/<amp>, white/<amp>, brown/<amp>
   if (sscanf(p, "pink/%lf %n", &amp_pct, &n) == 1 &&
@@ -623,6 +679,7 @@ sbx_default_tone_spec(SbxToneSpec *tone) {
   tone->carrier_hz = 200.0;
   tone->beat_hz = 10.0;
   tone->amplitude = 0.5;
+  tone->waveform = SBX_WAVE_SINE;
   tone->duty_cycle = 0.4;
 }
 

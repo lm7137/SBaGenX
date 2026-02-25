@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 1
+#define SBX_API_VERSION 2
 
 /* Status codes returned by sbagenlib APIs. */
 enum {
@@ -28,6 +28,13 @@ typedef enum {
 } SbxToneMode;
 
 typedef enum {
+  SBX_WAVE_SINE = 0,
+  SBX_WAVE_SQUARE = 1,
+  SBX_WAVE_TRIANGLE = 2,
+  SBX_WAVE_SAWTOOTH = 3
+} SbxWaveform;
+
+typedef enum {
   SBX_INTERP_LINEAR = 0,
   SBX_INTERP_STEP = 1
 } SbxInterpMode;
@@ -42,6 +49,7 @@ typedef struct {
   double carrier_hz;
   double beat_hz;
   double amplitude;  /* 0.0 .. 1.0 */
+  int waveform;      /* SBX_WAVE_* */
   double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.4) */
 } SbxToneSpec;
 
