@@ -8406,77 +8406,31 @@ sbagenlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz)
 static void
 emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, const char *extra) {
    size_t i, n;
-   int end_sec= 0;
-   int warned_frac= 0;
-   char first_name[32];
+   const char *extra_tail= (extra && *extra) ? extra : "";
 
    n= sbx_context_keyframe_count(ctx);
    if (n == 0)
       error("sbagenlib context does not contain keyframes");
 
-   handleOptions("-SE");
-   in_lin= 0;
-   formatNameDef("off: -");
-   formatTimeLine(86395, "== off ->");
-
-   first_name[0]= 0;
+   printf("# sbagenlib keyframes (%d)\n", (int)n);
+   if (*extra_tail)
+      printf("# extras:%s\n", extra_tail);
+   if (loop_requested)
+      printf("# loop: enabled\n");
    for (i= 0; i<n; i++) {
       SbxProgramKeyframe kf;
-      char name[32];
       char spec[256];
-      int t_sec;
-      int sec_int;
-      double frac;
+      const char *interp;
 
       if (sbx_context_get_keyframe(ctx, i, &kf) != SBX_OK)
 	 error("sbagenlib keyframe retrieval failed at index %d", (int)i);
       if (!sbagenlib_tone_to_legacy_spec(&kf.tone, spec, sizeof(spec)))
 	 error("sbagenlib keyframe %d has unsupported tone mode %d", (int)i, (int)kf.tone.mode);
-
-      snprintf(name, sizeof(name), "kf%03d", (int)i);
-      if (i == 0) {
-	 strncpy(first_name, name, sizeof(first_name)-1);
-	 first_name[sizeof(first_name)-1]= 0;
-      }
-      if (extra && *extra)
-	 formatNameDef("%s: %s%s", name, spec, extra);
-      else
-	 formatNameDef("%s: %s", name, spec);
-
-      sec_int= (int)kf.time_sec;
-      frac= fabs(kf.time_sec - (double)sec_int);
-      if (frac > 1e-9 && !warned_frac) {
-	 warn("libseq/libsbg bridge rounds fractional keyframe seconds to nearest integer");
-	 warned_frac= 1;
-      }
-      t_sec= (int)(kf.time_sec + 0.5);
-      if (t_sec < 0) t_sec= 0;
-      if (t_sec > 86399) t_sec= 86399;
-      formatTimeLine(t_sec, "== %s ->", name);
-
-      if (kf.interp == SBX_INTERP_STEP && i + 1 < n) {
-	 SbxProgramKeyframe next_kf;
-	 if (sbx_context_get_keyframe(ctx, i + 1, &next_kf) == SBX_OK) {
-	    int next_t= (int)(next_kf.time_sec + 0.5);
-	    int hold_t= next_t - 1;
-	    if (hold_t > t_sec && hold_t <= 86399)
-	       formatTimeLine(hold_t, "== %s ->", name);
-	 }
-      }
-      if (t_sec > end_sec) end_sec= t_sec;
+      interp= (kf.interp == SBX_INTERP_STEP) ? "step" : "linear";
+      printf("%.6f %s%s %s\n", kf.time_sec, spec, extra_tail, interp);
    }
-
-   if (loop_requested && n > 1 && first_name[0]) {
-      int loop_t= end_sec + 1;
-      if (loop_t <= 86399)
-	 formatTimeLine(loop_t, "== %s ->", first_name);
-      else
-	 warn("loop flag ignored because sequence end is too close to 24h boundary");
-   } else {
-      formatTimeLine(end_sec + 10, "== off");
-   }
-
-   correctPeriods();
+   fflush(stdout);
+   exit(0);
 }
 
 static void

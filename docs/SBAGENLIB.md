@@ -65,17 +65,36 @@ Phase 3.7
 - Keep legacy runtime unchanged for existing `drop`/`sigmoid`/`curve`/`slide`
   flows while proving end-to-end library-to-CLI integration.
 
-Phase 3.8 (current slice)
+Phase 3.8
 - Improve bridge fidelity for keyframe transition modes.
 - Preserve `step`/`hold` intent by emitting hold markers ahead of the next
   keyframe boundary in the generated legacy timeline.
 - Add optional bridge-level `loop` token handling for `-p libseq`/`-p libsbg`.
 
+Phase 3.9
+- Migrate built-in preprogram generators (`-p drop`, `-p sigmoid`,
+  `-p curve`, `-p slide`) to keyframe generation + sbagenlib runtime render.
+- Keep `-D` compatibility through a bridge path while validating runtime parity.
+
+Phase 3.10
+- Remove obsolete helper paths left over from legacy preprogram emission.
+- Clean warnings and reduce migration-specific dead code.
+
+Phase 3.11
+- Add sbagenlib-runtime support for extra tone-spec overlays in preprogram
+  modes by running auxiliary sbagenlib contexts in parallel.
+- Keep `mix/<amp>` support and explicit errors for unsupported extras.
+
+Phase 3.12 (current slice)
+- Make `-D` for sbagenlib-backed paths library-native: dump keyframes directly
+  instead of routing through legacy period construction.
+- Keep unsupported-extra inspection available in `-D` output.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.8 Slice)
----------------------------
+Current API (Phase 3.12 Slice)
+------------------------------
 
 Public header: `sbagenlib.h`
 
@@ -159,9 +178,11 @@ SBG timing subset form (Phase 3.4):
 Notes
 -----
 
-- This is intentionally a minimal, stable first API.
-- Existing `sbagenx` runtime still uses the current monolithic engine in this phase.
-- Next phases will migrate existing behavior into the library behind compatibility tests.
+- This is intentionally a minimal, stable core API.
+- `sbagenx` now uses sbagenlib runtime for `-p libseq`, `-p libsbg`,
+  and built-in preprogram generators (`drop/sigmoid/curve/slide`).
+- Remaining work is focused on full legacy `.sbg` path parity and legacy
+  non-core voice/effect migration.
 
 Quick Smoke Test
 ----------------
@@ -278,5 +299,8 @@ Notes:
 - `libseq` reads the Phase 3.3 line format: `<time> <tone-spec> [interp]`.
 - `libsbg` reads the Phase 3.4 timing subset: `<HH:MM[:SS]> <tone-spec> [interp]`.
 - Optional trailing `loop` token is accepted by both bridge commands.
-- `step`/`hold` interpolation now emits hold timeline markers so the bridged
-  legacy sequence better matches keyframe segment behavior.
+- `-D` now prints sbagenlib keyframes directly (`time tone-spec interp`).
+- Built-in programs (`drop/sigmoid/curve/slide`) now generate keyframes and
+  render via sbagenlib runtime in normal playback mode.
+- In sbagenlib runtime, extra tone-spec overlays that are parseable as
+  sbagenlib tones are mixed as auxiliary library contexts.
