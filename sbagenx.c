@@ -9111,7 +9111,9 @@ create_drop(int ac, char **av) {
 
       if (extra_spec.unsupported) {
 	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p drop sbagenlib runtime", extra_spec.bad_token);
+	    error("Unsupported extra tone-spec '%s' for -p drop sbagenlib runtime"
+		  NL "Supported extras: mix/<amp>, sbagenlib tones (+/-/@/M, single tones), and white/pink/brown noise",
+		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p drop; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else if (opt_D) {
@@ -9389,7 +9391,9 @@ create_sigmoid(int ac, char **av) {
 
       if (extra_spec.unsupported) {
 	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenlib runtime", extra_spec.bad_token);
+	    error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenlib runtime"
+		  NL "Supported extras: mix/<amp>, sbagenlib tones (+/-/@/M, single tones), and white/pink/brown noise",
+		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p sigmoid; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else if (opt_D) {
@@ -9740,7 +9744,9 @@ create_curve(int ac, char **av) {
 
       if (extra_spec.unsupported) {
 	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p curve sbagenlib runtime", extra_spec.bad_token);
+	    error("Unsupported extra tone-spec '%s' for -p curve sbagenlib runtime"
+		  NL "Supported extras: mix/<amp>, sbagenlib tones (+/-/@/M, single tones), and white/pink/brown noise",
+		  extra_spec.bad_token);
 	 if (have_mixamp_curve && have_mix_in_extra)
 	    warn("Curve mixamp expression is ignored in legacy -D bridge output");
 	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p curve; using legacy timeline bridge for -D output", extra_spec.bad_token);
@@ -9852,7 +9858,9 @@ create_slide(int ac, char **av) {
 
       if (extra_spec.unsupported) {
 	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p slide sbagenlib runtime", extra_spec.bad_token);
+	    error("Unsupported extra tone-spec '%s' for -p slide sbagenlib runtime"
+		  NL "Supported extras: mix/<amp>, sbagenlib tones (+/-/@/M, single tones), and white/pink/brown noise",
+		  extra_spec.bad_token);
 	 warn("Unsupported extra tone-spec '%s' for sbagenlib runtime in -p slide; using legacy timeline bridge for -D output", extra_spec.bad_token);
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else if (opt_D) {

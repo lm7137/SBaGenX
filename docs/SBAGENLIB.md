@@ -85,15 +85,28 @@ Phase 3.11
   modes by running auxiliary sbagenlib contexts in parallel.
 - Keep `mix/<amp>` support and explicit errors for unsupported extras.
 
-Phase 3.12 (current slice)
+Phase 3.12
 - Make `-D` for sbagenlib-backed paths library-native: dump keyframes directly
   instead of routing through legacy period construction.
 - Keep unsupported-extra inspection available in `-D` output.
 
+Phase 3.13
+- Route immediate mode (`-i`) through sbagenlib runtime whenever all provided
+  tokens are sbagenlib-parseable.
+- Keep automatic fallback to legacy immediate parsing for legacy-only tokens.
+
+Phase 3.14
+- Extend sbagenlib tone model with white/pink/brown noise modes.
+- Make noise tone-specs parseable in sbagenlib contexts and runtime overlays.
+
+Phase 3.15 (current slice)
+- Improve runtime diagnostics for unsupported extra tone-specs in preprogram
+  sbagenlib paths with explicit supported-token guidance.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.12 Slice)
+Current API (Phase 3.15 Slice)
 ------------------------------
 
 Public header: `sbagenlib.h`
