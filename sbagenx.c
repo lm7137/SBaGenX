@@ -425,6 +425,13 @@ help() {
 #endif
 	  NL "          -c spec   Compensate for low-frequency headphone roll-off; see docs"
 	  NL
+	  NL "Environment:"
+	  NL "          SBAGENX_SEQ_BACKEND=auto|legacy|sbagenlib"
+	  NL "                     Select seq-file backend (default auto)."
+	  NL "                     auto: try sbagenlib subset then fallback to legacy;"
+	  NL "                     legacy: force legacy parser/runtime;"
+	  NL "                     sbagenlib: require subset compatibility."
+	  NL
 	  );
    exit(0);
 }

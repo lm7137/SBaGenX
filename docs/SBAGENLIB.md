@@ -135,15 +135,19 @@ Phase 3.19
   - `legacy`: force existing legacy parser/runtime path.
   - `sbagenlib`: require sbagenlib subset compatibility (error otherwise).
 
-Phase 3.20 (current slice)
+Phase 3.20
 - Preserve default legacy `-D` semantics for normal `seq-file` usage in
   `SBAGENX_SEQ_BACKEND=auto`, while keeping explicit sbagenlib dump behavior
   available via `SBAGENX_SEQ_BACKEND=sbagenlib` (or `-p libseq` / `-p libsbg`).
 
+Phase 3.21 (current slice)
+- Surface `SBAGENX_SEQ_BACKEND` in CLI help output so backend selection is
+  discoverable during migration/testing.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.20 Slice)
+Current API (Phase 3.21 Slice)
 ------------------------------
 
 Public header: `sbagenlib.h`
