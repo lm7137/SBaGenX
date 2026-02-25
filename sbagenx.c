@@ -213,6 +213,7 @@ void corrVal(int ) ;
 int readLine() ;
 char * getWord() ;
 void badSeq() ;
+int sbx_try_readSeqImm_runtime(int ac, char **av);
 void readSeqImm(int ac, char **av) ;
 void readSeq(int ac, char **av) ;
 void readPreProg(int ac, char **av) ;
@@ -7200,6 +7201,9 @@ void
 readSeqImm(int ac, char **av) {
    char *p= buf;
 
+   if (sbx_try_readSeqImm_runtime(ac, av))
+      return;
+
    in_lin= 0;
    p += sprintf(p, "immediate:");
    while (ac-- > 0) p += sprintf(p, " %s", *av++);
@@ -8600,6 +8604,88 @@ sbx_runtime_set_aux_tones(const SbxToneSpec *tones, size_t n) {
       }
    }
    sbx_runtime_aux_n= n;
+   return 1;
+}
+
+static void
+sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double mix_amp_pct) {
+   SbxEngineConfig cfg;
+   int rc;
+
+   if (!tones || n == 0)
+      error("internal error: empty immediate tone list for sbagenlib runtime");
+
+   sbx_runtime_clear();
+
+   sbx_default_engine_config(&cfg);
+   cfg.sample_rate= (double)out_rate;
+   cfg.channels= 2;
+   sbx_runtime_ctx= sbx_context_create(&cfg);
+   if (!sbx_runtime_ctx)
+      error("Failed to create sbagenlib runtime context");
+
+   rc= sbx_context_set_tone(sbx_runtime_ctx, &tones[0]);
+   if (rc != SBX_OK)
+      error("Failed to load sbagenlib immediate tone: %s",
+	    sbx_context_last_error(sbx_runtime_ctx));
+
+   sbx_runtime_active= 1;
+   sbx_runtime_loop= 1;
+   sbx_runtime_total_sec= 0.0;
+   sbx_runtime_mix_amp_pct= mix_amp_pct;
+   if (!sbx_runtime_set_mix_keyframes(0, 0))
+      error("Out of memory");
+   if (n > 1 && !sbx_runtime_set_aux_tones(tones + 1, n - 1))
+      error("Failed to set sbagenlib runtime auxiliary tones");
+}
+
+int
+sbx_try_readSeqImm_runtime(int ac, char **av) {
+   SbxToneSpec tones[SBX_RUNTIME_MAX_AUX + 1];
+   size_t tone_count= 0;
+   int have_mix= 0;
+   double mix_amp_pct= 100.0;
+   int i;
+
+   if (ac <= 0 || !av)
+      return 0;
+
+   for (i= 0; i<ac; i++) {
+      const char *tok= av[i];
+      if (curve_parse_mix_amp_token(tok, &mix_amp_pct)) {
+	 have_mix= 1;
+	 continue;
+      }
+      if (tone_count >= SBX_RUNTIME_MAX_AUX + 1)
+	 return 0;
+      if (SBX_OK == sbx_parse_tone_spec(tok, &tones[tone_count])) {
+	 tone_count++;
+	 continue;
+      }
+      return 0;
+   }
+
+   if (tone_count == 0)
+      return 0;
+
+   if (have_mix && !mix_in && !opt_m && !opt_M)
+      warn("mix/<amp> was specified in -i tones but no mix input stream is active");
+
+   if (opt_D) {
+      printf("# sbagenlib immediate tones (%d)\n", (int)tone_count);
+      if (have_mix)
+	 printf("# mix/%g\n", mix_amp_pct);
+      for (i= 0; i<(int)tone_count; i++) {
+	 char spec[256];
+	 if (!sbagenlib_tone_to_legacy_spec(&tones[i], spec, sizeof(spec)))
+	    error("Failed formatting sbagenlib immediate tone %d", i);
+	 printf("%s\n", spec);
+      }
+      fflush(stdout);
+      exit(0);
+   }
+
+   sbx_runtime_activate_immediate_tones(tones, tone_count, have_mix ? mix_amp_pct : 100.0);
    return 1;
 }
 

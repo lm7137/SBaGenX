@@ -304,3 +304,5 @@ Notes:
   render via sbagenlib runtime in normal playback mode.
 - In sbagenlib runtime, extra tone-spec overlays that are parseable as
   sbagenlib tones are mixed as auxiliary library contexts.
+- Immediate mode (`-i`) now uses sbagenlib runtime when all provided tone-specs
+  are sbagenlib-parseable (legacy-only specs automatically fall back).
