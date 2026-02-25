@@ -7276,6 +7276,17 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    return 1;
 }
 
+static int
+sbx_seq_backend_mode(void) {
+   const char *v= getenv("SBAGENX_SEQ_BACKEND");
+   if (!v || !*v) return 0; /* auto */
+   if (0 == strcmp(v, "auto")) return 0;
+   if (0 == strcmp(v, "legacy")) return 1;
+   if (0 == strcmp(v, "sbagenlib") || 0 == strcmp(v, "library")) return 2;
+   warn("Unknown SBAGENX_SEQ_BACKEND=%s (expected auto|legacy|sbagenlib); using auto", v);
+   return 0;
+}
+
 //
 //	Read a list of sequence files, and generate a list of Period
 //	structures
@@ -7283,8 +7294,13 @@ sbx_try_readSeq_runtime(int ac, char **av) {
 
 void 
 readSeq(int ac, char **av) {
-   if (sbx_try_readSeq_runtime(ac, av))
-      return;
+   int seq_backend= sbx_seq_backend_mode();
+   if (seq_backend != 1) {
+      if (sbx_try_readSeq_runtime(ac, av))
+	 return;
+      if (seq_backend == 2)
+	 error("SBAGENX_SEQ_BACKEND=sbagenlib requested, but sequence input is not compatible with sbagenlib subset loader");
+   }
 
    // Setup a 'now' value to use for NOW in the sequence file
    now= calcNow();	

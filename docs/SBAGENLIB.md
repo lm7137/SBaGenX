@@ -120,17 +120,24 @@ Phase 3.17
 - Wire `sbagenx -p libseq` / `-p libsbg` to pass CLI global `-w` as the
   sbagenlib context default waveform.
 
-Phase 3.18 (current slice)
+Phase 3.18
 - Add opportunistic sbagenlib routing for normal CLI `seq-file` input:
   if a sequence file matches the sbagenlib timing/tone subset loaders, run it
   directly via sbagenlib runtime.
 - Keep automatic fallback to the legacy parser/runtime for full-feature `.sbg`
   constructs that are outside current sbagenlib subset support.
 
+Phase 3.19 (current slice)
+- Add `SBAGENX_SEQ_BACKEND=auto|legacy|sbagenlib` runtime selector for
+  `seq-file` loading:
+  - `auto` (default): try sbagenlib subset route, then fall back to legacy.
+  - `legacy`: force existing legacy parser/runtime path.
+  - `sbagenlib`: require sbagenlib subset compatibility (error otherwise).
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.18 Slice)
+Current API (Phase 3.19 Slice)
 ------------------------------
 
 Public header: `sbagenlib.h`
