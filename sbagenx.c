@@ -208,6 +208,7 @@ char * StrDup(char *str) ;
 int calcNow() ;
 void loop() ;
 void outChunk() ;
+void outChunkSbx() ;
 void corrVal(int ) ;
 int readLine() ;
 char * getWord() ;
@@ -754,6 +755,30 @@ typedef struct {
    double ev_a0, ev_m0;
 } FuncCurve;
 FuncCurve func_curve;		// Runtime function curve for pre-programmed sequences
+
+typedef struct {
+   double time_sec;
+   double amp_pct;
+   int interp;		// SBX_INTERP_*
+} SbxMixAmpKeyframe;
+
+static void sbx_runtime_clear(void);
+static void sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
+						double mix_amp_pct,
+						const SbxMixAmpKeyframe *mkf, size_t mkf_n);
+static double sbx_runtime_mix_amp_at(double t_sec);
+static int sbx_parse_supported_extra_tokens(const char *extra, int *have_mix, double *mix_amp_pct);
+
+int sbx_runtime_active= 0;
+int sbx_runtime_loop= 0;
+double sbx_runtime_total_sec= 0.0;
+double sbx_runtime_mix_amp_pct= 100.0;
+SbxContext *sbx_runtime_ctx= 0;
+float *sbx_runtime_fbuf= 0;
+size_t sbx_runtime_fcap= 0;
+SbxMixAmpKeyframe *sbx_runtime_mix_kf= 0;
+size_t sbx_runtime_mix_n= 0;
+size_t sbx_runtime_mix_seg= 0;
 
 int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
@@ -5790,12 +5815,23 @@ loop() {
   if (opt_L)
     byte_count= out_bps * (S64)(opt_L * 0.001 * out_rate);
   if (opt_E) {
-    // Calculate the correct duration based on the last time in the sequence file
-    int duration = t_per0(fast_tim0, fast_tim1);
-    byte_count= out_bps * (S64)(duration * 0.001 * out_rate /
-                (fast ? fast_mult : 1));
-    if (!opt_Q) {
-      printSequenceDuration();
+    if (sbx_runtime_active && sbx_runtime_total_sec > 0.0) {
+       int duration= (int)(sbx_runtime_total_sec * 1000.0 + 0.5);
+       byte_count= out_bps * (S64)(duration * 0.001 * out_rate /
+				   (fast ? fast_mult : 1));
+       if (!opt_Q) {
+	  int secs= duration / 1000;
+	  warn("*** Sequence duration: %02d:%02d:%02d (hh:mm:ss) ***",
+	       secs/3600, (secs/60)%60, secs%60);
+       }
+    } else {
+      // Calculate the correct duration based on the last time in the sequence file
+      int duration = t_per0(fast_tim0, fast_tim1);
+      byte_count= out_bps * (S64)(duration * 0.001 * out_rate /
+                  (fast ? fast_mult : 1));
+      if (!opt_Q) {
+        printSequenceDuration();
+      }
     }
   }
 
@@ -5809,24 +5845,29 @@ loop() {
     writeWAV();
 
   if (!opt_Q) fprintf(stderr, "\n");
-  corrVal(0);		// Get into correct period
-  dispCurrPer(stderr);	// Display
-  status(0);
+  if (!sbx_runtime_active) {
+     corrVal(0);		// Get into correct period
+     dispCurrPer(stderr);	// Display
+     status(0);
+  } else if (!opt_Q) {
+     warn("SBAGENLIB runtime active");
+  }
   
   while (1) {
     for (c= 0; c < cnt; c++) {
-      corrVal(1);
+      if (!sbx_runtime_active)
+	 corrVal(1);
       outChunk();
       ms_inc= out_buf_ms + err;
       now_lo += out_buf_lo + err_lo;
       if (now_lo >= 0x10000) { ms_inc += now_lo >> 16; now_lo &= 0xFFFF; }
       now += ms_inc;
       if (now > H24) now -= H24;
-      if (vfast && (c&1)) status(0);
+      if (!sbx_runtime_active && vfast && (c&1)) status(0);
     }
 
     if (fast) {
-      if (!vfast) status(0);
+      if (!sbx_runtime_active && !vfast) status(0);
     }
     else {
       // Synchronize with real clock, gently over the next second or so
@@ -5844,7 +5885,8 @@ loop() {
 	utime= userTime();
 	sprintf(buf, "%d ticks", utime-prev);		// Replaces standard message
       }
-      status(buf);
+      if (!sbx_runtime_active)
+	 status(buf);
     }
   }
 }
@@ -5862,6 +5904,11 @@ int rand0, rand1;
 
 void 
 outChunk() {
+   if (sbx_runtime_active) {
+      outChunkSbx();
+      return;
+   }
+
    int off= 0;
    double mix_mod_mul= mix_mod_multiplier(now);
 
@@ -6181,6 +6228,101 @@ outChunk() {
   else
     writeOut((char*)out_buf, out_bsiz);
 } 
+
+void
+outChunkSbx() {
+   int frames= out_blen / 2;
+   int off= 0;
+   int rc;
+   double t0;
+   double sr= (double)out_rate;
+
+   if (!sbx_runtime_ctx)
+      error("Internal error: sbagenlib runtime context is not initialized");
+
+   if ((size_t)out_blen > sbx_runtime_fcap) {
+      sbx_runtime_fbuf= (float*)realloc(sbx_runtime_fbuf, out_blen * sizeof(float));
+      if (!sbx_runtime_fbuf) error("Out of memory");
+      sbx_runtime_fcap= out_blen;
+   }
+
+   if (mix_in) {
+      int rv= inbuf_read(tmp_buf, out_blen);
+      if (rv == 0) {
+	 if (!opt_Q) warn("\nEnd of mix input audio stream");
+	 exit(0);
+      }
+      while (rv < out_blen) tmp_buf[rv++]= 0;
+   }
+
+   t0= sbx_context_time_sec(sbx_runtime_ctx);
+   rc= sbx_context_render_f32(sbx_runtime_ctx, sbx_runtime_fbuf, frames);
+   if (rc != SBX_OK)
+      error("sbagenlib render failed: %s", sbx_context_last_error(sbx_runtime_ctx));
+
+   while (off < out_blen) {
+      int mix1= mix_in ? tmp_buf[off] : 0;
+      int mix2= mix_in ? tmp_buf[off+1] : 0;
+      int idx= off;
+      int frm= off / 2;
+      double gen_l= sbx_runtime_fbuf[idx];
+      double gen_r= sbx_runtime_fbuf[idx+1];
+      double out_l= gen_l * 32767.0;
+      double out_r= gen_r * 32767.0;
+
+      if (mix_in) {
+	 double t_sec= t0 + frm / sr;
+	 double mix_pct= sbx_runtime_mix_amp_at(t_sec);
+	 double mix_mul= (mix_pct / 100.0) * mix_mod_multiplier(now);
+	 out_l += ((mix1 >> 4) * mix_mul);
+	 out_r += ((mix2 >> 4) * mix_mul);
+      }
+
+      if (opt_V != 100) {
+	 out_l= (out_l * opt_V) / 100.0;
+	 out_r= (out_r * opt_V) / 100.0;
+      }
+
+      if (out_l > 32767.0) out_l= 32767.0;
+      if (out_l < -32768.0) out_l= -32768.0;
+      if (out_r > 32767.0) out_r= 32767.0;
+      if (out_r < -32768.0) out_r= -32768.0;
+
+      out_buf[off++]= (short)lrint(out_l);
+      out_buf[off++]= (short)lrint(out_r);
+   }
+
+   // Rewrite buffer for 8-bit mode
+   if (out_mode == 0) {
+      short *sp= out_buf;
+      short *end= out_buf + out_blen;
+      char *cp= (char*)out_buf;
+      while (sp < end) *cp++= (*sp++ >> 8) + 128;
+   }
+
+   // Rewrite buffer for 16-bit byte-swapping
+   if (out_mode == 2) {
+      char *cp= (char*)out_buf;
+      char *end= (char*)(out_buf + out_blen);
+      while (cp < end) { char tmp= *cp++; cp[-1]= cp[0]; *cp++= tmp; }
+   }
+
+   // Check and update the byte count if necessary
+   if (byte_count > 0) {
+      if (byte_count <= out_bsiz) {
+	 writeOut((char*)out_buf, byte_count);
+#ifdef ALSA_AUDIO
+	 cleanup_alsa();
+#endif
+	 exit(0);		// All done
+      } else {
+	 writeOut((char*)out_buf, out_bsiz);
+	 byte_count -= out_bsiz;
+      }
+   } else {
+      writeOut((char*)out_buf, out_bsiz);
+   }
+}
 
 void 
 writeOut(char *buf, int siz) {
@@ -8218,6 +8360,7 @@ void
 readPreProg(int ac, char **av) {
    clear_func_curve();
    clear_mix_mod_curve();
+   sbx_runtime_clear();
    opt_P_sigmoid= 0;
    opt_P_drop= 0;
    opt_P_curve= 0;
@@ -8435,8 +8578,244 @@ create_libseq(int ac, char **av, int sbg_timing) {
    if (rc != SBX_OK)
       error("sbagenlib failed loading %s: %s", path, sbx_context_last_error(ctx));
 
+   if (opt_D) {
+      emit_periods_from_sbx_context(ctx, loop_flag);
+      sbx_context_destroy(ctx);
+      return;
+   }
+
+   // Runtime playback via sbagenlib context.
+   if (sbx_runtime_ctx) {
+      sbx_context_destroy(sbx_runtime_ctx);
+      sbx_runtime_ctx= 0;
+   }
+   if (sbx_runtime_mix_kf) {
+      free(sbx_runtime_mix_kf);
+      sbx_runtime_mix_kf= 0;
+      sbx_runtime_mix_n= 0;
+      sbx_runtime_mix_seg= 0;
+   }
+   sbx_runtime_ctx= ctx;
+   sbx_runtime_active= 1;
+   sbx_runtime_loop= loop_flag ? 1 : 0;
+   sbx_runtime_mix_amp_pct= 100.0;
+   sbx_runtime_total_sec= 0.0;
+   {
+      size_t kn= sbx_context_keyframe_count(ctx);
+      SbxProgramKeyframe kf;
+      if (kn > 0 && sbx_context_get_keyframe(ctx, kn-1, &kf) == SBX_OK)
+	 sbx_runtime_total_sec= kf.time_sec;
+   }
+}
+
+static void
+sbx_runtime_clear(void) {
+   sbx_runtime_active= 0;
+   sbx_runtime_loop= 0;
+   sbx_runtime_total_sec= 0.0;
+   sbx_runtime_mix_amp_pct= 100.0;
+   sbx_runtime_mix_seg= 0;
+   if (sbx_runtime_ctx) {
+      sbx_context_destroy(sbx_runtime_ctx);
+      sbx_runtime_ctx= 0;
+   }
+   if (sbx_runtime_fbuf) {
+      free(sbx_runtime_fbuf);
+      sbx_runtime_fbuf= 0;
+      sbx_runtime_fcap= 0;
+   }
+   if (sbx_runtime_mix_kf) {
+      free(sbx_runtime_mix_kf);
+      sbx_runtime_mix_kf= 0;
+      sbx_runtime_mix_n= 0;
+   }
+}
+
+static int
+sbx_runtime_set_mix_keyframes(const SbxMixAmpKeyframe *kfs, size_t n) {
+   if (sbx_runtime_mix_kf) {
+      free(sbx_runtime_mix_kf);
+      sbx_runtime_mix_kf= 0;
+      sbx_runtime_mix_n= 0;
+      sbx_runtime_mix_seg= 0;
+   }
+   if (!kfs || n == 0) return 1;
+   sbx_runtime_mix_kf= ALLOC_ARR(n, SbxMixAmpKeyframe);
+   if (!sbx_runtime_mix_kf) return 0;
+   memcpy(sbx_runtime_mix_kf, kfs, n * sizeof(*kfs));
+   sbx_runtime_mix_n= n;
+   sbx_runtime_mix_seg= 0;
+   return 1;
+}
+
+static double
+sbx_runtime_mix_amp_at(double t_sec) {
+   size_t n= sbx_runtime_mix_n;
+   size_t i0, i1;
+   double t0, t1, u;
+   const SbxMixAmpKeyframe *k0, *k1;
+
+   if (!sbx_runtime_mix_kf || n == 0)
+      return sbx_runtime_mix_amp_pct;
+   if (n == 1 || t_sec <= sbx_runtime_mix_kf[0].time_sec)
+      return sbx_runtime_mix_kf[0].amp_pct;
+   if (t_sec >= sbx_runtime_mix_kf[n-1].time_sec)
+      return sbx_runtime_mix_kf[n-1].amp_pct;
+
+   if (sbx_runtime_mix_seg >= n-1) sbx_runtime_mix_seg= n-2;
+   while (sbx_runtime_mix_seg + 1 < n &&
+	  t_sec > sbx_runtime_mix_kf[sbx_runtime_mix_seg + 1].time_sec)
+      sbx_runtime_mix_seg++;
+   while (sbx_runtime_mix_seg > 0 &&
+	  t_sec < sbx_runtime_mix_kf[sbx_runtime_mix_seg].time_sec)
+      sbx_runtime_mix_seg--;
+
+   i0= sbx_runtime_mix_seg;
+   i1= i0 + 1;
+   if (i1 >= n) i1= n-1;
+   k0= &sbx_runtime_mix_kf[i0];
+   k1= &sbx_runtime_mix_kf[i1];
+   t0= k0->time_sec;
+   t1= k1->time_sec;
+   if (t1 <= t0) return k0->amp_pct;
+   if (t_sec >= t1) return k1->amp_pct;
+   u= (t_sec - t0) / (t1 - t0);
+   if (u < 0.0) u= 0.0;
+   if (u > 1.0) u= 1.0;
+   if (k0->interp == SBX_INTERP_STEP) u= 0.0;
+   return k0->amp_pct + (k1->amp_pct - k0->amp_pct) * u;
+}
+
+static void
+sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
+				    double mix_amp_pct,
+				    const SbxMixAmpKeyframe *mkf, size_t mkf_n) {
+   SbxEngineConfig cfg;
+   int rc;
+   if (!kfs || n == 0)
+      error("internal error: empty sbagenlib runtime keyframe list");
+
+   sbx_runtime_clear();
+
+   sbx_default_engine_config(&cfg);
+   cfg.sample_rate= (double)out_rate;
+   cfg.channels= 2;
+   sbx_runtime_ctx= sbx_context_create(&cfg);
+   if (!sbx_runtime_ctx)
+      error("Failed to create sbagenlib runtime context");
+
+   rc= sbx_context_load_keyframes(sbx_runtime_ctx, kfs, n, loop_flag);
+   if (rc != SBX_OK)
+      error("Failed to load sbagenlib runtime keyframes: %s",
+	    sbx_context_last_error(sbx_runtime_ctx));
+
+   sbx_runtime_active= 1;
+   sbx_runtime_loop= loop_flag ? 1 : 0;
+   sbx_runtime_total_sec= kfs[n-1].time_sec;
+   sbx_runtime_mix_amp_pct= mix_amp_pct;
+   if (!sbx_runtime_set_mix_keyframes(mkf, mkf_n))
+      error("Out of memory");
+}
+
+static void
+sbx_emit_periods_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag) {
+   SbxEngineConfig cfg;
+   SbxContext *ctx;
+   int rc;
+   sbx_default_engine_config(&cfg);
+   cfg.sample_rate= (double)out_rate;
+   cfg.channels= 2;
+   ctx= sbx_context_create(&cfg);
+   if (!ctx)
+      error("Failed to create sbagenlib context");
+   rc= sbx_context_load_keyframes(ctx, kfs, n, loop_flag);
+   if (rc != SBX_OK)
+      error("Failed to load sbagenlib keyframes: %s", sbx_context_last_error(ctx));
    emit_periods_from_sbx_context(ctx, loop_flag);
    sbx_context_destroy(ctx);
+}
+
+static int
+sbx_parse_supported_extra_tokens(const char *extra, int *have_mix, double *mix_amp_pct) {
+   const char *p= extra;
+   int seen_mix= 0;
+   double mix_amp= 100.0;
+   while (p && *p) {
+      const char *s= p;
+      const char *e;
+      int n;
+      char tok[256];
+      while (*s && isspace((unsigned char)*s)) s++;
+      if (!*s) break;
+      e= s;
+      while (*e && !isspace((unsigned char)*e)) e++;
+      n= (int)(e-s);
+      if (n >= (int)sizeof(tok)) n= sizeof(tok)-1;
+      memcpy(tok, s, n);
+      tok[n]= 0;
+      if (curve_parse_mix_amp_token(tok, &mix_amp)) {
+	 seen_mix= 1;
+      } else {
+	 return 0;
+      }
+      p= e;
+   }
+   if (have_mix) *have_mix= seen_mix;
+   if (mix_amp_pct) *mix_amp_pct= mix_amp;
+   return 1;
+}
+
+typedef struct {
+   SbxProgramKeyframe *v;
+   size_t n;
+   size_t cap;
+} SbxKfBuilder;
+
+typedef struct {
+   SbxMixAmpKeyframe *v;
+   size_t n;
+   size_t cap;
+} SbxMixKfBuilder;
+
+static void
+sbx_kfb_add(SbxKfBuilder *b, double t_sec, const SbxToneSpec *tone, int interp) {
+   if (b->n == b->cap) {
+      size_t ncap= b->cap ? b->cap * 2 : 64;
+      SbxProgramKeyframe *tmp= (SbxProgramKeyframe*)realloc(b->v, ncap * sizeof(*tmp));
+      if (!tmp) error("Out of memory");
+      b->v= tmp;
+      b->cap= ncap;
+   }
+   b->v[b->n].time_sec= t_sec;
+   b->v[b->n].tone= *tone;
+   b->v[b->n].interp= interp;
+   b->n++;
+}
+
+static void
+sbx_mixkfb_add(SbxMixKfBuilder *b, double t_sec, double amp_pct, int interp) {
+   if (b->n == b->cap) {
+      size_t ncap= b->cap ? b->cap * 2 : 64;
+      SbxMixAmpKeyframe *tmp= (SbxMixAmpKeyframe*)realloc(b->v, ncap * sizeof(*tmp));
+      if (!tmp) error("Out of memory");
+      b->v= tmp;
+      b->cap= ncap;
+   }
+   b->v[b->n].time_sec= t_sec;
+   b->v[b->n].amp_pct= amp_pct;
+   b->v[b->n].interp= interp;
+   b->n++;
+}
+
+static void
+sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
+		   double carr_hz, double beat_hz, double amp_pct) {
+   sbx_default_tone_spec(tone);
+   tone->mode= isisochronic ? SBX_TONE_ISOCHRONIC : (ismono ? SBX_TONE_MONAURAL : SBX_TONE_BINAURAL);
+   tone->carrier_hz= carr_hz;
+   tone->beat_hz= beat_hz;
+   tone->amplitude= amp_pct / 100.0;
+   tone->duty_cycle= opt_I ? opt_I_d : 0.4;
 }
 
 //
@@ -8585,125 +8964,97 @@ create_drop(int ac, char **av) {
    for (a= 0; a<n_step; a++)
       beat[a]= 10 * exp(log(beat_target/10) * a / (n_step-1));
 
-   if (slide) {
-      setup_drop_func_curve(0, isisochronic ? 8 : 1, 0,
-			    c0, c2, len,
-			    beat[0], beat[n_step-1], len0);
-      if (ismono)
-	 setup_func_curve_monaural_pair(0, 1);
-      warn(" Using function-driven curve for sliding drop");
-   }
+   {
+      int have_mix= 0;
+      double mix_amp_pct= 100.0;
+      SbxKfBuilder kfb= {0};
+      SbxToneSpec tone;
+      int end_sec;
 
-   // Display summary
-   warn("DROP summary:");
-   if (slide) {
-      warn(" Carrier slides from %gHz to %gHz over %d minutes", 
-	   c0, c2, len/60);
-      if (ismono)
-	 warn(" Monaural beat frequency slides from %gHz to %gHz over %d minutes", 
-	      beat[0], beat[n_step-1], len0/60);
-      else
-	 warn(" %s frequency slides from %gHz to %gHz over %d minutes", 
-	      isisochronic ? "Pulse" : "Beat", beat[0], beat[n_step-1], len0/60);
-   } else {
-      warn(" Carrier steps from %gHz to %gHz over %d minutes", 
-	   c0, c2, len/60);
-      if (ismono)
-	 warn(" Monaural beat frequency steps from %gHz to %gHz over %d minutes:", 
-	      beat[0], beat[n_step-1], len0/60);
-      else
-	 warn(" %s frequency steps from %gHz to %gHz over %d minutes:", 
-	      isisochronic ? "Pulse" : "Beat", beat[0], beat[n_step-1], len0/60);
-      fprintf(stderr, "   ");
-      for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
-      fprintf(stderr, "\n");
-   }
-   if (ismono)
-      warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
-   if (wakeup) {
-      warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
-   }
-   if (opt_A) {
-      warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
-	   opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
-      warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
-   }
+      if (!sbx_parse_supported_extra_tokens(extra, &have_mix, &mix_amp_pct))
+	 error("-p drop with sbagenlib runtime currently supports only optional mix/<amp> extra tone-spec");
+      if (have_mix && !mix_in && !opt_m && !opt_M)
+	 warn("mix/<amp> was specified in -p drop extras but no mix input stream is active");
 
-   // Start generating sequence
-   handleOptions("-SE");
-   in_lin= 0;
-
-   formatNameDef("off: -");
-   formatTimeLine(86395, "== off ->");		// 23:59:55
-   
-   signal= isisochronic ? '@' : '+';
-   if (slide) {
-      // Slide version
-      for (a= 0; a<n_step; a++) {
-	 int tim= a * len0 / (n_step-1);
-	 double carr_t= c0 + (c2-c0) * tim * 1.0 / len;
-	 if (ismono) {
-	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
-			  carr_t - beat[a]/2.0, amp,
-			  carr_t + beat[a]/2.0, amp, extra);
-	 } else {
-	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
-			  carr_t, signal, beat[a], amp, extra);
-	 }
-	 formatTimeLine(tim, "== ts%02d ->", a);
-      }
-
-      if (islong) {
-	 if (ismono) {
-	    formatNameDef("tsend: %g/%g %g/%g %s",
-			  c2 - beat[n_step-1]/2.0, amp,
-			  c2 + beat[n_step-1]/2.0, amp, extra);
-	 } else {
-	    formatNameDef("tsend: %g%c%g/%g %s",
-			  c2, signal, beat[n_step-1], amp, extra);
-	 }
-	 formatTimeLine(len, "== tsend ->");
-      }
-      end= len;
-   } else {
-      // Step version
-      int lim= len / steplen;
-      int stepslide= steplen < 90 ? 5 : 10;    // Seconds slide between steps
-      for (a= 0; a<lim; a++) {
-	 int tim0= a * steplen;
-	 int tim1= (a+1) * steplen;
-	 double carr_t= c0 + (c2-c0) * tim1/len;
-	 double beat_t= beat[(a>=n_step) ? n_step-1 : a];
-	 if (ismono) {
-	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
-			  carr_t - beat_t/2.0, amp,
-			  carr_t + beat_t/2.0, amp, extra);
-	 } else {
-	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
-			  carr_t, signal, beat_t, amp, extra);
-	 }
-	 formatTimeLine(tim0, "== ts%02d ->", a);
-	 formatTimeLine(tim1-stepslide, "== ts%02d ->", a);
-      }
-      end= len-stepslide;
-   }
-   
-   // Wake-up and ending
-   if (wakeup) {
-      if (ismono) {
-	 formatNameDef("tswake: %g/%g %g/%g %s",
-		       c0 - beat[0]/2.0, amp,
-		       c0 + beat[0]/2.0, amp, extra);
+      // Display summary
+      warn("DROP summary:");
+      if (slide) {
+	 warn(" Carrier slides from %gHz to %gHz over %d minutes",
+	      c0, c2, len/60);
+	 if (ismono)
+	    warn(" Monaural beat frequency slides from %gHz to %gHz over %d minutes",
+		 beat[0], beat[n_step-1], len0/60);
+	 else
+	    warn(" %s frequency slides from %gHz to %gHz over %d minutes",
+		 isisochronic ? "Pulse" : "Beat", beat[0], beat[n_step-1], len0/60);
       } else {
-	 formatNameDef("tswake: %g%c%g/%g %s",
-		       c0, signal, beat[0], amp, extra);
+	 warn(" Carrier steps from %gHz to %gHz over %d minutes",
+	      c0, c2, len/60);
+	 if (ismono)
+	    warn(" Monaural beat frequency steps from %gHz to %gHz over %d minutes:",
+		 beat[0], beat[n_step-1], len0/60);
+	 else
+	    warn(" %s frequency steps from %gHz to %gHz over %d minutes:",
+		 isisochronic ? "Pulse" : "Beat", beat[0], beat[n_step-1], len0/60);
+	 fprintf(stderr, "   ");
+	 for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
+	 fprintf(stderr, "\n");
       }
-      formatTimeLine(end+len2, "== tswake ->");
-      end += len2;
-   } 
-   formatTimeLine(end+10, "== off");
+      if (ismono)
+	 warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
+      if (wakeup) {
+	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
+      }
+      if (opt_A) {
+	 warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
+	      opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
+	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
+      }
 
-   correctPeriods();
+      signal= isisochronic ? '@' : '+';
+      if (slide) {
+	 for (a= 0; a<n_step; a++) {
+	    double tim= a * len0 / (double)(n_step-1);
+	    double carr_t= c0 + (c2-c0) * tim / len;
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat[a], amp);
+	    sbx_kfb_add(&kfb, tim, &tone, SBX_INTERP_LINEAR);
+	 }
+	 if (islong) {
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, c2, beat[n_step-1], amp);
+	    sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
+	 }
+	 end_sec= len;
+      } else {
+	 int lim= len / steplen;
+	 for (a= 0; a<lim; a++) {
+	    int tim0= a * steplen;
+	    int tim1= (a+1) * steplen;
+	    double carr_t= c0 + (c2-c0) * tim1/len;
+	    double beat_t= beat[(a>=n_step) ? n_step-1 : a];
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat_t, amp);
+	    sbx_kfb_add(&kfb, (double)tim0, &tone, SBX_INTERP_STEP);
+	 }
+	 sbx_fill_tone_spec(&tone, isisochronic, ismono, c2, beat[n_step-1], amp);
+	 sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_STEP);
+	 end_sec= len;
+      }
+
+      if (wakeup) {
+	 sbx_fill_tone_spec(&tone, isisochronic, ismono, c0, beat[0], amp);
+	 sbx_kfb_add(&kfb, (double)(end_sec + len2), &tone, SBX_INTERP_LINEAR);
+	 end_sec += len2;
+      }
+
+      sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
+      sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
+
+      if (opt_D)
+	 sbx_emit_periods_from_keyframes(kfb.v, kfb.n, 0);
+      else
+	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0, have_mix ? mix_amp_pct : 100.0, 0, 0);
+
+      if (kfb.v) free(kfb.v);
+   }
 }
 
 //
@@ -8884,128 +9235,98 @@ create_sigmoid(int ac, char **av) {
 	 beat[a]= sig_a * tanh(sig_l * (t_min - d_min/2 - sig_h)) + sig_b;
    }
 
-   if (slide) {
-      if (!setup_sigmoid_func_curve(0, isisochronic ? 8 : 1, 0,
-				    c0, c2, len,
-				    beat_start, beat_target, len0,
-				    sig_l, sig_h))
-	 error("Sigmoid parameters produce an invalid runtime curve");
-      if (ismono)
-	 setup_func_curve_monaural_pair(0, 1);
-      warn(" Using function-driven curve for sliding sigmoid");
-   }
+   {
+      int have_mix= 0;
+      double mix_amp_pct= 100.0;
+      SbxKfBuilder kfb= {0};
+      SbxToneSpec tone;
+      int end_sec;
 
-   // Display summary
-   warn("SIGMOID summary:");
-   if (slide) {
-      warn(" Carrier slides from %gHz to %gHz over %d minutes",
-	   c0, c2, len/60);
-      if (ismono)
-	 warn(" Monaural beat frequency follows sigmoid from %gHz to %gHz over %d minutes",
-	      beat_start, beat_target, len0/60);
-      else
-	 warn(" %s frequency follows sigmoid from %gHz to %gHz over %d minutes",
-	      isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
-   } else {
-      warn(" Carrier steps from %gHz to %gHz over %d minutes",
-	   c0, c2, len/60);
-      if (ismono)
-	 warn(" Monaural beat frequency steps over sigmoid from %gHz to %gHz over %d minutes:",
-	      beat_start, beat_target, len0/60);
-      else
-	 warn(" %s frequency steps over sigmoid from %gHz to %gHz over %d minutes:",
-	      isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
-      fprintf(stderr, "   ");
-      for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
-      fprintf(stderr, "\n");
-   }
-   if (ismono)
-      warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
-   warn(" Sigmoid shape parameters: l=%g h=%g", sig_l, sig_h);
-   if (wakeup) {
-      warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
-   }
-   if (opt_A) {
-      warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
-	   opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
-      warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
-   }
+      if (!sbx_parse_supported_extra_tokens(extra, &have_mix, &mix_amp_pct))
+	 error("-p sigmoid with sbagenlib runtime currently supports only optional mix/<amp> extra tone-spec");
+      if (have_mix && !mix_in && !opt_m && !opt_M)
+	 warn("mix/<amp> was specified in -p sigmoid extras but no mix input stream is active");
 
-   // Start generating sequence
-   handleOptions("-SE");
-   in_lin= 0;
-
-   formatNameDef("off: -");
-   formatTimeLine(86395, "== off ->");		// 23:59:55
-
-   signal= isisochronic ? '@' : '+';
-   if (slide) {
-      // Slide version
-      for (a= 0; a<n_step; a++) {
-	 int tim= a * len0 / (n_step-1);
-	 double carr_t= c0 + (c2-c0) * tim * 1.0 / len;
-	 if (ismono) {
-	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
-			  carr_t - beat[a]/2.0, amp,
-			  carr_t + beat[a]/2.0, amp, extra);
-	 } else {
-	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
-			  carr_t, signal, beat[a], amp, extra);
-	 }
-	 formatTimeLine(tim, "== ts%02d ->", a);
-      }
-
-      if (islong) {
-	 if (ismono) {
-	    formatNameDef("tsend: %g/%g %g/%g %s",
-			  c2 - beat[n_step-1]/2.0, amp,
-			  c2 + beat[n_step-1]/2.0, amp, extra);
-	 } else {
-	    formatNameDef("tsend: %g%c%g/%g %s",
-			  c2, signal, beat[n_step-1], amp, extra);
-	 }
-	 formatTimeLine(len, "== tsend ->");
-      }
-      end= len;
-   } else {
-      // Step version
-      int lim= len / steplen;
-      int stepslide= steplen < 90 ? 5 : 10;	// Seconds slide between steps
-      for (a= 0; a<lim; a++) {
-	 int tim0= a * steplen;
-	 int tim1= (a+1) * steplen;
-	 double carr_t= c0 + (c2-c0) * tim1/len;
-	 double beat_t= beat[(a>=n_step) ? n_step-1 : a];
-	 if (ismono) {
-	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
-			  carr_t - beat_t/2.0, amp,
-			  carr_t + beat_t/2.0, amp, extra);
-	 } else {
-	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
-			  carr_t, signal, beat_t, amp, extra);
-	 }
-	 formatTimeLine(tim0, "== ts%02d ->", a);
-	 formatTimeLine(tim1-stepslide, "== ts%02d ->", a);
-      }
-      end= len-stepslide;
-   }
-
-   // Wake-up and ending
-   if (wakeup) {
-      if (ismono) {
-	 formatNameDef("tswake: %g/%g %g/%g %s",
-		       c0 - beat[0]/2.0, amp,
-		       c0 + beat[0]/2.0, amp, extra);
+      // Display summary
+      warn("SIGMOID summary:");
+      if (slide) {
+	 warn(" Carrier slides from %gHz to %gHz over %d minutes",
+	      c0, c2, len/60);
+	 if (ismono)
+	    warn(" Monaural beat frequency follows sigmoid from %gHz to %gHz over %d minutes",
+		 beat_start, beat_target, len0/60);
+	 else
+	    warn(" %s frequency follows sigmoid from %gHz to %gHz over %d minutes",
+		 isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
       } else {
-	 formatNameDef("tswake: %g%c%g/%g %s",
-		       c0, signal, beat[0], amp, extra);
+	 warn(" Carrier steps from %gHz to %gHz over %d minutes",
+	      c0, c2, len/60);
+	 if (ismono)
+	    warn(" Monaural beat frequency steps over sigmoid from %gHz to %gHz over %d minutes:",
+		 beat_start, beat_target, len0/60);
+	 else
+	    warn(" %s frequency steps over sigmoid from %gHz to %gHz over %d minutes:",
+		 isisochronic ? "Pulse" : "Beat", beat_start, beat_target, len0/60);
+	 fprintf(stderr, "   ");
+	 for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
+	 fprintf(stderr, "\n");
       }
-      formatTimeLine(end+len2, "== tswake ->");
-      end += len2;
-   }
-   formatTimeLine(end+10, "== off");
+      if (ismono)
+	 warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
+      warn(" Sigmoid shape parameters: l=%g h=%g", sig_l, sig_h);
+      if (wakeup) {
+	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
+      }
+      if (opt_A) {
+	 warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
+	      opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
+	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
+      }
 
-   correctPeriods();
+      signal= isisochronic ? '@' : '+';
+      if (slide) {
+	 for (a= 0; a<n_step; a++) {
+	    double tim= a * len0 / (double)(n_step-1);
+	    double carr_t= c0 + (c2-c0) * tim / len;
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat[a], amp);
+	    sbx_kfb_add(&kfb, tim, &tone, SBX_INTERP_LINEAR);
+	 }
+	 if (islong) {
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, c2, beat[n_step-1], amp);
+	    sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
+	 }
+	 end_sec= len;
+      } else {
+	 int lim= len / steplen;
+	 for (a= 0; a<lim; a++) {
+	    int tim0= a * steplen;
+	    int tim1= (a+1) * steplen;
+	    double carr_t= c0 + (c2-c0) * tim1/len;
+	    double beat_t= beat[(a>=n_step) ? n_step-1 : a];
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat_t, amp);
+	    sbx_kfb_add(&kfb, (double)tim0, &tone, SBX_INTERP_STEP);
+	 }
+	 sbx_fill_tone_spec(&tone, isisochronic, ismono, c2, beat[n_step-1], amp);
+	 sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_STEP);
+	 end_sec= len;
+      }
+
+      if (wakeup) {
+	 sbx_fill_tone_spec(&tone, isisochronic, ismono, c0, beat[0], amp);
+	 sbx_kfb_add(&kfb, (double)(end_sec + len2), &tone, SBX_INTERP_LINEAR);
+	 end_sec += len2;
+      }
+
+      sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
+      sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
+
+      if (opt_D)
+	 sbx_emit_periods_from_keyframes(kfb.v, kfb.n, 0);
+      else
+	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0, have_mix ? mix_amp_pct : 100.0, 0, 0);
+
+      if (kfb.v) free(kfb.v);
+   }
 }
 
 //
@@ -9062,7 +9383,7 @@ create_curve(int ac, char **av) {
    double amp_start_eval= 0.0, mix_start_eval= 0.0;
    int have_mix_in_extra= 0;
    int have_amp_curve= 0, have_mixamp_curve= 0;
-   char extra[256], extra_dyn[256];
+   char extra[256];
    static double beat_targets[]= {
       4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
    };
@@ -9224,153 +9545,138 @@ create_curve(int ac, char **av) {
       return;
    }
 
-   // Display summary
-   warn("CURVE summary:");
-   warn(" Source file: %s", func_curve.src_file);
-   if (slide) {
-      warn(" Carrier follows custom curve from %gHz to %gHz over %d minutes",
-	   carr_sam[0], carr_end, len/60);
-      if (ismono)
-	 warn(" Monaural beat frequency follows custom curve from %gHz to %gHz over %d minutes",
-	      beat[0], beat_end, len0/60);
-      else
-	 warn(" %s frequency follows custom curve from %gHz to %gHz over %d minutes",
-	      isisochronic ? "Pulse" : "Beat", beat[0], beat_end, len0/60);
-      warn(" Using function-driven curve from .sbgf for sliding mode");
-   } else {
-      warn(" Carrier/beat are sampled from custom curve in stepped mode over %d minutes", len/60);
-      if (ismono)
-	 warn(" Monaural beat checkpoints from %gHz to %gHz", beat[0], beat_end);
-      else
-	 warn(" %s checkpoints from %gHz to %gHz",
-	      isisochronic ? "Pulse" : "Beat", beat[0], beat_end);
-      fprintf(stderr, "   ");
-      for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
-      fprintf(stderr, "\n");
-   }
-   if (func_curve.have_carr_expr)
-      warn(" Carrier expression enabled from .sbgf");
-   if (have_amp_curve)
-      warn(" Beat amplitude expression enabled from .sbgf");
-   if (have_mixamp_curve) {
-      if (have_mix_in_extra)
-	 warn(" Mix amplitude expression enabled from .sbgf");
-      else
-	 warn(" mixamp expression is defined, but no mix/<amp> tone-spec was provided");
-   }
-   if (func_curve.param_count > 0) {
-      fprintf(stderr, " Parameters:");
-      for (a= 0; a<func_curve.param_count; a++)
-	 fprintf(stderr, " %s=%g", func_curve.param_names[a], func_curve.param_values[a]);
-      fprintf(stderr, "\n");
-   }
-   if (ismono)
-      warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
-   if (wakeup)
-      warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
-   if (opt_A) {
-      warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
-	   opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
-      warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
-   }
+   {
+      int have_mix= 0;
+      double mix_amp_pct= 100.0;
+      int end_sec;
+      SbxKfBuilder kfb= {0};
+      SbxMixKfBuilder mkfb= {0};
+      SbxToneSpec tone;
 
-   // Start generating sequence
-   handleOptions("-SE");
-   in_lin= 0;
+      if (!sbx_parse_supported_extra_tokens(extra, &have_mix, &mix_amp_pct))
+	 error("-p curve with sbagenlib runtime currently supports only optional mix/<amp> extra tone-spec");
+      if (have_mix && !mix_in && !opt_m && !opt_M)
+	 warn("mix/<amp> was specified in -p curve extras but no mix input stream is active");
 
-   formatNameDef("off: -");
-   formatTimeLine(86395, "== off ->");		// 23:59:55
-
-   signal= isisochronic ? '@' : '+';
-   if (slide) {
-      // Slide version
-      for (a= 0; a<n_step; a++) {
-	 double amp_t= have_amp_curve ? amp_sam[a] : amp;
-	 int tim= a * len0 / (n_step-1);
-	 curve_format_extra_with_mix_amp(extra,
-					 have_mixamp_curve && have_mix_in_extra,
-					 mix_sam[a], extra_dyn, sizeof(extra_dyn));
-	 if (ismono) {
-	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
-			  carr_sam[a] - beat[a]/2.0, amp_t,
-			  carr_sam[a] + beat[a]/2.0, amp_t, extra_dyn);
-	 } else {
-	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
-			  carr_sam[a], signal, beat[a], amp_t, extra_dyn);
-	 }
-	 formatTimeLine(tim, "== ts%02d ->", a);
-      }
-
-      if (islong) {
-	 double amp_t= have_amp_curve ? amp_end : amp;
-	 curve_format_extra_with_mix_amp(extra,
-					 have_mixamp_curve && have_mix_in_extra,
-					 mix_end, extra_dyn, sizeof(extra_dyn));
-	 if (ismono) {
-	    formatNameDef("tsend: %g/%g %g/%g %s",
-			  carr_end - beat_end/2.0, amp_t,
-			  carr_end + beat_end/2.0, amp_t, extra_dyn);
-	 } else {
-	    formatNameDef("tsend: %g%c%g/%g %s",
-			  carr_end, signal, beat_end, amp_t, extra_dyn);
-	 }
-	 formatTimeLine(len, "== tsend ->");
-      }
-      end= len;
-   } else {
-      // Step version
-      int lim= len / steplen;
-      int stepslide= steplen < 90 ? 5 : 10;	// Seconds slide between steps
-      for (a= 0; a<lim; a++) {
-	 int tim0= a * steplen;
-	 int tim1= (a+1) * steplen;
-	 double beat_t, carr_t, amp_t, mix_t;
-	 if (!eval_custom_curve_point(tim1, &beat_t, &carr_t, &amp_t, &mix_t))
-	    error("Custom curve evaluation failed at t=%d seconds", tim1);
-	 if (!have_amp_curve) amp_t= amp;
-	 curve_format_extra_with_mix_amp(extra,
-					 have_mixamp_curve && have_mix_in_extra,
-					 mix_t, extra_dyn, sizeof(extra_dyn));
-	 if (ismono) {
-	    formatNameDef("ts%02d: %g/%g %g/%g %s", a,
-			  carr_t - beat_t/2.0, amp_t,
-			  carr_t + beat_t/2.0, amp_t, extra_dyn);
-	 } else {
-	    formatNameDef("ts%02d: %g%c%g/%g %s", a,
-			  carr_t, signal, beat_t, amp_t, extra_dyn);
-	 }
-	 formatTimeLine(tim0, "== ts%02d ->", a);
-	 formatTimeLine(tim1-stepslide, "== ts%02d ->", a);
-      }
-      end= len-stepslide;
-      // No runtime override in stepped mode.
-      func_curve.active= 0;
-   }
-
-   // Wake-up and ending
-   if (wakeup) {
-      double amp_t= have_amp_curve ? amp_start_eval : amp;
-      curve_format_extra_with_mix_amp(extra,
-				      have_mixamp_curve && have_mix_in_extra,
-				      mix_start_eval, extra_dyn, sizeof(extra_dyn));
-      if (ismono) {
-	 formatNameDef("tswake: %g/%g %g/%g %s",
-		       carr_start_eval - beat_start_eval/2.0, amp_t,
-		       carr_start_eval + beat_start_eval/2.0, amp_t, extra_dyn);
+      // Display summary
+      warn("CURVE summary:");
+      warn(" Source file: %s", func_curve.src_file);
+      if (slide) {
+	 warn(" Carrier follows custom curve from %gHz to %gHz over %d minutes",
+	      carr_sam[0], carr_end, len/60);
+	 if (ismono)
+	    warn(" Monaural beat frequency follows custom curve from %gHz to %gHz over %d minutes",
+		 beat[0], beat_end, len0/60);
+	 else
+	    warn(" %s frequency follows custom curve from %gHz to %gHz over %d minutes",
+		 isisochronic ? "Pulse" : "Beat", beat[0], beat_end, len0/60);
+	 warn(" Using function-driven curve from .sbgf for sliding mode");
       } else {
-	 formatNameDef("tswake: %g%c%g/%g %s",
-		       carr_start_eval, signal, beat_start_eval, amp_t, extra_dyn);
+	 warn(" Carrier/beat are sampled from custom curve in stepped mode over %d minutes", len/60);
+	 if (ismono)
+	    warn(" Monaural beat checkpoints from %gHz to %gHz", beat[0], beat_end);
+	 else
+	    warn(" %s checkpoints from %gHz to %gHz",
+		 isisochronic ? "Pulse" : "Beat", beat[0], beat_end);
+	 fprintf(stderr, "   ");
+	 for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
+	 fprintf(stderr, "\n");
       }
-      formatTimeLine(end+len2, "== tswake ->");
-      end += len2;
+      if (func_curve.have_carr_expr)
+	 warn(" Carrier expression enabled from .sbgf");
+      if (have_amp_curve)
+	 warn(" Beat amplitude expression enabled from .sbgf");
+      if (have_mixamp_curve) {
+	 if (have_mix_in_extra)
+	    warn(" Mix amplitude expression enabled from .sbgf");
+	 else
+	    warn(" mixamp expression is defined, but no mix/<amp> tone-spec was provided");
+      }
+      if (func_curve.param_count > 0) {
+	 fprintf(stderr, " Parameters:");
+	 for (a= 0; a<func_curve.param_count; a++)
+	    fprintf(stderr, " %s=%g", func_curve.param_names[a], func_curve.param_values[a]);
+	 fprintf(stderr, "\n");
+      }
+      if (ismono)
+	 warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
+      if (wakeup)
+	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
+      if (opt_A) {
+	 warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
+	      opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
+	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
+      }
+
+      signal= isisochronic ? '@' : '+';
+      if (slide) {
+	 for (a= 0; a<n_step; a++) {
+	    double amp_t= have_amp_curve ? amp_sam[a] : amp;
+	    double tim= a * len0 / (double)(n_step-1);
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_sam[a], beat[a], amp_t);
+	    sbx_kfb_add(&kfb, tim, &tone, SBX_INTERP_LINEAR);
+	    if (have_mixamp_curve && have_mix_in_extra)
+	       sbx_mixkfb_add(&mkfb, tim, mix_sam[a], SBX_INTERP_LINEAR);
+	 }
+	 if (islong) {
+	    double amp_t= have_amp_curve ? amp_end : amp;
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, amp_t);
+	    sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
+	    if (have_mixamp_curve && have_mix_in_extra)
+	       sbx_mixkfb_add(&mkfb, (double)len, mix_end, SBX_INTERP_LINEAR);
+	 }
+	 end_sec= len;
+      } else {
+	 int lim= len / steplen;
+	 for (a= 0; a<lim; a++) {
+	    int tim0= a * steplen;
+	    int tim1= (a+1) * steplen;
+	    double beat_t, carr_t, amp_t, mix_t;
+	    if (!eval_custom_curve_point(tim1, &beat_t, &carr_t, &amp_t, &mix_t))
+	       error("Custom curve evaluation failed at t=%d seconds", tim1);
+	    if (!have_amp_curve) amp_t= amp;
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat_t, amp_t);
+	    sbx_kfb_add(&kfb, (double)tim0, &tone, SBX_INTERP_STEP);
+	    if (have_mixamp_curve && have_mix_in_extra)
+	       sbx_mixkfb_add(&mkfb, (double)tim0, mix_t, SBX_INTERP_STEP);
+	 }
+	 sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, have_amp_curve ? amp_end : amp);
+	 sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_STEP);
+	 if (have_mixamp_curve && have_mix_in_extra)
+	    sbx_mixkfb_add(&mkfb, (double)len, mix_end, SBX_INTERP_STEP);
+	 end_sec= len;
+      }
+
+      if (wakeup) {
+	 double amp_t= have_amp_curve ? amp_start_eval : amp;
+	 sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_start_eval, beat_start_eval, amp_t);
+	 sbx_kfb_add(&kfb, (double)(end_sec + len2), &tone, SBX_INTERP_LINEAR);
+	 if (have_mixamp_curve && have_mix_in_extra)
+	    sbx_mixkfb_add(&mkfb, (double)(end_sec + len2), mix_start_eval, SBX_INTERP_LINEAR);
+	 end_sec += len2;
+      }
+
+      sbx_fill_tone_spec(&tone, isisochronic, ismono,
+			 wakeup ? carr_start_eval : carr_end,
+			 wakeup ? beat_start_eval : beat_end,
+			 0.0);
+      sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
+      if (have_mixamp_curve && have_mix_in_extra)
+	 sbx_mixkfb_add(&mkfb, (double)(end_sec + 10), wakeup ? mix_start_eval : mix_end, SBX_INTERP_LINEAR);
+
+      if (opt_D)
+	 sbx_emit_periods_from_keyframes(kfb.v, kfb.n, 0);
+      else
+	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
+					     have_mix ? mix_amp_pct : 100.0,
+					     (have_mixamp_curve && have_mix_in_extra) ? mkfb.v : 0,
+					     (have_mixamp_curve && have_mix_in_extra) ? mkfb.n : 0);
+
+      if (kfb.v) free(kfb.v);
+      if (mkfb.v) free(mkfb.v);
    }
-   formatTimeLine(end+10, "== off");
 
-   correctPeriods();
-
-   // For stepped mode we do not need retained compiled expressions.
-   if (!slide)
-      clear_func_curve();
+   clear_func_curve();
 }
 
 //
@@ -9433,40 +9739,42 @@ create_slide(int ac, char **av) {
       ac--; av++;
    }
 
-   // Summary
-   warn("SLIDE summary:");
-   warn(" Sliding carrier from %gHz to %gHz over %g minutes",
-	c0, c1, len/60.0);
-   if (ismono) {
-      warn(" Holding monaural beat constant at %gHz", beat_abs);
-      warn(" Monaural tone pair: f1=carr-beat/2, f2=carr+beat/2");
-   } else {
-      warn(" Holding %s constant at %gHz", signal == '@' ? "pulse" : "beat", beat);
-   }
+   {
+      int have_mix= 0;
+      double mix_amp_pct= 100.0;
+      SbxKfBuilder kfb= {0};
+      SbxToneSpec tone;
 
-   // Generate sequence
-   handleOptions("-SE");
-   in_lin= 0;
+      if (!sbx_parse_supported_extra_tokens(extra, &have_mix, &mix_amp_pct))
+	 error("-p slide with sbagenlib runtime currently supports only optional mix/<amp> extra tone-spec");
+      if (have_mix && !mix_in && !opt_m && !opt_M)
+	 warn("mix/<amp> was specified in -p slide extras but no mix input stream is active");
 
-   formatNameDef("off: -");
-   formatTimeLine(86395, "== off ->");		// 23:59:55
-   if (ismono) {
-      formatNameDef("ts0: %g/%g %g/%g %s",
-		    c0 - beat_abs/2.0, amp, c0 + beat_abs/2.0, amp, extra);
-   } else {
-      formatNameDef("ts0: %g%c%g/%g %s", c0, signal, beat, amp, extra);
+      // Summary
+      warn("SLIDE summary:");
+      warn(" Sliding carrier from %gHz to %gHz over %g minutes",
+	   c0, c1, len/60.0);
+      if (ismono) {
+	 warn(" Holding monaural beat constant at %gHz", beat_abs);
+	 warn(" Monaural tone pair: f1=carr-beat/2, f2=carr+beat/2");
+      } else {
+	 warn(" Holding %s constant at %gHz", signal == '@' ? "pulse" : "beat", beat);
+      }
+
+      sbx_fill_tone_spec(&tone, signal == '@', ismono, c0, signal == '-' ? -beat_abs : beat_abs, amp);
+      sbx_kfb_add(&kfb, 0.0, &tone, SBX_INTERP_LINEAR);
+      sbx_fill_tone_spec(&tone, signal == '@', ismono, c1, signal == '-' ? -beat_abs : beat_abs, amp);
+      sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
+      sbx_fill_tone_spec(&tone, signal == '@', ismono, c1, signal == '-' ? -beat_abs : beat_abs, 0.0);
+      sbx_kfb_add(&kfb, (double)len + 10.0, &tone, SBX_INTERP_LINEAR);
+
+      if (opt_D)
+	 sbx_emit_periods_from_keyframes(kfb.v, kfb.n, 0);
+      else
+	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0, have_mix ? mix_amp_pct : 100.0, 0, 0);
+
+      if (kfb.v) free(kfb.v);
    }
-   formatTimeLine(0, "== ts0 ->");
-   if (ismono) {
-      formatNameDef("ts1: %g/%g %g/%g %s",
-		    c1 - beat_abs/2.0, amp, c1 + beat_abs/2.0, amp, extra);
-   } else {
-      formatNameDef("ts1: %g%c%g/%g %s", c1, signal, beat, amp, extra);
-   }
-   formatTimeLine(len, "== ts1 ->");
-   formatTimeLine(len+10, "== off");
-   
-   correctPeriods();
 }   
 
 // Function to normalize the total amplitude of voices
