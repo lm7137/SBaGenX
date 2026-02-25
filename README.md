@@ -1,10 +1,10 @@
-<img src="assets/sbagenx.png" alt="SBaGenX Logo" width="32" height="32"> SBaGenX - Sequenced Brainwave Generator
+# SBaGenX - Sequenced Brainwave Generator
 
-SBaGenX is a command-line tool for generating binaural beats, monaural beats and isochronic tones, designed to assist with meditation, relaxation, and altering states of consciousness.
+SBaGenX is a command-line brainwave generator for creating binaural beats, monaural beats, and isochronic tones. It is designed for precise, scriptable session design and advanced audio experimentation.
 
-Project website: [sbagenx.com](https://www.sbagenx.com)
+**Project website:** https://www.sbagenx.com
 
-> **SBaGenX is a fork of the project SBaGen+, which is no longer under active development.**  
+> **SBaGenX is a fork of SBaGen+, continuing development of the original SBaGen lineage.**
 > Full credit is due, first and foremost, to the father of SBaGen, Jim Peters, and also to the creator of the SBaGen+ fork, Ruan Klein, who added isochronic beats as well as making numerous enhancements.
 
 ## Table of Contents
