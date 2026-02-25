@@ -111,7 +111,7 @@ Phase 3.16
 - Apply CLI global waveform default (`-w`) to sbagenlib-backed immediate and
   preprogram tone generation when no explicit waveform prefix is provided.
 
-Phase 3.17 (current slice)
+Phase 3.17
 - Add context-level default waveform control via
   `sbx_context_set_default_waveform()`.
 - Apply the default waveform to unprefixed tones loaded through
@@ -120,10 +120,17 @@ Phase 3.17 (current slice)
 - Wire `sbagenx -p libseq` / `-p libsbg` to pass CLI global `-w` as the
   sbagenlib context default waveform.
 
+Phase 3.18 (current slice)
+- Add opportunistic sbagenlib routing for normal CLI `seq-file` input:
+  if a sequence file matches the sbagenlib timing/tone subset loaders, run it
+  directly via sbagenlib runtime.
+- Keep automatic fallback to the legacy parser/runtime for full-feature `.sbg`
+  constructs that are outside current sbagenlib subset support.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.17 Slice)
+Current API (Phase 3.18 Slice)
 ------------------------------
 
 Public header: `sbagenlib.h`
@@ -216,7 +223,8 @@ Notes
 
 - This is intentionally a minimal, stable core API.
 - `sbagenx` now uses sbagenlib runtime for `-p libseq`, `-p libsbg`,
-  and built-in preprogram generators (`drop/sigmoid/curve/slide`).
+  built-in preprogram generators (`drop/sigmoid/curve/slide`), and
+  compatible direct `seq-file` inputs.
 - Remaining work is focused on full legacy `.sbg` path parity and legacy
   non-core voice/effect migration.
 

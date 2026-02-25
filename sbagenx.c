@@ -214,6 +214,7 @@ int readLine() ;
 char * getWord() ;
 void badSeq() ;
 int sbx_try_readSeqImm_runtime(int ac, char **av);
+int sbx_try_readSeq_runtime(int ac, char **av);
 void readSeqImm(int ac, char **av) ;
 void readSeq(int ac, char **av) ;
 void readPreProg(int ac, char **av) ;
@@ -301,6 +302,7 @@ int try_external_curve_graph_png(const char *out_fname,
 int try_external_iso_cycle_graph_png(const char *out_fname,
 				     double carr_hz, double pulse_hz,
 				     double amp_pct, int waveform);
+static void emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested);
 
 #define ALLOC_ARR(cnt, type) ((type*)Alloc((cnt) * sizeof(type)))
 #define uint unsigned int
@@ -7215,6 +7217,65 @@ readSeqImm(int ac, char **av) {
    correctPeriods();
 }
 
+int
+sbx_try_readSeq_runtime(int ac, char **av) {
+   const char *fnam;
+   SbxEngineConfig cfg;
+   SbxContext *ctx;
+   int rc;
+
+   if (ac != 1 || !av)
+      return 0;
+   fnam= av[0];
+   if (!fnam || 0 == strcmp(fnam, "-"))
+      return 0;
+
+   sbx_default_engine_config(&cfg);
+   cfg.sample_rate= (double)out_rate;
+   cfg.channels= 2;
+   ctx= sbx_context_create(&cfg);
+   if (!ctx)
+      return 0;
+   if (sbx_context_set_default_waveform(ctx, opt_w) != SBX_OK) {
+      sbx_context_destroy(ctx);
+      return 0;
+   }
+
+   rc= sbx_context_load_sbg_timing_file(ctx, fnam, 0);
+   if (rc != SBX_OK)
+      rc= sbx_context_load_sequence_file(ctx, fnam, 0);
+   if (rc != SBX_OK) {
+      sbx_context_destroy(ctx);
+      return 0;
+   }
+
+   if (opt_A && !opt_m && !opt_M)
+      error("-A requires a mix input stream; use -m <file> or -M");
+
+   if (opt_D) {
+      emit_periods_from_sbx_context(ctx, 0);
+      sbx_context_destroy(ctx);
+      return 1;
+   }
+
+   // Runtime playback via sbagenlib context.
+   sbx_runtime_clear();
+   sbx_runtime_ctx= ctx;
+   sbx_runtime_active= 1;
+   sbx_runtime_loop= 0;
+   sbx_runtime_mix_amp_pct= 100.0;
+   sbx_runtime_total_sec= 0.0;
+   {
+      size_t kn= sbx_context_keyframe_count(ctx);
+      SbxProgramKeyframe kf;
+      if (kn > 0 && sbx_context_get_keyframe(ctx, kn-1, &kf) == SBX_OK)
+	 sbx_runtime_total_sec= kf.time_sec;
+   }
+   if (!opt_Q)
+      warn("Using sbagenlib runtime for sequence file subset: %s", fnam);
+   return 1;
+}
+
 //
 //	Read a list of sequence files, and generate a list of Period
 //	structures
@@ -7222,6 +7283,9 @@ readSeqImm(int ac, char **av) {
 
 void 
 readSeq(int ac, char **av) {
+   if (sbx_try_readSeq_runtime(ac, av))
+      return;
+
    // Setup a 'now' value to use for NOW in the sequence file
    now= calcNow();	
 
