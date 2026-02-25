@@ -58,17 +58,23 @@ Phase 3.6
   migration work.
 - Add direct API tests for keyframe access behavior.
 
-Phase 3.7 (current slice)
+Phase 3.7
 - Wire an initial `sbagenx` CLI bridge that can load sbagenlib keyframes from
   external files.
 - Add `-p libseq` (minimal keyframe text) and `-p libsbg` (HH:MM subset) paths.
 - Keep legacy runtime unchanged for existing `drop`/`sigmoid`/`curve`/`slide`
   flows while proving end-to-end library-to-CLI integration.
 
+Phase 3.8 (current slice)
+- Improve bridge fidelity for keyframe transition modes.
+- Preserve `step`/`hold` intent by emitting hold markers ahead of the next
+  keyframe boundary in the generated legacy timeline.
+- Add optional bridge-level `loop` token handling for `-p libseq`/`-p libsbg`.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.7 Slice)
+Current API (Phase 3.8 Slice)
 ---------------------------
 
 Public header: `sbagenlib.h`
@@ -272,3 +278,5 @@ Notes:
 - `libseq` reads the Phase 3.3 line format: `<time> <tone-spec> [interp]`.
 - `libsbg` reads the Phase 3.4 timing subset: `<HH:MM[:SS]> <tone-spec> [interp]`.
 - Optional trailing `loop` token is accepted by both bridge commands.
+- `step`/`hold` interpolation now emits hold timeline markers so the bridged
+  legacy sequence better matches keyframe segment behavior.

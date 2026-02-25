@@ -8371,6 +8371,16 @@ emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested) {
       if (t_sec < 0) t_sec= 0;
       if (t_sec > 86399) t_sec= 86399;
       formatTimeLine(t_sec, "== %s ->", name);
+
+      if (kf.interp == SBX_INTERP_STEP && i + 1 < n) {
+	 SbxProgramKeyframe next_kf;
+	 if (sbx_context_get_keyframe(ctx, i + 1, &next_kf) == SBX_OK) {
+	    int next_t= (int)(next_kf.time_sec + 0.5);
+	    int hold_t= next_t - 1;
+	    if (hold_t > t_sec && hold_t <= 86399)
+	       formatTimeLine(hold_t, "== %s ->", name);
+	 }
+      }
       if (t_sec > end_sec) end_sec= t_sec;
    }
 
