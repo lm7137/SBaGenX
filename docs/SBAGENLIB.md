@@ -37,15 +37,20 @@ Phase 3.2
 - Add optional looped playback for keyframed programs.
 - Keep CLI behavior unchanged while library runtime expands.
 
-Phase 3.3 (current slice)
+Phase 3.3
 - Add minimal sequence text/file loader APIs on top of keyframes.
 - Support simple line-based format: `<time> <tone-spec>`.
 - Keep CLI behavior unchanged while increasing reusable library coverage.
 
+Phase 3.4 (current slice)
+- Add a thin subset loader for real `.sbg` timing-style lines.
+- Support `HH:MM` and `HH:MM:SS` timing tokens with tone-specs.
+- Keep CLI behavior unchanged while moving sequence parsing into the library.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.3 Slice)
+Current API (Phase 3.4 Slice)
 ---------------------------
 
 Public header: `sbagenlib.h`
@@ -70,6 +75,8 @@ Public header: `sbagenlib.h`
   - `sbx_context_load_keyframes()`
   - `sbx_context_load_sequence_text()`
   - `sbx_context_load_sequence_file()`
+  - `sbx_context_load_sbg_timing_text()`
+  - `sbx_context_load_sbg_timing_file()`
   - `sbx_context_render_f32()`
   - `sbx_context_time_sec()`
   - `sbx_context_last_error()`
@@ -108,6 +115,17 @@ Minimal sequence text/file form (Phase 3.3):
   - `// ...`
 - Example file:
   - `examples/sbagenlib/minimal-keyframes.sbxseq`
+
+SBG timing subset form (Phase 3.4):
+- One keyframe line per non-empty line:
+  - `<HH:MM> <tone-spec>`
+  - `<HH:MM:SS> <tone-spec>`
+- Supported comments:
+  - `# ...`
+  - `; ...`
+  - `// ...`
+- Example file:
+  - `examples/sbagenlib/minimal-sbg-timing.sbg`
 
 Notes
 -----
@@ -182,4 +200,18 @@ Expected output:
 
 ```text
 PASS: sbagenlib sequence loader API checks
+```
+
+SBG Timing Loader Test (Phase 3.4)
+----------------------------------
+
+```bash
+gcc -O2 -I. tests/sbagenlib/test_sbg_timing_loader_api.c sbagenlib.c -lm -o /tmp/test_sbx_sbg_loader
+/tmp/test_sbx_sbg_loader
+```
+
+Expected output:
+
+```text
+PASS: sbagenlib sbg timing loader checks
 ```

@@ -1,0 +1,13 @@
+# Minimal .sbg timing subset for sbagenlib (Phase 3.4)
+# Supported format:
+#   HH:MM tone-spec
+#   HH:MM:SS tone-spec
+#
+# Example tones:
+#   binaural   200+8/20
+#   monaural   200M8/20
+#   isochronic 200@8/20
+
+00:00    200+10/20
+00:30    190+8/20
+01:00    180+6/20

@@ -156,6 +156,80 @@ parse_time_seconds_token(const char *tok, double *out_sec) {
 }
 
 static int
+parse_hhmmss_token(const char *tok, double *out_sec) {
+  int hh = 0, mm = 0, ss = 0;
+  char tail[2];
+  if (!tok || !*tok || !out_sec) return SBX_EINVAL;
+
+  if (sscanf(tok, "%d:%d:%d%1s", &hh, &mm, &ss, tail) == 3) {
+    if (hh < 0 || mm < 0 || mm >= 60 || ss < 0 || ss >= 60) return SBX_EINVAL;
+    *out_sec = (double)hh * 3600.0 + (double)mm * 60.0 + (double)ss;
+    return SBX_OK;
+  }
+  if (sscanf(tok, "%d:%d%1s", &hh, &mm, tail) == 2) {
+    if (hh < 0 || mm < 0 || mm >= 60) return SBX_EINVAL;
+    *out_sec = (double)hh * 3600.0 + (double)mm * 60.0;
+    return SBX_OK;
+  }
+  return SBX_EINVAL;
+}
+
+static int
+read_text_file_alloc(const char *path, char **out_text) {
+  FILE *fp = 0;
+  char chunk[4096];
+  char *text = 0;
+  size_t len = 0, cap = 0;
+
+  if (!path || !out_text) return SBX_EINVAL;
+  *out_text = 0;
+
+  fp = fopen(path, "rb");
+  if (!fp) return SBX_EINVAL;
+
+  for (;;) {
+    size_t n = fread(chunk, 1, sizeof(chunk), fp);
+    if (n > 0) {
+      char *tmp;
+      size_t need = len + n + 1;
+      if (need > cap) {
+        size_t ncap = cap ? cap : 4096;
+        while (ncap < need) ncap *= 2;
+        tmp = (char *)realloc(text, ncap);
+        if (!tmp) {
+          if (text) free(text);
+          fclose(fp);
+          return SBX_ENOMEM;
+        }
+        text = tmp;
+        cap = ncap;
+      }
+      memcpy(text + len, chunk, n);
+      len += n;
+      text[len] = 0;
+    }
+    if (n < sizeof(chunk)) {
+      if (ferror(fp)) {
+        if (text) free(text);
+        fclose(fp);
+        return SBX_EINVAL;
+      }
+      break;
+    }
+  }
+
+  fclose(fp);
+  if (!text) {
+    text = (char *)malloc(1);
+    if (!text) return SBX_ENOMEM;
+    text[0] = 0;
+  }
+
+  *out_text = text;
+  return SBX_OK;
+}
+
+static int
 normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   if (!tone) return SBX_EINVAL;
   if (err && err_sz) err[0] = 0;
@@ -777,68 +851,176 @@ done:
 
 int
 sbx_context_load_sequence_file(SbxContext *ctx, const char *path, int loop) {
-  FILE *fp = 0;
-  char chunk[4096];
   char *text = 0;
-  size_t len = 0, cap = 0;
   int rc = SBX_OK;
 
   if (!ctx || !ctx->eng || !path) return SBX_EINVAL;
 
-  fp = fopen(path, "rb");
-  if (!fp) {
+  rc = read_text_file_alloc(path, &text);
+  if (rc == SBX_EINVAL) {
     char emsg[256];
     snprintf(emsg, sizeof(emsg), "cannot open sequence file: %s", path);
     set_ctx_error(ctx, emsg);
-    return SBX_EINVAL;
-  }
-
-  for (;;) {
-    size_t n = fread(chunk, 1, sizeof(chunk), fp);
-    if (n > 0) {
-      char *tmp;
-      size_t need = len + n + 1;
-      if (need > cap) {
-        size_t ncap = cap ? cap : 4096;
-        while (ncap < need) ncap *= 2;
-        tmp = (char *)realloc(text, ncap);
-        if (!tmp) {
-          set_ctx_error(ctx, "out of memory");
-          rc = SBX_ENOMEM;
-          goto done;
-        }
-        text = tmp;
-        cap = ncap;
-      }
-      memcpy(text + len, chunk, n);
-      len += n;
-      text[len] = 0;
-    }
-    if (n < sizeof(chunk)) {
-      if (ferror(fp)) {
-        set_ctx_error(ctx, "failed reading sequence file");
-        rc = SBX_EINVAL;
-      }
-      break;
-    }
-  }
-  if (rc != SBX_OK) goto done;
-
-  if (!text) {
-    text = (char *)malloc(1);
-    if (!text) {
-      set_ctx_error(ctx, "out of memory");
-      rc = SBX_ENOMEM;
-      goto done;
-    }
-    text[0] = 0;
+    return rc;
+  } else if (rc == SBX_ENOMEM) {
+    set_ctx_error(ctx, "out of memory");
+    return rc;
+  } else if (rc != SBX_OK) {
+    set_ctx_error(ctx, "failed reading sequence file");
+    return rc;
   }
 
   rc = sbx_context_load_sequence_text(ctx, text, loop);
 
-done:
-  if (fp) fclose(fp);
   if (text) free(text);
+  return rc;
+}
+
+int
+sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
+  char *buf = 0, *line = 0, *next = 0;
+  size_t line_no = 0;
+  SbxProgramKeyframe *frames = 0;
+  size_t count = 0, cap = 0;
+  int rc = SBX_OK;
+
+  if (!ctx || !ctx->eng || !text) return SBX_EINVAL;
+
+  buf = sbx_strdup_local(text);
+  if (!buf) {
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+
+  line = buf;
+  while (line && *line) {
+    char *p, *q;
+    char *time_tok;
+    char *tone_tok;
+    double tsec;
+    SbxToneSpec tone;
+
+    line_no++;
+    next = strchr(line, '\n');
+    if (next) {
+      *next = 0;
+      next++;
+    }
+
+    if (line[0] && line[strlen(line) - 1] == '\r')
+      line[strlen(line) - 1] = 0;
+
+    strip_inline_comment(line);
+    rstrip_inplace(line);
+    p = (char *)skip_ws(line);
+    if (*p == 0) {
+      line = next;
+      continue;
+    }
+
+    q = p;
+    while (*q && !isspace((unsigned char)*q)) q++;
+    if (*q == 0) {
+      char emsg[208];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: expected '<HH:MM[:SS]> <tone-spec>'",
+               (unsigned long)line_no);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+    *q++ = 0;
+    q = (char *)skip_ws(q);
+    if (*q == 0) {
+      char emsg[192];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: missing tone-spec",
+               (unsigned long)line_no);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+
+    time_tok = p;
+    tone_tok = q;
+
+    rc = parse_hhmmss_token(time_tok, &tsec);
+    if (rc != SBX_OK) {
+      char emsg[224];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: invalid SBG timing token '%s'",
+               (unsigned long)line_no, time_tok);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+
+    rc = sbx_parse_tone_spec(tone_tok, &tone);
+    if (rc != SBX_OK) {
+      char emsg[224];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: invalid tone-spec '%s'",
+               (unsigned long)line_no, tone_tok);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+
+    if (count == cap) {
+      size_t ncap = cap ? (cap * 2) : 8;
+      SbxProgramKeyframe *tmp;
+      tmp = (SbxProgramKeyframe *)realloc(frames, ncap * sizeof(*frames));
+      if (!tmp) {
+        set_ctx_error(ctx, "out of memory");
+        rc = SBX_ENOMEM;
+        goto done;
+      }
+      frames = tmp;
+      cap = ncap;
+    }
+
+    frames[count].time_sec = tsec;
+    frames[count].tone = tone;
+    count++;
+    line = next;
+  }
+
+  if (count == 0) {
+    set_ctx_error(ctx, "sbg timing text contains no keyframes");
+    rc = SBX_EINVAL;
+    goto done;
+  }
+
+  rc = sbx_context_load_keyframes(ctx, frames, count, loop);
+
+done:
+  if (frames) free(frames);
+  if (buf) free(buf);
+  return rc;
+}
+
+int
+sbx_context_load_sbg_timing_file(SbxContext *ctx, const char *path, int loop) {
+  char *text = 0;
+  int rc;
+  if (!ctx || !ctx->eng || !path) return SBX_EINVAL;
+
+  rc = read_text_file_alloc(path, &text);
+  if (rc == SBX_EINVAL) {
+    char emsg[256];
+    snprintf(emsg, sizeof(emsg), "cannot open sbg timing file: %s", path);
+    set_ctx_error(ctx, emsg);
+    return rc;
+  } else if (rc == SBX_ENOMEM) {
+    set_ctx_error(ctx, "out of memory");
+    return rc;
+  } else if (rc != SBX_OK) {
+    set_ctx_error(ctx, "failed reading sbg timing file");
+    return rc;
+  }
+
+  rc = sbx_context_load_sbg_timing_text(ctx, text, loop);
+  free(text);
   return rc;
 }
 
