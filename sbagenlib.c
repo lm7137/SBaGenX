@@ -1,4 +1,5 @@
 #include "sbagenlib.h"
+#include "sbagenlib_dsp.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -32,27 +33,6 @@ set_last_error(SbxEngine *eng, const char *msg) {
     return;
   }
   snprintf(eng->last_error, sizeof(eng->last_error), "%s", msg);
-}
-
-static double
-clamp(double v, double lo, double hi) {
-  if (v < lo) return lo;
-  if (v > hi) return hi;
-  return v;
-}
-
-static double
-wrap_phase(double p) {
-  while (p >= SBX_TAU) p -= SBX_TAU;
-  while (p < 0.0) p += SBX_TAU;
-  return p;
-}
-
-static double
-smoothstep(double x) {
-  if (x <= 0.0) return 0.0;
-  if (x >= 1.0) return 1.0;
-  return x * x * (3.0 - 2.0 * x);
 }
 
 const char *
@@ -152,7 +132,7 @@ sbx_engine_set_tone(SbxEngine *eng, const SbxToneSpec *tone_in) {
       set_last_error(eng, "amplitude must be finite");
       return SBX_EINVAL;
     }
-    tone.amplitude = clamp(tone.amplitude, 0.0, 1.0);
+    tone.amplitude = sbx_dsp_clamp(tone.amplitude, 0.0, 1.0);
   }
 
   if (tone.mode == SBX_TONE_MONAURAL || tone.mode == SBX_TONE_ISOCHRONIC) {
@@ -168,7 +148,7 @@ sbx_engine_set_tone(SbxEngine *eng, const SbxToneSpec *tone_in) {
       set_last_error(eng, "duty_cycle must be finite");
       return SBX_EINVAL;
     }
-    tone.duty_cycle = clamp(tone.duty_cycle, 0.01, 1.0);
+    tone.duty_cycle = sbx_dsp_clamp(tone.duty_cycle, 0.01, 1.0);
   }
 
   eng->tone = tone;
@@ -206,39 +186,30 @@ sbx_engine_render_f32(SbxEngine *eng, float *out, size_t frames) {
       double f_r = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
       left = amp * sin(eng->phase_l);
       right = amp * sin(eng->phase_r);
-      eng->phase_l = wrap_phase(eng->phase_l + SBX_TAU * f_l / sr);
-      eng->phase_r = wrap_phase(eng->phase_r + SBX_TAU * f_r / sr);
+      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f_l / sr, SBX_TAU);
+      eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f_r / sr, SBX_TAU);
     } else if (eng->tone.mode == SBX_TONE_MONAURAL) {
       double f1 = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
       double f2 = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
       double mono = 0.5 * amp * (sin(eng->phase_l) + sin(eng->phase_r));
       left = mono;
       right = mono;
-      eng->phase_l = wrap_phase(eng->phase_l + SBX_TAU * f1 / sr);
-      eng->phase_r = wrap_phase(eng->phase_r + SBX_TAU * f2 / sr);
+      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f1 / sr, SBX_TAU);
+      eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f2 / sr, SBX_TAU);
     } else {
       double env = 0.0;
       double duty = eng->tone.duty_cycle;
-      double edge = duty * 0.15;
       double pos;
       double carrier;
 
       carrier = sin(eng->phase_l);
-      eng->phase_l = wrap_phase(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr);
+      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr, SBX_TAU);
 
       eng->pulse_phase += eng->tone.beat_hz / sr;
       while (eng->pulse_phase >= 1.0) eng->pulse_phase -= 1.0;
       pos = eng->pulse_phase;
 
-      if (pos < duty) {
-        if (edge > 1e-9 && pos < edge) {
-          env = smoothstep(pos / edge);
-        } else if (edge > 1e-9 && pos > (duty - edge)) {
-          env = smoothstep((duty - pos) / edge);
-        } else {
-          env = 1.0;
-        }
-      }
+      env = sbx_dsp_iso_mod_factor_custom(pos, 0.0, duty, 0.15, 0.15, 2);
 
       left = right = amp * env * carrier;
     }

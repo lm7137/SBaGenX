@@ -181,6 +181,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "libs/stb_image_write.h"
 #include "libs/tinyexpr.h"
+#include "sbagenlib_dsp.h"
 
 typedef struct Channel Channel;
 typedef struct Voice Voice;
@@ -1090,9 +1091,7 @@ static double curve_fn_step(double x) {
 static double curve_fn_clamp(double x, double lo, double hi) {
    double t;
    if (lo > hi) { t= lo; lo= hi; hi= t; }
-   if (x < lo) x= lo;
-   if (x > hi) x= hi;
-   return x;
+   return sbx_dsp_clamp(x, lo, hi);
 }
 
 static double curve_fn_lerp(double a, double b, double u) {
@@ -1106,12 +1105,12 @@ static double curve_fn_ramp(double x, double x0, double x1) {
 
 static double curve_fn_smoothstep(double edge0, double edge1, double x) {
    double u= curve_fn_ramp(x, edge0, edge1);
-   return u*u*(3.0 - 2.0*u);
+   return sbx_dsp_smoothstep01(u);
 }
 
 static double curve_fn_smootherstep(double edge0, double edge1, double x) {
    double u= curve_fn_ramp(x, edge0, edge1);
-   return u*u*u*(u*(u*6.0 - 15.0) + 10.0);
+   return sbx_dsp_smootherstep01(u);
 }
 
 static double curve_fn_between(double x, double a, double b) {
@@ -2367,59 +2366,17 @@ parse_iso_gate_option_spec(const char *spec) {
 }
 
 static double
-iso_edge_shape(double x, int mode) {
-   if (x <= 0.0) return 0.0;
-   if (x >= 1.0) return 1.0;
-   switch (mode) {
-    case 0: return x > 0.0 ? 1.0 : 0.0;                    // Hard edge
-    case 1: return x;                                       // Linear
-    case 3: return x*x*x*(x*(x*6.0 - 15.0) + 10.0);        // Smootherstep
-    case 2:
-    default: return x*x*(3.0 - 2.0*x);                     // Smoothstep
-   }
-}
-
-static double
 isochronic_mod_factor_phase_custom(double phase,
 				   double start, double duty,
 				   double attack, double release,
 				   int edge_mode) {
-   double end= start + duty;
-   double u= -1.0;
-
-   phase -= floor(phase);
-   if (phase < 0.0) phase += 1.0;
-
-   if (duty >= 1.0)
-      return 1.0;
-
-   if (end <= 1.0) {
-      if (phase >= start && phase < end)
-	 u= (phase - start) / duty;
-   } else {
-      if (phase >= start)
-	 u= (phase - start) / duty;
-      else if (phase < (end - 1.0))
-	 u= (phase + (1.0 - start)) / duty;
-   }
-
-   if (u <= 0.0 || u >= 1.0)
-      return 0.0;
-
-   if (attack > 0.0 && u < attack)
-      return iso_edge_shape(u / attack, edge_mode);
-   if (u <= (1.0 - release))
-      return 1.0;
-   if (release > 0.0)
-      return iso_edge_shape((1.0 - u) / release, edge_mode);
-   return 0.0;
+   return sbx_dsp_iso_mod_factor_custom(phase, start, duty, attack, release, edge_mode);
 }
 
 static double
 wave_sample_phase(int waveform, double phase) {
    int idx;
-   while (phase < 0.0) phase += 1.0;
-   phase -= floor(phase);
+   phase= sbx_dsp_wrap_unit(phase);
    idx= (int)(phase * ST_SIZ);
    if (idx >= ST_SIZ) idx= ST_SIZ-1;
    return sin_tables[waveform][idx] / (double)ST_AMP;
@@ -2432,7 +2389,7 @@ isochronic_mod_factor_phase_legacy(double phase, int waveform) {
    double threshold= 0.3;
    if (wave > threshold) {
       mod_factor= (wave - threshold) / (1.0 - threshold);
-      mod_factor= mod_factor * mod_factor * (3.0 - 2.0 * mod_factor);
+      mod_factor= sbx_dsp_smoothstep01(mod_factor);
    }
    return mod_factor;
 }
