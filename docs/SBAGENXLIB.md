@@ -163,17 +163,24 @@ Phase 3.24
   - include bell in sbagenx/sbagenxlib bridge formatting and runtime
     extra-tone diagnostics.
 
-Phase 3.25 (current slice)
+Phase 3.25
 - Extend sbagenx/sbagenxlib runtime adapter to accept preprogram extra mix
   effects in library-backed paths:
   - `mixspin`, `mixpulse`, `mixbeat` token parsing,
   - runtime mix-stream effect processing in `outChunkSbx`,
   - validation requiring both a mix input stream and explicit `mix/<amp>`.
 
+Phase 3.26 (current slice)
+- Extend sbagenx/sbagenxlib runtime adapter immediate mode (`-i`) to accept
+  extra mix effects:
+  - `mixspin`, `mixpulse`, `mixbeat` token parsing for `-i`,
+  - same validation rules (`-m`/`-M` active and explicit `mix/<amp>`),
+  - include parsed mix effects in `-D` immediate output.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.25 Slice)
+Current API (Phase 3.26 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -401,4 +408,5 @@ Notes:
   (`mixspin`/`mixpulse`/`mixbeat`) are now handled by the sbagenx adapter
   when mix input is active and `mix/<amp>` is present.
 - Immediate mode (`-i`) now uses sbagenxlib runtime when all provided tone-specs
-  are sbagenxlib-parseable (legacy-only specs automatically fall back).
+  are sbagenxlib-parseable, including adapter-handled mix effects
+  (`mixspin`/`mixpulse`/`mixbeat`).
