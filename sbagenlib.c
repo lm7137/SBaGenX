@@ -1135,6 +1135,20 @@ sbx_context_load_sbg_timing_file(SbxContext *ctx, const char *path, int loop) {
   return rc;
 }
 
+size_t
+sbx_context_keyframe_count(const SbxContext *ctx) {
+  if (!ctx || !ctx->kfs) return 0;
+  return ctx->kf_count;
+}
+
+int
+sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out) {
+  if (!ctx || !out || !ctx->kfs) return SBX_EINVAL;
+  if (index >= ctx->kf_count) return SBX_EINVAL;
+  *out = ctx->kfs[index];
+  return SBX_OK;
+}
+
 int
 sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   int rc;

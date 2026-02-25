@@ -47,15 +47,21 @@ Phase 3.4
 - Support `HH:MM` and `HH:MM:SS` timing tokens with tone-specs.
 - Keep CLI behavior unchanged while moving sequence parsing into the library.
 
-Phase 3.5 (current slice)
+Phase 3.5
 - Add transition semantics on keyframe segments (`linear`/`step`).
 - Handle boundary behavior at exact keyframe times deterministically.
 - Add timing/interpolation edge-case validation in loaders and tests.
 
+Phase 3.6 (current slice)
+- Add keyframe introspection APIs on `SbxContext`.
+- Expose keyframe count and indexed keyframe retrieval for adapter/front-end
+  migration work.
+- Add direct API tests for keyframe access behavior.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.5 Slice)
+Current API (Phase 3.6 Slice)
 ---------------------------
 
 Public header: `sbagenlib.h`
@@ -82,6 +88,8 @@ Public header: `sbagenlib.h`
   - `sbx_context_load_sequence_file()`
   - `sbx_context_load_sbg_timing_text()`
   - `sbx_context_load_sbg_timing_file()`
+  - `sbx_context_keyframe_count()`
+  - `sbx_context_get_keyframe()`
   - `sbx_context_render_f32()`
   - `sbx_context_time_sec()`
   - `sbx_context_last_error()`
@@ -229,3 +237,17 @@ Transition Semantics Note (Phase 3.5)
 
 - `step`/`hold` keeps the current keyframe tone until the next keyframe time.
 - At exact keyframe boundaries, the new keyframe tone is selected.
+
+Keyframe Access API Test (Phase 3.6)
+------------------------------------
+
+```bash
+gcc -O2 -I. tests/sbagenlib/test_keyframe_access_api.c sbagenlib.c -lm -o /tmp/test_sbx_keyframe_access_api
+/tmp/test_sbx_keyframe_access_api
+```
+
+Expected output:
+
+```text
+PASS: sbagenlib keyframe access API checks
+```

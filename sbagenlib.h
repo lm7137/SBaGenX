@@ -89,6 +89,8 @@ int sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop);
 int sbx_context_load_sequence_file(SbxContext *ctx, const char *path, int loop);
 int sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop);
 int sbx_context_load_sbg_timing_file(SbxContext *ctx, const char *path, int loop);
+size_t sbx_context_keyframe_count(const SbxContext *ctx);
+int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out);
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);
 double sbx_context_time_sec(const SbxContext *ctx);
 const char *sbx_context_last_error(const SbxContext *ctx);
