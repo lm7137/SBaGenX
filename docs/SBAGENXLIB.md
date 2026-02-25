@@ -141,14 +141,25 @@ Phase 3.20
   `SBAGENX_SEQ_BACKEND=auto`, while keeping explicit sbagenxlib dump behavior
   available via `SBAGENX_SEQ_BACKEND=sbagenxlib` (or `-p libseq` / `-p libsbg`).
 
-Phase 3.21 (current slice)
+Phase 3.21
 - Surface `SBAGENX_SEQ_BACKEND` in CLI help output so backend selection is
   discoverable during migration/testing.
+
+Phase 3.22
+- Complete repository/library naming migration from `sbagenlib` to
+  `sbagenxlib`, with compatibility aliases retained where needed.
+
+Phase 3.23 (current slice)
+- Add spin-noise tone support to sbagenxlib:
+  - `spin:` (pink base), `bspin:` (brown base), `wspin:` (white base)
+  - waveform-aware spin modulation via existing waveform prefixes/defaults.
+- Extend sbagenx/sbagenxlib bridge formatting and extra-tone diagnostics to
+  include spin-family tones in library-native runtime paths.
 
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.21 Slice)
+Current API (Phase 3.23 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -186,7 +197,8 @@ Supported tone modes in this first extraction:
 - binaural,
 - monaural,
 - isochronic (simple gated model),
-- white/pink/brown noise.
+- white/pink/brown noise,
+- spin-noise tones (`spin`, `bspin`, `wspin`).
 
 Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `<carrier>+<beat>/<amp>` (binaural)
@@ -195,6 +207,9 @@ Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `<carrier>@<pulse>/<amp>` (isochronic)
 - `<carrier>/<amp>` (single tone, mapped to binaural with beat=0)
 - `white/<amp>`, `pink/<amp>`, `brown/<amp>` (noise tones)
+- `spin:<width-us><spin-hz>/<amp>` (pink-noise spin)
+- `bspin:<width-us><spin-hz>/<amp>` (brown-noise spin)
+- `wspin:<width-us><spin-hz>/<amp>` (white-noise spin)
 - Optional waveform name prefixes are parsed and stored in
   `SbxToneSpec.waveform`: `sine:`, `square:`, `triangle:`, `sawtooth:`
 - When loading through a context, unprefixed tonal specs use that context's

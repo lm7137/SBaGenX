@@ -19,6 +19,15 @@ static int has_energy(const float *buf, size_t n) {
   return e > 1e-6;
 }
 
+static int has_stereo_difference(const float *buf, size_t frames) {
+  size_t i;
+  double d = 0.0;
+  for (i = 0; i < frames; i++) {
+    d += fabs((double)buf[i * 2] - (double)buf[i * 2 + 1]);
+  }
+  return d > 1e-6;
+}
+
 static void assert_parse(const char *spec, SbxToneMode mode, double carrier, double beat, double amp, int abs_beat, int waveform) {
   SbxToneSpec t;
   if (sbx_parse_tone_spec(spec, &t) != SBX_OK) fail("parse failed unexpectedly");
@@ -45,6 +54,9 @@ int main(void) {
   assert_parse("200@4/30", SBX_TONE_ISOCHRONIC, 200.0, 4.0, 0.30, 1, SBX_WAVE_SINE);
   assert_parse("triangle:300@8/15", SBX_TONE_ISOCHRONIC, 300.0, 8.0, 0.15, 1, SBX_WAVE_TRIANGLE);
   assert_parse("sawtooth:150/25", SBX_TONE_BINAURAL, 150.0, 0.0, 0.25, 0, SBX_WAVE_SAWTOOTH);
+  assert_parse("spin:80+1/40", SBX_TONE_SPIN_PINK, 80.0, 1.0, 0.40, 0, SBX_WAVE_SINE);
+  assert_parse("triangle:bspin:120-1.5/35", SBX_TONE_SPIN_BROWN, 120.0, -1.5, 0.35, 0, SBX_WAVE_TRIANGLE);
+  assert_parse("square:wspin:60+0.75/25", SBX_TONE_SPIN_WHITE, 60.0, 0.75, 0.25, 0, SBX_WAVE_SQUARE);
 
   {
     SbxToneSpec t;
@@ -73,6 +85,16 @@ int main(void) {
     fail("render after load failed");
   if (!has_energy(buf, frames * 2))
     fail("render output appears silent");
+
+  if (sbx_context_load_tone_spec(ctx, "spin:90+1/30") != SBX_OK)
+    fail("load spin tone spec failed");
+  memset(buf, 0, frames * 2 * sizeof(float));
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("render after spin load failed");
+  if (!has_energy(buf, frames * 2))
+    fail("spin render output appears silent");
+  if (!has_stereo_difference(buf, frames))
+    fail("spin render should produce L/R differences");
 
   if (sbx_context_load_tone_spec(ctx, "invalid") != SBX_EINVAL)
     fail("invalid tone spec should fail");

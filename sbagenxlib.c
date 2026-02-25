@@ -277,17 +277,24 @@ read_text_file_alloc(const char *path, char **out_text) {
 static int
 normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   int uses_carrier;
+  int strict_carrier_positive;
   if (!tone) return SBX_EINVAL;
   if (err && err_sz) err[0] = 0;
 
-  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_BROWN_NOISE) {
+  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_SPIN_WHITE) {
     if (err && err_sz) snprintf(err, err_sz, "%s", "unsupported tone mode");
     return SBX_EINVAL;
   }
 
   uses_carrier = (tone->mode == SBX_TONE_BINAURAL ||
                   tone->mode == SBX_TONE_MONAURAL ||
-                  tone->mode == SBX_TONE_ISOCHRONIC);
+                  tone->mode == SBX_TONE_ISOCHRONIC ||
+                  tone->mode == SBX_TONE_SPIN_PINK ||
+                  tone->mode == SBX_TONE_SPIN_BROWN ||
+                  tone->mode == SBX_TONE_SPIN_WHITE);
+  strict_carrier_positive = (tone->mode == SBX_TONE_BINAURAL ||
+                             tone->mode == SBX_TONE_MONAURAL ||
+                             tone->mode == SBX_TONE_ISOCHRONIC);
 
   if (uses_carrier) {
     if (tone->waveform < SBX_WAVE_SINE || tone->waveform > SBX_WAVE_SAWTOOTH) {
@@ -299,9 +306,14 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   }
 
   if (tone->mode != SBX_TONE_NONE) {
-    if (tone->carrier_hz <= 0.0 || !isfinite(tone->carrier_hz)) {
+    if (!isfinite(tone->carrier_hz) || (strict_carrier_positive && tone->carrier_hz <= 0.0)) {
       if (uses_carrier) {
-        if (err && err_sz) snprintf(err, err_sz, "%s", "carrier_hz must be finite and > 0");
+        if (err && err_sz) {
+          if (strict_carrier_positive)
+            snprintf(err, err_sz, "%s", "carrier_hz must be finite and > 0");
+          else
+            snprintf(err, err_sz, "%s", "carrier_hz must be finite");
+        }
         return SBX_EINVAL;
       }
     }
@@ -383,6 +395,53 @@ engine_wave_sample(int waveform, double phase, double *out_sample) {
   }
 }
 
+static double
+engine_next_white(SbxEngine *eng) {
+  return sbx_rand_signed_unit(eng);
+}
+
+static double
+engine_next_pink_from_state(SbxEngine *eng, double state[7]) {
+  double w = sbx_rand_signed_unit(eng);
+  double p;
+
+  state[0] = 0.99886 * state[0] + 0.0555179 * w;
+  state[1] = 0.99332 * state[1] + 0.0750759 * w;
+  state[2] = 0.96900 * state[2] + 0.1538520 * w;
+  state[3] = 0.86650 * state[3] + 0.3104856 * w;
+  state[4] = 0.55000 * state[4] + 0.5329522 * w;
+  state[5] = -0.7616 * state[5] - 0.0168980 * w;
+  p = state[0] + state[1] + state[2] + state[3] + state[4] + state[5] + state[6] + 0.5362 * w;
+  state[6] = 0.115926 * w;
+
+  return 0.11 * p;
+}
+
+static double
+engine_next_brown_from_state(SbxEngine *eng, double *state) {
+  double w = sbx_rand_signed_unit(eng);
+  *state += 0.02 * w;
+  if (*state > 1.0) *state = 1.0;
+  if (*state < -1.0) *state = -1.0;
+  return *state;
+}
+
+static double
+engine_next_noise_mono_for_mode(SbxEngine *eng, SbxToneMode mode) {
+  switch (mode) {
+    case SBX_TONE_SPIN_WHITE:
+    case SBX_TONE_WHITE_NOISE:
+      return engine_next_white(eng);
+    case SBX_TONE_SPIN_BROWN:
+    case SBX_TONE_BROWN_NOISE:
+      return engine_next_brown_from_state(eng, &eng->brown_l);
+    case SBX_TONE_SPIN_PINK:
+    case SBX_TONE_PINK_NOISE:
+    default:
+      return engine_next_pink_from_state(eng, eng->pink_l);
+  }
+}
+
 static void
 engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
   double sr = eng->cfg.sample_rate;
@@ -427,46 +486,42 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
 
     left = right = amp * env * carrier;
   } else if (eng->tone.mode == SBX_TONE_WHITE_NOISE) {
-    left = amp * sbx_rand_signed_unit(eng);
-    right = amp * sbx_rand_signed_unit(eng);
+    left = amp * engine_next_white(eng);
+    right = amp * engine_next_white(eng);
   } else if (eng->tone.mode == SBX_TONE_PINK_NOISE) {
-    double w_l = sbx_rand_signed_unit(eng);
-    double w_r = sbx_rand_signed_unit(eng);
-    double p_l, p_r;
-
-    eng->pink_l[0] = 0.99886 * eng->pink_l[0] + 0.0555179 * w_l;
-    eng->pink_l[1] = 0.99332 * eng->pink_l[1] + 0.0750759 * w_l;
-    eng->pink_l[2] = 0.96900 * eng->pink_l[2] + 0.1538520 * w_l;
-    eng->pink_l[3] = 0.86650 * eng->pink_l[3] + 0.3104856 * w_l;
-    eng->pink_l[4] = 0.55000 * eng->pink_l[4] + 0.5329522 * w_l;
-    eng->pink_l[5] = -0.7616 * eng->pink_l[5] - 0.0168980 * w_l;
-    p_l = eng->pink_l[0] + eng->pink_l[1] + eng->pink_l[2] + eng->pink_l[3] +
-          eng->pink_l[4] + eng->pink_l[5] + eng->pink_l[6] + 0.5362 * w_l;
-    eng->pink_l[6] = 0.115926 * w_l;
-
-    eng->pink_r[0] = 0.99886 * eng->pink_r[0] + 0.0555179 * w_r;
-    eng->pink_r[1] = 0.99332 * eng->pink_r[1] + 0.0750759 * w_r;
-    eng->pink_r[2] = 0.96900 * eng->pink_r[2] + 0.1538520 * w_r;
-    eng->pink_r[3] = 0.86650 * eng->pink_r[3] + 0.3104856 * w_r;
-    eng->pink_r[4] = 0.55000 * eng->pink_r[4] + 0.5329522 * w_r;
-    eng->pink_r[5] = -0.7616 * eng->pink_r[5] - 0.0168980 * w_r;
-    p_r = eng->pink_r[0] + eng->pink_r[1] + eng->pink_r[2] + eng->pink_r[3] +
-          eng->pink_r[4] + eng->pink_r[5] + eng->pink_r[6] + 0.5362 * w_r;
-    eng->pink_r[6] = 0.115926 * w_r;
-
-    left = amp * (0.11 * p_l);
-    right = amp * (0.11 * p_r);
+    left = amp * engine_next_pink_from_state(eng, eng->pink_l);
+    right = amp * engine_next_pink_from_state(eng, eng->pink_r);
   } else if (eng->tone.mode == SBX_TONE_BROWN_NOISE) {
-    double w_l = sbx_rand_signed_unit(eng);
-    double w_r = sbx_rand_signed_unit(eng);
-    eng->brown_l += 0.02 * w_l;
-    eng->brown_r += 0.02 * w_r;
-    if (eng->brown_l > 1.0) eng->brown_l = 1.0;
-    if (eng->brown_l < -1.0) eng->brown_l = -1.0;
-    if (eng->brown_r > 1.0) eng->brown_r = 1.0;
-    if (eng->brown_r < -1.0) eng->brown_r = -1.0;
-    left = amp * eng->brown_l;
-    right = amp * eng->brown_r;
+    left = amp * engine_next_brown_from_state(eng, &eng->brown_l);
+    right = amp * engine_next_brown_from_state(eng, &eng->brown_r);
+  } else if (eng->tone.mode == SBX_TONE_SPIN_PINK ||
+             eng->tone.mode == SBX_TONE_SPIN_BROWN ||
+             eng->tone.mode == SBX_TONE_SPIN_WHITE) {
+    double base_noise;
+    double spin_mod;
+    double spin_pos;
+    double spin;
+    double g_l, g_r;
+
+    base_noise = engine_next_noise_mono_for_mode(eng, eng->tone.mode);
+    engine_wave_sample(eng->tone.waveform, eng->phase_l, &spin_mod);
+    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.beat_hz / sr, SBX_TAU);
+
+    // Width is interpreted in microseconds (legacy spin semantics).
+    spin = eng->tone.carrier_hz * 1.0e-6 * sr * spin_mod;
+    spin = sbx_dsp_clamp(spin * 1.5, -1.0, 1.0);
+    spin_pos = fabs(spin);
+
+    if (spin >= 0.0) {
+      g_l = 1.0 - spin_pos;
+      g_r = 1.0 + spin_pos;
+    } else {
+      g_l = 1.0 + spin_pos;
+      g_r = 1.0 - spin_pos;
+    }
+
+    left = amp * base_noise * g_l;
+    right = amp * base_noise * g_r;
   }
 
   *out_l = (float)left;
@@ -618,6 +673,41 @@ parse_tone_spec_with_default_waveform(const char *spec,
       *skip_ws(p + n) == 0) {
     if (!isfinite(amp_pct) || amp_pct < 0.0) return SBX_EINVAL;
     out_tone->mode = SBX_TONE_BROWN_NOISE;
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+
+  // Spin-noise tones:
+  //  spin:<width-us><spin-hz>/<amp>   (pink noise base)
+  //  bspin:<width-us><spin-hz>/<amp>  (brown noise base)
+  //  wspin:<width-us><spin-hz>/<amp>  (white noise base)
+  if (sscanf(p, "spin:%lf%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
+      *skip_ws(p + n) == 0) {
+    if (!isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_SPIN_PINK;
+    out_tone->carrier_hz = carrier;
+    out_tone->beat_hz = beat;
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+  if (sscanf(p, "bspin:%lf%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
+      *skip_ws(p + n) == 0) {
+    if (!isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_SPIN_BROWN;
+    out_tone->carrier_hz = carrier;
+    out_tone->beat_hz = beat;
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+  if (sscanf(p, "wspin:%lf%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
+      *skip_ws(p + n) == 0) {
+    if (!isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_SPIN_WHITE;
+    out_tone->carrier_hz = carrier;
+    out_tone->beat_hz = beat;
     out_tone->amplitude = amp_pct / 100.0;
     return SBX_OK;
   }
