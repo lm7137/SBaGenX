@@ -1434,8 +1434,8 @@ Supported line types:
   solve <u1>,<u2>,... : <lhs1>=<rhs1> ; <lhs2>=<rhs2> ; ... (optional)
   beat = <expression>          (required)
   carrier = <expression>       (optional)
-  amp = <expression>           (optional, beat/iso/mono amplitude in %)
-  mixamp = <expression>        (optional, mix/<amp> amplitude in %)
+  amp = <expression>           (optional, beat/iso/mono amplitude %, 0..100 scale)
+  mixamp = <expression>        (optional, mix/<amp> amplitude %, 0..100 scale)
   beat<expr = <expression>     (piecewise, optional)
   beat<=expr = <expression>    (piecewise, optional)
   beat>expr = <expression>     (piecewise, optional)
@@ -1477,10 +1477,12 @@ Expression variables available at runtime:
   b1   target beat/pulse frequency in Hz (from depth letter)
   c0   start carrier frequency in Hz
   c1   end carrier frequency in Hz (after drop/hold)
-  a0   base beat/iso/mono amplitude in % (from /amp in curve spec)
-  m0   base mix amplitude in % (from mix/<amp> tone-spec)
+  a0   base beat/iso/mono amplitude in % (0..100, from /amp in curve spec)
+  m0   base mix amplitude in % (0..100, from mix/<amp> tone-spec)
 
-`amp` and `mixamp` expressions return percentages.
+`amp` and `mixamp` expressions return percentages on a 0..100 scale
+(not fractions in the 0.0..1.0 range).
+For example: 100 = full configured amplitude, 50 = half amplitude.
 `mixamp` affects runtime mix amplitude only when a `mix/<amp>` tone-spec
 is present.
 
