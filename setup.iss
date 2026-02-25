@@ -115,6 +115,9 @@ Source: "RESEARCH.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "docs\*"; DestDir: "{#MyAppUserDocsDir}\Documentation"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "licenses\*"; DestDir: "{#MyAppUserDocsDir}\Licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "examples\*"; DestDir: "{#MyAppUserDocsDir}\Examples"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Example plot PNGs in user's Documents\SBaGenX\Plots
+Source: "assets\example-plot-*.png"; DestDir: "{#MyAppUserDocsDir}\Plots"; Flags: ignoreversion
+Source: "assets\example-mix-amplitude-modulation.png"; DestDir: "{#MyAppUserDocsDir}\Plots"; Flags: ignoreversion
 Source: "COPYING.txt"; DestDir: "{#MyAppUserDocsDir}"; DestName: "License.txt"; Flags: ignoreversion
 Source: "NOTICE.txt"; DestDir: "{#MyAppUserDocsDir}"; DestName: "Notice.txt"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{#MyAppUserDocsDir}"; DestName: "README.md"; Flags: ignoreversion
@@ -123,6 +126,7 @@ Source: "RESEARCH.md"; DestDir: "{#MyAppUserDocsDir}"; DestName: "RESEARCH.md"; 
 
 [Dirs]
 Name: "{#MyAppUserDocsDir}"; Flags: uninsalwaysuninstall
+Name: "{#MyAppUserDocsDir}\Plots"; Flags: uninsalwaysuninstall
 
 [Icons]
 ; Program shortcuts
