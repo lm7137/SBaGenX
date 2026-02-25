@@ -129,7 +129,8 @@ Public header: `sbagenlib.h`
 Supported tone modes in this first extraction:
 - binaural,
 - monaural,
-- isochronic (simple gated model).
+- isochronic (simple gated model),
+- white/pink/brown noise.
 
 Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `<carrier>+<beat>/<amp>` (binaural)
@@ -137,6 +138,7 @@ Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `<carrier>M<beat>/<amp>` or `<carrier>m<beat>/<amp>` (monaural)
 - `<carrier>@<pulse>/<amp>` (isochronic)
 - `<carrier>/<amp>` (single tone, mapped to binaural with beat=0)
+- `white/<amp>`, `pink/<amp>`, `brown/<amp>` (noise tones)
 - Optional waveform name prefixes are accepted and ignored by the parser:
   `sine:`, `square:`, `triangle:`, `sawtooth:`
 

@@ -8402,6 +8402,15 @@ sbagenlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz)
        snprintf(out, out_sz, "%g@%g/%g", tone->carrier_hz, pulse, amp_pct);
        return 1;
     }
+    case SBX_TONE_WHITE_NOISE:
+       snprintf(out, out_sz, "white/%g", amp_pct);
+       return 1;
+    case SBX_TONE_PINK_NOISE:
+       snprintf(out, out_sz, "pink/%g", amp_pct);
+       return 1;
+    case SBX_TONE_BROWN_NOISE:
+       snprintf(out, out_sz, "brown/%g", amp_pct);
+       return 1;
     default:
        return 0;
    }

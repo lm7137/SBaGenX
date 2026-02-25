@@ -27,6 +27,11 @@ struct SbxEngine {
   double phase_l;
   double phase_r;
   double pulse_phase;
+  unsigned int rng_state;
+  double pink_l[7];
+  double pink_r[7];
+  double brown_l;
+  double brown_r;
   char last_error[256];
 };
 
@@ -61,6 +66,18 @@ set_ctx_error(SbxContext *ctx, const char *msg) {
     return;
   }
   snprintf(ctx->last_error, sizeof(ctx->last_error), "%s", msg);
+}
+
+static unsigned int
+sbx_rand_u32(SbxEngine *eng) {
+  eng->rng_state = eng->rng_state * 1664525u + 1013904223u;
+  return eng->rng_state;
+}
+
+static double
+sbx_rand_signed_unit(SbxEngine *eng) {
+  unsigned int v = sbx_rand_u32(eng);
+  return ((double)v / 2147483648.0) - 1.0;
 }
 
 static const char *
@@ -246,22 +263,31 @@ read_text_file_alloc(const char *path, char **out_text) {
 
 static int
 normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
+  int uses_carrier;
   if (!tone) return SBX_EINVAL;
   if (err && err_sz) err[0] = 0;
 
-  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_ISOCHRONIC) {
+  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_BROWN_NOISE) {
     if (err && err_sz) snprintf(err, err_sz, "%s", "unsupported tone mode");
     return SBX_EINVAL;
   }
 
+  uses_carrier = (tone->mode == SBX_TONE_BINAURAL ||
+                  tone->mode == SBX_TONE_MONAURAL ||
+                  tone->mode == SBX_TONE_ISOCHRONIC);
+
   if (tone->mode != SBX_TONE_NONE) {
     if (tone->carrier_hz <= 0.0 || !isfinite(tone->carrier_hz)) {
-      if (err && err_sz) snprintf(err, err_sz, "%s", "carrier_hz must be finite and > 0");
-      return SBX_EINVAL;
+      if (uses_carrier) {
+        if (err && err_sz) snprintf(err, err_sz, "%s", "carrier_hz must be finite and > 0");
+        return SBX_EINVAL;
+      }
     }
     if (!isfinite(tone->beat_hz)) {
-      if (err && err_sz) snprintf(err, err_sz, "%s", "beat_hz must be finite");
-      return SBX_EINVAL;
+      if (uses_carrier) {
+        if (err && err_sz) snprintf(err, err_sz, "%s", "beat_hz must be finite");
+        return SBX_EINVAL;
+      }
     }
     if (!isfinite(tone->amplitude)) {
       if (err && err_sz) snprintf(err, err_sz, "%s", "amplitude must be finite");
@@ -346,6 +372,47 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     env = sbx_dsp_iso_mod_factor_custom(pos, 0.0, duty, 0.15, 0.15, 2);
 
     left = right = amp * env * carrier;
+  } else if (eng->tone.mode == SBX_TONE_WHITE_NOISE) {
+    left = amp * sbx_rand_signed_unit(eng);
+    right = amp * sbx_rand_signed_unit(eng);
+  } else if (eng->tone.mode == SBX_TONE_PINK_NOISE) {
+    double w_l = sbx_rand_signed_unit(eng);
+    double w_r = sbx_rand_signed_unit(eng);
+    double p_l, p_r;
+
+    eng->pink_l[0] = 0.99886 * eng->pink_l[0] + 0.0555179 * w_l;
+    eng->pink_l[1] = 0.99332 * eng->pink_l[1] + 0.0750759 * w_l;
+    eng->pink_l[2] = 0.96900 * eng->pink_l[2] + 0.1538520 * w_l;
+    eng->pink_l[3] = 0.86650 * eng->pink_l[3] + 0.3104856 * w_l;
+    eng->pink_l[4] = 0.55000 * eng->pink_l[4] + 0.5329522 * w_l;
+    eng->pink_l[5] = -0.7616 * eng->pink_l[5] - 0.0168980 * w_l;
+    p_l = eng->pink_l[0] + eng->pink_l[1] + eng->pink_l[2] + eng->pink_l[3] +
+          eng->pink_l[4] + eng->pink_l[5] + eng->pink_l[6] + 0.5362 * w_l;
+    eng->pink_l[6] = 0.115926 * w_l;
+
+    eng->pink_r[0] = 0.99886 * eng->pink_r[0] + 0.0555179 * w_r;
+    eng->pink_r[1] = 0.99332 * eng->pink_r[1] + 0.0750759 * w_r;
+    eng->pink_r[2] = 0.96900 * eng->pink_r[2] + 0.1538520 * w_r;
+    eng->pink_r[3] = 0.86650 * eng->pink_r[3] + 0.3104856 * w_r;
+    eng->pink_r[4] = 0.55000 * eng->pink_r[4] + 0.5329522 * w_r;
+    eng->pink_r[5] = -0.7616 * eng->pink_r[5] - 0.0168980 * w_r;
+    p_r = eng->pink_r[0] + eng->pink_r[1] + eng->pink_r[2] + eng->pink_r[3] +
+          eng->pink_r[4] + eng->pink_r[5] + eng->pink_r[6] + 0.5362 * w_r;
+    eng->pink_r[6] = 0.115926 * w_r;
+
+    left = amp * (0.11 * p_l);
+    right = amp * (0.11 * p_r);
+  } else if (eng->tone.mode == SBX_TONE_BROWN_NOISE) {
+    double w_l = sbx_rand_signed_unit(eng);
+    double w_r = sbx_rand_signed_unit(eng);
+    eng->brown_l += 0.02 * w_l;
+    eng->brown_r += 0.02 * w_r;
+    if (eng->brown_l > 1.0) eng->brown_l = 1.0;
+    if (eng->brown_l < -1.0) eng->brown_l = -1.0;
+    if (eng->brown_r > 1.0) eng->brown_r = 1.0;
+    if (eng->brown_r < -1.0) eng->brown_r = -1.0;
+    left = amp * eng->brown_l;
+    right = amp * eng->brown_r;
   }
 
   *out_l = (float)left;
@@ -466,6 +533,29 @@ sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
   p = skip_optional_waveform_prefix(p);
   sbx_default_tone_spec(out_tone);
 
+  // Noise tones: pink/<amp>, white/<amp>, brown/<amp>
+  if (sscanf(p, "pink/%lf %n", &amp_pct, &n) == 1 &&
+      *skip_ws(p + n) == 0) {
+    if (!isfinite(amp_pct) || amp_pct < 0.0) return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_PINK_NOISE;
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+  if (sscanf(p, "white/%lf %n", &amp_pct, &n) == 1 &&
+      *skip_ws(p + n) == 0) {
+    if (!isfinite(amp_pct) || amp_pct < 0.0) return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_WHITE_NOISE;
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+  if (sscanf(p, "brown/%lf %n", &amp_pct, &n) == 1 &&
+      *skip_ws(p + n) == 0) {
+    if (!isfinite(amp_pct) || amp_pct < 0.0) return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_BROWN_NOISE;
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+
   // Isochronic: <carrier>@<pulse>/<amp>
   if (sscanf(p, "%lf@%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
       *skip_ws(p + n) == 0) {
@@ -552,6 +642,7 @@ sbx_engine_create(const SbxEngineConfig *cfg_in) {
 
   eng->cfg = cfg;
   sbx_default_tone_spec(&eng->tone);
+  eng->rng_state = 0x12345678u;
   set_last_error(eng, NULL);
   return eng;
 }
@@ -568,6 +659,10 @@ sbx_engine_reset(SbxEngine *eng) {
   eng->phase_l = 0.0;
   eng->phase_r = 0.0;
   eng->pulse_phase = 0.0;
+  memset(eng->pink_l, 0, sizeof(eng->pink_l));
+  memset(eng->pink_r, 0, sizeof(eng->pink_r));
+  eng->brown_l = 0.0;
+  eng->brown_r = 0.0;
 }
 
 int
