@@ -10,7 +10,7 @@
 section_header "Building SBaGenX for Linux with FLAC, MP3, OGG and ALSA support..."
 
 # Check for required tools
-check_required_tools gcc
+check_required_tools gcc ar
 
 # Check distribution directory
 create_dir_if_not_exists "dist"
@@ -174,6 +174,60 @@ fi
 
 # Remove the temporary file
 rm -f sbagenx.tmp.c
+
+# Build sbagenlib static archives (Phase 1 extraction artifacts)
+section_header "Building sbagenlib static libraries..."
+create_dir_if_not_exists "build/sbagenlib"
+create_dir_if_not_exists "dist/include"
+
+SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENLIB_VERSION=\"\\\"$VERSION\\\"\""
+
+if [ $SKIP_32BIT = 0 ]; then
+    gcc $SBX_LIB_CFLAGS -m32 -c sbagenlib.c -o build/sbagenlib/sbagenlib-linux32.o
+    if [ $? -eq 0 ]; then
+        ar rcs dist/libsbagenx-linux32.a build/sbagenlib/sbagenlib-linux32.o
+        if [ $? -eq 0 ]; then
+            success "Created sbagenlib archive: dist/libsbagenx-linux32.a"
+        else
+            warning "Failed to archive dist/libsbagenx-linux32.a"
+        fi
+    else
+        warning "Failed to compile sbagenlib for 32-bit"
+    fi
+fi
+
+if [ "$HOST_ARCH" = "aarch64" ]; then
+    gcc $SBX_LIB_CFLAGS -c sbagenlib.c -o build/sbagenlib/sbagenlib-linux-arm64.o
+    if [ $? -eq 0 ]; then
+        ar rcs dist/libsbagenx-linux-arm64.a build/sbagenlib/sbagenlib-linux-arm64.o
+        if [ $? -eq 0 ]; then
+            success "Created sbagenlib archive: dist/libsbagenx-linux-arm64.a"
+        else
+            warning "Failed to archive dist/libsbagenx-linux-arm64.a"
+        fi
+    else
+        warning "Failed to compile sbagenlib for ARM64"
+    fi
+else
+    gcc $SBX_LIB_CFLAGS -m64 -c sbagenlib.c -o build/sbagenlib/sbagenlib-linux64.o
+    if [ $? -eq 0 ]; then
+        ar rcs dist/libsbagenx-linux64.a build/sbagenlib/sbagenlib-linux64.o
+        if [ $? -eq 0 ]; then
+            success "Created sbagenlib archive: dist/libsbagenx-linux64.a"
+        else
+            warning "Failed to archive dist/libsbagenx-linux64.a"
+        fi
+    else
+        warning "Failed to compile sbagenlib for 64-bit"
+    fi
+fi
+
+cp sbagenlib.h dist/include/sbagenlib.h
+if [ $? -eq 0 ]; then
+    success "Bundled public header: dist/include/sbagenlib.h"
+else
+    warning "Could not copy sbagenlib.h into dist/include"
+fi
 
 # Bundle Python/Cairo plot backend script for dist binaries
 section_header "Bundling plot backend script..."

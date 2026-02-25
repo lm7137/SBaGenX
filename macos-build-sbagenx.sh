@@ -8,6 +8,9 @@
 
 section_header "Building SBaGenX universal binary (ARM64 + x86_64) with FLAC, MP3 and OGG support..."
 
+# Check required tools
+check_required_tools gcc libtool
+
 # Create libs directory if it doesn't exist
 create_dir_if_not_exists "libs"
 
@@ -69,5 +72,30 @@ fi
 
 # Remove the temporary file
 rm -f sbagenx.tmp.c
+
+# Build sbagenlib universal static archive (Phase 1 extraction artifact)
+section_header "Building sbagenlib universal static library..."
+create_dir_if_not_exists "build/sbagenlib"
+create_dir_if_not_exists "dist/include"
+
+SBX_LIB_CFLAGS="-Wall -O3 -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -I. -DSBAGENLIB_VERSION=\"\\\"$VERSION\\\"\""
+gcc $SBX_LIB_CFLAGS -c sbagenlib.c -o build/sbagenlib/sbagenlib-macos-universal.o
+if [ $? -eq 0 ]; then
+    libtool -static -o dist/libsbagenx-macos-universal.a build/sbagenlib/sbagenlib-macos-universal.o
+    if [ $? -eq 0 ]; then
+        success "Created sbagenlib archive: dist/libsbagenx-macos-universal.a"
+    else
+        warning "Failed to archive dist/libsbagenx-macos-universal.a"
+    fi
+else
+    warning "Failed to compile sbagenlib for macOS universal"
+fi
+
+cp sbagenlib.h dist/include/sbagenlib.h
+if [ $? -eq 0 ]; then
+    success "Bundled public header: dist/include/sbagenlib.h"
+else
+    warning "Could not copy sbagenlib.h into dist/include"
+fi
 
 section_header "Build process completed!" 

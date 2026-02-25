@@ -16,6 +16,10 @@ if ! command -v i686-w64-mingw32-gcc &> /dev/null || ! command -v x86_64-w64-min
     info "On Arch: sudo pacman -S mingw-w64-gcc"
     exit 1
 fi
+if ! command -v i686-w64-mingw32-ar &> /dev/null || ! command -v x86_64-w64-mingw32-ar &> /dev/null; then
+    error "MinGW archiver tools not found (i686-w64-mingw32-ar / x86_64-w64-mingw32-ar)."
+    exit 1
+fi
 
 # Create libs directory if it doesn't exist
 create_dir_if_not_exists "libs"
@@ -716,6 +720,43 @@ if [ $? -eq 0 ]; then
     success "64-bit compilation successful! Created 64-bit binary: dist/sbagenx-win64.exe"
 else
     error "64-bit compilation failed!"
+fi
+
+# Build sbagenlib static archives (Phase 1 extraction artifacts)
+section_header "Building sbagenlib static libraries..."
+create_dir_if_not_exists "build/sbagenlib"
+create_dir_if_not_exists "dist/include"
+SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENLIB_VERSION=\"\\\"$VERSION\\\"\""
+
+i686-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenlib.c -o build/sbagenlib/sbagenlib-win32.o
+if [ $? -eq 0 ]; then
+    i686-w64-mingw32-ar rcs dist/libsbagenx-win32.a build/sbagenlib/sbagenlib-win32.o
+    if [ $? -eq 0 ]; then
+        success "Created sbagenlib archive: dist/libsbagenx-win32.a"
+    else
+        warning "Failed to archive dist/libsbagenx-win32.a"
+    fi
+else
+    warning "Failed to compile sbagenlib for win32"
+fi
+
+x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenlib.c -o build/sbagenlib/sbagenlib-win64.o
+if [ $? -eq 0 ]; then
+    x86_64-w64-mingw32-ar rcs dist/libsbagenx-win64.a build/sbagenlib/sbagenlib-win64.o
+    if [ $? -eq 0 ]; then
+        success "Created sbagenlib archive: dist/libsbagenx-win64.a"
+    else
+        warning "Failed to archive dist/libsbagenx-win64.a"
+    fi
+else
+    warning "Failed to compile sbagenlib for win64"
+fi
+
+cp sbagenlib.h dist/include/sbagenlib.h
+if [ $? -eq 0 ]; then
+    success "Bundled public header: dist/include/sbagenlib.h"
+else
+    warning "Could not copy sbagenlib.h into dist/include"
 fi
 
 section_header "Bundling optional runtime encoder DLLs..."

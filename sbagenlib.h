@@ -1,0 +1,64 @@
+#ifndef SBAGENLIB_H
+#define SBAGENLIB_H
+
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define SBX_API_VERSION 1
+
+/* Status codes returned by sbagenlib APIs. */
+enum {
+  SBX_OK = 0,
+  SBX_EINVAL = 1,
+  SBX_ENOMEM = 2,
+  SBX_ENOTREADY = 3
+};
+
+typedef enum {
+  SBX_TONE_NONE = 0,
+  SBX_TONE_BINAURAL = 1,
+  SBX_TONE_MONAURAL = 2,
+  SBX_TONE_ISOCHRONIC = 3
+} SbxToneMode;
+
+typedef struct {
+  double sample_rate; /* Hz, e.g. 44100 */
+  int channels;       /* currently 2 (stereo) */
+} SbxEngineConfig;
+
+typedef struct {
+  SbxToneMode mode;
+  double carrier_hz;
+  double beat_hz;
+  double amplitude;  /* 0.0 .. 1.0 */
+  double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.4) */
+} SbxToneSpec;
+
+typedef struct SbxEngine SbxEngine;
+
+const char *sbx_version(void);
+int sbx_api_version(void);
+const char *sbx_status_string(int status);
+
+void sbx_default_engine_config(SbxEngineConfig *cfg);
+void sbx_default_tone_spec(SbxToneSpec *tone);
+
+SbxEngine *sbx_engine_create(const SbxEngineConfig *cfg);
+void sbx_engine_destroy(SbxEngine *eng);
+void sbx_engine_reset(SbxEngine *eng);
+
+int sbx_engine_set_tone(SbxEngine *eng, const SbxToneSpec *tone);
+
+/* Render interleaved stereo float samples into out[frames * channels]. */
+int sbx_engine_render_f32(SbxEngine *eng, float *out, size_t frames);
+
+const char *sbx_engine_last_error(const SbxEngine *eng);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SBAGENLIB_H */
