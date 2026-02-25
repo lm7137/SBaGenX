@@ -1378,6 +1378,9 @@ further depending on step mode.
 2.11: The 'curve' sequences
 ---------------------------
 
+This is advanced functionality.  If you are new to SBaGenX sequence
+syntax, read section 3 first, then return here.
+
 `-p curve` lets you drive built-in sessions from expressions stored in
 an external function file.  The file extension is `.sbgf` (required).
 
