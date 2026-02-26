@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -843,6 +844,96 @@ parse_tone_spec_with_default_waveform(const char *spec,
 int
 sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
   return parse_tone_spec_with_default_waveform(spec, SBX_WAVE_SINE, out_tone);
+}
+
+static const char *
+wave_name_for_tone(int waveform) {
+  switch (waveform) {
+    case SBX_WAVE_SQUARE: return "square";
+    case SBX_WAVE_TRIANGLE: return "triangle";
+    case SBX_WAVE_SAWTOOTH: return "sawtooth";
+    case SBX_WAVE_SINE:
+    default: return "sine";
+  }
+}
+
+static int
+snprintf_checked(char *out, size_t out_sz, const char *fmt, ...) {
+  int n;
+  va_list ap;
+  if (!out || out_sz == 0 || !fmt) return 0;
+  va_start(ap, fmt);
+  n = vsnprintf(out, out_sz, fmt, ap);
+  va_end(ap);
+  if (n < 0 || (size_t)n >= out_sz) return 0;
+  return 1;
+}
+
+int
+sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
+  double amp_pct;
+  const char *wname;
+  SbxToneSpec norm;
+  if (!tone || !out || out_sz == 0) return SBX_EINVAL;
+
+  norm = *tone;
+  if (normalize_tone(&norm, 0, 0) != SBX_OK) return SBX_EINVAL;
+  amp_pct = norm.amplitude * 100.0;
+  wname = wave_name_for_tone(norm.waveform);
+
+  switch (norm.mode) {
+    case SBX_TONE_BINAURAL: {
+      char sign = norm.beat_hz < 0.0 ? '-' : '+';
+      double beat = fabs(norm.beat_hz);
+      if (!snprintf_checked(out, out_sz, "%s:%g%c%g/%g",
+                            wname, norm.carrier_hz, sign, beat, amp_pct))
+        return SBX_EINVAL;
+      return SBX_OK;
+    }
+    case SBX_TONE_MONAURAL: {
+      double beat = fabs(norm.beat_hz);
+      double f1 = norm.carrier_hz - beat * 0.5;
+      double f2 = norm.carrier_hz + beat * 0.5;
+      if (!snprintf_checked(out, out_sz, "%s:%g/%g %s:%g/%g",
+                            wname, f1, amp_pct, wname, f2, amp_pct))
+        return SBX_EINVAL;
+      return SBX_OK;
+    }
+    case SBX_TONE_ISOCHRONIC: {
+      double pulse = fabs(norm.beat_hz);
+      if (!snprintf_checked(out, out_sz, "%s:%g@%g/%g",
+                            wname, norm.carrier_hz, pulse, amp_pct))
+        return SBX_EINVAL;
+      return SBX_OK;
+    }
+    case SBX_TONE_WHITE_NOISE:
+      if (!snprintf_checked(out, out_sz, "white/%g", amp_pct)) return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_TONE_PINK_NOISE:
+      if (!snprintf_checked(out, out_sz, "pink/%g", amp_pct)) return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_TONE_BROWN_NOISE:
+      if (!snprintf_checked(out, out_sz, "brown/%g", amp_pct)) return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_TONE_BELL:
+      if (!snprintf_checked(out, out_sz, "%s:bell%g/%g", wname, norm.carrier_hz, amp_pct))
+        return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_TONE_SPIN_PINK:
+      if (!snprintf_checked(out, out_sz, "%s:spin:%g%+g/%g", wname, norm.carrier_hz, norm.beat_hz, amp_pct))
+        return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_TONE_SPIN_BROWN:
+      if (!snprintf_checked(out, out_sz, "%s:bspin:%g%+g/%g", wname, norm.carrier_hz, norm.beat_hz, amp_pct))
+        return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_TONE_SPIN_WHITE:
+      if (!snprintf_checked(out, out_sz, "%s:wspin:%g%+g/%g", wname, norm.carrier_hz, norm.beat_hz, amp_pct))
+        return SBX_EINVAL;
+      return SBX_OK;
+    default:
+      return SBX_EINVAL;
+  }
 }
 
 void

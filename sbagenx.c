@@ -8664,60 +8664,6 @@ sbx_parse_mix_fx_token(const char *tok, SbxMixFxState *fx_out) {
    return 1;
 }
 
-static int
-sbagenxlib_tone_to_legacy_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
-   double amp_pct;
-   const char *wave_name;
-   if (!tone || !out || out_sz == 0) return 0;
-   amp_pct= tone->amplitude * 100.0;
-   if (!isfinite(amp_pct) || amp_pct < 0.0) amp_pct= 0.0;
-   wave_name= sbx_waveform_name_for_spec(tone->waveform);
-
-   switch (tone->mode) {
-    case SBX_TONE_BINAURAL: {
-       char sign= tone->beat_hz < 0.0 ? '-' : '+';
-       double beat= fabs(tone->beat_hz);
-       snprintf(out, out_sz, "%s:%g%c%g/%g", wave_name, tone->carrier_hz, sign, beat, amp_pct);
-       return 1;
-    }
-    case SBX_TONE_MONAURAL: {
-       double beat= fabs(tone->beat_hz);
-       double f1= tone->carrier_hz - beat * 0.5;
-       double f2= tone->carrier_hz + beat * 0.5;
-       snprintf(out, out_sz, "%s:%g/%g %s:%g/%g", wave_name, f1, amp_pct, wave_name, f2, amp_pct);
-       return 1;
-    }
-    case SBX_TONE_ISOCHRONIC: {
-       double pulse= fabs(tone->beat_hz);
-       snprintf(out, out_sz, "%s:%g@%g/%g", wave_name, tone->carrier_hz, pulse, amp_pct);
-       return 1;
-    }
-    case SBX_TONE_WHITE_NOISE:
-       snprintf(out, out_sz, "white/%g", amp_pct);
-       return 1;
-    case SBX_TONE_PINK_NOISE:
-       snprintf(out, out_sz, "pink/%g", amp_pct);
-       return 1;
-    case SBX_TONE_BROWN_NOISE:
-       snprintf(out, out_sz, "brown/%g", amp_pct);
-       return 1;
-    case SBX_TONE_BELL:
-       snprintf(out, out_sz, "%s:bell%g/%g", wave_name, tone->carrier_hz, amp_pct);
-       return 1;
-    case SBX_TONE_SPIN_PINK:
-       snprintf(out, out_sz, "%s:spin:%g%+g/%g", wave_name, tone->carrier_hz, tone->beat_hz, amp_pct);
-       return 1;
-    case SBX_TONE_SPIN_BROWN:
-       snprintf(out, out_sz, "%s:bspin:%g%+g/%g", wave_name, tone->carrier_hz, tone->beat_hz, amp_pct);
-       return 1;
-    case SBX_TONE_SPIN_WHITE:
-       snprintf(out, out_sz, "%s:wspin:%g%+g/%g", wave_name, tone->carrier_hz, tone->beat_hz, amp_pct);
-       return 1;
-    default:
-       return 0;
-   }
-}
-
 static void
 emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, const char *extra) {
    size_t i, n;
@@ -8739,7 +8685,7 @@ emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, co
 
       if (sbx_context_get_keyframe(ctx, i, &kf) != SBX_OK)
 	 error("sbagenxlib keyframe retrieval failed at index %d", (int)i);
-      if (!sbagenxlib_tone_to_legacy_spec(&kf.tone, spec, sizeof(spec)))
+      if (sbx_format_tone_spec(&kf.tone, spec, sizeof(spec)) != SBX_OK)
 	 error("sbagenxlib keyframe %d has unsupported tone mode %d", (int)i, (int)kf.tone.mode);
       interp= (kf.interp == SBX_INTERP_STEP) ? "step" : "linear";
       printf("%.6f %s%s %s\n", kf.time_sec, spec, extra_tail, interp);
@@ -8979,7 +8925,7 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
 	 printf("# mix/%g\n", mix_amp_pct);
       for (i= 0; i<(int)tone_count; i++) {
 	 char spec[256];
-	 if (!sbagenxlib_tone_to_legacy_spec(&tones[i], spec, sizeof(spec)))
+	 if (sbx_format_tone_spec(&tones[i], spec, sizeof(spec)) != SBX_OK)
 	    error("Failed formatting sbagenxlib immediate tone %d", i);
 	 printf("%s\n", spec);
       }

@@ -79,6 +79,19 @@ int main(void) {
   assert_parse("spin:80+1/40", SBX_TONE_SPIN_PINK, 80.0, 1.0, 0.40, 0, SBX_WAVE_SINE);
   assert_parse("triangle:bspin:120-1.5/35", SBX_TONE_SPIN_BROWN, 120.0, -1.5, 0.35, 0, SBX_WAVE_TRIANGLE);
   assert_parse("square:wspin:60+0.75/25", SBX_TONE_SPIN_WHITE, 60.0, 0.75, 0.25, 0, SBX_WAVE_SQUARE);
+  {
+    SbxToneSpec in, out;
+    char spec[256];
+    if (sbx_parse_tone_spec("triangle:bell300/25", &in) != SBX_OK)
+      fail("parse before format failed");
+    if (sbx_format_tone_spec(&in, spec, sizeof(spec)) != SBX_OK)
+      fail("format tone spec failed");
+    if (sbx_parse_tone_spec(spec, &out) != SBX_OK)
+      fail("parse after format failed");
+    if (out.mode != in.mode) fail("format roundtrip mode mismatch");
+    if (fabs(out.carrier_hz - in.carrier_hz) > 1e-9) fail("format roundtrip carrier mismatch");
+    if (fabs(out.amplitude - in.amplitude) > 1e-9) fail("format roundtrip amplitude mismatch");
+  }
 
   {
     SbxToneSpec t;

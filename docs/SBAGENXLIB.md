@@ -177,17 +177,23 @@ Phase 3.26
   - same validation rules (`-m`/`-M` active and explicit `mix/<amp>`),
   - include parsed mix effects in `-D` immediate output.
 
-Phase 3.27 (current slice)
+Phase 3.27
 - Add sbagenxlib context-level auxiliary tone mixing:
   - new API to set/get/clear aux tones on a context,
   - aux tones render in the same context clock/loop domain as the main tone,
   - sbagenx runtime adapter now uses context aux tones directly instead of
     maintaining separate aux contexts/buffers in the CLI layer.
 
+Phase 3.28 (current slice)
+- Add shared tone-spec formatting API to sbagenxlib:
+  - new `sbx_format_tone_spec()` function for canonical string emission,
+  - replace duplicate sbagenx-side formatter usage with the library API for
+    keyframe and immediate `-D` output paths.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.27 Slice)
+Current API (Phase 3.28 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -201,6 +207,7 @@ Public header: `sbagenxlib.h`
   - `sbx_engine_reset()`
 - Tone setup and rendering:
   - `sbx_default_tone_spec()`
+  - `sbx_format_tone_spec()`
   - `sbx_engine_set_tone()`
   - `sbx_engine_render_f32()`
 - Context + load API:
