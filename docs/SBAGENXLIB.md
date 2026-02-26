@@ -268,16 +268,22 @@ Phase 3.41
     parsers still produce expected `-D` output forms,
   - covers tone, isochronic, bell, spin-family, noise, and mixbeat tokens.
 
-Phase 3.42 (current slice)
+Phase 3.42
 - Consolidate legacy voice-token parsing behind one helper:
   - add `parse_legacy_voice_token()` wrapper for `waveNN`, `mix/<amp>`,
     mix-effects, and sbagenxlib tone parsing,
   - simplify `readNameDef()` to a small dispatch path.
 
+Phase 3.43 (current slice)
+- Add shared mix-effect formatter API:
+  - new `sbx_format_mix_fx_spec()` for canonical `mixspin/mixpulse/mixbeat`
+    string emission,
+  - switch immediate `-D` mix-effect output to this API.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.42 Slice)
+Current API (Phase 3.43 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -297,6 +303,7 @@ Public header: `sbagenxlib.h`
 - Context + load API:
   - `sbx_parse_tone_spec()`
   - `sbx_parse_tone_spec_ex()`
+  - `sbx_format_mix_fx_spec()`
   - `sbx_parse_mix_fx_spec()`
   - `sbx_parse_extra_token()`
   - `sbx_context_create()` / `sbx_context_destroy()`

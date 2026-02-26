@@ -117,6 +117,8 @@ int main(void) {
     int typ = SBX_EXTRA_INVALID;
     SbxToneSpec tone;
     SbxMixFxSpec fx;
+    SbxMixFxSpec fx_rt;
+    char spec[256];
     double mixpct = 0.0;
     if (sbx_parse_extra_token("mix/87", SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
       fail("parse extra mix token failed");
@@ -130,6 +132,16 @@ int main(void) {
       fail("parse extra tone token failed");
     if (typ != SBX_EXTRA_TONE || tone.mode != SBX_TONE_BINAURAL || tone.waveform != SBX_WAVE_TRIANGLE)
       fail("parse extra tone token mismatch");
+    if (sbx_parse_mix_fx_spec("sawtooth:mixspin:400+6/40", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mix fx parse for format failed");
+    if (sbx_format_mix_fx_spec(&fx, spec, sizeof(spec)) != SBX_OK)
+      fail("mix fx format failed");
+    if (sbx_parse_mix_fx_spec(spec, SBX_WAVE_SINE, &fx_rt) != SBX_OK)
+      fail("mix fx parse after format failed");
+    if (fx_rt.type != fx.type || fx_rt.waveform != fx.waveform)
+      fail("mix fx format roundtrip type/wave mismatch");
+    if (fabs(fx_rt.carr - fx.carr) > 1e-9 || fabs(fx_rt.res - fx.res) > 1e-9 || fabs(fx_rt.amp - fx.amp) > 1e-9)
+      fail("mix fx format roundtrip value mismatch");
   }
 
   sbx_default_engine_config(&cfg);

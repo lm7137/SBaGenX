@@ -8123,17 +8123,6 @@ is_loop_flag_token(const char *s) {
    return 0 == strcmp(s, "loop");
 }
 
-static const char *
-sbx_waveform_name_for_spec(int waveform) {
-   switch (waveform) {
-    case SBX_WAVE_SQUARE: return "square";
-    case SBX_WAVE_TRIANGLE: return "triangle";
-    case SBX_WAVE_SAWTOOTH: return "sawtooth";
-    case SBX_WAVE_SINE:
-    default: return "sine";
-   }
-}
-
 static void
 emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, const char *extra) {
    size_t i, n;
@@ -8361,22 +8350,8 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
       }
       for (i= 0; i<(int)mix_fx_count; i++) {
 	 char spec[256];
-	 const char *wname= sbx_waveform_name_for_spec(mix_fx[i].waveform);
-	 switch (mix_fx[i].type) {
-	  case SBX_MIXFX_SPIN:
-	     snprintf(spec, sizeof(spec), "%s:mixspin:%g%+g/%g", wname, mix_fx[i].carr, mix_fx[i].res, mix_fx[i].amp * 100.0);
-	     break;
-	  case SBX_MIXFX_PULSE:
-	     snprintf(spec, sizeof(spec), "%s:mixpulse:%g/%g", wname, mix_fx[i].res, mix_fx[i].amp * 100.0);
-	     break;
-	  case SBX_MIXFX_BEAT:
-	     snprintf(spec, sizeof(spec), "%s:mixbeat:%g/%g", wname, mix_fx[i].res, mix_fx[i].amp * 100.0);
-	     break;
-	  default:
-	     spec[0]= 0;
-	     break;
-	 }
-	 if (spec[0]) printf("%s\n", spec);
+	 if (sbx_format_mix_fx_spec(&mix_fx[i], spec, sizeof(spec)) == SBX_OK)
+	    printf("%s\n", spec);
       }
       fflush(stdout);
       exit(0);

@@ -1062,6 +1062,39 @@ snprintf_checked(char *out, size_t out_sz, const char *fmt, ...) {
 }
 
 int
+sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz) {
+  const char *wname;
+  if (!fx || !out || out_sz == 0) return SBX_EINVAL;
+  if (fx->type < SBX_MIXFX_SPIN || fx->type > SBX_MIXFX_BEAT) return SBX_EINVAL;
+  if (fx->waveform < SBX_WAVE_SINE || fx->waveform > SBX_WAVE_SAWTOOTH) return SBX_EINVAL;
+  if (!isfinite(fx->carr) || !isfinite(fx->res) || !isfinite(fx->amp) || fx->amp < 0.0)
+    return SBX_EINVAL;
+
+  wname = wave_name_for_tone(fx->waveform);
+  switch (fx->type) {
+    case SBX_MIXFX_SPIN:
+      if (!snprintf_checked(out, out_sz, "%s:mixspin:%g%+g/%g",
+                            wname, fx->carr, fx->res, fx->amp * 100.0))
+        return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_MIXFX_PULSE:
+      if (!snprintf_checked(out, out_sz, "%s:mixpulse:%g/%g",
+                            wname, fx->res, fx->amp * 100.0))
+        return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_MIXFX_BEAT:
+      if (!snprintf_checked(out, out_sz, "%s:mixbeat:%g/%g",
+                            wname, fx->res, fx->amp * 100.0))
+        return SBX_EINVAL;
+      return SBX_OK;
+    default:
+      break;
+  }
+
+  return SBX_EINVAL;
+}
+
+int
 sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
   double amp_pct;
   const char *wname;
