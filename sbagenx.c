@@ -793,8 +793,6 @@ double sbx_runtime_mix_amp_pct= 100.0;
 SbxContext *sbx_runtime_ctx= 0;
 float *sbx_runtime_fbuf= 0;
 size_t sbx_runtime_fcap= 0;
-SbxMixFxSpec sbx_runtime_mix_fx[SBX_MAX_AUX_TONES];
-size_t sbx_runtime_mix_fx_n= 0;
 
 int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
@@ -6198,7 +6196,7 @@ outChunkSbx() {
 	 out_l += ((mix1 >> 4) * mix_mul);
 	 out_r += ((mix2 >> 4) * mix_mul);
 
-	 if (sbx_runtime_mix_fx_n > 0) {
+	 if (sbx_context_mix_effect_count(sbx_runtime_ctx) > 0) {
 	    double base_amp= mix_mul * 0.7;
 	    double fx_add_l= 0.0, fx_add_r= 0.0;
 	    rc= sbx_context_apply_mix_effects(sbx_runtime_ctx, mix_l, mix_r, base_amp,
@@ -8237,7 +8235,6 @@ sbx_runtime_clear(void) {
       sbx_runtime_fbuf= 0;
       sbx_runtime_fcap= 0;
    }
-   sbx_runtime_mix_fx_n= 0;
 }
 
 static int
@@ -8252,20 +8249,14 @@ sbx_runtime_set_aux_tones(const SbxToneSpec *tones, size_t n) {
 static int
 sbx_runtime_set_mix_fx(const SbxMixFxSpec *fxv, size_t n) {
    int rc;
-   sbx_runtime_mix_fx_n= 0;
    if (!fxv || n == 0)
       n= 0;
    if (!sbx_runtime_ctx)
       return 0;
-   rc= sbx_context_set_mix_effects(sbx_runtime_ctx, fxv, n);
-   if (rc != SBX_OK)
-      return 0;
    if (n > SBX_MAX_AUX_TONES)
       return 0;
-   if (n > 0 && fxv)
-      memcpy(sbx_runtime_mix_fx, fxv, n * sizeof(*fxv));
-   sbx_runtime_mix_fx_n= n;
-   return 1;
+   rc= sbx_context_set_mix_effects(sbx_runtime_ctx, fxv, n);
+   return rc == SBX_OK;
 }
 
 static void
