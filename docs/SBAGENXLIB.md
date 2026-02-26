@@ -202,16 +202,23 @@ Phase 3.30
   - switch sbagenx runtime extra/immediate parsing to this API,
   - remove duplicated sbagenx-side waveform-prefix application helper.
 
-Phase 3.31 (current slice)
+Phase 3.31
 - Remove adapter/library aux-limit drift:
   - switch sbagenx runtime adapter aux limits to `SBX_MAX_AUX_TONES`
     from `sbagenxlib.h`,
   - eliminate duplicate local constant definitions.
 
+Phase 3.32 (current slice)
+- Move mix-effect runtime DSP ownership into sbagenxlib:
+  - add shared mix-effect spec/API (`SbxMixFxSpec`, parser, context set/get),
+  - add `sbx_context_apply_mix_effects()` with internal phase/Hilbert state,
+  - switch sbagenx runtime adapter to call sbagenxlib for mix-effect
+    processing instead of running mix-effect DSP in `outChunkSbx`.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.31 Slice)
+Current API (Phase 3.32 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -231,6 +238,7 @@ Public header: `sbagenxlib.h`
 - Context + load API:
   - `sbx_parse_tone_spec()`
   - `sbx_parse_tone_spec_ex()`
+  - `sbx_parse_mix_fx_spec()`
   - `sbx_context_create()` / `sbx_context_destroy()`
   - `sbx_context_reset()`
   - `sbx_context_set_tone()`
@@ -244,6 +252,10 @@ Public header: `sbagenxlib.h`
   - `sbx_context_set_aux_tones()`
   - `sbx_context_aux_tone_count()`
   - `sbx_context_get_aux_tone()`
+  - `sbx_context_set_mix_effects()`
+  - `sbx_context_mix_effect_count()`
+  - `sbx_context_get_mix_effect()`
+  - `sbx_context_apply_mix_effects()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_get_keyframe()`
   - `sbx_context_render_f32()`

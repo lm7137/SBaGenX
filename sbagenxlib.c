@@ -21,6 +21,14 @@
 #define SBX_CTX_SRC_NONE 0
 #define SBX_CTX_SRC_STATIC 1
 #define SBX_CTX_SRC_KEYFRAMES 2
+#define SBX_MIXBEAT_HILBERT_TAPS 31
+
+typedef struct {
+  SbxMixFxSpec spec;
+  double phase;
+  double mixbeat_hist[SBX_MIXBEAT_HILBERT_TAPS];
+  int mixbeat_hist_pos;
+} SbxMixFxState;
 
 struct SbxEngine {
   SbxEngineConfig cfg;
@@ -56,7 +64,11 @@ struct SbxContext {
   size_t aux_count;
   float *aux_buf;
   size_t aux_buf_cap;
+  SbxMixFxState *mix_fx;
+  size_t mix_fx_count;
 };
+
+static void engine_wave_sample(int waveform, double phase, double *out_sample);
 
 static void
 set_last_error(SbxEngine *eng, const char *msg) {
@@ -88,6 +100,63 @@ static double
 sbx_rand_signed_unit(SbxEngine *eng) {
   unsigned int v = sbx_rand_u32(eng);
   return ((double)v / 2147483648.0) - 1.0;
+}
+
+static double sbx_mixbeat_hilbert_coeff[SBX_MIXBEAT_HILBERT_TAPS];
+static int sbx_mixbeat_hilbert_inited = 0;
+
+static void
+sbx_mixbeat_hilbert_init_once(void) {
+  int k;
+  int mid = SBX_MIXBEAT_HILBERT_TAPS / 2;
+  double pi = M_PI;
+  if (sbx_mixbeat_hilbert_inited) return;
+  memset(sbx_mixbeat_hilbert_coeff, 0, sizeof(sbx_mixbeat_hilbert_coeff));
+  for (k = 0; k < SBX_MIXBEAT_HILBERT_TAPS; k++) {
+    int n = k - mid;
+    double h = 0.0;
+    double win;
+    if (n != 0 && (n & 1)) h = 2.0 / (pi * (double)n);
+    win = 0.54 - 0.46 * cos((2.0 * pi * k) / (SBX_MIXBEAT_HILBERT_TAPS - 1));
+    sbx_mixbeat_hilbert_coeff[k] = h * win;
+  }
+  sbx_mixbeat_hilbert_inited = 1;
+}
+
+static void
+sbx_mix_fx_reset_state(SbxMixFxState *fx) {
+  if (!fx) return;
+  fx->phase = 0.0;
+  memset(fx->mixbeat_hist, 0, sizeof(fx->mixbeat_hist));
+  fx->mixbeat_hist_pos = 0;
+}
+
+static double
+sbx_mixbeat_hilbert_step(SbxMixFxState *fx, double x) {
+  int k, idx;
+  double q = 0.0;
+  int pos;
+  if (!fx) return 0.0;
+  sbx_mixbeat_hilbert_init_once();
+  pos = fx->mixbeat_hist_pos;
+  fx->mixbeat_hist[pos] = x;
+  idx = pos;
+  for (k = 0; k < SBX_MIXBEAT_HILBERT_TAPS; k++) {
+    q += sbx_mixbeat_hilbert_coeff[k] * fx->mixbeat_hist[idx];
+    if (--idx < 0) idx = SBX_MIXBEAT_HILBERT_TAPS - 1;
+  }
+  pos++;
+  if (pos >= SBX_MIXBEAT_HILBERT_TAPS) pos = 0;
+  fx->mixbeat_hist_pos = pos;
+  return q;
+}
+
+static double
+sbx_wave_sample_unit_phase(int waveform, double phase_unit) {
+  double wav;
+  phase_unit = sbx_dsp_wrap_unit(phase_unit);
+  engine_wave_sample(waveform, phase_unit * SBX_TAU, &wav);
+  return wav;
 }
 
 static const char *
@@ -605,12 +674,23 @@ ctx_clear_aux_tones(SbxContext *ctx) {
 }
 
 static void
+ctx_clear_mix_effects(SbxContext *ctx) {
+  if (!ctx) return;
+  if (ctx->mix_fx) free(ctx->mix_fx);
+  ctx->mix_fx = 0;
+  ctx->mix_fx_count = 0;
+}
+
+static void
 ctx_reset_runtime(SbxContext *ctx) {
   size_t i;
   if (!ctx || !ctx->eng) return;
   sbx_engine_reset(ctx->eng);
   for (i = 0; i < ctx->aux_count; i++) {
     if (ctx->aux_eng[i]) sbx_engine_reset(ctx->aux_eng[i]);
+  }
+  for (i = 0; i < ctx->mix_fx_count; i++) {
+    sbx_mix_fx_reset_state(&ctx->mix_fx[i]);
   }
   ctx->t_sec = 0.0;
   ctx->kf_seg = 0;
@@ -853,6 +933,56 @@ sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *out_
   return parse_tone_spec_with_default_waveform(spec, default_waveform, out_tone);
 }
 
+int
+sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_fx) {
+  const char *p, *p0;
+  int n = 0;
+  int waveform;
+  SbxMixFxSpec fx;
+  double carr = 0.0, res = 0.0, amp_pct = 0.0;
+
+  if (!spec || !out_fx) return SBX_EINVAL;
+  if (default_waveform < SBX_WAVE_SINE || default_waveform > SBX_WAVE_SAWTOOTH)
+    return SBX_EINVAL;
+
+  memset(&fx, 0, sizeof(fx));
+  fx.type = SBX_MIXFX_NONE;
+  waveform = default_waveform;
+  p = skip_ws(spec);
+  p0 = p;
+  p = skip_optional_waveform_prefix(p, &waveform);
+  if (p == p0) fx.waveform = default_waveform;
+  else fx.waveform = waveform;
+
+  if (sscanf(p, "mixspin:%lf%lf/%lf %n", &carr, &res, &amp_pct, &n) == 3 &&
+      *skip_ws(p + n) == 0) {
+    fx.type = SBX_MIXFX_SPIN;
+    fx.carr = carr;
+    fx.res = res;
+    fx.amp = amp_pct / 100.0;
+  } else if (sscanf(p, "mixpulse:%lf/%lf %n", &res, &amp_pct, &n) == 2 &&
+             *skip_ws(p + n) == 0) {
+    fx.type = SBX_MIXFX_PULSE;
+    fx.res = res;
+    fx.amp = amp_pct / 100.0;
+  } else if (sscanf(p, "mixbeat:%lf/%lf %n", &res, &amp_pct, &n) == 2 &&
+             *skip_ws(p + n) == 0) {
+    fx.type = SBX_MIXFX_BEAT;
+    fx.res = res;
+    fx.amp = amp_pct / 100.0;
+  } else {
+    return SBX_EINVAL;
+  }
+
+  if (fx.waveform < SBX_WAVE_SINE || fx.waveform > SBX_WAVE_SAWTOOTH)
+    return SBX_EINVAL;
+  if (!isfinite(fx.carr) || !isfinite(fx.res) || !isfinite(fx.amp) || fx.amp < 0.0)
+    return SBX_EINVAL;
+
+  *out_fx = fx;
+  return SBX_OK;
+}
+
 static const char *
 wave_name_for_tone(int waveform) {
   switch (waveform) {
@@ -1065,6 +1195,8 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->aux_count = 0;
   ctx->aux_buf = 0;
   ctx->aux_buf_cap = 0;
+  ctx->mix_fx = 0;
+  ctx->mix_fx_count = 0;
   set_ctx_error(ctx, NULL);
   return ctx;
 }
@@ -1072,6 +1204,7 @@ sbx_context_create(const SbxEngineConfig *cfg) {
 void
 sbx_context_destroy(SbxContext *ctx) {
   if (!ctx) return;
+  ctx_clear_mix_effects(ctx);
   ctx_clear_aux_tones(ctx);
   ctx_clear_keyframes(ctx);
   sbx_engine_destroy(ctx->eng);
@@ -1682,6 +1815,152 @@ sbx_context_get_aux_tone(const SbxContext *ctx, size_t index, SbxToneSpec *out) 
   if (!ctx || !out || !ctx->aux_tones) return SBX_EINVAL;
   if (index >= ctx->aux_count) return SBX_EINVAL;
   *out = ctx->aux_tones[index];
+  return SBX_OK;
+}
+
+int
+sbx_context_set_mix_effects(SbxContext *ctx, const SbxMixFxSpec *fxv, size_t fx_count) {
+  SbxMixFxState *states = 0;
+  size_t i;
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (fx_count > SBX_MAX_AUX_TONES) {
+    set_ctx_error(ctx, "too many mix effects");
+    return SBX_EINVAL;
+  }
+  if (fx_count == 0) {
+    ctx_clear_mix_effects(ctx);
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (!fxv) {
+    set_ctx_error(ctx, "mix effect list is null");
+    return SBX_EINVAL;
+  }
+
+  states = (SbxMixFxState *)calloc(fx_count, sizeof(*states));
+  if (!states) {
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+  for (i = 0; i < fx_count; i++) {
+    states[i].spec = fxv[i];
+    if (states[i].spec.type < SBX_MIXFX_NONE || states[i].spec.type > SBX_MIXFX_BEAT) {
+      free(states);
+      set_ctx_error(ctx, "invalid mix effect type");
+      return SBX_EINVAL;
+    }
+    if (states[i].spec.waveform < SBX_WAVE_SINE || states[i].spec.waveform > SBX_WAVE_SAWTOOTH) {
+      free(states);
+      set_ctx_error(ctx, "invalid mix effect waveform");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(states[i].spec.carr) || !isfinite(states[i].spec.res) ||
+        !isfinite(states[i].spec.amp) || states[i].spec.amp < 0.0) {
+      free(states);
+      set_ctx_error(ctx, "invalid mix effect parameter");
+      return SBX_EINVAL;
+    }
+    sbx_mix_fx_reset_state(&states[i]);
+  }
+
+  ctx_clear_mix_effects(ctx);
+  ctx->mix_fx = states;
+  ctx->mix_fx_count = fx_count;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+size_t
+sbx_context_mix_effect_count(const SbxContext *ctx) {
+  if (!ctx || !ctx->mix_fx) return 0;
+  return ctx->mix_fx_count;
+}
+
+int
+sbx_context_get_mix_effect(const SbxContext *ctx, size_t index, SbxMixFxSpec *out_fx) {
+  if (!ctx || !out_fx || !ctx->mix_fx) return SBX_EINVAL;
+  if (index >= ctx->mix_fx_count) return SBX_EINVAL;
+  *out_fx = ctx->mix_fx[index].spec;
+  return SBX_OK;
+}
+
+int
+sbx_context_apply_mix_effects(SbxContext *ctx,
+                              double mix_l,
+                              double mix_r,
+                              double base_amp,
+                              double *out_add_l,
+                              double *out_add_r) {
+  size_t i;
+  double sr;
+  if (!ctx || !ctx->eng || !out_add_l || !out_add_r) return SBX_EINVAL;
+  *out_add_l = 0.0;
+  *out_add_r = 0.0;
+  if (ctx->mix_fx_count == 0) return SBX_OK;
+
+  sr = ctx->eng->cfg.sample_rate;
+  if (!(isfinite(sr) && sr > 0.0)) {
+    set_ctx_error(ctx, "engine configuration is invalid");
+    return SBX_ENOTREADY;
+  }
+
+  for (i = 0; i < ctx->mix_fx_count; i++) {
+    SbxMixFxState *fx = &ctx->mix_fx[i];
+    switch (fx->spec.type) {
+      case SBX_MIXFX_SPIN: {
+        double wav, val, intensity, amplified, pos, fx_l, fx_r;
+        fx->phase = sbx_dsp_wrap_unit(fx->phase + fx->spec.res / sr);
+        wav = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
+        val = fx->spec.carr * 1.0e-6 * sr * wav;
+        intensity = 0.5 + fx->spec.amp * 3.5;
+        amplified = val * intensity;
+        amplified = sbx_dsp_clamp(amplified, -128.0, 127.0);
+        pos = fabs(amplified);
+        if (amplified >= 0.0) {
+          fx_l = (mix_l * (128.0 - pos)) / 128.0;
+          fx_r = mix_r + (mix_l * pos) / 128.0;
+        } else {
+          fx_l = mix_l + (mix_r * pos) / 128.0;
+          fx_r = (mix_r * (128.0 - pos)) / 128.0;
+        }
+        *out_add_l += base_amp * fx_l;
+        *out_add_r += base_amp * fx_r;
+        break;
+      }
+      case SBX_MIXFX_PULSE: {
+        double wav, mod_factor = 0.0, effect_intensity, gain;
+        fx->phase = sbx_dsp_wrap_unit(fx->phase + fx->spec.res / sr);
+        wav = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
+        if (wav > 0.3) {
+          mod_factor = (wav - 0.3) / 0.7;
+          mod_factor = sbx_dsp_smoothstep01(mod_factor);
+        }
+        effect_intensity = sbx_dsp_clamp(fx->spec.amp, 0.0, 1.0);
+        gain = (1.0 - effect_intensity) + (effect_intensity * mod_factor);
+        *out_add_l += base_amp * mix_l * gain;
+        *out_add_r += base_amp * mix_r * gain;
+        break;
+      }
+      case SBX_MIXFX_BEAT: {
+        double s, c, mono, q, up, down, effect_intensity, fx_l, fx_r;
+        fx->phase = sbx_dsp_wrap_unit(fx->phase + (fx->spec.res * 0.5) / sr);
+        s = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
+        c = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase + 0.25);
+        mono = 0.5 * (mix_l + mix_r);
+        q = sbx_mixbeat_hilbert_step(fx, mono);
+        up = mono * c - q * s;
+        down = mono * c + q * s;
+        effect_intensity = sbx_dsp_clamp(fx->spec.amp, 0.0, 1.0);
+        fx_l = mix_l * (1.0 - effect_intensity) + down * effect_intensity;
+        fx_r = mix_r * (1.0 - effect_intensity) + up * effect_intensity;
+        *out_add_l += base_amp * fx_l;
+        *out_add_r += base_amp * fx_r;
+        break;
+      }
+      default:
+        break;
+    }
+  }
   return SBX_OK;
 }
 

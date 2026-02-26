@@ -44,6 +44,21 @@ typedef enum {
   SBX_INTERP_STEP = 1
 } SbxInterpMode;
 
+typedef enum {
+  SBX_MIXFX_NONE = 0,
+  SBX_MIXFX_SPIN = 1,
+  SBX_MIXFX_PULSE = 2,
+  SBX_MIXFX_BEAT = 3
+} SbxMixFxType;
+
+typedef struct {
+  int type;      /* SBX_MIXFX_* */
+  int waveform;  /* SBX_WAVE_* */
+  double carr;   /* mixspin width in microseconds */
+  double res;    /* modulation/spin frequency in Hz */
+  double amp;    /* 0..1 effect amount */
+} SbxMixFxSpec;
+
 typedef struct {
   double sample_rate; /* Hz, e.g. 44100 */
   int channels;       /* currently 2 (stereo) */
@@ -111,6 +126,16 @@ int sbx_context_load_sbg_timing_file(SbxContext *ctx, const char *path, int loop
 int sbx_context_set_aux_tones(SbxContext *ctx, const SbxToneSpec *tones, size_t tone_count);
 size_t sbx_context_aux_tone_count(const SbxContext *ctx);
 int sbx_context_get_aux_tone(const SbxContext *ctx, size_t index, SbxToneSpec *out);
+int sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_fx);
+int sbx_context_set_mix_effects(SbxContext *ctx, const SbxMixFxSpec *fxv, size_t fx_count);
+size_t sbx_context_mix_effect_count(const SbxContext *ctx);
+int sbx_context_get_mix_effect(const SbxContext *ctx, size_t index, SbxMixFxSpec *out_fx);
+int sbx_context_apply_mix_effects(SbxContext *ctx,
+                                  double mix_l,
+                                  double mix_r,
+                                  double base_amp,
+                                  double *out_add_l,
+                                  double *out_add_r);
 size_t sbx_context_keyframe_count(const SbxContext *ctx);
 int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out);
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);

@@ -105,6 +105,14 @@ int main(void) {
     if (sbx_parse_tone_spec("mixspin:400+6/40", &t) == SBX_OK)
       fail("unsupported spec parsed as valid");
   }
+  {
+    SbxMixFxSpec fx;
+    double add_l = 0.0, add_r = 0.0;
+    if (sbx_parse_mix_fx_spec("triangle:mixpulse:1/50", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mix fx parse failed");
+    if (fx.type != SBX_MIXFX_PULSE || fx.waveform != SBX_WAVE_TRIANGLE)
+      fail("mix fx parse value mismatch");
+  }
 
   sbx_default_engine_config(&cfg);
   ctx = sbx_context_create(&cfg);
@@ -113,6 +121,28 @@ int main(void) {
     fail("invalid default waveform should fail");
   if (sbx_context_set_default_waveform(ctx, SBX_WAVE_TRIANGLE) != SBX_OK)
     fail("setting default waveform failed");
+
+  {
+    SbxMixFxSpec fx;
+    SbxMixFxSpec fx_out;
+    double add_l = 0.0, add_r = 0.0;
+    if (sbx_parse_mix_fx_spec("triangle:mixpulse:1/50", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mix fx parse failed");
+    if (sbx_context_set_mix_effects(ctx, &fx, 1) != SBX_OK)
+      fail("set mix effects failed");
+    if (sbx_context_mix_effect_count(ctx) != 1)
+      fail("mix effect count mismatch");
+    if (sbx_context_get_mix_effect(ctx, 0, &fx_out) != SBX_OK)
+      fail("get mix effect failed");
+    if (fx_out.type != SBX_MIXFX_PULSE || fx_out.waveform != SBX_WAVE_TRIANGLE)
+      fail("get mix effect mismatch");
+    if (sbx_context_apply_mix_effects(ctx, 100.0, 80.0, 0.5, &add_l, &add_r) != SBX_OK)
+      fail("apply mix effects failed");
+    if (!(fabs(add_l) > 1e-9 || fabs(add_r) > 1e-9))
+      fail("mix effects produced zero contribution");
+    if (sbx_context_set_mix_effects(ctx, 0, 0) != SBX_OK)
+      fail("clear mix effects failed");
+  }
 
   buf = (float *)calloc(frames * 2, sizeof(float));
   if (!buf) fail("alloc failed");
