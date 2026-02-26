@@ -170,17 +170,24 @@ Phase 3.25
   - runtime mix-stream effect processing in `outChunkSbx`,
   - validation requiring both a mix input stream and explicit `mix/<amp>`.
 
-Phase 3.26 (current slice)
+Phase 3.26
 - Extend sbagenx/sbagenxlib runtime adapter immediate mode (`-i`) to accept
   extra mix effects:
   - `mixspin`, `mixpulse`, `mixbeat` token parsing for `-i`,
   - same validation rules (`-m`/`-M` active and explicit `mix/<amp>`),
   - include parsed mix effects in `-D` immediate output.
 
+Phase 3.27 (current slice)
+- Add sbagenxlib context-level auxiliary tone mixing:
+  - new API to set/get/clear aux tones on a context,
+  - aux tones render in the same context clock/loop domain as the main tone,
+  - sbagenx runtime adapter now uses context aux tones directly instead of
+    maintaining separate aux contexts/buffers in the CLI layer.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.26 Slice)
+Current API (Phase 3.27 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -208,6 +215,9 @@ Public header: `sbagenxlib.h`
   - `sbx_context_load_sequence_file()`
   - `sbx_context_load_sbg_timing_text()`
   - `sbx_context_load_sbg_timing_file()`
+  - `sbx_context_set_aux_tones()`
+  - `sbx_context_aux_tone_count()`
+  - `sbx_context_get_aux_tone()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_get_keyframe()`
   - `sbx_context_render_f32()`

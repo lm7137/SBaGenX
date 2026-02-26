@@ -19,6 +19,13 @@ static int has_energy(const float *buf, size_t n) {
   return e > 1e-6;
 }
 
+static double total_abs(const float *buf, size_t n) {
+  size_t i;
+  double e = 0.0;
+  for (i = 0; i < n; i++) e += fabs((double)buf[i]);
+  return e;
+}
+
 static int has_stereo_difference(const float *buf, size_t frames) {
   size_t i;
   double d = 0.0;
@@ -100,6 +107,34 @@ int main(void) {
     fail("render after load failed");
   if (!has_energy(buf, frames * 2))
     fail("render output appears silent");
+  {
+    SbxToneSpec aux;
+    double e_plain, e_aux;
+    memset(&aux, 0, sizeof(aux));
+    if (sbx_parse_tone_spec("250/10", &aux) != SBX_OK)
+      fail("parse aux tone failed");
+    e_plain = total_abs(buf, frames * 2);
+    if (sbx_context_set_aux_tones(ctx, &aux, 1) != SBX_OK)
+      fail("set aux tones failed");
+    if (sbx_context_aux_tone_count(ctx) != 1)
+      fail("aux tone count mismatch");
+    memset(&aux, 0, sizeof(aux));
+    if (sbx_context_get_aux_tone(ctx, 0, &aux) != SBX_OK)
+      fail("get aux tone failed");
+    if (aux.mode != SBX_TONE_BINAURAL)
+      fail("aux tone mode mismatch");
+    sbx_context_reset(ctx);
+    memset(buf, 0, frames * 2 * sizeof(float));
+    if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+      fail("render after aux set failed");
+    e_aux = total_abs(buf, frames * 2);
+    if (!(e_aux > e_plain * 1.1))
+      fail("aux tones should increase output energy");
+    if (sbx_context_set_aux_tones(ctx, 0, 0) != SBX_OK)
+      fail("clearing aux tones failed");
+    if (sbx_context_aux_tone_count(ctx) != 0)
+      fail("aux tone clear count mismatch");
+  }
 
   if (sbx_context_load_tone_spec(ctx, "spin:90+1/30") != SBX_OK)
     fail("load spin tone spec failed");

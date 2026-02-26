@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 #define SBX_API_VERSION 2
+#define SBX_MAX_AUX_TONES 16
 
 /* Status codes returned by sbagenxlib APIs. */
 enum {
@@ -105,6 +106,9 @@ int sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop);
 int sbx_context_load_sequence_file(SbxContext *ctx, const char *path, int loop);
 int sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop);
 int sbx_context_load_sbg_timing_file(SbxContext *ctx, const char *path, int loop);
+int sbx_context_set_aux_tones(SbxContext *ctx, const SbxToneSpec *tones, size_t tone_count);
+size_t sbx_context_aux_tone_count(const SbxContext *ctx);
+int sbx_context_get_aux_tone(const SbxContext *ctx, size_t index, SbxToneSpec *out);
 size_t sbx_context_keyframe_count(const SbxContext *ctx);
 int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out);
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);

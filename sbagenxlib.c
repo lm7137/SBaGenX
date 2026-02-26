@@ -50,6 +50,11 @@ struct SbxContext {
   size_t kf_seg;
   double kf_duration_sec;
   double t_sec;
+  SbxToneSpec *aux_tones;
+  SbxEngine **aux_eng;
+  size_t aux_count;
+  float *aux_buf;
+  size_t aux_buf_cap;
 };
 
 static void
@@ -580,9 +585,32 @@ ctx_clear_keyframes(SbxContext *ctx) {
 }
 
 static void
+ctx_clear_aux_tones(SbxContext *ctx) {
+  size_t i;
+  if (!ctx) return;
+  if (ctx->aux_eng) {
+    for (i = 0; i < ctx->aux_count; i++) {
+      if (ctx->aux_eng[i]) sbx_engine_destroy(ctx->aux_eng[i]);
+    }
+    free(ctx->aux_eng);
+  }
+  if (ctx->aux_tones) free(ctx->aux_tones);
+  if (ctx->aux_buf) free(ctx->aux_buf);
+  ctx->aux_eng = 0;
+  ctx->aux_tones = 0;
+  ctx->aux_buf = 0;
+  ctx->aux_count = 0;
+  ctx->aux_buf_cap = 0;
+}
+
+static void
 ctx_reset_runtime(SbxContext *ctx) {
+  size_t i;
   if (!ctx || !ctx->eng) return;
   sbx_engine_reset(ctx->eng);
+  for (i = 0; i < ctx->aux_count; i++) {
+    if (ctx->aux_eng[i]) sbx_engine_reset(ctx->aux_eng[i]);
+  }
   ctx->t_sec = 0.0;
   ctx->kf_seg = 0;
 }
@@ -934,6 +962,11 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->kf_seg = 0;
   ctx->kf_duration_sec = 0.0;
   ctx->t_sec = 0.0;
+  ctx->aux_tones = 0;
+  ctx->aux_eng = 0;
+  ctx->aux_count = 0;
+  ctx->aux_buf = 0;
+  ctx->aux_buf_cap = 0;
   set_ctx_error(ctx, NULL);
   return ctx;
 }
@@ -941,6 +974,7 @@ sbx_context_create(const SbxEngineConfig *cfg) {
 void
 sbx_context_destroy(SbxContext *ctx) {
   if (!ctx) return;
+  ctx_clear_aux_tones(ctx);
   ctx_clear_keyframes(ctx);
   sbx_engine_destroy(ctx->eng);
   free(ctx);
@@ -1456,6 +1490,103 @@ sbx_context_load_sbg_timing_file(SbxContext *ctx, const char *path, int loop) {
   return rc;
 }
 
+int
+sbx_context_set_aux_tones(SbxContext *ctx, const SbxToneSpec *tones, size_t tone_count) {
+  SbxToneSpec *copy = 0;
+  SbxEngine **engv = 0;
+  size_t i;
+  char err[160];
+  int rc;
+
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (tone_count > SBX_MAX_AUX_TONES) {
+    set_ctx_error(ctx, "too many aux tones");
+    return SBX_EINVAL;
+  }
+  if (tone_count == 0) {
+    ctx_clear_aux_tones(ctx);
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (!tones) {
+    set_ctx_error(ctx, "aux tone list is null");
+    return SBX_EINVAL;
+  }
+
+  copy = (SbxToneSpec *)calloc(tone_count, sizeof(*copy));
+  if (!copy) {
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+  engv = (SbxEngine **)calloc(tone_count, sizeof(*engv));
+  if (!engv) {
+    free(copy);
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+
+  for (i = 0; i < tone_count; i++) {
+    copy[i] = tones[i];
+    rc = normalize_tone(&copy[i], err, sizeof(err));
+    if (rc != SBX_OK) {
+      size_t j;
+      for (j = 0; j < i; j++) {
+        if (engv[j]) sbx_engine_destroy(engv[j]);
+      }
+      free(engv);
+      free(copy);
+      set_ctx_error(ctx, err);
+      return rc;
+    }
+    engv[i] = sbx_engine_create(&ctx->eng->cfg);
+    if (!engv[i]) {
+      size_t j;
+      for (j = 0; j < i; j++) {
+        if (engv[j]) sbx_engine_destroy(engv[j]);
+      }
+      free(engv);
+      free(copy);
+      set_ctx_error(ctx, "out of memory");
+      return SBX_ENOMEM;
+    }
+    rc = engine_apply_tone(engv[i], &copy[i], 1);
+    if (rc != SBX_OK) {
+      size_t j;
+      char emsg_local[256];
+      const char *emsg = sbx_engine_last_error(engv[i]);
+      snprintf(emsg_local, sizeof(emsg_local), "%s", emsg ? emsg : "invalid aux tone");
+      for (j = 0; j <= i; j++) {
+        if (engv[j]) sbx_engine_destroy(engv[j]);
+      }
+      free(engv);
+      free(copy);
+      set_ctx_error(ctx, emsg_local);
+      return rc;
+    }
+  }
+
+  ctx_clear_aux_tones(ctx);
+  ctx->aux_tones = copy;
+  ctx->aux_eng = engv;
+  ctx->aux_count = tone_count;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+size_t
+sbx_context_aux_tone_count(const SbxContext *ctx) {
+  if (!ctx || !ctx->aux_tones) return 0;
+  return ctx->aux_count;
+}
+
+int
+sbx_context_get_aux_tone(const SbxContext *ctx, size_t index, SbxToneSpec *out) {
+  if (!ctx || !out || !ctx->aux_tones) return SBX_EINVAL;
+  if (index >= ctx->aux_count) return SBX_EINVAL;
+  *out = ctx->aux_tones[index];
+  return SBX_OK;
+}
+
 size_t
 sbx_context_keyframe_count(const SbxContext *ctx) {
   if (!ctx || !ctx->kfs) return 0;
@@ -1486,6 +1617,29 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     if (rc != SBX_OK) {
       set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
       return rc;
+    }
+    if (ctx->aux_count > 0) {
+      size_t ai;
+      size_t nfloat = frames * (size_t)ctx->eng->cfg.channels;
+      if (nfloat > ctx->aux_buf_cap) {
+        float *tmp = (float *)realloc(ctx->aux_buf, nfloat * sizeof(float));
+        if (!tmp) {
+          set_ctx_error(ctx, "out of memory");
+          return SBX_ENOMEM;
+        }
+        ctx->aux_buf = tmp;
+        ctx->aux_buf_cap = nfloat;
+      }
+      for (ai = 0; ai < ctx->aux_count; ai++) {
+        size_t k;
+        rc = sbx_engine_render_f32(ctx->aux_eng[ai], ctx->aux_buf, frames);
+        if (rc != SBX_OK) {
+          set_ctx_error(ctx, sbx_engine_last_error(ctx->aux_eng[ai]));
+          return rc;
+        }
+        for (k = 0; k < nfloat; k++)
+          out[k] += ctx->aux_buf[k];
+      }
     }
     sr = ctx->eng->cfg.sample_rate;
     if (isfinite(sr) && sr > 0.0)
@@ -1518,6 +1672,15 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
     ctx->eng->tone = tone;
     engine_render_sample(ctx->eng, &l, &r);
+    if (ctx->aux_count > 0) {
+      size_t ai;
+      for (ai = 0; ai < ctx->aux_count; ai++) {
+        float al = 0.0f, ar = 0.0f;
+        engine_render_sample(ctx->aux_eng[ai], &al, &ar);
+        l += al;
+        r += ar;
+      }
+    }
     out[i * 2] = l;
     out[i * 2 + 1] = r;
     ctx->t_sec += 1.0 / sr;

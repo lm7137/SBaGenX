@@ -822,10 +822,6 @@ size_t sbx_runtime_fcap= 0;
 SbxMixAmpKeyframe *sbx_runtime_mix_kf= 0;
 size_t sbx_runtime_mix_n= 0;
 size_t sbx_runtime_mix_seg= 0;
-SbxContext *sbx_runtime_aux_ctx[SBX_RUNTIME_MAX_AUX];
-size_t sbx_runtime_aux_n= 0;
-float *sbx_runtime_aux_fbuf= 0;
-size_t sbx_runtime_aux_fcap= 0;
 SbxMixFxState sbx_runtime_mix_fx[SBX_RUNTIME_MAX_AUX];
 size_t sbx_runtime_mix_fx_n= 0;
 
@@ -6212,24 +6208,6 @@ outChunkSbx() {
    if (rc != SBX_OK)
       error("sbagenxlib render failed: %s", sbx_context_last_error(sbx_runtime_ctx));
 
-   if (sbx_runtime_aux_n > 0) {
-      size_t ai;
-      size_t nfloat= (size_t)out_blen;
-      if (nfloat > sbx_runtime_aux_fcap) {
-	 sbx_runtime_aux_fbuf= (float*)realloc(sbx_runtime_aux_fbuf, nfloat * sizeof(float));
-	 if (!sbx_runtime_aux_fbuf) error("Out of memory");
-	 sbx_runtime_aux_fcap= nfloat;
-      }
-      for (ai= 0; ai<sbx_runtime_aux_n; ai++) {
-	 size_t k;
-	 rc= sbx_context_render_f32(sbx_runtime_aux_ctx[ai], sbx_runtime_aux_fbuf, frames);
-	 if (rc != SBX_OK)
-	    error("sbagenxlib aux render failed: %s", sbx_context_last_error(sbx_runtime_aux_ctx[ai]));
-	 for (k= 0; k<nfloat; k++)
-	    sbx_runtime_fbuf[k] += sbx_runtime_aux_fbuf[k];
-      }
-   }
-
    while (off < out_blen) {
       int mix1= mix_in ? tmp_buf[off] : 0;
       int mix2= mix_in ? tmp_buf[off+1] : 0;
@@ -8838,7 +8816,6 @@ create_libseq(int ac, char **av, int sbg_timing) {
 
 static void
 sbx_runtime_clear(void) {
-   size_t i;
    sbx_runtime_active= 0;
    sbx_runtime_loop= 0;
    sbx_runtime_total_sec= 0.0;
@@ -8857,18 +8834,6 @@ sbx_runtime_clear(void) {
       free(sbx_runtime_mix_kf);
       sbx_runtime_mix_kf= 0;
       sbx_runtime_mix_n= 0;
-   }
-   for (i= 0; i<sbx_runtime_aux_n; i++) {
-      if (sbx_runtime_aux_ctx[i]) {
-	 sbx_context_destroy(sbx_runtime_aux_ctx[i]);
-	 sbx_runtime_aux_ctx[i]= 0;
-      }
-   }
-   sbx_runtime_aux_n= 0;
-   if (sbx_runtime_aux_fbuf) {
-      free(sbx_runtime_aux_fbuf);
-      sbx_runtime_aux_fbuf= 0;
-      sbx_runtime_aux_fcap= 0;
    }
    sbx_runtime_mix_fx_n= 0;
 }
@@ -8892,55 +8857,11 @@ sbx_runtime_set_mix_keyframes(const SbxMixAmpKeyframe *kfs, size_t n) {
 
 static int
 sbx_runtime_set_aux_tones(const SbxToneSpec *tones, size_t n) {
-   size_t i;
-   SbxEngineConfig cfg;
-
-   for (i= 0; i<sbx_runtime_aux_n; i++) {
-      if (sbx_runtime_aux_ctx[i]) {
-	 sbx_context_destroy(sbx_runtime_aux_ctx[i]);
-	 sbx_runtime_aux_ctx[i]= 0;
-      }
-   }
-   sbx_runtime_aux_n= 0;
-
-   if (!tones || n == 0)
-      return 1;
-   if (n > SBX_RUNTIME_MAX_AUX)
+   int rc;
+   if (!sbx_runtime_ctx)
       return 0;
-
-   sbx_default_engine_config(&cfg);
-   cfg.sample_rate= (double)out_rate;
-   cfg.channels= 2;
-
-   for (i= 0; i<n; i++) {
-      int rc;
-      sbx_runtime_aux_ctx[i]= sbx_context_create(&cfg);
-      if (!sbx_runtime_aux_ctx[i]) {
-	 size_t j;
-	 for (j= 0; j<i; j++) {
-	    if (sbx_runtime_aux_ctx[j]) {
-	       sbx_context_destroy(sbx_runtime_aux_ctx[j]);
-	       sbx_runtime_aux_ctx[j]= 0;
-	    }
-	 }
-	 return 0;
-      }
-      rc= sbx_context_set_tone(sbx_runtime_aux_ctx[i], &tones[i]);
-      if (rc != SBX_OK) {
-	 size_t j;
-	 sbx_context_destroy(sbx_runtime_aux_ctx[i]);
-	 sbx_runtime_aux_ctx[i]= 0;
-	 for (j= 0; j<i; j++) {
-	    if (sbx_runtime_aux_ctx[j]) {
-	       sbx_context_destroy(sbx_runtime_aux_ctx[j]);
-	       sbx_runtime_aux_ctx[j]= 0;
-	    }
-	 }
-	 return 0;
-      }
-   }
-   sbx_runtime_aux_n= n;
-   return 1;
+   rc= sbx_context_set_aux_tones(sbx_runtime_ctx, tones, n);
+   return rc == SBX_OK;
 }
 
 static int
