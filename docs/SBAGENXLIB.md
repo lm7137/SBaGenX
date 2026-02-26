@@ -190,16 +190,22 @@ Phase 3.28
   - replace duplicate sbagenx-side formatter usage with the library API for
     keyframe and immediate `-D` output paths.
 
-Phase 3.29 (current slice)
+Phase 3.29
 - Normalize sbagenxlib-backed `-D` extra-token diagnostics:
   - remove stale "legacy timeline bridge" wording in preprogram dumps,
   - report unsupported extras as textual-preservation-only for `-D`,
   - clarify that curve `mixamp` expressions are ignored in keyframe dump mode.
 
+Phase 3.30 (current slice)
+- Expose default-waveform-aware tone parsing in sbagenxlib:
+  - new `sbx_parse_tone_spec_ex(spec, default_waveform, out)` API,
+  - switch sbagenx runtime extra/immediate parsing to this API,
+  - remove duplicated sbagenx-side waveform-prefix application helper.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.29 Slice)
+Current API (Phase 3.30 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -218,6 +224,7 @@ Public header: `sbagenxlib.h`
   - `sbx_engine_render_f32()`
 - Context + load API:
   - `sbx_parse_tone_spec()`
+  - `sbx_parse_tone_spec_ex()`
   - `sbx_context_create()` / `sbx_context_destroy()`
   - `sbx_context_reset()`
   - `sbx_context_set_tone()`

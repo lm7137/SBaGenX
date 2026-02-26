@@ -92,6 +92,13 @@ int main(void) {
     if (fabs(out.carrier_hz - in.carrier_hz) > 1e-9) fail("format roundtrip carrier mismatch");
     if (fabs(out.amplitude - in.amplitude) > 1e-9) fail("format roundtrip amplitude mismatch");
   }
+  {
+    SbxToneSpec t;
+    if (sbx_parse_tone_spec_ex("200+8/15", SBX_WAVE_SAWTOOTH, &t) != SBX_OK)
+      fail("parse_ex failed");
+    if (t.waveform != SBX_WAVE_SAWTOOTH)
+      fail("parse_ex default waveform was not applied");
+  }
 
   {
     SbxToneSpec t;

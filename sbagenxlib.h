@@ -91,6 +91,7 @@ const char *sbx_engine_last_error(const SbxEngine *eng);
  * monolithic sbagenx.c runtime to a reusable core context.
  */
 int sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone);
+int sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *out_tone);
 int sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz);
 
 SbxContext *sbx_context_create(const SbxEngineConfig *cfg);

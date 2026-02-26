@@ -846,6 +846,13 @@ sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone) {
   return parse_tone_spec_with_default_waveform(spec, SBX_WAVE_SINE, out_tone);
 }
 
+int
+sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *out_tone) {
+  if (default_waveform < SBX_WAVE_SINE || default_waveform > SBX_WAVE_SAWTOOTH)
+    return SBX_EINVAL;
+  return parse_tone_spec_with_default_waveform(spec, default_waveform, out_tone);
+}
+
 static const char *
 wave_name_for_tone(int waveform) {
   switch (waveform) {

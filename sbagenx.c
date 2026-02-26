@@ -8569,48 +8569,6 @@ sbx_streq_prefix_nocase_local(const char *s, const char *prefix) {
 }
 
 static int
-sbx_parse_waveform_prefix_token(const char *tok, int *out_waveform) {
-   const char *p= tok;
-   if (!tok) return 0;
-   while (*p && isspace((unsigned char)*p)) p++;
-   if (sbx_streq_prefix_nocase_local(p, "sine:")) {
-      if (out_waveform) *out_waveform= SBX_WAVE_SINE;
-      return 1;
-   }
-   if (sbx_streq_prefix_nocase_local(p, "square:")) {
-      if (out_waveform) *out_waveform= SBX_WAVE_SQUARE;
-      return 1;
-   }
-   if (sbx_streq_prefix_nocase_local(p, "triangle:")) {
-      if (out_waveform) *out_waveform= SBX_WAVE_TRIANGLE;
-      return 1;
-   }
-   if (sbx_streq_prefix_nocase_local(p, "sawtooth:")) {
-      if (out_waveform) *out_waveform= SBX_WAVE_SAWTOOTH;
-      return 1;
-   }
-   return 0;
-}
-
-static void
-sbx_apply_waveform_from_token_or_default(const char *tok, SbxToneSpec *tone) {
-   int wf= SBX_WAVE_SINE;
-   if (!tone) return;
-   if (!(tone->mode == SBX_TONE_BINAURAL ||
-	 tone->mode == SBX_TONE_MONAURAL ||
-	 tone->mode == SBX_TONE_ISOCHRONIC ||
-	 tone->mode == SBX_TONE_BELL ||
-	 tone->mode == SBX_TONE_SPIN_PINK ||
-	 tone->mode == SBX_TONE_SPIN_BROWN ||
-	 tone->mode == SBX_TONE_SPIN_WHITE))
-      return;
-   if (sbx_parse_waveform_prefix_token(tok, &wf))
-      tone->waveform= wf;
-   else
-      tone->waveform= opt_w;
-}
-
-static int
 sbx_parse_mix_fx_token(const char *tok, SbxMixFxState *fx_out) {
    const char *p= tok;
    double carr= 0.0, res= 0.0, amp= 0.0;
@@ -8901,8 +8859,7 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
       }
       if (tone_count >= SBX_RUNTIME_MAX_AUX + 1)
 	 return 0;
-      if (SBX_OK == sbx_parse_tone_spec(tok, &tones[tone_count])) {
-	 sbx_apply_waveform_from_token_or_default(tok, &tones[tone_count]);
+      if (SBX_OK == sbx_parse_tone_spec_ex(tok, opt_w, &tones[tone_count])) {
 	 tone_count++;
 	 continue;
       }
@@ -9082,8 +9039,7 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
 	    continue;
 	 }
 	 SbxToneSpec tone;
-	 if (SBX_OK == sbx_parse_tone_spec(tok, &tone)) {
-	    sbx_apply_waveform_from_token_or_default(tok, &tone);
+	 if (SBX_OK == sbx_parse_tone_spec_ex(tok, opt_w, &tone)) {
 	    if (spec->aux_count >= SBX_RUNTIME_MAX_AUX)
 	       error("Too many extra sbagenxlib tone-specs (max %d)", SBX_RUNTIME_MAX_AUX);
 	    spec->aux_tones[spec->aux_count++]= tone;
