@@ -262,6 +262,7 @@ For developers integrating `sbagenxlib`:
 - API reference: [docs/SBAGENXLIB_API.md](docs/SBAGENXLIB_API.md)
 - Quick start: [docs/SBAGENXLIB_QUICKSTART.md](docs/SBAGENXLIB_QUICKSTART.md)
 - .NET interop notes: [docs/SBAGENXLIB_DOTNET_INTEROP.md](docs/SBAGENXLIB_DOTNET_INTEROP.md)
+- Doxygen generation: [docs/SBAGENXLIB_DOXYGEN.md](docs/SBAGENXLIB_DOXYGEN.md)
 
 ## Research
 
