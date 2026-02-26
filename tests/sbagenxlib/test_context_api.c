@@ -192,12 +192,71 @@ int main(void) {
     if (fabs(v - 77.0) > 1e-9)
       fail("mix amp default mismatch");
   }
+  {
+    SbxProgramKeyframe kf[2];
+    SbxToneSpec t;
+    if (sbx_parse_tone_spec("200+10/20", &t) != SBX_OK)
+      fail("parse tone for duration failed");
+    kf[0].time_sec = 0.0;
+    kf[0].tone = t;
+    kf[0].interp = SBX_INTERP_LINEAR;
+    kf[1].time_sec = 5.0;
+    kf[1].tone = t;
+    kf[1].interp = SBX_INTERP_STEP;
+    if (sbx_context_load_keyframes(ctx, kf, 2, 0) != SBX_OK)
+      fail("load keyframes for duration failed");
+    if (fabs(sbx_context_duration_sec(ctx) - 5.0) > 1e-9)
+      fail("context duration mismatch");
+  }
+  {
+    SbxToneSpec t;
+    if (sbx_parse_tone_spec("200+10/20", &t) != SBX_OK)
+      fail("parse tone for static duration failed");
+    if (sbx_context_set_tone(ctx, &t) != SBX_OK)
+      fail("set tone for static duration failed");
+    if (fabs(sbx_context_duration_sec(ctx)) > 1e-9)
+      fail("static tone duration should be zero");
+  }
+  {
+    SbxMixAmpKeyframe mkf[2];
+    SbxMixFxSpec fx;
+    SbxToneSpec aux;
+    double add_l = 0.0, add_r = 0.0;
+    int rc;
+    mkf[0].time_sec = 0.0;
+    mkf[0].amp_pct = 100.0;
+    mkf[0].interp = SBX_INTERP_LINEAR;
+    mkf[1].time_sec = 10.0;
+    mkf[1].amp_pct = 50.0;
+    mkf[1].interp = SBX_INTERP_LINEAR;
+    if (sbx_parse_mix_fx_spec("mixpulse:2/40", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("parse mix fx for runtime config failed");
+    if (sbx_parse_tone_spec("250/10", &aux) != SBX_OK)
+      fail("parse aux for runtime config failed");
+    rc = sbx_context_configure_runtime(ctx,
+                                       mkf, 2, 80.0,
+                                       &fx, 1,
+                                       &aux, 1);
+    if (rc != SBX_OK)
+      fail("configure runtime failed");
+    if (sbx_context_mix_stream_sample(ctx, 5.0, 1600, -1200, 1.0, &add_l, &add_r) != SBX_OK)
+      fail("mix stream sample failed");
+    if (!(fabs(add_l) > 1e-9 || fabs(add_r) > 1e-9))
+      fail("mix stream sample produced zero contribution");
+    if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, 0, 0, 0, 0) != SBX_OK)
+      fail("clear runtime config failed");
+  }
 
   buf = (float *)calloc(frames * 2, sizeof(float));
   if (!buf) fail("alloc failed");
 
-  if (sbx_context_render_f32(ctx, buf, frames) != SBX_ENOTREADY)
-    fail("render should fail with ENOTREADY before load");
+  {
+    SbxContext *ctx0 = sbx_context_create(&cfg);
+    if (!ctx0) fail("context create failed (ctx0)");
+    if (sbx_context_render_f32(ctx0, buf, frames) != SBX_ENOTREADY)
+      fail("render should fail with ENOTREADY before load");
+    sbx_context_destroy(ctx0);
+  }
 
   if (sbx_context_load_tone_spec(ctx, "200+10/20") != SBX_OK)
     fail("load tone spec failed");
