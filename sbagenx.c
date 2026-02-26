@@ -9392,14 +9392,15 @@ create_drop(int ac, char **av) {
       sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
       sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
-      if (extra_spec.unsupported) {
-	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p drop sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
-		  extra_spec.bad_token);
-	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p drop; using legacy timeline bridge for -D output", extra_spec.bad_token);
-	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
-      } else if (opt_D) {
+      if (extra_spec.unsupported && !opt_D)
+	 error("Unsupported extra tone-spec '%s' for -p drop sbagenxlib runtime"
+	       NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+	       extra_spec.bad_token);
+      if (extra_spec.unsupported && opt_D)
+	 warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
+	      extra_spec.bad_token);
+
+      if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
@@ -9674,14 +9675,15 @@ create_sigmoid(int ac, char **av) {
       sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
       sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
-      if (extra_spec.unsupported) {
-	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
-		  extra_spec.bad_token);
-	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p sigmoid; using legacy timeline bridge for -D output", extra_spec.bad_token);
-	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
-      } else if (opt_D) {
+      if (extra_spec.unsupported && !opt_D)
+	 error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenxlib runtime"
+	       NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+	       extra_spec.bad_token);
+      if (extra_spec.unsupported && opt_D)
+	 warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
+	      extra_spec.bad_token);
+
+      if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
@@ -10029,16 +10031,17 @@ create_curve(int ac, char **av) {
       if (have_mixamp_curve && have_mix_in_extra)
 	 sbx_mixkfb_add(&mkfb, (double)(end_sec + 10), wakeup ? mix_start_eval : mix_end, SBX_INTERP_LINEAR);
 
-      if (extra_spec.unsupported) {
-	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p curve sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
-		  extra_spec.bad_token);
-	 if (have_mixamp_curve && have_mix_in_extra)
-	    warn("Curve mixamp expression is ignored in legacy -D bridge output");
-	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p curve; using legacy timeline bridge for -D output", extra_spec.bad_token);
-	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
-      } else if (opt_D) {
+      if (extra_spec.unsupported && !opt_D)
+	 error("Unsupported extra tone-spec '%s' for -p curve sbagenxlib runtime"
+	       NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+	       extra_spec.bad_token);
+      if (opt_D && have_mixamp_curve && have_mix_in_extra)
+	 warn("Curve mixamp expression is ignored in -D keyframe dump output");
+      if (extra_spec.unsupported && opt_D)
+	 warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
+	      extra_spec.bad_token);
+
+      if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
@@ -10145,14 +10148,15 @@ create_slide(int ac, char **av) {
       sbx_fill_tone_spec(&tone, signal == '@', ismono, c1, signal == '-' ? -beat_abs : beat_abs, 0.0);
       sbx_kfb_add(&kfb, (double)len + 10.0, &tone, SBX_INTERP_LINEAR);
 
-      if (extra_spec.unsupported) {
-	 if (!opt_D)
-	    error("Unsupported extra tone-spec '%s' for -p slide sbagenxlib runtime"
-		  NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
-		  extra_spec.bad_token);
-	 warn("Unsupported extra tone-spec '%s' for sbagenxlib runtime in -p slide; using legacy timeline bridge for -D output", extra_spec.bad_token);
-	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
-      } else if (opt_D) {
+      if (extra_spec.unsupported && !opt_D)
+	 error("Unsupported extra tone-spec '%s' for -p slide sbagenxlib runtime"
+	       NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+	       extra_spec.bad_token);
+      if (extra_spec.unsupported && opt_D)
+	 warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
+	      extra_spec.bad_token);
+
+      if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,

@@ -184,16 +184,22 @@ Phase 3.27
   - sbagenx runtime adapter now uses context aux tones directly instead of
     maintaining separate aux contexts/buffers in the CLI layer.
 
-Phase 3.28 (current slice)
+Phase 3.28
 - Add shared tone-spec formatting API to sbagenxlib:
   - new `sbx_format_tone_spec()` function for canonical string emission,
   - replace duplicate sbagenx-side formatter usage with the library API for
     keyframe and immediate `-D` output paths.
 
+Phase 3.29 (current slice)
+- Normalize sbagenxlib-backed `-D` extra-token diagnostics:
+  - remove stale "legacy timeline bridge" wording in preprogram dumps,
+  - report unsupported extras as textual-preservation-only for `-D`,
+  - clarify that curve `mixamp` expressions are ignored in keyframe dump mode.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.28 Slice)
+Current API (Phase 3.29 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
