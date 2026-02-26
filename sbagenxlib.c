@@ -2058,6 +2058,43 @@ sbx_context_apply_mix_effects(SbxContext *ctx,
 }
 
 int
+sbx_context_mix_stream_sample(SbxContext *ctx,
+                              double t_sec,
+                              int mix_l_sample,
+                              int mix_r_sample,
+                              double mix_mod_mul,
+                              double *out_add_l,
+                              double *out_add_r) {
+  double mix_l;
+  double mix_r;
+  double mix_pct;
+  double mix_mul;
+
+  if (!ctx || !out_add_l || !out_add_r) return SBX_EINVAL;
+  if (!isfinite(mix_mod_mul)) mix_mod_mul = 1.0;
+
+  mix_l = (double)(mix_l_sample >> 4);
+  mix_r = (double)(mix_r_sample >> 4);
+  mix_pct = sbx_context_mix_amp_at(ctx, t_sec);
+  mix_mul = (mix_pct / 100.0) * mix_mod_mul;
+
+  *out_add_l = mix_l * mix_mul;
+  *out_add_r = mix_r * mix_mul;
+
+  if (sbx_context_mix_effect_count(ctx) > 0) {
+    double fx_add_l = 0.0;
+    double fx_add_r = 0.0;
+    int rc = sbx_context_apply_mix_effects(ctx, mix_l, mix_r, mix_mul * 0.7,
+                                           &fx_add_l, &fx_add_r);
+    if (rc != SBX_OK) return rc;
+    *out_add_l += fx_add_l;
+    *out_add_r += fx_add_r;
+  }
+
+  return SBX_OK;
+}
+
+int
 sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
                                   const SbxMixAmpKeyframe *kfs,
                                   size_t kf_count,

@@ -285,16 +285,23 @@ Phase 3.44
   - remove stale warnings in `test_context_api` so the expanded parser/mixfx
     regression checks run warning-clean under `-Wall -Wextra`.
 
-Phase 3.45 (current slice)
+Phase 3.45
 - Add context-duration API ownership in sbagenxlib:
   - new `sbx_context_duration_sec()` to expose keyframed program duration,
   - switch sbagenx runtime activation paths to query duration from the
     library instead of manually reading the last keyframe.
 
+Phase 3.46 (current slice)
+- Move mix-stream sample processing ownership into sbagenxlib:
+  - add `sbx_context_mix_stream_sample()` to combine context mix amplitude
+    profiles and mix effects on one sample path,
+  - switch `outChunkSbx()` to call this library API instead of duplicating
+    mix gain/effect math in `sbagenx.c`.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.45 Slice)
+Current API (Phase 3.46 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -334,6 +341,7 @@ Public header: `sbagenxlib.h`
   - `sbx_context_mix_effect_count()`
   - `sbx_context_get_mix_effect()`
   - `sbx_context_apply_mix_effects()`
+  - `sbx_context_mix_stream_sample()`
   - `sbx_context_set_mix_amp_keyframes()`
   - `sbx_context_mix_amp_at()`
   - `sbx_context_keyframe_count()`

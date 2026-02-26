@@ -6187,23 +6187,14 @@ outChunkSbx() {
 
       if (mix_in) {
 	 double t_sec= t0 + frm / sr;
-	 double mix_pct= sbx_context_mix_amp_at(sbx_runtime_ctx, t_sec);
-	 double mix_mul= (mix_pct / 100.0) * mix_mod_mul;
-	 double mix_l= (mix1 >> 4);
-	 double mix_r= (mix2 >> 4);
-	 out_l += ((mix1 >> 4) * mix_mul);
-	 out_r += ((mix2 >> 4) * mix_mul);
-
-	 if (sbx_context_mix_effect_count(sbx_runtime_ctx) > 0) {
-	    double base_amp= mix_mul * 0.7;
-	    double fx_add_l= 0.0, fx_add_r= 0.0;
-	    rc= sbx_context_apply_mix_effects(sbx_runtime_ctx, mix_l, mix_r, base_amp,
-					      &fx_add_l, &fx_add_r);
-	    if (rc != SBX_OK)
-	       error("sbagenxlib mix effect processing failed: %s", sbx_context_last_error(sbx_runtime_ctx));
-	    out_l += fx_add_l;
-	    out_r += fx_add_r;
-	 }
+	 double mix_add_l= 0.0;
+	 double mix_add_r= 0.0;
+	 rc= sbx_context_mix_stream_sample(sbx_runtime_ctx, t_sec, mix1, mix2, mix_mod_mul,
+					   &mix_add_l, &mix_add_r);
+	 if (rc != SBX_OK)
+	    error("sbagenxlib mix stream processing failed: %s", sbx_context_last_error(sbx_runtime_ctx));
+	 out_l += mix_add_l;
+	 out_r += mix_add_r;
       }
 
       if (opt_V != 100) {

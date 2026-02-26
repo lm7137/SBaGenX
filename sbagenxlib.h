@@ -156,6 +156,13 @@ int sbx_context_apply_mix_effects(SbxContext *ctx,
                                   double base_amp,
                                   double *out_add_l,
                                   double *out_add_r);
+int sbx_context_mix_stream_sample(SbxContext *ctx,
+                                  double t_sec,
+                                  int mix_l_sample,
+                                  int mix_r_sample,
+                                  double mix_mod_mul,
+                                  double *out_add_l,
+                                  double *out_add_r);
 int sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
                                       const SbxMixAmpKeyframe *kfs,
                                       size_t kf_count,
