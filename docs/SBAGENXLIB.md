@@ -357,6 +357,11 @@ Phase 3.56
   - reject self-referential block recursion,
   - preserve deterministic non-decreasing expanded block timing.
 
+Phase 3.57
+- Add first-class developer API reference for `sbagenxlib`:
+  - `docs/SBAGENXLIB_API.md` as canonical function/ownership/error/threading
+    reference for front-end and binding authors.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -665,3 +670,7 @@ Notes:
 - Immediate mode (`-i`) now uses sbagenxlib runtime when all provided tone-specs
   are sbagenxlib-parseable, including adapter-handled mix effects
   (`mixspin`/`mixpulse`/`mixbeat`).
+
+Developer docs:
+
+- `docs/SBAGENXLIB_API.md`
