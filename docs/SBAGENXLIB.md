@@ -311,16 +311,22 @@ Phase 3.48
   - add tests for `sbx_context_configure_runtime()` and
     `sbx_context_mix_stream_sample()` paths.
 
-Phase 3.49 (current slice)
+Phase 3.49
 - Allow mixed tone modes in keyframed sbagenxlib programs:
   - remove same-mode keyframe restriction in `sbx_context_load_keyframes()`,
   - force deterministic step behavior across mode/waveform changes at segment
     boundaries.
 
+Phase 3.50 (current slice)
+- Extend sbagenxlib SBG timing subset loader with named tone-sets:
+  - support inline named definitions (`name: <tone-spec>` / `name: -`),
+  - support timeline references to named tone-sets plus legacy transition
+    tokens (`->`, `==`, etc.) mapped to sbagenxlib interpolation behavior.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.49 Slice)
+Current API (Phase 3.50 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -425,6 +431,13 @@ SBG timing subset form (Phase 3.4):
 - One keyframe line per non-empty line:
   - `<HH:MM> <tone-spec> [linear|ramp|step|hold]`
   - `<HH:MM:SS> <tone-spec> [linear|ramp|step|hold]`
+- Extended subset additions (Phase 3.50):
+  - named tone-set definition lines:
+    - `<name>: <tone-spec>`
+    - `<name>: -`
+  - timeline entries may reference named tone-sets:
+    - `<HH:MM[:SS]> <name>`
+    - with optional transition/interp tokens, e.g. `==` / `->` / `step`.
 - Supported comments:
   - `# ...`
   - `; ...`

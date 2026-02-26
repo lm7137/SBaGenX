@@ -25,6 +25,18 @@ zero_crossings_left(const float *buf, size_t frames) {
   return zc;
 }
 
+static double
+abs_sum_window(const float *buf, size_t i0, size_t i1) {
+  size_t i;
+  double s = 0.0;
+  if (i1 <= i0) return 0.0;
+  for (i = i0; i < i1; i++) {
+    s += fabs((double)buf[i * 2]);
+    s += fabs((double)buf[i * 2 + 1]);
+  }
+  return s;
+}
+
 static void
 write_text_file(const char *path, const char *text) {
   FILE *fp = fopen(path, "wb");
@@ -48,6 +60,13 @@ main(void) {
       "# minimal sbg timing subset\n"
       "00:00 100+0/50 step\n"
       "00:00:06 240+0/50\n";
+  const char *sbg_named_text =
+      "# named tone-set + timeline references\n"
+      "off: -\n"
+      "base: 180+0/35\n"
+      "00:00 off ==\n"
+      "00:00:01 base ->\n"
+      "00:00:02 off\n";
   const char *tmp_path = "/tmp/sbx_sbg_timing_test.sbg";
   double t_actual, t_expect;
 
@@ -110,6 +129,21 @@ main(void) {
   t_actual = sbx_context_time_sec(ctx);
   if (fabs(t_actual - t_expect) > 4e-3)
     fail("looped sbg timing time tracking out of range");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_named_text, 0);
+  if (rc != SBX_OK) fail("named sbg timing load failed");
+  free(buf);
+  frames = (size_t)(2.3 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (named)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("named sbg timing render failed");
+  if (!(abs_sum_window(buf, (size_t)(0.1 * cfg.sample_rate), (size_t)(0.4 * cfg.sample_rate)) < 1e-4))
+    fail("named sbg timing should be silent in initial off segment");
+  if (!(abs_sum_window(buf, (size_t)(1.2 * cfg.sample_rate), (size_t)(1.6 * cfg.sample_rate)) > 1e-3))
+    fail("named sbg timing should have energy in base segment");
+  if (!(abs_sum_window(buf, (size_t)(2.05 * cfg.sample_rate), (size_t)(2.25 * cfg.sample_rate)) < 1e-4))
+    fail("named sbg timing should be silent after final off switch");
 
   free(buf);
   sbx_context_destroy(ctx);
