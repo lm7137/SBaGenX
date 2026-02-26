@@ -323,15 +323,21 @@ Phase 3.50
   - support timeline references to named tone-sets plus legacy transition
     tokens (`->`, `==`, etc.) mapped to sbagenxlib interpolation behavior.
 
-Phase 3.51 (current slice)
+Phase 3.51
 - Unify SBG clock-token parsing between sbagenx and sbagenxlib:
   - add shared `sbx_parse_sbg_clock_token()` API (`HH:MM` / `HH:MM:SS`),
   - switch legacy `sbagenx.c` `readTime()` to use the library parser.
 
+Phase 3.52 (current slice)
+- Add explicit off-tone parity in sbagenxlib formatting/bridging:
+  - parse/format `-` as `SBX_TONE_NONE`,
+  - add `SBAGENX_SEQ_BACKEND=sbagenxlib` smoke test for named SBG subset
+    dump output including off-keyframes.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.51 Slice)
+Current API (Phase 3.52 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -397,6 +403,7 @@ Supported tone-spec forms (for `sbx_parse_tone_spec`):
 - `<carrier>M<beat>/<amp>` or `<carrier>m<beat>/<amp>` (monaural)
 - `<carrier>@<pulse>/<amp>` (isochronic)
 - `bell<carrier>/<amp>` (bell)
+- `-` (off / no tone)
 - `<carrier>/<amp>` (single tone, mapped to binaural with beat=0)
 - `white/<amp>`, `pink/<amp>`, `brown/<amp>` (noise tones)
 - `spin:<width-us><spin-hz>/<amp>` (pink-noise spin)
@@ -576,6 +583,13 @@ Legacy Parser Bridge Smoke Test (Phase 3.41)
 
 ```bash
 tests/sbagenxlib/test_legacy_sequence_parser_bridge.sh
+```
+
+Seq Backend Named-Subset Bridge Smoke Test (Phase 3.52)
+-------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_named_subset.sh
 ```
 
 Notes:

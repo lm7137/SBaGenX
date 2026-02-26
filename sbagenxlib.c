@@ -860,6 +860,12 @@ parse_tone_spec_with_default_waveform(const char *spec,
     out_tone->waveform = default_waveform;
   }
 
+  if (*p == '-' && *skip_ws(p + 1) == 0) {
+    out_tone->mode = SBX_TONE_NONE;
+    out_tone->amplitude = 0.0;
+    return SBX_OK;
+  }
+
   // Noise tones: pink/<amp>, white/<amp>, brown/<amp>
   if (sscanf(p, "pink/%lf %n", &amp_pct, &n) == 1 &&
       *skip_ws(p + n) == 0) {
@@ -1155,6 +1161,10 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
   wname = wave_name_for_tone(norm.waveform);
 
   switch (norm.mode) {
+    case SBX_TONE_NONE:
+      if (!snprintf_checked(out, out_sz, "-"))
+        return SBX_EINVAL;
+      return SBX_OK;
     case SBX_TONE_BINAURAL: {
       char sign = norm.beat_hz < 0.0 ? '-' : '+';
       double beat = fabs(norm.beat_hz);

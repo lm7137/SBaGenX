@@ -76,6 +76,7 @@ int main(void) {
   assert_parse("triangle:300@8/15", SBX_TONE_ISOCHRONIC, 300.0, 8.0, 0.15, 1, SBX_WAVE_TRIANGLE);
   assert_parse("sawtooth:150/25", SBX_TONE_BINAURAL, 150.0, 0.0, 0.25, 0, SBX_WAVE_SAWTOOTH);
   assert_parse("square:bell300/25", SBX_TONE_BELL, 300.0, 0.0, 0.25, 0, SBX_WAVE_SQUARE);
+  assert_parse("-", SBX_TONE_NONE, 200.0, 10.0, 0.0, 0, SBX_WAVE_SINE);
   assert_parse("spin:80+1/40", SBX_TONE_SPIN_PINK, 80.0, 1.0, 0.40, 0, SBX_WAVE_SINE);
   assert_parse("triangle:bspin:120-1.5/35", SBX_TONE_SPIN_BROWN, 120.0, -1.5, 0.35, 0, SBX_WAVE_TRIANGLE);
   assert_parse("square:wspin:60+0.75/25", SBX_TONE_SPIN_WHITE, 60.0, 0.75, 0.25, 0, SBX_WAVE_SQUARE);
@@ -105,6 +106,18 @@ int main(void) {
     if (out.mode != in.mode) fail("format roundtrip mode mismatch");
     if (fabs(out.carrier_hz - in.carrier_hz) > 1e-9) fail("format roundtrip carrier mismatch");
     if (fabs(out.amplitude - in.amplitude) > 1e-9) fail("format roundtrip amplitude mismatch");
+  }
+  {
+    SbxToneSpec in, out;
+    char spec[256];
+    if (sbx_parse_tone_spec("-", &in) != SBX_OK)
+      fail("parse off tone failed");
+    if (sbx_format_tone_spec(&in, spec, sizeof(spec)) != SBX_OK)
+      fail("format off tone failed");
+    if (strcmp(spec, "-") != 0)
+      fail("format off tone string mismatch");
+    if (sbx_parse_tone_spec(spec, &out) != SBX_OK || out.mode != SBX_TONE_NONE)
+      fail("parse off tone roundtrip failed");
   }
   {
     SbxToneSpec t;
