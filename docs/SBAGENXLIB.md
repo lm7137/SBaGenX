@@ -328,16 +328,21 @@ Phase 3.51
   - add shared `sbx_parse_sbg_clock_token()` API (`HH:MM` / `HH:MM:SS`),
   - switch legacy `sbagenx.c` `readTime()` to use the library parser.
 
-Phase 3.52 (current slice)
+Phase 3.52
 - Add explicit off-tone parity in sbagenxlib formatting/bridging:
   - parse/format `-` as `SBX_TONE_NONE`,
   - add `SBAGENX_SEQ_BACKEND=sbagenxlib` smoke test for named SBG subset
     dump output including off-keyframes.
 
+Phase 3.53 (current slice)
+- Improve sbagenxlib SBG named-subset discoverability:
+  - add `examples/sbagenxlib/minimal-sbg-named.sbg`,
+  - surface named-subset example in CLI `-p` usage examples and docs.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.52 Slice)
+Current API (Phase 3.53 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -457,6 +462,7 @@ SBG timing subset form (Phase 3.4):
   - `// ...`
 - Example file:
   - `examples/sbagenxlib/minimal-sbg-timing.sbg`
+  - `examples/sbagenxlib/minimal-sbg-named.sbg`
 
 Notes
 -----

@@ -8038,6 +8038,7 @@ readPreProg(int ac, char **av) {
 	    NL "  curve examples/basics/curve-sigmoid-like.sbgf 00ds+:l=0.2:h=0"
 	    NL "  libseq examples/sbagenxlib/minimal-keyframes.sbxseq"
 	    NL "  libsbg examples/sbagenxlib/minimal-sbg-timing.sbg"
+	    NL "  libsbg examples/sbagenxlib/minimal-sbg-named.sbg"
 	    );
 
    if (opt_A && !opt_m && !opt_M)

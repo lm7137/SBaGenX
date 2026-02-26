@@ -1,0 +1,7 @@
+# Named tone-set subset accepted by sbagenxlib.
+off: -
+base: 180+0/35
+
+00:00 off ==
+00:00:01 base ->
+00:00:02 off
