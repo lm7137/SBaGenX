@@ -66,6 +66,10 @@ struct SbxContext {
   size_t aux_buf_cap;
   SbxMixFxState *mix_fx;
   size_t mix_fx_count;
+  SbxMixAmpKeyframe *mix_kf;
+  size_t mix_kf_count;
+  size_t mix_kf_seg;
+  double mix_default_amp_pct;
 };
 
 static void engine_wave_sample(int waveform, double phase, double *out_sample);
@@ -682,6 +686,15 @@ ctx_clear_mix_effects(SbxContext *ctx) {
 }
 
 static void
+ctx_clear_mix_keyframes(SbxContext *ctx) {
+  if (!ctx) return;
+  if (ctx->mix_kf) free(ctx->mix_kf);
+  ctx->mix_kf = 0;
+  ctx->mix_kf_count = 0;
+  ctx->mix_kf_seg = 0;
+}
+
+static void
 ctx_reset_runtime(SbxContext *ctx) {
   size_t i;
   if (!ctx || !ctx->eng) return;
@@ -692,6 +705,7 @@ ctx_reset_runtime(SbxContext *ctx) {
   for (i = 0; i < ctx->mix_fx_count; i++) {
     sbx_mix_fx_reset_state(&ctx->mix_fx[i]);
   }
+  ctx->mix_kf_seg = 0;
   ctx->t_sec = 0.0;
   ctx->kf_seg = 0;
 }
@@ -1197,6 +1211,10 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->aux_buf_cap = 0;
   ctx->mix_fx = 0;
   ctx->mix_fx_count = 0;
+  ctx->mix_kf = 0;
+  ctx->mix_kf_count = 0;
+  ctx->mix_kf_seg = 0;
+  ctx->mix_default_amp_pct = 100.0;
   set_ctx_error(ctx, NULL);
   return ctx;
 }
@@ -1204,6 +1222,7 @@ sbx_context_create(const SbxEngineConfig *cfg) {
 void
 sbx_context_destroy(SbxContext *ctx) {
   if (!ctx) return;
+  ctx_clear_mix_keyframes(ctx);
   ctx_clear_mix_effects(ctx);
   ctx_clear_aux_tones(ctx);
   ctx_clear_keyframes(ctx);
@@ -1962,6 +1981,101 @@ sbx_context_apply_mix_effects(SbxContext *ctx,
     }
   }
   return SBX_OK;
+}
+
+int
+sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
+                                  const SbxMixAmpKeyframe *kfs,
+                                  size_t kf_count,
+                                  double default_amp_pct) {
+  SbxMixAmpKeyframe *copy = 0;
+  size_t i;
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!isfinite(default_amp_pct)) {
+    set_ctx_error(ctx, "invalid default mix amp");
+    return SBX_EINVAL;
+  }
+
+  if (kf_count > 0 && !kfs) {
+    set_ctx_error(ctx, "mix amp keyframe list is null");
+    return SBX_EINVAL;
+  }
+
+  if (kf_count > 0) {
+    copy = (SbxMixAmpKeyframe *)calloc(kf_count, sizeof(*copy));
+    if (!copy) {
+      set_ctx_error(ctx, "out of memory");
+      return SBX_ENOMEM;
+    }
+    for (i = 0; i < kf_count; i++) {
+      copy[i] = kfs[i];
+      if (!isfinite(copy[i].time_sec) || copy[i].time_sec < 0.0) {
+        free(copy);
+        set_ctx_error(ctx, "mix amp keyframe time_sec must be finite and >= 0");
+        return SBX_EINVAL;
+      }
+      if (i > 0 && !(copy[i].time_sec > copy[i - 1].time_sec)) {
+        free(copy);
+        set_ctx_error(ctx, "mix amp keyframe time_sec values must be strictly increasing");
+        return SBX_EINVAL;
+      }
+      if (copy[i].interp != SBX_INTERP_LINEAR &&
+          copy[i].interp != SBX_INTERP_STEP) {
+        free(copy);
+        set_ctx_error(ctx, "mix amp keyframe interp must be SBX_INTERP_LINEAR or SBX_INTERP_STEP");
+        return SBX_EINVAL;
+      }
+      if (!isfinite(copy[i].amp_pct)) {
+        free(copy);
+        set_ctx_error(ctx, "mix amp keyframe amp_pct must be finite");
+        return SBX_EINVAL;
+      }
+    }
+  }
+
+  ctx_clear_mix_keyframes(ctx);
+  ctx->mix_default_amp_pct = default_amp_pct;
+  ctx->mix_kf = copy;
+  ctx->mix_kf_count = kf_count;
+  ctx->mix_kf_seg = 0;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+double
+sbx_context_mix_amp_at(SbxContext *ctx, double t_sec) {
+  size_t n, i0, i1;
+  double t0, t1, u;
+  SbxMixAmpKeyframe *k0, *k1;
+
+  if (!ctx) return 100.0;
+  n = ctx->mix_kf_count;
+  if (!ctx->mix_kf || n == 0) return ctx->mix_default_amp_pct;
+  if (n == 1 || t_sec <= ctx->mix_kf[0].time_sec) return ctx->mix_kf[0].amp_pct;
+  if (t_sec >= ctx->mix_kf[n - 1].time_sec) return ctx->mix_kf[n - 1].amp_pct;
+
+  if (ctx->mix_kf_seg >= n - 1) ctx->mix_kf_seg = n - 2;
+  while (ctx->mix_kf_seg + 1 < n &&
+         t_sec > ctx->mix_kf[ctx->mix_kf_seg + 1].time_sec)
+    ctx->mix_kf_seg++;
+  while (ctx->mix_kf_seg > 0 &&
+         t_sec < ctx->mix_kf[ctx->mix_kf_seg].time_sec)
+    ctx->mix_kf_seg--;
+
+  i0 = ctx->mix_kf_seg;
+  i1 = i0 + 1;
+  if (i1 >= n) i1 = n - 1;
+  k0 = &ctx->mix_kf[i0];
+  k1 = &ctx->mix_kf[i1];
+  t0 = k0->time_sec;
+  t1 = k1->time_sec;
+  if (t1 <= t0) return k0->amp_pct;
+  if (t_sec >= t1) return k1->amp_pct;
+  u = (t_sec - t0) / (t1 - t0);
+  if (u < 0.0) u = 0.0;
+  if (u > 1.0) u = 1.0;
+  if (k0->interp == SBX_INTERP_STEP) u = 0.0;
+  return k0->amp_pct + (k1->amp_pct - k0->amp_pct) * u;
 }
 
 size_t

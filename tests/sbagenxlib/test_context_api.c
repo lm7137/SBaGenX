@@ -143,6 +143,26 @@ int main(void) {
     if (sbx_context_set_mix_effects(ctx, 0, 0) != SBX_OK)
       fail("clear mix effects failed");
   }
+  {
+    SbxMixAmpKeyframe mkf[2];
+    double v;
+    mkf[0].time_sec = 0.0;
+    mkf[0].amp_pct = 100.0;
+    mkf[0].interp = SBX_INTERP_LINEAR;
+    mkf[1].time_sec = 10.0;
+    mkf[1].amp_pct = 50.0;
+    mkf[1].interp = SBX_INTERP_LINEAR;
+    if (sbx_context_set_mix_amp_keyframes(ctx, mkf, 2, 80.0) != SBX_OK)
+      fail("set mix amp keyframes failed");
+    v = sbx_context_mix_amp_at(ctx, 5.0);
+    if (!(v > 70.0 && v < 80.0))
+      fail("mix amp interpolation mismatch");
+    if (sbx_context_set_mix_amp_keyframes(ctx, 0, 0, 77.0) != SBX_OK)
+      fail("clear mix amp keyframes failed");
+    v = sbx_context_mix_amp_at(ctx, 5.0);
+    if (fabs(v - 77.0) > 1e-9)
+      fail("mix amp default mismatch");
+  }
 
   buf = (float *)calloc(frames * 2, sizeof(float));
   if (!buf) fail("alloc failed");

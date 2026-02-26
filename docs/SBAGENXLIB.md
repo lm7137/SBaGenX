@@ -208,17 +208,23 @@ Phase 3.31
     from `sbagenxlib.h`,
   - eliminate duplicate local constant definitions.
 
-Phase 3.32 (current slice)
+Phase 3.32
 - Move mix-effect runtime DSP ownership into sbagenxlib:
   - add shared mix-effect spec/API (`SbxMixFxSpec`, parser, context set/get),
   - add `sbx_context_apply_mix_effects()` with internal phase/Hilbert state,
   - switch sbagenx runtime adapter to call sbagenxlib for mix-effect
     processing instead of running mix-effect DSP in `outChunkSbx`.
 
+Phase 3.33 (current slice)
+- Move mix-amplitude keyframe profile ownership into sbagenxlib:
+  - add shared mix-amp keyframe API (`SbxMixAmpKeyframe`, set/query helpers),
+  - switch sbagenx runtime adapter to use `sbx_context_mix_amp_at()` for
+    runtime mix gain and remove adapter-owned mix keyframe state.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.32 Slice)
+Current API (Phase 3.33 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -256,6 +262,8 @@ Public header: `sbagenxlib.h`
   - `sbx_context_mix_effect_count()`
   - `sbx_context_get_mix_effect()`
   - `sbx_context_apply_mix_effects()`
+  - `sbx_context_set_mix_amp_keyframes()`
+  - `sbx_context_mix_amp_at()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_get_keyframe()`
   - `sbx_context_render_f32()`

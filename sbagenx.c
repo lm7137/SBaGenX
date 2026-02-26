@@ -768,12 +768,6 @@ typedef struct {
 FuncCurve func_curve;		// Runtime function curve for pre-programmed sequences
 
 typedef struct {
-   double time_sec;
-   double amp_pct;
-   int interp;		// SBX_INTERP_*
-} SbxMixAmpKeyframe;
-
-typedef struct {
    int have_mix;
    double mix_amp_pct;
    SbxToneSpec aux_tones[SBX_MAX_AUX_TONES];
@@ -790,7 +784,6 @@ static void sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, s
 						const SbxToneSpec *aux_tones, size_t aux_count,
 						const SbxMixFxSpec *mix_fx, size_t mix_fx_count,
 						const SbxMixAmpKeyframe *mkf, size_t mkf_n);
-static double sbx_runtime_mix_amp_at(double t_sec);
 static int sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec);
 
 int sbx_runtime_active= 0;
@@ -800,9 +793,6 @@ double sbx_runtime_mix_amp_pct= 100.0;
 SbxContext *sbx_runtime_ctx= 0;
 float *sbx_runtime_fbuf= 0;
 size_t sbx_runtime_fcap= 0;
-SbxMixAmpKeyframe *sbx_runtime_mix_kf= 0;
-size_t sbx_runtime_mix_n= 0;
-size_t sbx_runtime_mix_seg= 0;
 SbxMixFxSpec sbx_runtime_mix_fx[SBX_MAX_AUX_TONES];
 size_t sbx_runtime_mix_fx_n= 0;
 
@@ -6201,7 +6191,7 @@ outChunkSbx() {
 
       if (mix_in) {
 	 double t_sec= t0 + frm / sr;
-	 double mix_pct= sbx_runtime_mix_amp_at(t_sec);
+	 double mix_pct= sbx_context_mix_amp_at(sbx_runtime_ctx, t_sec);
 	 double mix_mul= (mix_pct / 100.0) * mix_mod_mul;
 	 double mix_l= (mix1 >> 4);
 	 double mix_r= (mix2 >> 4);
@@ -8579,7 +8569,6 @@ sbx_runtime_clear(void) {
    sbx_runtime_loop= 0;
    sbx_runtime_total_sec= 0.0;
    sbx_runtime_mix_amp_pct= 100.0;
-   sbx_runtime_mix_seg= 0;
    if (sbx_runtime_ctx) {
       sbx_context_destroy(sbx_runtime_ctx);
       sbx_runtime_ctx= 0;
@@ -8589,29 +8578,7 @@ sbx_runtime_clear(void) {
       sbx_runtime_fbuf= 0;
       sbx_runtime_fcap= 0;
    }
-   if (sbx_runtime_mix_kf) {
-      free(sbx_runtime_mix_kf);
-      sbx_runtime_mix_kf= 0;
-      sbx_runtime_mix_n= 0;
-   }
    sbx_runtime_mix_fx_n= 0;
-}
-
-static int
-sbx_runtime_set_mix_keyframes(const SbxMixAmpKeyframe *kfs, size_t n) {
-   if (sbx_runtime_mix_kf) {
-      free(sbx_runtime_mix_kf);
-      sbx_runtime_mix_kf= 0;
-      sbx_runtime_mix_n= 0;
-      sbx_runtime_mix_seg= 0;
-   }
-   if (!kfs || n == 0) return 1;
-   sbx_runtime_mix_kf= ALLOC_ARR(n, SbxMixAmpKeyframe);
-   if (!sbx_runtime_mix_kf) return 0;
-   memcpy(sbx_runtime_mix_kf, kfs, n * sizeof(*kfs));
-   sbx_runtime_mix_n= n;
-   sbx_runtime_mix_seg= 0;
-   return 1;
 }
 
 static int
@@ -8669,8 +8636,8 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
    sbx_runtime_loop= 1;
    sbx_runtime_total_sec= 0.0;
    sbx_runtime_mix_amp_pct= mix_amp_pct;
-   if (!sbx_runtime_set_mix_keyframes(0, 0))
-      error("Out of memory");
+   if (sbx_context_set_mix_amp_keyframes(sbx_runtime_ctx, 0, 0, mix_amp_pct) != SBX_OK)
+      error("Failed to set sbagenxlib runtime mix amplitude profile");
    if (!sbx_runtime_set_mix_fx(mix_fx, mix_fx_count))
       error("Failed to set sbagenxlib runtime mix effects");
    if (n > 1 && !sbx_runtime_set_aux_tones(tones + 1, n - 1))
@@ -8761,44 +8728,6 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
    return 1;
 }
 
-static double
-sbx_runtime_mix_amp_at(double t_sec) {
-   size_t n= sbx_runtime_mix_n;
-   size_t i0, i1;
-   double t0, t1, u;
-   const SbxMixAmpKeyframe *k0, *k1;
-
-   if (!sbx_runtime_mix_kf || n == 0)
-      return sbx_runtime_mix_amp_pct;
-   if (n == 1 || t_sec <= sbx_runtime_mix_kf[0].time_sec)
-      return sbx_runtime_mix_kf[0].amp_pct;
-   if (t_sec >= sbx_runtime_mix_kf[n-1].time_sec)
-      return sbx_runtime_mix_kf[n-1].amp_pct;
-
-   if (sbx_runtime_mix_seg >= n-1) sbx_runtime_mix_seg= n-2;
-   while (sbx_runtime_mix_seg + 1 < n &&
-	  t_sec > sbx_runtime_mix_kf[sbx_runtime_mix_seg + 1].time_sec)
-      sbx_runtime_mix_seg++;
-   while (sbx_runtime_mix_seg > 0 &&
-	  t_sec < sbx_runtime_mix_kf[sbx_runtime_mix_seg].time_sec)
-      sbx_runtime_mix_seg--;
-
-   i0= sbx_runtime_mix_seg;
-   i1= i0 + 1;
-   if (i1 >= n) i1= n-1;
-   k0= &sbx_runtime_mix_kf[i0];
-   k1= &sbx_runtime_mix_kf[i1];
-   t0= k0->time_sec;
-   t1= k1->time_sec;
-   if (t1 <= t0) return k0->amp_pct;
-   if (t_sec >= t1) return k1->amp_pct;
-   u= (t_sec - t0) / (t1 - t0);
-   if (u < 0.0) u= 0.0;
-   if (u > 1.0) u= 1.0;
-   if (k0->interp == SBX_INTERP_STEP) u= 0.0;
-   return k0->amp_pct + (k1->amp_pct - k0->amp_pct) * u;
-}
-
 static void
 sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
 				    double mix_amp_pct,
@@ -8828,8 +8757,8 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
    sbx_runtime_loop= loop_flag ? 1 : 0;
    sbx_runtime_total_sec= kfs[n-1].time_sec;
    sbx_runtime_mix_amp_pct= mix_amp_pct;
-   if (!sbx_runtime_set_mix_keyframes(mkf, mkf_n))
-      error("Out of memory");
+   if (sbx_context_set_mix_amp_keyframes(sbx_runtime_ctx, mkf, mkf_n, mix_amp_pct) != SBX_OK)
+      error("Failed to set sbagenxlib runtime mix amplitude profile");
    if (!sbx_runtime_set_mix_fx(mix_fx, mix_fx_count))
       error("Failed to set sbagenxlib runtime mix effects");
    if (!sbx_runtime_set_aux_tones(aux_tones, aux_count))

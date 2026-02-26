@@ -60,6 +60,12 @@ typedef struct {
 } SbxMixFxSpec;
 
 typedef struct {
+  double time_sec;
+  double amp_pct;
+  int interp; /* SBX_INTERP_* */
+} SbxMixAmpKeyframe;
+
+typedef struct {
   double sample_rate; /* Hz, e.g. 44100 */
   int channels;       /* currently 2 (stereo) */
 } SbxEngineConfig;
@@ -136,6 +142,11 @@ int sbx_context_apply_mix_effects(SbxContext *ctx,
                                   double base_amp,
                                   double *out_add_l,
                                   double *out_add_r);
+int sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
+                                      const SbxMixAmpKeyframe *kfs,
+                                      size_t kf_count,
+                                      double default_amp_pct);
+double sbx_context_mix_amp_at(SbxContext *ctx, double t_sec);
 size_t sbx_context_keyframe_count(const SbxContext *ctx);
 int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out);
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);
