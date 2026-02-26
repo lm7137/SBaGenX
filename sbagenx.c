@@ -8211,28 +8211,6 @@ static void
    }
 }
 
-static int
-sbx_runtime_set_aux_tones(const SbxToneSpec *tones, size_t n) {
-   int rc;
-   if (!sbx_runtime_ctx)
-      return 0;
-   rc= sbx_context_set_aux_tones(sbx_runtime_ctx, tones, n);
-   return rc == SBX_OK;
-}
-
-static int
-sbx_runtime_set_mix_fx(const SbxMixFxSpec *fxv, size_t n) {
-   int rc;
-   if (!fxv || n == 0)
-      n= 0;
-   if (!sbx_runtime_ctx)
-      return 0;
-   if (n > SBX_MAX_AUX_TONES)
-      return 0;
-   rc= sbx_context_set_mix_effects(sbx_runtime_ctx, fxv, n);
-   return rc == SBX_OK;
-}
-
 static void
 sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double mix_amp_pct,
 				     const SbxMixFxSpec *mix_fx, size_t mix_fx_count) {
@@ -8258,12 +8236,14 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
 
    sbx_runtime_active= 1;
    sbx_runtime_total_sec= 0.0;
-   if (sbx_context_set_mix_amp_keyframes(sbx_runtime_ctx, 0, 0, mix_amp_pct) != SBX_OK)
-      error("Failed to set sbagenxlib runtime mix amplitude profile");
-   if (!sbx_runtime_set_mix_fx(mix_fx, mix_fx_count))
-      error("Failed to set sbagenxlib runtime mix effects");
-   if (n > 1 && !sbx_runtime_set_aux_tones(tones + 1, n - 1))
-      error("Failed to set sbagenxlib runtime auxiliary tones");
+   rc= sbx_context_configure_runtime(sbx_runtime_ctx,
+				     0, 0, mix_amp_pct,
+				     mix_fx, mix_fx_count,
+				     (n > 1) ? (tones + 1) : 0,
+				     (n > 1) ? (n - 1) : 0);
+   if (rc != SBX_OK)
+      error("Failed to configure sbagenxlib runtime extras: %s",
+	    sbx_context_last_error(sbx_runtime_ctx));
 }
 
 int
@@ -8368,12 +8348,13 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
 
    sbx_runtime_active= 1;
    sbx_runtime_total_sec= kfs[n-1].time_sec;
-   if (sbx_context_set_mix_amp_keyframes(sbx_runtime_ctx, mkf, mkf_n, mix_amp_pct) != SBX_OK)
-      error("Failed to set sbagenxlib runtime mix amplitude profile");
-   if (!sbx_runtime_set_mix_fx(mix_fx, mix_fx_count))
-      error("Failed to set sbagenxlib runtime mix effects");
-   if (!sbx_runtime_set_aux_tones(aux_tones, aux_count))
-      error("Failed to set sbagenxlib runtime auxiliary tones");
+   rc= sbx_context_configure_runtime(sbx_runtime_ctx,
+				     mkf, mkf_n, mix_amp_pct,
+				     mix_fx, mix_fx_count,
+				     aux_tones, aux_count);
+   if (rc != SBX_OK)
+      error("Failed to configure sbagenxlib runtime extras: %s",
+	    sbx_context_last_error(sbx_runtime_ctx));
 }
 
 static void

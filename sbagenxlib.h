@@ -167,6 +167,14 @@ int sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
                                       const SbxMixAmpKeyframe *kfs,
                                       size_t kf_count,
                                       double default_amp_pct);
+int sbx_context_configure_runtime(SbxContext *ctx,
+                                  const SbxMixAmpKeyframe *mix_kfs,
+                                  size_t mix_kf_count,
+                                  double default_mix_amp_pct,
+                                  const SbxMixFxSpec *mix_fx,
+                                  size_t mix_fx_count,
+                                  const SbxToneSpec *aux_tones,
+                                  size_t aux_count);
 double sbx_context_mix_amp_at(SbxContext *ctx, double t_sec);
 size_t sbx_context_keyframe_count(const SbxContext *ctx);
 int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out);

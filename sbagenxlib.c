@@ -2153,6 +2153,28 @@ sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
   return SBX_OK;
 }
 
+int
+sbx_context_configure_runtime(SbxContext *ctx,
+                              const SbxMixAmpKeyframe *mix_kfs,
+                              size_t mix_kf_count,
+                              double default_mix_amp_pct,
+                              const SbxMixFxSpec *mix_fx,
+                              size_t mix_fx_count,
+                              const SbxToneSpec *aux_tones,
+                              size_t aux_count) {
+  int rc;
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  rc = sbx_context_set_mix_amp_keyframes(ctx, mix_kfs, mix_kf_count,
+                                         default_mix_amp_pct);
+  if (rc != SBX_OK) return rc;
+  rc = sbx_context_set_mix_effects(ctx, mix_fx, mix_fx_count);
+  if (rc != SBX_OK) return rc;
+  rc = sbx_context_set_aux_tones(ctx, aux_tones, aux_count);
+  if (rc != SBX_OK) return rc;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
 double
 sbx_context_mix_amp_at(SbxContext *ctx, double t_sec) {
   size_t n, i0, i1;
