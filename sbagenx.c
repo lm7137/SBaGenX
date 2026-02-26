@@ -7946,130 +7946,31 @@ readNameDef() {
       nd->vv[ch].amp= AMP_DA(amp);	
       continue;
     }
-    if (3 == sscanf(p, "sine:mixspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 6;
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "square:mixspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 6;
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "triangle:mixspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 6;
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "sawtooth:mixspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 6;
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "mixspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 6;
-      nd->vv[ch].waveform= opt_w;
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "sine:mixpulse:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 7;
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "square:mixpulse:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 7;
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "triangle:mixpulse:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 7;
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "sawtooth:mixpulse:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 7;
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "mixpulse:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 7;
-      nd->vv[ch].waveform= opt_w;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "sine:mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 13;
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);
-      continue;
-    }
-    if (2 == sscanf(p, "square:mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 13;
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);
-      continue;
-    }
-    if (2 == sscanf(p, "triangle:mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 13;
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);
-      continue;
-    }
-    if (2 == sscanf(p, "sawtooth:mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 13;
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);
-      continue;
-    }
-    if (2 == sscanf(p, "mixbeat:%lf/%lf %c", &res, &amp, &dmy)) {
-      checkMixInSequence();
-      nd->vv[ch].typ= 13;
-      nd->vv[ch].waveform= opt_w;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);
-      continue;
+    {
+      SbxMixFxSpec fx;
+      if (sbx_parse_mix_fx_spec(p, opt_w, &fx) == SBX_OK) {
+        checkMixInSequence();
+        nd->vv[ch].waveform= fx.waveform;
+        nd->vv[ch].res= fx.res;
+        nd->vv[ch].amp= AMP_DA(fx.amp * 100.0);
+        switch (fx.type) {
+          case SBX_MIXFX_SPIN:
+            nd->vv[ch].typ= 6;
+            nd->vv[ch].carr= fx.carr;
+            break;
+          case SBX_MIXFX_PULSE:
+            nd->vv[ch].typ= 7;
+            nd->vv[ch].carr= 0.0;
+            break;
+          case SBX_MIXFX_BEAT:
+            nd->vv[ch].typ= 13;
+            nd->vv[ch].carr= 0.0;
+            break;
+          default:
+            badSeq();
+        }
+        continue;
+      }
     }
     if (3 == sscanf(p, "sine:bspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
       nd->vv[ch].typ= 11;

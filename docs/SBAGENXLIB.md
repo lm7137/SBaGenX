@@ -221,16 +221,22 @@ Phase 3.33
   - switch sbagenx runtime adapter to use `sbx_context_mix_amp_at()` for
   runtime mix gain and remove adapter-owned mix keyframe state.
 
-Phase 3.34 (current slice)
+Phase 3.34
 - Unify runtime extra-token parsing in sbagenxlib:
   - add `sbx_parse_extra_token()` for `mix/<amp>`, mix effects, and tone specs,
   - switch sbagenx adapter immediate/extra parsing to this API,
   - reduce duplicated token-classification logic in `sbagenx.c`.
 
+Phase 3.35 (current slice)
+- Start reusing sbagenxlib parsers in the legacy voice parser:
+  - replace duplicated `mixspin/mixpulse/mixbeat` `sscanf` chains with
+    `sbx_parse_mix_fx_spec()` mapping,
+  - keep legacy runtime output behavior unchanged while reducing parser drift.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.34 Slice)
+Current API (Phase 3.35 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
