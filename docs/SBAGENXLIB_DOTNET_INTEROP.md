@@ -65,6 +65,15 @@ internal static class SbxNative
     public static extern int sbx_context_render_f32(IntPtr ctx, float[] outInterleavedStereo, UIntPtr frames);
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int sbx_context_sample_tones(
+        IntPtr ctx,
+        double t0Sec,
+        double t1Sec,
+        UIntPtr sampleCount,
+        [Out] double[] outTSec,
+        [Out] SbxToneSpec[] outTones);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr sbx_context_last_error(IntPtr ctx);
 }
 ```
@@ -83,7 +92,8 @@ Example Flow
 2. Create context with `sbx_context_create`.
 3. Load tone/sequence (`sbx_context_load_tone_spec`, `sbx_context_load_*`).
 4. Render float frames with `sbx_context_render_f32`.
-5. Destroy context with `sbx_context_destroy`.
+5. For GUI plotting, sample tone curves with `sbx_context_sample_tones`.
+6. Destroy context with `sbx_context_destroy`.
 
 Error String Marshalling
 ------------------------

@@ -858,37 +858,41 @@ ctx_reset_runtime(SbxContext *ctx) {
 }
 
 static void
-ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
+ctx_eval_keyframed_tone_at(const SbxProgramKeyframe *kfs,
+                           size_t n,
+                           double t_sec,
+                           size_t *inout_seg,
+                           SbxToneSpec *out) {
   size_t i0, i1;
   double t0, t1, u;
   const SbxProgramKeyframe *k0, *k1;
-  size_t n = ctx->kf_count;
+  size_t seg = inout_seg ? *inout_seg : 0;
 
   if (n == 0) {
     sbx_default_tone_spec(out);
     out->mode = SBX_TONE_NONE;
     return;
   }
-  if (n == 1 || t_sec <= ctx->kfs[0].time_sec) {
-    *out = ctx->kfs[0].tone;
+  if (n == 1 || t_sec <= kfs[0].time_sec) {
+    *out = kfs[0].tone;
     return;
   }
-  if (t_sec >= ctx->kfs[n - 1].time_sec) {
-    *out = ctx->kfs[n - 1].tone;
+  if (t_sec >= kfs[n - 1].time_sec) {
+    *out = kfs[n - 1].tone;
     return;
   }
 
-  if (ctx->kf_seg >= n - 1) ctx->kf_seg = n - 2;
-  while (ctx->kf_seg + 1 < n && t_sec > ctx->kfs[ctx->kf_seg + 1].time_sec)
-    ctx->kf_seg++;
-  while (ctx->kf_seg > 0 && t_sec < ctx->kfs[ctx->kf_seg].time_sec)
-    ctx->kf_seg--;
+  if (seg >= n - 1) seg = n - 2;
+  while (seg + 1 < n && t_sec > kfs[seg + 1].time_sec)
+    seg++;
+  while (seg > 0 && t_sec < kfs[seg].time_sec)
+    seg--;
 
-  i0 = ctx->kf_seg;
+  i0 = seg;
   i1 = i0 + 1;
   if (i1 >= n) i1 = n - 1;
-  k0 = &ctx->kfs[i0];
-  k1 = &ctx->kfs[i1];
+  k0 = &kfs[i0];
+  k1 = &kfs[i1];
 
   t0 = k0->time_sec;
   t1 = k1->time_sec;
@@ -914,6 +918,12 @@ ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
   out->amplitude = sbx_lerp(k0->tone.amplitude, k1->tone.amplitude, u);
   out->waveform = k0->tone.waveform;
   out->duty_cycle = sbx_lerp(k0->tone.duty_cycle, k1->tone.duty_cycle, u);
+  if (inout_seg) *inout_seg = seg;
+}
+
+static void
+ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
+  ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, t_sec, &ctx->kf_seg, out);
 }
 
 const char *
@@ -2926,6 +2936,60 @@ sbx_context_duration_sec(const SbxContext *ctx) {
       !ctx->kfs || ctx->kf_count == 0)
     return 0.0;
   return ctx->kf_duration_sec;
+}
+
+int
+sbx_context_sample_tones(SbxContext *ctx,
+                         double t0_sec,
+                         double t1_sec,
+                         size_t sample_count,
+                         double *out_t_sec,
+                         SbxToneSpec *out_tones) {
+  size_t i;
+  size_t seg_saved;
+  if (!ctx || !ctx->eng || !out_tones || sample_count == 0)
+    return SBX_EINVAL;
+  if (!ctx->loaded) {
+    set_ctx_error(ctx, "no tone/program loaded");
+    return SBX_ENOTREADY;
+  }
+  if (!isfinite(t0_sec) || !isfinite(t1_sec)) {
+    set_ctx_error(ctx, "sampling times must be finite");
+    return SBX_EINVAL;
+  }
+
+  if (ctx->source_mode != SBX_CTX_SRC_KEYFRAMES) {
+    for (i = 0; i < sample_count; i++) {
+      double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+      double ts = sbx_lerp(t0_sec, t1_sec, u);
+      out_tones[i] = ctx->eng->tone;
+      if (out_t_sec) out_t_sec[i] = ts;
+    }
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+
+  if (!ctx->kfs || ctx->kf_count == 0) {
+    set_ctx_error(ctx, "no keyframes loaded");
+    return SBX_ENOTREADY;
+  }
+
+  seg_saved = ctx->kf_seg;
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double ts = sbx_lerp(t0_sec, t1_sec, u);
+    double eval_t = ts;
+    if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+      eval_t = fmod(eval_t, ctx->kf_duration_sec);
+      if (eval_t < 0.0) eval_t += ctx->kf_duration_sec;
+    }
+    ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, eval_t, &ctx->kf_seg,
+                               &out_tones[i]);
+    if (out_t_sec) out_t_sec[i] = ts;
+  }
+  ctx->kf_seg = seg_saved;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
 }
 
 int

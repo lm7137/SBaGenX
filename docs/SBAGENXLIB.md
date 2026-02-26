@@ -375,10 +375,17 @@ Phase 3.60
 - Link sbagenxlib developer docs from `README.md` so integrators can find
   API/quickstart/interop references directly from the project landing page.
 
+Phase 3.61
+- Add context tone-sampling API for plotting/frontends:
+  - `sbx_context_sample_tones()` samples evaluated tone values over a caller
+    requested time range,
+  - supports static and keyframed sources (including looped keyframes),
+  - enables GUI/host plotting without duplicating curve math outside library.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.59 Slice)
+Current API (Phase 3.61 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -426,6 +433,7 @@ Public header: `sbagenxlib.h`
   - `sbx_context_keyframe_count()`
   - `sbx_context_get_keyframe()`
   - `sbx_context_duration_sec()`
+  - `sbx_context_sample_tones()`
   - `sbx_context_render_f32()`
   - `sbx_context_time_sec()`
   - `sbx_context_last_error()`
@@ -626,6 +634,20 @@ Expected output:
 
 ```text
 PASS: sbagenxlib keyframe access API checks
+```
+
+Plot Sampling API Test (Phase 3.61)
+-----------------------------------
+
+```bash
+gcc -O2 -I. tests/sbagenxlib/test_plot_sampling_api.c sbagenxlib.c -lm -o /tmp/test_sbx_plot_sampling_api
+/tmp/test_sbx_plot_sampling_api
+```
+
+Expected output:
+
+```text
+PASS: sbagenxlib plot sampling API checks
 ```
 
 CLI Bridge Smoke Test (Phase 3.7)

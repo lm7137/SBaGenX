@@ -16,7 +16,8 @@ Out of scope
 
 - Audio device I/O (ALSA/WASAPI/CoreAudio). The library renders samples; host
   applications own device playback.
-- PNG plotting APIs. Plot generation is currently exposed through CLI paths.
+- PNG image rendering. `sbagenxlib` exposes sampling APIs; frontends own
+  plotting/visualization implementation.
 
 Versioning and Compatibility
 ----------------------------
@@ -135,6 +136,7 @@ These are designed so front-ends can share parser semantics with CLI code.
 - `sbx_context_keyframe_count(const SbxContext *ctx)`
 - `sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out)`
 - `sbx_context_duration_sec(const SbxContext *ctx)`
+- `sbx_context_sample_tones(SbxContext *ctx, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, SbxToneSpec *out_tones)`
 
 6) Runtime extras (aux tones, mix effects, mix amp profile)
 
@@ -152,6 +154,18 @@ These are designed so front-ends can share parser semantics with CLI code.
 
 `sbx_context_configure_runtime` is the one-call setup path for mix keyframes,
 mix effects, and auxiliary tones.
+
+7) Plot/data sampling support
+
+- `sbx_context_sample_tones(...)`
+
+`sbx_context_sample_tones` evaluates the currently loaded source over a caller
+provided time range (`[t0_sec, t1_sec]`) into `sample_count` tone samples.
+
+- Works for static tone and keyframed sources.
+- For looped keyframes, evaluation wraps to program duration.
+- Does not advance context render clock (`sbx_context_time_sec`).
+- Returns optional sample-time output via `out_t_sec` when non-NULL.
 
 Minimal Lifecycle
 -----------------

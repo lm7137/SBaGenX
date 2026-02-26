@@ -93,6 +93,17 @@ Minimal Sequence File Load
 int rc = sbx_context_load_sequence_file(ctx, "examples/sbagenxlib/minimal-keyframes.sbxseq", 0);
 ```
 
+Minimal Plot-Sampling Example
+-----------------------------
+
+```c
+SbxToneSpec curve[256];
+double tsec[256];
+int rc = sbx_context_sample_tones(ctx, 0.0, 1800.0, 256, tsec, curve);
+```
+
+Use this to drive GUI plots directly from library-evaluated tone values.
+
 Minimal SBG Timing Subset Load
 ------------------------------
 
@@ -122,5 +133,6 @@ Notes
 -----
 
 - The library renders audio buffers; host app owns file encoding/device output.
-- Plotting is currently a CLI-level feature, not a `sbagenxlib` API surface.
+- Image rendering is frontend-owned; use `sbx_context_sample_tones()` for
+  plotting data extraction.
 - For API details and ownership/threading rules, read `docs/SBAGENXLIB_API.md`.

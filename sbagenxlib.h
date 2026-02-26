@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 2   /* public API contract revision */
+#define SBX_API_VERSION 3   /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -285,6 +285,21 @@ int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyf
 
 /* Program duration in seconds (0 for static tone sources). */
 double sbx_context_duration_sec(const SbxContext *ctx);
+
+/*
+ * Sample evaluated tone values over [t0_sec, t1_sec].
+ * - sample_count must be >= 1.
+ * - out_tones must have sample_count elements.
+ * - out_t_sec is optional (may be NULL).
+ * - Times are interpreted in context time domain; looped keyframe programs
+ *   are wrapped to keyframe duration when sampled.
+ */
+int sbx_context_sample_tones(SbxContext *ctx,
+                             double t0_sec,
+                             double t1_sec,
+                             size_t sample_count,
+                             double *out_t_sec,
+                             SbxToneSpec *out_tones);
 
 /* Render interleaved stereo float frames from context source. */
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);
