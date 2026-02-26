@@ -7763,17 +7763,14 @@ readNameDef() {
   for (ch= 0; ch < N_CH && (p= getWord()); ch++) {
     char dmy;
     double amp, carr, res;
+    double mix_pct= 100.0;
     int wave;
+    int extra_type= SBX_EXTRA_INVALID;
+    SbxMixFxSpec fx;
     SbxToneSpec tone;
 
     // Interpret word into Voice nd->vv[ch]
     if (0 == strcmp(p, "-")) continue;
-    if (1 == sscanf(p, "mix/%lf %c", &amp, &dmy)) {
-       nd->vv[ch].typ= 5;
-       nd->vv[ch].amp= AMP_DA(amp);
-       mix_flag= 1;
-       continue;
-    }
     if (4 == sscanf(p, "wave%d:%lf%lf/%lf %c", &wave, &carr, &res, &amp, &dmy)) {
        if (wave < 0 || wave >= 100)
 	  error("Only wave00 to wave99 is permitted at line: %d\n  %s", in_lin, lin_copy);
@@ -7786,35 +7783,39 @@ readNameDef() {
        nd->vv[ch].amp= AMP_DA(amp);	
        continue;
     }
-    {
-      SbxMixFxSpec fx;
-      if (sbx_parse_mix_fx_spec(p, opt_w, &fx) == SBX_OK) {
-        checkMixInSequence();
-        nd->vv[ch].waveform= fx.waveform;
-        nd->vv[ch].res= fx.res;
-        nd->vv[ch].amp= AMP_DA(fx.amp * 100.0);
-        switch (fx.type) {
-          case SBX_MIXFX_SPIN:
-            nd->vv[ch].typ= 6;
-            nd->vv[ch].carr= fx.carr;
-            break;
-          case SBX_MIXFX_PULSE:
-            nd->vv[ch].typ= 7;
-            nd->vv[ch].carr= 0.0;
-            break;
-          case SBX_MIXFX_BEAT:
-            nd->vv[ch].typ= 13;
-            nd->vv[ch].carr= 0.0;
-            break;
-          default:
-            badSeq();
-        }
-        continue;
-      }
+    if (SBX_OK == sbx_parse_extra_token(p, opt_w, &extra_type, &tone, &fx, &mix_pct)) {
+       if (extra_type == SBX_EXTRA_MIXAMP) {
+	  nd->vv[ch].typ= 5;
+	  nd->vv[ch].amp= AMP_DA(mix_pct);
+	  mix_flag= 1;
+	  continue;
+       } else if (extra_type == SBX_EXTRA_MIXFX) {
+	  checkMixInSequence();
+	  nd->vv[ch].waveform= fx.waveform;
+	  nd->vv[ch].res= fx.res;
+	  nd->vv[ch].amp= AMP_DA(fx.amp * 100.0);
+	  switch (fx.type) {
+	   case SBX_MIXFX_SPIN:
+	      nd->vv[ch].typ= 6;
+	      nd->vv[ch].carr= fx.carr;
+	      break;
+	   case SBX_MIXFX_PULSE:
+	      nd->vv[ch].typ= 7;
+	      nd->vv[ch].carr= 0.0;
+	      break;
+	   case SBX_MIXFX_BEAT:
+	      nd->vv[ch].typ= 13;
+	      nd->vv[ch].carr= 0.0;
+	      break;
+	   default:
+	      badSeq();
+	  }
+	  continue;
+       } else if (extra_type == SBX_EXTRA_TONE &&
+		  legacy_voice_from_sbx_tone(&tone, &nd->vv[ch])) {
+	  continue;
+       }
     }
-    if (SBX_OK == sbx_parse_tone_spec_ex(p, opt_w, &tone) &&
-	legacy_voice_from_sbx_tone(&tone, &nd->vv[ch]))
-       continue;
     badSeq();
   }
   

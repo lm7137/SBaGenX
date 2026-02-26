@@ -233,16 +233,23 @@ Phase 3.35
     `sbx_parse_mix_fx_spec()` mapping,
   - keep legacy runtime output behavior unchanged while reducing parser drift.
 
-Phase 3.36 (current slice)
+Phase 3.36
 - Continue parser convergence in legacy `readNameDef()` voice parsing:
   - replace duplicated tone `sscanf` matrix (binaural/isochronic/noise/bell/
     spin-family) with `sbx_parse_tone_spec_ex()` + shared legacy voice mapping,
   - keep existing legacy-only tokens (`mix/<amp>`, `waveNN:...`) and behavior.
 
+Phase 3.37 (current slice)
+- Continue parser convergence in legacy `readNameDef()` by routing token classes
+  through `sbx_parse_extra_token()`:
+  - parse `mix/<amp>`, mix effects, and sbagenxlib tone-specs from one helper,
+  - preserve sequence-level checks (`checkMixInSequence`) and legacy voice
+    type mapping/output behavior.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.36 Slice)
+Current API (Phase 3.37 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
