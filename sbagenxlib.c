@@ -270,21 +270,13 @@ parse_time_seconds_token(const char *tok, double *out_sec) {
 
 static int
 parse_hhmmss_token(const char *tok, double *out_sec) {
-  int hh = 0, mm = 0, ss = 0;
-  char tail[2];
+  size_t used = 0;
+  int rc;
   if (!tok || !*tok || !out_sec) return SBX_EINVAL;
-
-  if (sscanf(tok, "%d:%d:%d%1s", &hh, &mm, &ss, tail) == 3) {
-    if (hh < 0 || mm < 0 || mm >= 60 || ss < 0 || ss >= 60) return SBX_EINVAL;
-    *out_sec = (double)hh * 3600.0 + (double)mm * 60.0 + (double)ss;
-    return SBX_OK;
-  }
-  if (sscanf(tok, "%d:%d%1s", &hh, &mm, tail) == 2) {
-    if (hh < 0 || mm < 0 || mm >= 60) return SBX_EINVAL;
-    *out_sec = (double)hh * 3600.0 + (double)mm * 60.0;
-    return SBX_OK;
-  }
-  return SBX_EINVAL;
+  rc = sbx_parse_sbg_clock_token(tok, &used, out_sec);
+  if (rc != SBX_OK) return rc;
+  if (used != strlen(tok)) return SBX_EINVAL;
+  return SBX_OK;
 }
 
 static int
@@ -817,6 +809,31 @@ sbx_status_string(int status) {
     case SBX_ENOTREADY: return "engine not ready";
     default: return "unknown status";
   }
+}
+
+int
+sbx_parse_sbg_clock_token(const char *tok, size_t *out_consumed, double *out_sec) {
+  int nn = 0;
+  int hh = 0;
+  int mm = 0;
+  int ss = 0;
+  if (!tok || !*tok || !out_sec) return SBX_EINVAL;
+  if (3 <= sscanf(tok, "%2d:%2d:%2d%n", &hh, &mm, &ss, &nn)) {
+    if (hh < 0 || hh >= 24 || mm < 0 || mm >= 60 || ss < 0 || ss >= 60)
+      return SBX_EINVAL;
+    *out_sec = (double)((hh * 60 + mm) * 60 + ss);
+    if (out_consumed) *out_consumed = (size_t)nn;
+    return SBX_OK;
+  }
+  ss = 0;
+  if (2 <= sscanf(tok, "%2d:%2d%n", &hh, &mm, &nn)) {
+    if (hh < 0 || hh >= 24 || mm < 0 || mm >= 60)
+      return SBX_EINVAL;
+    *out_sec = (double)((hh * 60 + mm) * 60);
+    if (out_consumed) *out_consumed = (size_t)nn;
+    return SBX_OK;
+  }
+  return SBX_EINVAL;
 }
 
 static int

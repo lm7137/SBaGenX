@@ -317,16 +317,21 @@ Phase 3.49
   - force deterministic step behavior across mode/waveform changes at segment
     boundaries.
 
-Phase 3.50 (current slice)
+Phase 3.50
 - Extend sbagenxlib SBG timing subset loader with named tone-sets:
   - support inline named definitions (`name: <tone-spec>` / `name: -`),
   - support timeline references to named tone-sets plus legacy transition
     tokens (`->`, `==`, etc.) mapped to sbagenxlib interpolation behavior.
 
+Phase 3.51 (current slice)
+- Unify SBG clock-token parsing between sbagenx and sbagenxlib:
+  - add shared `sbx_parse_sbg_clock_token()` API (`HH:MM` / `HH:MM:SS`),
+  - switch legacy `sbagenx.c` `readTime()` to use the library parser.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.50 Slice)
+Current API (Phase 3.51 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -346,6 +351,7 @@ Public header: `sbagenxlib.h`
 - Context + load API:
   - `sbx_parse_tone_spec()`
   - `sbx_parse_tone_spec_ex()`
+  - `sbx_parse_sbg_clock_token()`
   - `sbx_format_mix_fx_spec()`
   - `sbx_parse_mix_fx_spec()`
   - `sbx_parse_extra_token()`

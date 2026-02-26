@@ -7945,19 +7945,12 @@ readTimeLine() {
 
 int
 readTime(char *p, int *timp) {		// Rets chars consumed, or 0 error
-  int nn, hh, mm, ss;
-
-  if (3 > sscanf(p, "%2d:%2d:%2d%n", &hh, &mm, &ss, &nn)) {
-    ss= 0;
-    if (2 > sscanf(p, "%2d:%2d%n", &hh, &mm, &nn)) return 0;
-  }
-
-  if (hh < 0 || hh >= 24 ||
-      mm < 0 || mm >= 60 ||
-      ss < 0 || ss >= 60) return 0;
-
-  *timp= ((hh * 60 + mm) * 60 + ss) * 1000;
-  return nn;
+  size_t nn= 0;
+  double sec= 0.0;
+  if (SBX_OK != sbx_parse_sbg_clock_token(p, &nn, &sec))
+    return 0;
+  *timp= (int)(sec * 1000.0 + 0.5);
+  return (int)nn;
 }
 
 //

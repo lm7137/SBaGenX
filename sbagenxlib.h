@@ -120,6 +120,7 @@ const char *sbx_engine_last_error(const SbxEngine *eng);
  */
 int sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone);
 int sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *out_tone);
+int sbx_parse_sbg_clock_token(const char *tok, size_t *out_consumed, double *out_sec);
 int sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz);
 int sbx_parse_extra_token(const char *tok,
                           int default_waveform,

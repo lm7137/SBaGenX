@@ -80,6 +80,20 @@ int main(void) {
   assert_parse("triangle:bspin:120-1.5/35", SBX_TONE_SPIN_BROWN, 120.0, -1.5, 0.35, 0, SBX_WAVE_TRIANGLE);
   assert_parse("square:wspin:60+0.75/25", SBX_TONE_SPIN_WHITE, 60.0, 0.75, 0.25, 0, SBX_WAVE_SQUARE);
   {
+    double sec = 0.0;
+    size_t used = 0;
+    if (sbx_parse_sbg_clock_token("00:12:34", &used, &sec) != SBX_OK)
+      fail("parse sbg clock token hh:mm:ss failed");
+    if (used != 8 || fabs(sec - 754.0) > 1e-9)
+      fail("parse sbg clock token hh:mm:ss mismatch");
+    if (sbx_parse_sbg_clock_token("04:30", &used, &sec) != SBX_OK)
+      fail("parse sbg clock token hh:mm failed");
+    if (used != 5 || fabs(sec - 16200.0) > 1e-9)
+      fail("parse sbg clock token hh:mm mismatch");
+    if (sbx_parse_sbg_clock_token("25:00", &used, &sec) != SBX_EINVAL)
+      fail("parse sbg clock token range validation failed");
+  }
+  {
     SbxToneSpec in, out;
     char spec[256];
     if (sbx_parse_tone_spec("triangle:bell300/25", &in) != SBX_OK)
