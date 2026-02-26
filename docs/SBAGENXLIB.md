@@ -252,15 +252,20 @@ Phase 3.38
     `sbx_context_mix_effect_count()`),
   - remove duplicate adapter-side mixfx arrays/counters.
 
-Phase 3.39 (current slice)
+Phase 3.39
 - Remove adapter runtime fields that became write-only during migration:
   - drop `sbx_runtime_loop` and `sbx_runtime_mix_amp_pct`,
   - keep runtime timing/state derived from context/keyframes only.
 
+Phase 3.40 (current slice)
+- Normalize unsupported-extra diagnostics for sbagenxlib preprogram paths:
+  - add a shared helper for `-p drop` / `-p sigmoid` / `-p curve` / `-p slide`,
+  - keep existing `-D` textual-preservation behavior and curve-specific notes.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.39 Slice)
+Current API (Phase 3.40 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`

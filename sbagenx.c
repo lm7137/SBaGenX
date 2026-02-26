@@ -8487,6 +8487,18 @@ sbx_validate_runtime_extra_mix_fx(const char *prog_name, const SbxRuntimeExtraSp
       error("%s mix effects require mix/<amp> in extra tone-specs", prog_name ? prog_name : "sbagenx");
 }
 
+static void
+sbx_handle_runtime_unsupported_extra(const char *prog_name, const SbxRuntimeExtraSpec *spec) {
+   if (!spec || !spec->unsupported)
+      return;
+   if (!opt_D)
+      error("Unsupported extra tone-spec '%s' for %s sbagenxlib runtime"
+	    NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+	    spec->bad_token, prog_name ? prog_name : "sbagenx");
+   warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
+	spec->bad_token);
+}
+
 typedef struct {
    SbxProgramKeyframe *v;
    size_t n;
@@ -8769,13 +8781,7 @@ create_drop(int ac, char **av) {
       sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
       sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
-      if (extra_spec.unsupported && !opt_D)
-	 error("Unsupported extra tone-spec '%s' for -p drop sbagenxlib runtime"
-	       NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
-	       extra_spec.bad_token);
-      if (extra_spec.unsupported && opt_D)
-	 warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
-	      extra_spec.bad_token);
+      sbx_handle_runtime_unsupported_extra("-p drop", &extra_spec);
 
       if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9052,13 +9058,7 @@ create_sigmoid(int ac, char **av) {
       sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
       sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
-      if (extra_spec.unsupported && !opt_D)
-	 error("Unsupported extra tone-spec '%s' for -p sigmoid sbagenxlib runtime"
-	       NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
-	       extra_spec.bad_token);
-      if (extra_spec.unsupported && opt_D)
-	 warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
-	      extra_spec.bad_token);
+      sbx_handle_runtime_unsupported_extra("-p sigmoid", &extra_spec);
 
       if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9408,15 +9408,9 @@ create_curve(int ac, char **av) {
       if (have_mixamp_curve && have_mix_in_extra)
 	 sbx_mixkfb_add(&mkfb, (double)(end_sec + 10), wakeup ? mix_start_eval : mix_end, SBX_INTERP_LINEAR);
 
-      if (extra_spec.unsupported && !opt_D)
-	 error("Unsupported extra tone-spec '%s' for -p curve sbagenxlib runtime"
-	       NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
-	       extra_spec.bad_token);
+      sbx_handle_runtime_unsupported_extra("-p curve", &extra_spec);
       if (opt_D && have_mixamp_curve && have_mix_in_extra)
 	 warn("Curve mixamp expression is ignored in -D keyframe dump output");
-      if (extra_spec.unsupported && opt_D)
-	 warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
-	      extra_spec.bad_token);
 
       if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
@@ -9525,13 +9519,7 @@ create_slide(int ac, char **av) {
       sbx_fill_tone_spec(&tone, signal == '@', ismono, c1, signal == '-' ? -beat_abs : beat_abs, 0.0);
       sbx_kfb_add(&kfb, (double)len + 10.0, &tone, SBX_INTERP_LINEAR);
 
-      if (extra_spec.unsupported && !opt_D)
-	 error("Unsupported extra tone-spec '%s' for -p slide sbagenxlib runtime"
-	       NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
-	       extra_spec.bad_token);
-      if (extra_spec.unsupported && opt_D)
-	 warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
-	      extra_spec.bad_token);
+      sbx_handle_runtime_unsupported_extra("-p slide", &extra_spec);
 
       if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
