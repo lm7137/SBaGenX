@@ -371,6 +371,10 @@ Phase 3.59
 - Make `sbagenxlib.h` self-documenting with grouped public API comments to
   keep markdown/docs and header-level API intent aligned.
 
+Phase 3.60
+- Link sbagenxlib developer docs from `README.md` so integrators can find
+  API/quickstart/interop references directly from the project landing page.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 

@@ -20,6 +20,7 @@ SBaGenX is a command-line brainwave generator for creating binaural beats, monau
   - [Installing on Windows](#-installing-on-windows)
 - [Basic Usage](#-basic-usage)
 - [Documentation](#-documentation)
+- [Library API](#-library-api)
 - [Research](#-research)
 - [Compilation](#️-compilation)
   - [Build Scripts Structure](#-build-scripts-structure)
@@ -250,6 +251,17 @@ See [USAGE.md](USAGE.md) for more information on how to use SBaGenX.
 ## Documentation
 
 For detailed information on all features, see the [SBAGENX.txt](docs/SBAGENX.txt) file.
+
+For sbagenxlib migration status and roadmap, see
+[docs/SBAGENXLIB.md](docs/SBAGENXLIB.md).
+
+## Library API
+
+For developers integrating `sbagenxlib`:
+
+- API reference: [docs/SBAGENXLIB_API.md](docs/SBAGENXLIB_API.md)
+- Quick start: [docs/SBAGENXLIB_QUICKSTART.md](docs/SBAGENXLIB_QUICKSTART.md)
+- .NET interop notes: [docs/SBAGENXLIB_DOTNET_INTEROP.md](docs/SBAGENXLIB_DOTNET_INTEROP.md)
 
 ## Research
 
