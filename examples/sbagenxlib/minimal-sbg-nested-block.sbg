@@ -1,0 +1,12 @@
+# minimal sbagenxlib SBG subset with nested block expansion
+off: -
+pulse: {
+  +00:00 off ==
+  +00:01 180+0/35 ->
+}
+double: {
+  +00:00 pulse
+  +00:02 pulse
+}
+
+NOW double

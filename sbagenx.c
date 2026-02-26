@@ -8040,6 +8040,7 @@ readPreProg(int ac, char **av) {
 	    NL "  libsbg examples/sbagenxlib/minimal-sbg-timing.sbg"
 	    NL "  libsbg examples/sbagenxlib/minimal-sbg-named.sbg"
 	    NL "  libsbg examples/sbagenxlib/minimal-sbg-block.sbg"
+	    NL "  libsbg examples/sbagenxlib/minimal-sbg-nested-block.sbg"
 	    );
 
    if (opt_A && !opt_m && !opt_M)

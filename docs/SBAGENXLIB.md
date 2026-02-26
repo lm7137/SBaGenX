@@ -351,10 +351,16 @@ Phase 3.55
   - support timeline block invocation: `<time-spec> <block-name>`,
   - require block-internal time tokens to be relative (`+HH:MM[:SS][+...]`).
 
+Phase 3.56
+- Extend sbagenxlib block subset with nested block invocation:
+  - allow block entries to invoke previously defined blocks,
+  - reject self-referential block recursion,
+  - preserve deterministic non-decreasing expanded block timing.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.55 Slice)
+Current API (Phase 3.56 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -481,6 +487,7 @@ SBG timing subset form (Phase 3.4):
   - invoke block:
     - `<time-spec> <block-name>`
   - block entry timings must be non-decreasing and relative (`+...`).
+  - block entries may invoke previously defined blocks (Phase 3.56).
 - Supported comments:
   - `# ...`
   - `; ...`
@@ -489,6 +496,7 @@ SBG timing subset form (Phase 3.4):
   - `examples/sbagenxlib/minimal-sbg-timing.sbg`
   - `examples/sbagenxlib/minimal-sbg-named.sbg`
   - `examples/sbagenxlib/minimal-sbg-block.sbg`
+  - `examples/sbagenxlib/minimal-sbg-nested-block.sbg`
 
 Notes
 -----
@@ -609,6 +617,7 @@ CLI Bridge Smoke Test (Phase 3.7)
 ./dist/sbagenx-linux64 -D -p libseq examples/sbagenxlib/minimal-keyframes.sbxseq
 ./dist/sbagenx-linux64 -D -p libsbg examples/sbagenxlib/minimal-sbg-timing.sbg
 ./dist/sbagenx-linux64 -D -p libsbg examples/sbagenxlib/minimal-sbg-block.sbg
+./dist/sbagenx-linux64 -D -p libsbg examples/sbagenxlib/minimal-sbg-nested-block.sbg
 ```
 
 Legacy Parser Bridge Smoke Test (Phase 3.41)
@@ -630,6 +639,13 @@ Seq Backend Block-Subset Bridge Smoke Test (Phase 3.55)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_block_subset.sh
+```
+
+Seq Backend Nested-Block Subset Bridge Smoke Test (Phase 3.56)
+--------------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_nested_block_subset.sh
 ```
 
 Notes:
