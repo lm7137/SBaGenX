@@ -274,16 +274,21 @@ Phase 3.42
     mix-effects, and sbagenxlib tone parsing,
   - simplify `readNameDef()` to a small dispatch path.
 
-Phase 3.43 (current slice)
+Phase 3.43
 - Add shared mix-effect formatter API:
   - new `sbx_format_mix_fx_spec()` for canonical `mixspin/mixpulse/mixbeat`
     string emission,
   - switch immediate `-D` mix-effect output to this API.
 
+Phase 3.44 (current slice)
+- Tighten migration test hygiene:
+  - remove stale warnings in `test_context_api` so the expanded parser/mixfx
+    regression checks run warning-clean under `-Wall -Wextra`.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.43 Slice)
+Current API (Phase 3.44 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`

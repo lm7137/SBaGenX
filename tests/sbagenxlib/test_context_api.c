@@ -107,7 +107,6 @@ int main(void) {
   }
   {
     SbxMixFxSpec fx;
-    double add_l = 0.0, add_r = 0.0;
     if (sbx_parse_mix_fx_spec("triangle:mixpulse:1/50", SBX_WAVE_SINE, &fx) != SBX_OK)
       fail("mix fx parse failed");
     if (fx.type != SBX_MIXFX_PULSE || fx.waveform != SBX_WAVE_TRIANGLE)
