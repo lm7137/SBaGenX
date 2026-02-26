@@ -65,6 +65,13 @@ typedef struct {
   int interp; /* SBX_INTERP_* */
 } SbxMixAmpKeyframe;
 
+typedef enum {
+  SBX_EXTRA_INVALID = 0,
+  SBX_EXTRA_MIXAMP = 1,
+  SBX_EXTRA_TONE = 2,
+  SBX_EXTRA_MIXFX = 3
+} SbxExtraTokenType;
+
 typedef struct {
   double sample_rate; /* Hz, e.g. 44100 */
   int channels;       /* currently 2 (stereo) */
@@ -113,6 +120,12 @@ const char *sbx_engine_last_error(const SbxEngine *eng);
  */
 int sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone);
 int sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *out_tone);
+int sbx_parse_extra_token(const char *tok,
+                          int default_waveform,
+                          int *out_type,
+                          SbxToneSpec *out_tone,
+                          SbxMixFxSpec *out_fx,
+                          double *out_mix_amp_pct);
 int sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz);
 
 SbxContext *sbx_context_create(const SbxEngineConfig *cfg);

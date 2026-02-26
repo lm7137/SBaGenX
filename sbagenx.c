@@ -8461,12 +8461,6 @@ sbx_waveform_name_for_spec(int waveform) {
    }
 }
 
-static int
-sbx_parse_mix_fx_token(const char *tok, SbxMixFxSpec *fx_out) {
-   if (!tok || !fx_out) return 0;
-   return sbx_parse_mix_fx_spec(tok, opt_w, fx_out) == SBX_OK;
-}
-
 static void
 emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, const char *extra) {
    size_t i, n;
@@ -8659,22 +8653,27 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
 
    for (i= 0; i<ac; i++) {
       const char *tok= av[i];
+      int extra_type= SBX_EXTRA_INVALID;
+      SbxToneSpec tone_tmp;
       SbxMixFxSpec mix_fx_tmp;
-      if (curve_parse_mix_amp_token(tok, &mix_amp_pct)) {
+      double mix_pct= mix_amp_pct;
+      if (SBX_OK != sbx_parse_extra_token(tok, opt_w, &extra_type, &tone_tmp, &mix_fx_tmp, &mix_pct))
+	 return 0;
+      if (extra_type == SBX_EXTRA_MIXAMP) {
 	 have_mix= 1;
+	 mix_amp_pct= mix_pct;
 	 continue;
       }
-      if (sbx_parse_mix_fx_token(tok, &mix_fx_tmp)) {
+      if (extra_type == SBX_EXTRA_MIXFX) {
 	 if (mix_fx_count >= SBX_MAX_AUX_TONES)
 	    return 0;
-	 mix_fx[mix_fx_count]= mix_fx_tmp;
-	 mix_fx_count++;
+	 mix_fx[mix_fx_count++]= mix_fx_tmp;
 	 continue;
       }
-      if (tone_count >= SBX_MAX_AUX_TONES + 1)
-	 return 0;
-      if (SBX_OK == sbx_parse_tone_spec_ex(tok, opt_w, &tones[tone_count])) {
-	 tone_count++;
+      if (extra_type == SBX_EXTRA_TONE) {
+	 if (tone_count >= SBX_MAX_AUX_TONES + 1)
+	    return 0;
+	 tones[tone_count++]= tone_tmp;
 	 continue;
       }
       return 0;
@@ -8803,22 +8802,24 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
       if (n >= (int)sizeof(tok)) n= sizeof(tok)-1;
       memcpy(tok, s, n);
       tok[n]= 0;
-      if (curve_parse_mix_amp_token(tok, &spec->mix_amp_pct)) {
-	 spec->have_mix= 1;
-      } else {
+      {
+	 int extra_type= SBX_EXTRA_INVALID;
 	 SbxMixFxSpec mix_fx;
-	 if (sbx_parse_mix_fx_token(tok, &mix_fx)) {
-	    if (spec->mix_fx_count >= SBX_MAX_AUX_TONES)
-	       error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_MAX_AUX_TONES);
-	    spec->mix_fx[spec->mix_fx_count++]= mix_fx;
-	    p= e;
-	    continue;
-	 }
 	 SbxToneSpec tone;
-	 if (SBX_OK == sbx_parse_tone_spec_ex(tok, opt_w, &tone)) {
-	    if (spec->aux_count >= SBX_MAX_AUX_TONES)
-	       error("Too many extra sbagenxlib tone-specs (max %d)", SBX_MAX_AUX_TONES);
-	    spec->aux_tones[spec->aux_count++]= tone;
+	 double mix_pct= spec->mix_amp_pct;
+	 if (SBX_OK == sbx_parse_extra_token(tok, opt_w, &extra_type, &tone, &mix_fx, &mix_pct)) {
+	    if (extra_type == SBX_EXTRA_MIXAMP) {
+	       spec->have_mix= 1;
+	       spec->mix_amp_pct= mix_pct;
+	    } else if (extra_type == SBX_EXTRA_MIXFX) {
+	       if (spec->mix_fx_count >= SBX_MAX_AUX_TONES)
+		  error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_MAX_AUX_TONES);
+	       spec->mix_fx[spec->mix_fx_count++]= mix_fx;
+	    } else if (extra_type == SBX_EXTRA_TONE) {
+	       if (spec->aux_count >= SBX_MAX_AUX_TONES)
+		  error("Too many extra sbagenxlib tone-specs (max %d)", SBX_MAX_AUX_TONES);
+	       spec->aux_tones[spec->aux_count++]= tone;
+	    }
 	 } else {
 	    spec->unsupported= 1;
 	    if (!spec->bad_token[0]) {

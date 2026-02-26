@@ -113,6 +113,24 @@ int main(void) {
     if (fx.type != SBX_MIXFX_PULSE || fx.waveform != SBX_WAVE_TRIANGLE)
       fail("mix fx parse value mismatch");
   }
+  {
+    int typ = SBX_EXTRA_INVALID;
+    SbxToneSpec tone;
+    SbxMixFxSpec fx;
+    double mixpct = 0.0;
+    if (sbx_parse_extra_token("mix/87", SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
+      fail("parse extra mix token failed");
+    if (typ != SBX_EXTRA_MIXAMP || fabs(mixpct - 87.0) > 1e-9)
+      fail("parse extra mix token mismatch");
+    if (sbx_parse_extra_token("sawtooth:mixbeat:2/30", SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
+      fail("parse extra mixfx token failed");
+    if (typ != SBX_EXTRA_MIXFX || fx.type != SBX_MIXFX_BEAT || fx.waveform != SBX_WAVE_SAWTOOTH)
+      fail("parse extra mixfx token mismatch");
+    if (sbx_parse_extra_token("triangle:200+8/20", SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
+      fail("parse extra tone token failed");
+    if (typ != SBX_EXTRA_TONE || tone.mode != SBX_TONE_BINAURAL || tone.waveform != SBX_WAVE_TRIANGLE)
+      fail("parse extra tone token mismatch");
+  }
 
   sbx_default_engine_config(&cfg);
   ctx = sbx_context_create(&cfg);

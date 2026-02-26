@@ -997,6 +997,47 @@ sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_
   return SBX_OK;
 }
 
+int
+sbx_parse_extra_token(const char *tok,
+                      int default_waveform,
+                      int *out_type,
+                      SbxToneSpec *out_tone,
+                      SbxMixFxSpec *out_fx,
+                      double *out_mix_amp_pct) {
+  const char *p;
+  int n = 0;
+  double v = 0.0;
+  int rc;
+  if (!tok || !out_type) return SBX_EINVAL;
+  *out_type = SBX_EXTRA_INVALID;
+
+  p = skip_ws(tok);
+  if (sscanf(p, "mix/%lf %n", &v, &n) == 1 && *skip_ws(p + n) == 0) {
+    if (!isfinite(v)) return SBX_EINVAL;
+    if (out_mix_amp_pct) *out_mix_amp_pct = v;
+    *out_type = SBX_EXTRA_MIXAMP;
+    return SBX_OK;
+  }
+
+  if (out_fx) {
+    rc = sbx_parse_mix_fx_spec(p, default_waveform, out_fx);
+    if (rc == SBX_OK) {
+      *out_type = SBX_EXTRA_MIXFX;
+      return SBX_OK;
+    }
+  }
+
+  if (out_tone) {
+    rc = sbx_parse_tone_spec_ex(p, default_waveform, out_tone);
+    if (rc == SBX_OK) {
+      *out_type = SBX_EXTRA_TONE;
+      return SBX_OK;
+    }
+  }
+
+  return SBX_EINVAL;
+}
+
 static const char *
 wave_name_for_tone(int waveform) {
   switch (waveform) {

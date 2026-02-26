@@ -215,16 +215,22 @@ Phase 3.32
   - switch sbagenx runtime adapter to call sbagenxlib for mix-effect
     processing instead of running mix-effect DSP in `outChunkSbx`.
 
-Phase 3.33 (current slice)
+Phase 3.33
 - Move mix-amplitude keyframe profile ownership into sbagenxlib:
   - add shared mix-amp keyframe API (`SbxMixAmpKeyframe`, set/query helpers),
   - switch sbagenx runtime adapter to use `sbx_context_mix_amp_at()` for
-    runtime mix gain and remove adapter-owned mix keyframe state.
+  runtime mix gain and remove adapter-owned mix keyframe state.
+
+Phase 3.34 (current slice)
+- Unify runtime extra-token parsing in sbagenxlib:
+  - add `sbx_parse_extra_token()` for `mix/<amp>`, mix effects, and tone specs,
+  - switch sbagenx adapter immediate/extra parsing to this API,
+  - reduce duplicated token-classification logic in `sbagenx.c`.
 
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.33 Slice)
+Current API (Phase 3.34 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -245,6 +251,7 @@ Public header: `sbagenxlib.h`
   - `sbx_parse_tone_spec()`
   - `sbx_parse_tone_spec_ex()`
   - `sbx_parse_mix_fx_spec()`
+  - `sbx_parse_extra_token()`
   - `sbx_context_create()` / `sbx_context_destroy()`
   - `sbx_context_reset()`
   - `sbx_context_set_tone()`
