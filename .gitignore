@@ -12,5 +12,6 @@ sbagenx-*
 !assets/river2.ogg
 *.log
 *.tmp.c
+docs/api/
 
 !/examples/**/*.sbg
