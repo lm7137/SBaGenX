@@ -362,6 +362,11 @@ Phase 3.57
   - `docs/SBAGENXLIB_API.md` as canonical function/ownership/error/threading
     reference for front-end and binding authors.
 
+Phase 3.58
+- Add onboarding docs for frontend/binding developers:
+  - `docs/SBAGENXLIB_QUICKSTART.md` (5-minute compile/load/render path),
+  - `docs/SBAGENXLIB_DOTNET_INTEROP.md` (P/Invoke interop guidance).
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -674,3 +679,5 @@ Notes:
 Developer docs:
 
 - `docs/SBAGENXLIB_API.md`
+- `docs/SBAGENXLIB_QUICKSTART.md`
+- `docs/SBAGENXLIB_DOTNET_INTEROP.md`
