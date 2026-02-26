@@ -257,15 +257,21 @@ Phase 3.39
   - drop `sbx_runtime_loop` and `sbx_runtime_mix_amp_pct`,
   - keep runtime timing/state derived from context/keyframes only.
 
-Phase 3.40 (current slice)
+Phase 3.40
 - Normalize unsupported-extra diagnostics for sbagenxlib preprogram paths:
   - add a shared helper for `-p drop` / `-p sigmoid` / `-p curve` / `-p slide`,
   - keep existing `-D` textual-preservation behavior and curve-specific notes.
 
+Phase 3.41 (current slice)
+- Add a dedicated legacy parser bridge smoke test script:
+  - validates that legacy `.sbg` voice tokens now routed through sbagenxlib
+    parsers still produce expected `-D` output forms,
+  - covers tone, isochronic, bell, spin-family, noise, and mixbeat tokens.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.40 Slice)
+Current API (Phase 3.41 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -490,6 +496,13 @@ CLI Bridge Smoke Test (Phase 3.7)
 ```bash
 ./dist/sbagenx-linux64 -D -p libseq examples/sbagenxlib/minimal-keyframes.sbxseq
 ./dist/sbagenx-linux64 -D -p libsbg examples/sbagenxlib/minimal-sbg-timing.sbg
+```
+
+Legacy Parser Bridge Smoke Test (Phase 3.41)
+---------------------------------------------
+
+```bash
+tests/sbagenxlib/test_legacy_sequence_parser_bridge.sh
 ```
 
 Notes:
