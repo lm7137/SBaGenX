@@ -2166,6 +2166,14 @@ sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe
   return SBX_OK;
 }
 
+double
+sbx_context_duration_sec(const SbxContext *ctx) {
+  if (!ctx || ctx->source_mode != SBX_CTX_SRC_KEYFRAMES ||
+      !ctx->kfs || ctx->kf_count == 0)
+    return 0.0;
+  return ctx->kf_duration_sec;
+}
+
 int
 sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   int rc;

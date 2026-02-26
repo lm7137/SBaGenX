@@ -7251,13 +7251,7 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    sbx_runtime_clear();
    sbx_runtime_ctx= ctx;
    sbx_runtime_active= 1;
-   sbx_runtime_total_sec= 0.0;
-   {
-      size_t kn= sbx_context_keyframe_count(ctx);
-      SbxProgramKeyframe kf;
-      if (kn > 0 && sbx_context_get_keyframe(ctx, kn-1, &kf) == SBX_OK)
-	 sbx_runtime_total_sec= kf.time_sec;
-   }
+   sbx_runtime_total_sec= sbx_context_duration_sec(ctx);
    if (!opt_Q)
       warn("Using sbagenxlib runtime for sequence file subset: %s", fnam);
    return 1;
@@ -8208,13 +8202,7 @@ create_libseq(int ac, char **av, int sbg_timing) {
    sbx_runtime_clear();
    sbx_runtime_ctx= ctx;
    sbx_runtime_active= 1;
-   sbx_runtime_total_sec= 0.0;
-   {
-      size_t kn= sbx_context_keyframe_count(ctx);
-      SbxProgramKeyframe kf;
-      if (kn > 0 && sbx_context_get_keyframe(ctx, kn-1, &kf) == SBX_OK)
-	 sbx_runtime_total_sec= kf.time_sec;
-   }
+   sbx_runtime_total_sec= sbx_context_duration_sec(ctx);
 }
 
 static void

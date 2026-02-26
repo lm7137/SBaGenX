@@ -163,6 +163,7 @@ int sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
 double sbx_context_mix_amp_at(SbxContext *ctx, double t_sec);
 size_t sbx_context_keyframe_count(const SbxContext *ctx);
 int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out);
+double sbx_context_duration_sec(const SbxContext *ctx);
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);
 double sbx_context_time_sec(const SbxContext *ctx);
 const char *sbx_context_last_error(const SbxContext *ctx);

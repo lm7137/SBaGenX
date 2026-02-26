@@ -280,15 +280,21 @@ Phase 3.43
     string emission,
   - switch immediate `-D` mix-effect output to this API.
 
-Phase 3.44 (current slice)
+Phase 3.44
 - Tighten migration test hygiene:
   - remove stale warnings in `test_context_api` so the expanded parser/mixfx
     regression checks run warning-clean under `-Wall -Wextra`.
 
+Phase 3.45 (current slice)
+- Add context-duration API ownership in sbagenxlib:
+  - new `sbx_context_duration_sec()` to expose keyframed program duration,
+  - switch sbagenx runtime activation paths to query duration from the
+    library instead of manually reading the last keyframe.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.44 Slice)
+Current API (Phase 3.45 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -332,6 +338,7 @@ Public header: `sbagenxlib.h`
   - `sbx_context_mix_amp_at()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_get_keyframe()`
+  - `sbx_context_duration_sec()`
   - `sbx_context_render_f32()`
   - `sbx_context_time_sec()`
   - `sbx_context_last_error()`
