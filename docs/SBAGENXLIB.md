@@ -227,16 +227,22 @@ Phase 3.34
   - switch sbagenx adapter immediate/extra parsing to this API,
   - reduce duplicated token-classification logic in `sbagenx.c`.
 
-Phase 3.35 (current slice)
+Phase 3.35
 - Start reusing sbagenxlib parsers in the legacy voice parser:
   - replace duplicated `mixspin/mixpulse/mixbeat` `sscanf` chains with
     `sbx_parse_mix_fx_spec()` mapping,
   - keep legacy runtime output behavior unchanged while reducing parser drift.
 
+Phase 3.36 (current slice)
+- Continue parser convergence in legacy `readNameDef()` voice parsing:
+  - replace duplicated tone `sscanf` matrix (binaural/isochronic/noise/bell/
+    spin-family) with `sbx_parse_tone_spec_ex()` + shared legacy voice mapping,
+  - keep existing legacy-only tokens (`mix/<amp>`, `waveNN:...`) and behavior.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.35 Slice)
+Current API (Phase 3.36 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`

@@ -7591,6 +7591,58 @@ voicesEq(Voice *v0, Voice *v1) {
   return 1;
 }
 
+static int
+legacy_voice_from_sbx_tone(const SbxToneSpec *tone, Voice *out) {
+  if (!tone || !out) return 0;
+
+  out->waveform= tone->waveform;
+  out->carr= tone->carrier_hz;
+  out->res= tone->beat_hz;
+  out->amp= AMP_DA(tone->amplitude * 100.0);
+
+  switch (tone->mode) {
+   case SBX_TONE_BINAURAL:
+      out->typ= 1;
+      return 1;
+   case SBX_TONE_ISOCHRONIC:
+      out->typ= 8;
+      out->res= fabs(out->res);
+      return 1;
+   case SBX_TONE_PINK_NOISE:
+      out->typ= 2;
+      out->carr= 0.0;
+      out->res= 0.0;
+      return 1;
+   case SBX_TONE_WHITE_NOISE:
+      out->typ= 9;
+      out->carr= 0.0;
+      out->res= 0.0;
+      return 1;
+   case SBX_TONE_BROWN_NOISE:
+      out->typ= 10;
+      out->carr= 0.0;
+      out->res= 0.0;
+      return 1;
+   case SBX_TONE_BELL:
+      out->typ= 3;
+      out->res= 0.0;
+      return 1;
+   case SBX_TONE_SPIN_PINK:
+      out->typ= 4;
+      return 1;
+   case SBX_TONE_SPIN_BROWN:
+      out->typ= 11;
+      return 1;
+   case SBX_TONE_SPIN_WHITE:
+      out->typ= 12;
+      return 1;
+   default:
+      break;
+  }
+
+  return 0;
+}
+
 //
 //	Read a name definition
 //
@@ -7712,62 +7764,10 @@ readNameDef() {
     char dmy;
     double amp, carr, res;
     int wave;
+    SbxToneSpec tone;
 
     // Interpret word into Voice nd->vv[ch]
     if (0 == strcmp(p, "-")) continue;
-    if (1 == sscanf(p, "pink/%lf %c", &amp, &dmy)) {
-       nd->vv[ch].typ= 2;
-       nd->vv[ch].waveform= opt_w;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
-    if (1 == sscanf(p, "white/%lf %c", &amp, &dmy)) {
-       nd->vv[ch].typ= 9;
-       nd->vv[ch].waveform= opt_w;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
-    if (1 == sscanf(p, "brown/%lf %c", &amp, &dmy)) {
-       nd->vv[ch].typ= 10;
-       nd->vv[ch].waveform= opt_w;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
-    if (2 == sscanf(p, "bell%lf/%lf %c", &carr, &amp, &dmy)) {
-       nd->vv[ch].typ= 3;
-       nd->vv[ch].waveform= opt_w;
-       nd->vv[ch].carr= carr;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
-    if (2 == sscanf(p, "sine:bell%lf/%lf %c", &carr, &amp, &dmy)) {
-       nd->vv[ch].typ= 3;
-       nd->vv[ch].waveform= 0; // Sine
-       nd->vv[ch].carr= carr;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
-    if (2 == sscanf(p, "square:bell%lf/%lf %c", &carr, &amp, &dmy)) {
-       nd->vv[ch].typ= 3;
-       nd->vv[ch].waveform= 1; // Square
-       nd->vv[ch].carr= carr;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
-    if (2 == sscanf(p, "triangle:bell%lf/%lf %c", &carr, &amp, &dmy)) {
-       nd->vv[ch].typ= 3;
-       nd->vv[ch].waveform= 2; // Triangle
-       nd->vv[ch].carr= carr;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
-    if (2 == sscanf(p, "sawtooth:bell%lf/%lf %c", &carr, &amp, &dmy)) {
-       nd->vv[ch].typ= 3;
-       nd->vv[ch].waveform= 3; // Sawtooth
-       nd->vv[ch].carr= carr;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
     if (1 == sscanf(p, "mix/%lf %c", &amp, &dmy)) {
        nd->vv[ch].typ= 5;
        nd->vv[ch].amp= AMP_DA(amp);
@@ -7785,166 +7785,6 @@ readNameDef() {
        nd->vv[ch].res= res;
        nd->vv[ch].amp= AMP_DA(amp);	
        continue;
-    }
-    if (3 == sscanf(p, "sine:%lf@%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 8; // Isochronic
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "square:%lf@%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 8; // Isochronic
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "triangle:%lf@%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 8; // Isochronic
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "sawtooth:%lf@%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 8; // Isochronic
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "%lf@%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-       nd->vv[ch].typ= 8;  // Isochronic
-       nd->vv[ch].waveform= opt_w;
-       nd->vv[ch].carr= carr;
-       nd->vv[ch].res= res;
-       nd->vv[ch].amp= AMP_DA(amp);
-       continue;
-    }
-    if (3 == sscanf(p, "sine:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "square:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "triangle:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "sawtooth:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= opt_w;
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "sine:%lf/%lf %c", &carr, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= 0;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "square:%lf/%lf %c", &carr, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= 0;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "triangle:%lf/%lf %c", &carr, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= 0;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "sawtooth:%lf/%lf %c", &carr, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= 0;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (2 == sscanf(p, "%lf/%lf %c", &carr, &amp, &dmy)) {
-      nd->vv[ch].typ= 1;
-      nd->vv[ch].waveform= opt_w;
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= 0;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "sine:spin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 4;
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "square:spin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 4;
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "triangle:spin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 4;
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "sawtooth:spin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 4;
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "spin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 4;
-      nd->vv[ch].waveform= opt_w;
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
     }
     {
       SbxMixFxSpec fx;
@@ -7972,86 +7812,9 @@ readNameDef() {
         continue;
       }
     }
-    if (3 == sscanf(p, "sine:bspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 11;
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "square:bspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 11;
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "triangle:bspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 11;
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "sawtooth:bspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 11;
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "bspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 11;
-      nd->vv[ch].waveform= opt_w;
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "sine:wspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 12;
-      nd->vv[ch].waveform= 0; // Sine
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "square:wspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 12;
-      nd->vv[ch].waveform= 1; // Square
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "triangle:wspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 12;
-      nd->vv[ch].waveform= 2; // Triangle
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "sawtooth:wspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 12;
-      nd->vv[ch].waveform= 3; // Sawtooth
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
-    if (3 == sscanf(p, "wspin:%lf%lf/%lf %c", &carr, &res, &amp, &dmy)) {
-      nd->vv[ch].typ= 12;
-      nd->vv[ch].waveform= opt_w;
-      nd->vv[ch].carr= carr;
-      nd->vv[ch].res= res;
-      nd->vv[ch].amp= AMP_DA(amp);	
-      continue;
-    }
+    if (SBX_OK == sbx_parse_tone_spec_ex(p, opt_w, &tone) &&
+	legacy_voice_from_sbx_tone(&tone, &nd->vv[ch]))
+       continue;
     badSeq();
   }
   
