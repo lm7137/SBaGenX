@@ -262,16 +262,22 @@ Phase 3.40
   - add a shared helper for `-p drop` / `-p sigmoid` / `-p curve` / `-p slide`,
   - keep existing `-D` textual-preservation behavior and curve-specific notes.
 
-Phase 3.41 (current slice)
+Phase 3.41
 - Add a dedicated legacy parser bridge smoke test script:
   - validates that legacy `.sbg` voice tokens now routed through sbagenxlib
     parsers still produce expected `-D` output forms,
   - covers tone, isochronic, bell, spin-family, noise, and mixbeat tokens.
 
+Phase 3.42 (current slice)
+- Consolidate legacy voice-token parsing behind one helper:
+  - add `parse_legacy_voice_token()` wrapper for `waveNN`, `mix/<amp>`,
+    mix-effects, and sbagenxlib tone parsing,
+  - simplify `readNameDef()` to a small dispatch path.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.41 Slice)
+Current API (Phase 3.42 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`

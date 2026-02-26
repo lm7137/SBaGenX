@@ -7637,6 +7637,67 @@ legacy_voice_from_sbx_tone(const SbxToneSpec *tone, Voice *out) {
   return 0;
 }
 
+static int
+parse_legacy_voice_token(const char *tok, Voice *out, int *out_sets_mix_flag) {
+   char dmy;
+   double amp, carr, res;
+   double mix_pct= 100.0;
+   int wave;
+   int extra_type= SBX_EXTRA_INVALID;
+   SbxMixFxSpec fx;
+   SbxToneSpec tone;
+
+   if (!tok || !out) return 0;
+   if (out_sets_mix_flag) *out_sets_mix_flag= 0;
+
+   if (4 == sscanf(tok, "wave%d:%lf%lf/%lf %c", &wave, &carr, &res, &amp, &dmy)) {
+      if (wave < 0 || wave >= 100)
+	 error("Only wave00 to wave99 is permitted at line: %d\n  %s", in_lin, lin_copy);
+      if (!waves[wave])
+	 error("Waveform %02d has not been defined, line: %d\n  %s", wave, in_lin, lin_copy);
+      out->typ= -1-wave;
+      out->waveform= opt_w;
+      out->carr= carr;
+      out->res= res;
+      out->amp= AMP_DA(amp);
+      return 1;
+   }
+
+   if (SBX_OK == sbx_parse_extra_token(tok, opt_w, &extra_type, &tone, &fx, &mix_pct)) {
+      if (extra_type == SBX_EXTRA_MIXAMP) {
+	 out->typ= 5;
+	 out->amp= AMP_DA(mix_pct);
+	 if (out_sets_mix_flag) *out_sets_mix_flag= 1;
+	 return 1;
+      } else if (extra_type == SBX_EXTRA_MIXFX) {
+	 checkMixInSequence();
+	 out->waveform= fx.waveform;
+	 out->res= fx.res;
+	 out->amp= AMP_DA(fx.amp * 100.0);
+	 switch (fx.type) {
+	  case SBX_MIXFX_SPIN:
+	     out->typ= 6;
+	     out->carr= fx.carr;
+	     return 1;
+	  case SBX_MIXFX_PULSE:
+	     out->typ= 7;
+	     out->carr= 0.0;
+	     return 1;
+	  case SBX_MIXFX_BEAT:
+	     out->typ= 13;
+	     out->carr= 0.0;
+	     return 1;
+	  default:
+	     return 0;
+	 }
+      } else if (extra_type == SBX_EXTRA_TONE && legacy_voice_from_sbx_tone(&tone, out)) {
+	 return 1;
+      }
+   }
+
+   return 0;
+}
+
 //
 //	Read a name definition
 //
@@ -7755,60 +7816,13 @@ readNameDef() {
 
   // Normal line-definition
   for (ch= 0; ch < N_CH && (p= getWord()); ch++) {
-    char dmy;
-    double amp, carr, res;
-    double mix_pct= 100.0;
-    int wave;
-    int extra_type= SBX_EXTRA_INVALID;
-    SbxMixFxSpec fx;
-    SbxToneSpec tone;
+    int sets_mix_flag= 0;
 
     // Interpret word into Voice nd->vv[ch]
     if (0 == strcmp(p, "-")) continue;
-    if (4 == sscanf(p, "wave%d:%lf%lf/%lf %c", &wave, &carr, &res, &amp, &dmy)) {
-       if (wave < 0 || wave >= 100)
-	  error("Only wave00 to wave99 is permitted at line: %d\n  %s", in_lin, lin_copy);
-       if (!waves[wave])
-	  error("Waveform %02d has not been defined, line: %d\n  %s", wave, in_lin, lin_copy);
-       nd->vv[ch].typ= -1-wave;
-       nd->vv[ch].waveform= opt_w;
-       nd->vv[ch].carr= carr;
-       nd->vv[ch].res= res;
-       nd->vv[ch].amp= AMP_DA(amp);	
+    if (parse_legacy_voice_token(p, &nd->vv[ch], &sets_mix_flag)) {
+       if (sets_mix_flag) mix_flag= 1;
        continue;
-    }
-    if (SBX_OK == sbx_parse_extra_token(p, opt_w, &extra_type, &tone, &fx, &mix_pct)) {
-       if (extra_type == SBX_EXTRA_MIXAMP) {
-	  nd->vv[ch].typ= 5;
-	  nd->vv[ch].amp= AMP_DA(mix_pct);
-	  mix_flag= 1;
-	  continue;
-       } else if (extra_type == SBX_EXTRA_MIXFX) {
-	  checkMixInSequence();
-	  nd->vv[ch].waveform= fx.waveform;
-	  nd->vv[ch].res= fx.res;
-	  nd->vv[ch].amp= AMP_DA(fx.amp * 100.0);
-	  switch (fx.type) {
-	   case SBX_MIXFX_SPIN:
-	      nd->vv[ch].typ= 6;
-	      nd->vv[ch].carr= fx.carr;
-	      break;
-	   case SBX_MIXFX_PULSE:
-	      nd->vv[ch].typ= 7;
-	      nd->vv[ch].carr= 0.0;
-	      break;
-	   case SBX_MIXFX_BEAT:
-	      nd->vv[ch].typ= 13;
-	      nd->vv[ch].carr= 0.0;
-	      break;
-	   default:
-	      badSeq();
-	  }
-	  continue;
-       } else if (extra_type == SBX_EXTRA_TONE &&
-		  legacy_voice_from_sbx_tone(&tone, &nd->vv[ch])) {
-	  continue;
-       }
     }
     badSeq();
   }
