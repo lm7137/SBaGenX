@@ -67,6 +67,10 @@ main(void) {
       "00:00 off ==\n"
       "00:00:01 base ->\n"
       "00:00:02 off\n";
+  const char *sbg_relative_text =
+      "base: 120+0/30\n"
+      "NOW base\n"
+      "+00:00:02 base\n";
   const char *tmp_path = "/tmp/sbx_sbg_timing_test.sbg";
   double t_actual, t_expect;
 
@@ -107,6 +111,9 @@ main(void) {
   rc = sbx_context_load_sbg_timing_text(ctx, "0s 100+0/40\n", 0);
   if (rc != SBX_EINVAL)
     fail("non-HH:MM token should fail for sbg timing loader");
+  rc = sbx_context_load_sbg_timing_text(ctx, "+00:00:02 100+0/40\n", 0);
+  if (rc != SBX_EINVAL)
+    fail("relative token without previous absolute/NOW should fail");
 
   rc = sbx_context_load_sbg_timing_text(ctx, "00:00 100+0/40 smooth\n", 0);
   if (rc != SBX_EINVAL)
@@ -144,6 +151,13 @@ main(void) {
     fail("named sbg timing should have energy in base segment");
   if (!(abs_sum_window(buf, (size_t)(2.05 * cfg.sample_rate), (size_t)(2.25 * cfg.sample_rate)) < 1e-4))
     fail("named sbg timing should be silent after final off switch");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_relative_text, 0);
+  if (rc != SBX_OK) fail("relative/NOW sbg timing load failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK || fabs(kf.time_sec - 0.0) > 1e-9)
+    fail("NOW-based keyframe time mismatch");
+  if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 2.0) > 1e-9)
+    fail("relative +HH:MM:SS keyframe time mismatch");
 
   free(buf);
   sbx_context_destroy(ctx);

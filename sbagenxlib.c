@@ -323,6 +323,64 @@ named_tone_find(const SbxNamedToneDef *defs, size_t ndefs, const char *name) {
 }
 
 static int
+parse_sbg_timeline_time_token(const char *tok,
+                              double *inout_last_abs_sec,
+                              double *out_sec) {
+  const char *p;
+  double tim = -1.0;
+  double base_abs = -1.0;
+  int have_base_abs = 0;
+  double seg = 0.0;
+  size_t used = 0;
+  const double day_sec = 24.0 * 60.0 * 60.0;
+
+  if (!tok || !inout_last_abs_sec || !out_sec) return SBX_EINVAL;
+  p = skip_ws(tok);
+  if (!*p) return SBX_EINVAL;
+
+  if (strncasecmp(p, "NOW", 3) == 0) {
+    tim = 0.0;
+    base_abs = 0.0;
+    have_base_abs = 1;
+    p += 3;
+  }
+
+  while (*p) {
+    if (*p == '+') {
+      p++;
+      if (sbx_parse_sbg_clock_token(p, &used, &seg) != SBX_OK)
+        return SBX_EINVAL;
+      if (tim < 0.0) {
+        if (*inout_last_abs_sec < 0.0)
+          return SBX_EINVAL;
+        tim = *inout_last_abs_sec;
+      }
+      tim = fmod(tim + seg, day_sec);
+      if (tim < 0.0) tim += day_sec;
+      p += used;
+      continue;
+    }
+
+    if (tim < 0.0) {
+      if (sbx_parse_sbg_clock_token(p, &used, &seg) != SBX_OK)
+        return SBX_EINVAL;
+      tim = seg;
+      base_abs = seg;
+      have_base_abs = 1;
+      p += used;
+      continue;
+    }
+
+    return SBX_EINVAL;
+  }
+
+  if (tim < 0.0) return SBX_EINVAL;
+  if (have_base_abs) *inout_last_abs_sec = base_abs;
+  *out_sec = tim;
+  return SBX_OK;
+}
+
+static int
 read_text_file_alloc(const char *path, char **out_text) {
   FILE *fp = 0;
   char chunk[4096];
@@ -1683,6 +1741,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   size_t count = 0, cap = 0;
   SbxNamedToneDef *defs = 0;
   size_t ndefs = 0, defs_cap = 0;
+  double last_abs_sec = -1.0;
   int rc = SBX_OK;
 
   if (!ctx || !ctx->eng || !text) return SBX_EINVAL;
@@ -1840,11 +1899,11 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       goto done;
     }
 
-    rc = parse_hhmmss_token(time_tok, &tsec);
+    rc = parse_sbg_timeline_time_token(time_tok, &last_abs_sec, &tsec);
     if (rc != SBX_OK) {
       char emsg[224];
       snprintf(emsg, sizeof(emsg),
-               "line %lu: invalid SBG timing token '%s'",
+               "line %lu: invalid SBG timing token '%s' (use HH:MM[:SS], NOW, and optional +relative parts)",
                (unsigned long)line_no, time_tok);
       set_ctx_error(ctx, emsg);
       rc = SBX_EINVAL;
