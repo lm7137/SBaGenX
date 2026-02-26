@@ -196,16 +196,22 @@ Phase 3.29
   - report unsupported extras as textual-preservation-only for `-D`,
   - clarify that curve `mixamp` expressions are ignored in keyframe dump mode.
 
-Phase 3.30 (current slice)
+Phase 3.30
 - Expose default-waveform-aware tone parsing in sbagenxlib:
   - new `sbx_parse_tone_spec_ex(spec, default_waveform, out)` API,
   - switch sbagenx runtime extra/immediate parsing to this API,
   - remove duplicated sbagenx-side waveform-prefix application helper.
 
+Phase 3.31 (current slice)
+- Remove adapter/library aux-limit drift:
+  - switch sbagenx runtime adapter aux limits to `SBX_MAX_AUX_TONES`
+    from `sbagenxlib.h`,
+  - eliminate duplicate local constant definitions.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.30 Slice)
+Current API (Phase 3.31 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`

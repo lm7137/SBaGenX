@@ -773,8 +773,6 @@ typedef struct {
    int interp;		// SBX_INTERP_*
 } SbxMixAmpKeyframe;
 
-#define SBX_RUNTIME_MAX_AUX 16
-
 typedef enum {
    SBX_MIXFX_NONE= 0,
    SBX_MIXFX_SPIN= 1,
@@ -795,9 +793,9 @@ typedef struct {
 typedef struct {
    int have_mix;
    double mix_amp_pct;
-   SbxToneSpec aux_tones[SBX_RUNTIME_MAX_AUX];
+   SbxToneSpec aux_tones[SBX_MAX_AUX_TONES];
    size_t aux_count;
-   SbxMixFxState mix_fx[SBX_RUNTIME_MAX_AUX];
+   SbxMixFxState mix_fx[SBX_MAX_AUX_TONES];
    size_t mix_fx_count;
    int unsupported;
    char bad_token[128];
@@ -822,7 +820,7 @@ size_t sbx_runtime_fcap= 0;
 SbxMixAmpKeyframe *sbx_runtime_mix_kf= 0;
 size_t sbx_runtime_mix_n= 0;
 size_t sbx_runtime_mix_seg= 0;
-SbxMixFxState sbx_runtime_mix_fx[SBX_RUNTIME_MAX_AUX];
+SbxMixFxState sbx_runtime_mix_fx[SBX_MAX_AUX_TONES];
 size_t sbx_runtime_mix_fx_n= 0;
 
 int opt_c;			// Number of -c option points provided (max 16)
@@ -8776,7 +8774,7 @@ sbx_runtime_set_mix_fx(const SbxMixFxState *fxv, size_t n) {
    sbx_runtime_mix_fx_n= 0;
    if (!fxv || n == 0)
       return 1;
-   if (n > SBX_RUNTIME_MAX_AUX)
+   if (n > SBX_MAX_AUX_TONES)
       return 0;
 
    for (i= 0; i<n; i++) {
@@ -8832,8 +8830,8 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
 
 int
 sbx_try_readSeqImm_runtime(int ac, char **av) {
-   SbxToneSpec tones[SBX_RUNTIME_MAX_AUX + 1];
-   SbxMixFxState mix_fx[SBX_RUNTIME_MAX_AUX];
+   SbxToneSpec tones[SBX_MAX_AUX_TONES + 1];
+   SbxMixFxState mix_fx[SBX_MAX_AUX_TONES];
    size_t tone_count= 0;
    size_t mix_fx_count= 0;
    int have_mix= 0;
@@ -8851,13 +8849,13 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
 	 continue;
       }
       if (sbx_parse_mix_fx_token(tok, &mix_fx_tmp)) {
-	 if (mix_fx_count >= SBX_RUNTIME_MAX_AUX)
+	 if (mix_fx_count >= SBX_MAX_AUX_TONES)
 	    return 0;
 	 mix_fx[mix_fx_count]= mix_fx_tmp;
 	 mix_fx_count++;
 	 continue;
       }
-      if (tone_count >= SBX_RUNTIME_MAX_AUX + 1)
+      if (tone_count >= SBX_MAX_AUX_TONES + 1)
 	 return 0;
       if (SBX_OK == sbx_parse_tone_spec_ex(tok, opt_w, &tones[tone_count])) {
 	 tone_count++;
@@ -9032,16 +9030,16 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
       } else {
 	 SbxMixFxState mix_fx;
 	 if (sbx_parse_mix_fx_token(tok, &mix_fx)) {
-	    if (spec->mix_fx_count >= SBX_RUNTIME_MAX_AUX)
-	       error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_RUNTIME_MAX_AUX);
+	    if (spec->mix_fx_count >= SBX_MAX_AUX_TONES)
+	       error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_MAX_AUX_TONES);
 	    spec->mix_fx[spec->mix_fx_count++]= mix_fx;
 	    p= e;
 	    continue;
 	 }
 	 SbxToneSpec tone;
 	 if (SBX_OK == sbx_parse_tone_spec_ex(tok, opt_w, &tone)) {
-	    if (spec->aux_count >= SBX_RUNTIME_MAX_AUX)
-	       error("Too many extra sbagenxlib tone-specs (max %d)", SBX_RUNTIME_MAX_AUX);
+	    if (spec->aux_count >= SBX_MAX_AUX_TONES)
+	       error("Too many extra sbagenxlib tone-specs (max %d)", SBX_MAX_AUX_TONES);
 	    spec->aux_tones[spec->aux_count++]= tone;
 	 } else {
 	    spec->unsupported= 1;
