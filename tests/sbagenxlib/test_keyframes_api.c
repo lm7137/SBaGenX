@@ -25,6 +25,18 @@ zero_crossings_left(const float *buf, size_t frames) {
   return zc;
 }
 
+static double
+abs_sum_window(const float *buf, size_t i0, size_t i1) {
+  size_t i;
+  double s = 0.0;
+  if (i1 <= i0) return 0.0;
+  for (i = i0; i < i1; i++) {
+    s += fabs((double)buf[i * 2]);
+    s += fabs((double)buf[i * 2 + 1]);
+  }
+  return s;
+}
+
 int
 main(void) {
   SbxEngineConfig cfg;
@@ -104,10 +116,19 @@ main(void) {
     fail("non-increasing keyframe times should fail");
 
   kf[1] = kf[0];
-  kf[1].time_sec = 1.0;
-  kf[1].tone.mode = SBX_TONE_MONAURAL;
-  if (sbx_context_load_keyframes(ctx, kf, 2, 0) != SBX_EINVAL)
-    fail("mixed keyframe modes should fail");
+  kf[1].time_sec = 0.5;
+  kf[1].tone.mode = SBX_TONE_NONE;
+  if (sbx_context_load_keyframes(ctx, kf, 2, 0) != SBX_OK)
+    fail("mixed keyframe modes should load");
+  free(buf);
+  buf = (float *)calloc((size_t)(0.8 * cfg.sample_rate) * 2, sizeof(float));
+  if (!buf) fail("alloc failed (mixed mode)");
+  if (sbx_context_render_f32(ctx, buf, (size_t)(0.8 * cfg.sample_rate)) != SBX_OK)
+    fail("render failed for mixed mode");
+  if (!(abs_sum_window(buf, (size_t)(0.1 * cfg.sample_rate), (size_t)(0.3 * cfg.sample_rate)) > 1e-3))
+    fail("mixed mode should produce tone before boundary");
+  if (!(abs_sum_window(buf, (size_t)(0.6 * cfg.sample_rate), (size_t)(0.8 * cfg.sample_rate)) < 1e-3))
+    fail("mixed mode should be silent after boundary");
 
   /* Looping check. */
   kf[1] = kf[0];

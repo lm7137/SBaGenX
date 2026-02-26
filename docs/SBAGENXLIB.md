@@ -305,16 +305,22 @@ Phase 3.47
   - switch sbagenx runtime activation paths to this API and remove adapter-side
     extra-setup helpers.
 
-Phase 3.48 (current slice)
+Phase 3.48
 - Expand context API regression coverage:
   - add tests for `sbx_context_duration_sec()` in keyframed and static modes,
   - add tests for `sbx_context_configure_runtime()` and
     `sbx_context_mix_stream_sample()` paths.
 
+Phase 3.49 (current slice)
+- Allow mixed tone modes in keyframed sbagenxlib programs:
+  - remove same-mode keyframe restriction in `sbx_context_load_keyframes()`,
+  - force deterministic step behavior across mode/waveform changes at segment
+    boundaries.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.48 Slice)
+Current API (Phase 3.49 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -393,10 +399,11 @@ Supported tone-spec forms (for `sbx_parse_tone_spec`):
 Keyframed program form (`sbx_context_load_keyframes`):
 - Load an array of `SbxProgramKeyframe` with:
   - increasing `time_sec` (seconds),
-  - one tone spec per keyframe,
-  - a single tone mode across all keyframes.
+  - one tone spec per keyframe.
 - Rendering interpolates carrier/beat/amplitude/duty linearly between
-  keyframes, with optional looping.
+  keyframes (within compatible mode/waveform segments), with optional looping.
+- When adjacent keyframes change tone mode or waveform, sbagenxlib applies
+  step behavior at that boundary.
 - `SbxProgramKeyframe.interp` sets segment behavior to next keyframe:
   - `SBX_INTERP_LINEAR`
   - `SBX_INTERP_STEP`

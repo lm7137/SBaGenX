@@ -756,7 +756,9 @@ ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
   u = (t_sec - t0) / (t1 - t0);
   if (u < 0.0) u = 0.0;
   if (u > 1.0) u = 1.0;
-  if (k0->interp == SBX_INTERP_STEP)
+  if (k0->interp == SBX_INTERP_STEP ||
+      k0->tone.mode != k1->tone.mode ||
+      k0->tone.waveform != k1->tone.waveform)
     u = 0.0;
 
   out->mode = k0->tone.mode;
@@ -1363,7 +1365,6 @@ sbx_context_load_keyframes(SbxContext *ctx,
                            int loop) {
   SbxProgramKeyframe *copy = 0;
   size_t i;
-  SbxToneMode mode0 = SBX_TONE_NONE;
   char err[160];
   int rc;
 
@@ -1397,12 +1398,6 @@ sbx_context_load_keyframes(SbxContext *ctx,
       free(copy);
       set_ctx_error(ctx, err);
       return rc;
-    }
-    if (i == 0) mode0 = copy[i].tone.mode;
-    else if (copy[i].tone.mode != mode0) {
-      free(copy);
-      set_ctx_error(ctx, "all keyframes must use the same tone mode");
-      return SBX_EINVAL;
     }
   }
 
