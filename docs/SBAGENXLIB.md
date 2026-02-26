@@ -246,16 +246,21 @@ Phase 3.37
   - preserve sequence-level checks (`checkMixInSequence`) and legacy voice
     type mapping/output behavior.
 
-Phase 3.38 (current slice)
+Phase 3.38
 - Remove sbagenx runtime adapter mix-effect mirror state:
   - rely on context-owned mix effects only (`sbx_context_set_mix_effects()` and
     `sbx_context_mix_effect_count()`),
   - remove duplicate adapter-side mixfx arrays/counters.
 
+Phase 3.39 (current slice)
+- Remove adapter runtime fields that became write-only during migration:
+  - drop `sbx_runtime_loop` and `sbx_runtime_mix_amp_pct`,
+  - keep runtime timing/state derived from context/keyframes only.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.38 Slice)
+Current API (Phase 3.39 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`

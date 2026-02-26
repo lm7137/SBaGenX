@@ -787,9 +787,7 @@ static void sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, s
 static int sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec);
 
 int sbx_runtime_active= 0;
-int sbx_runtime_loop= 0;
 double sbx_runtime_total_sec= 0.0;
-double sbx_runtime_mix_amp_pct= 100.0;
 SbxContext *sbx_runtime_ctx= 0;
 float *sbx_runtime_fbuf= 0;
 size_t sbx_runtime_fcap= 0;
@@ -7253,8 +7251,6 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    sbx_runtime_clear();
    sbx_runtime_ctx= ctx;
    sbx_runtime_active= 1;
-   sbx_runtime_loop= 0;
-   sbx_runtime_mix_amp_pct= 100.0;
    sbx_runtime_total_sec= 0.0;
    {
       size_t kn= sbx_context_keyframe_count(ctx);
@@ -8209,8 +8205,6 @@ create_libseq(int ac, char **av, int sbg_timing) {
    sbx_runtime_clear();
    sbx_runtime_ctx= ctx;
    sbx_runtime_active= 1;
-   sbx_runtime_loop= loop_flag ? 1 : 0;
-   sbx_runtime_mix_amp_pct= 100.0;
    sbx_runtime_total_sec= 0.0;
    {
       size_t kn= sbx_context_keyframe_count(ctx);
@@ -8221,11 +8215,9 @@ create_libseq(int ac, char **av, int sbg_timing) {
 }
 
 static void
-sbx_runtime_clear(void) {
+   sbx_runtime_clear(void) {
    sbx_runtime_active= 0;
-   sbx_runtime_loop= 0;
    sbx_runtime_total_sec= 0.0;
-   sbx_runtime_mix_amp_pct= 100.0;
    if (sbx_runtime_ctx) {
       sbx_context_destroy(sbx_runtime_ctx);
       sbx_runtime_ctx= 0;
@@ -8283,9 +8275,7 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
 	    sbx_context_last_error(sbx_runtime_ctx));
 
    sbx_runtime_active= 1;
-   sbx_runtime_loop= 1;
    sbx_runtime_total_sec= 0.0;
-   sbx_runtime_mix_amp_pct= mix_amp_pct;
    if (sbx_context_set_mix_amp_keyframes(sbx_runtime_ctx, 0, 0, mix_amp_pct) != SBX_OK)
       error("Failed to set sbagenxlib runtime mix amplitude profile");
    if (!sbx_runtime_set_mix_fx(mix_fx, mix_fx_count))
@@ -8409,9 +8399,7 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
 	    sbx_context_last_error(sbx_runtime_ctx));
 
    sbx_runtime_active= 1;
-   sbx_runtime_loop= loop_flag ? 1 : 0;
    sbx_runtime_total_sec= kfs[n-1].time_sec;
-   sbx_runtime_mix_amp_pct= mix_amp_pct;
    if (sbx_context_set_mix_amp_keyframes(sbx_runtime_ctx, mkf, mkf_n, mix_amp_pct) != SBX_OK)
       error("Failed to set sbagenxlib runtime mix amplitude profile");
    if (!sbx_runtime_set_mix_fx(mix_fx, mix_fx_count))
