@@ -367,10 +367,14 @@ Phase 3.58
   - `docs/SBAGENXLIB_QUICKSTART.md` (5-minute compile/load/render path),
   - `docs/SBAGENXLIB_DOTNET_INTEROP.md` (P/Invoke interop guidance).
 
+Phase 3.59
+- Make `sbagenxlib.h` self-documenting with grouped public API comments to
+  keep markdown/docs and header-level API intent aligned.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.56 Slice)
+Current API (Phase 3.59 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
