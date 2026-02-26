@@ -8039,6 +8039,7 @@ readPreProg(int ac, char **av) {
 	    NL "  libseq examples/sbagenxlib/minimal-keyframes.sbxseq"
 	    NL "  libsbg examples/sbagenxlib/minimal-sbg-timing.sbg"
 	    NL "  libsbg examples/sbagenxlib/minimal-sbg-named.sbg"
+	    NL "  libsbg examples/sbagenxlib/minimal-sbg-block.sbg"
 	    );
 
    if (opt_A && !opt_m && !opt_M)

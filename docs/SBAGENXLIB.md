@@ -345,10 +345,16 @@ Phase 3.54 (current slice)
   - support relative `+HH:MM[:SS]` timeline offsets using last-absolute-time
     semantics compatible with legacy sequence parsing.
 
+Phase 3.55
+- Extend sbagenxlib SBG timing subset with block definitions and expansion:
+  - support block definitions: `<name>: { ... }`,
+  - support timeline block invocation: `<time-spec> <block-name>`,
+  - require block-internal time tokens to be relative (`+HH:MM[:SS][+...]`).
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.54 Slice)
+Current API (Phase 3.55 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -466,6 +472,15 @@ SBG timing subset form (Phase 3.4):
   - `NOW`
   - `NOW+HH:MM[:SS][+HH:MM[:SS]...]`
   - `+HH:MM[:SS]` (relative to previous absolute/NOW base line)
+- Block definition subset (Phase 3.55):
+  - define block:
+    - `<block-name>: {`
+    - `  +HH:MM[:SS][+...] <tone-spec-or-named-tone> [transition/interp]`
+    - `  ...`
+    - `}`
+  - invoke block:
+    - `<time-spec> <block-name>`
+  - block entry timings must be non-decreasing and relative (`+...`).
 - Supported comments:
   - `# ...`
   - `; ...`
@@ -473,6 +488,7 @@ SBG timing subset form (Phase 3.4):
 - Example file:
   - `examples/sbagenxlib/minimal-sbg-timing.sbg`
   - `examples/sbagenxlib/minimal-sbg-named.sbg`
+  - `examples/sbagenxlib/minimal-sbg-block.sbg`
 
 Notes
 -----
@@ -592,6 +608,7 @@ CLI Bridge Smoke Test (Phase 3.7)
 ```bash
 ./dist/sbagenx-linux64 -D -p libseq examples/sbagenxlib/minimal-keyframes.sbxseq
 ./dist/sbagenx-linux64 -D -p libsbg examples/sbagenxlib/minimal-sbg-timing.sbg
+./dist/sbagenx-linux64 -D -p libsbg examples/sbagenxlib/minimal-sbg-block.sbg
 ```
 
 Legacy Parser Bridge Smoke Test (Phase 3.41)
@@ -608,10 +625,18 @@ Seq Backend Named-Subset Bridge Smoke Test (Phase 3.52)
 tests/sbagenxlib/test_seq_backend_named_subset.sh
 ```
 
+Seq Backend Block-Subset Bridge Smoke Test (Phase 3.55)
+-------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_block_subset.sh
+```
+
 Notes:
 
 - `libseq` reads the Phase 3.3 line format: `<time> <tone-spec> [interp]`.
-- `libsbg` reads the Phase 3.4 timing subset: `<HH:MM[:SS]> <tone-spec> [interp]`.
+- `libsbg` reads the Phase 3.4+ timing subset (including named tone-sets,
+  `NOW`/relative timeline forms, and block definitions/invocations).
 - Optional trailing `loop` token is accepted by both bridge commands.
 - `-D` now prints sbagenxlib keyframes directly (`time tone-spec interp`).
 - Built-in programs (`drop/sigmoid/curve/slide`) now generate keyframes and

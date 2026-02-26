@@ -71,6 +71,16 @@ main(void) {
       "base: 120+0/30\n"
       "NOW base\n"
       "+00:00:02 base\n";
+  const char *sbg_block_text =
+      "off: -\n"
+      "base: 180+0/35\n"
+      "burst: {\n"
+      "  +00:00 off ==\n"
+      "  +00:01 base ->\n"
+      "  +00:02 off\n"
+      "}\n"
+      "NOW burst\n"
+      "+00:03:00 burst\n";
   const char *tmp_path = "/tmp/sbx_sbg_timing_test.sbg";
   double t_actual, t_expect;
 
@@ -158,6 +168,30 @@ main(void) {
     fail("NOW-based keyframe time mismatch");
   if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 2.0) > 1e-9)
     fail("relative +HH:MM:SS keyframe time mismatch");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_block_text, 0);
+  if (rc != SBX_OK) fail("block-definition sbg timing load failed");
+  if (sbx_context_keyframe_count(ctx) != 6)
+    fail("block-definition expansion should produce 6 keyframes");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK || fabs(kf.time_sec - 0.0) > 1e-9)
+    fail("block keyframe #0 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 60.0) > 1e-9)
+    fail("block keyframe #1 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 2, &kf) != SBX_OK || fabs(kf.time_sec - 120.0) > 1e-9)
+    fail("block keyframe #2 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 3, &kf) != SBX_OK || fabs(kf.time_sec - 180.0) > 1e-9)
+    fail("block keyframe #3 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 4, &kf) != SBX_OK || fabs(kf.time_sec - 240.0) > 1e-9)
+    fail("block keyframe #4 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 5, &kf) != SBX_OK || fabs(kf.time_sec - 300.0) > 1e-9)
+    fail("block keyframe #5 time mismatch");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, "b:{\n+00:00 100+0/40\n", 0);
+  if (rc != SBX_EINVAL)
+    fail("unterminated block definition should fail");
+  rc = sbx_context_load_sbg_timing_text(ctx, "b: {\n00:00 100+0/40\n}\nNOW b\n", 0);
+  if (rc != SBX_EINVAL)
+    fail("block line using absolute time token should fail");
 
   free(buf);
   sbx_context_destroy(ctx);

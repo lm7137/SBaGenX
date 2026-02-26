@@ -1,0 +1,11 @@
+# minimal sbagenxlib SBG subset with block definition + expansion
+off: -
+base: 180+0/35
+burst: {
+  +00:00 off ==
+  +00:01 base ->
+  +00:02 off
+}
+
+NOW burst
++00:03:00 burst

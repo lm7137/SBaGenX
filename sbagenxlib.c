@@ -298,6 +298,19 @@ typedef struct {
   SbxToneSpec tone;
 } SbxNamedToneDef;
 
+typedef struct {
+  double offset_sec;
+  SbxToneSpec tone;
+  int interp;
+} SbxBlockEntry;
+
+typedef struct {
+  char *name;
+  SbxBlockEntry *entries;
+  size_t count;
+  size_t cap;
+} SbxNamedBlockDef;
+
 static int
 is_sbg_transition_token(const char *tok) {
   if (!tok || !tok[0] || !tok[1] || tok[2]) return 0;
@@ -320,6 +333,61 @@ named_tone_find(const SbxNamedToneDef *defs, size_t ndefs, const char *name) {
       return (int)i;
   }
   return -1;
+}
+
+static int
+named_block_find(const SbxNamedBlockDef *defs, size_t ndefs, const char *name) {
+  size_t i;
+  if (!defs || !name) return -1;
+  for (i = 0; i < ndefs; i++) {
+    if (defs[i].name && strcmp(defs[i].name, name) == 0)
+      return (int)i;
+  }
+  return -1;
+}
+
+static int
+parse_sbg_relative_offset_token(const char *tok, double *out_sec) {
+  const char *p;
+  size_t used = 0;
+  double seg = 0.0;
+  double sum = 0.0;
+
+  if (!tok || !*tok || !out_sec) return SBX_EINVAL;
+  p = skip_ws(tok);
+  if (*p != '+') return SBX_EINVAL;
+  while (*p) {
+    if (*p != '+') return SBX_EINVAL;
+    p++;
+    if (sbx_parse_sbg_clock_token(p, &used, &seg) != SBX_OK) return SBX_EINVAL;
+    sum += seg;
+    p += used;
+  }
+  if (!isfinite(sum) || sum < 0.0) return SBX_EINVAL;
+  *out_sec = sum;
+  return SBX_OK;
+}
+
+static int
+block_append_entry(SbxNamedBlockDef *blk,
+                   double offset_sec,
+                   const SbxToneSpec *tone,
+                   int interp) {
+  SbxBlockEntry *tmp;
+  size_t ncap;
+  if (!blk || !tone) return SBX_EINVAL;
+  if (blk->count == blk->cap) {
+    ncap = blk->cap ? (blk->cap * 2) : 8;
+    tmp = (SbxBlockEntry *)realloc(blk->entries, ncap * sizeof(*blk->entries));
+    if (!tmp) return SBX_ENOMEM;
+    blk->entries = tmp;
+    blk->cap = ncap;
+  }
+  blk->entries[blk->count].offset_sec = offset_sec;
+  blk->entries[blk->count].tone = *tone;
+  blk->entries[blk->count].interp = interp;
+  blk->count++;
+  return SBX_OK;
 }
 
 static int
@@ -1741,6 +1809,10 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   size_t count = 0, cap = 0;
   SbxNamedToneDef *defs = 0;
   size_t ndefs = 0, defs_cap = 0;
+  SbxNamedBlockDef *blocks = 0;
+  size_t nblocks = 0, blocks_cap = 0;
+  int active_block_idx = -1;
+  double active_block_last_off = -1.0;
   double last_abs_sec = -1.0;
   int rc = SBX_OK;
 
@@ -1758,6 +1830,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     char *time_tok;
     char *tone_tok;
     int interp = SBX_INTERP_LINEAR;
+    int expanded_block = 0;
     int is_definition = 0;
     double tsec;
     SbxToneSpec tone;
@@ -1789,6 +1862,165 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       rest = q;
     }
 
+    if (active_block_idx >= 0) {
+      char *time_tok = p;
+      char *tone_tok = 0;
+      int interp = SBX_INTERP_LINEAR;
+      double off_sec = 0.0;
+      SbxToneSpec blk_tone;
+      SbxNamedBlockDef *blk = &blocks[active_block_idx];
+
+      if (strcmp(time_tok, "}") == 0) {
+        if (rest && *rest) {
+          char emsg[224];
+          snprintf(emsg, sizeof(emsg),
+                   "line %lu: unexpected trailing token(s) after block close",
+                   (unsigned long)line_no);
+          set_ctx_error(ctx, emsg);
+          rc = SBX_EINVAL;
+          goto done;
+        }
+        active_block_idx = -1;
+        active_block_last_off = -1.0;
+        line = next;
+        continue;
+      }
+
+      if (*rest == 0) {
+        char emsg[224];
+        snprintf(emsg, sizeof(emsg),
+                 "line %lu: missing tone-spec or named tone-set in block '%s'",
+                 (unsigned long)line_no, blk->name ? blk->name : "?");
+        set_ctx_error(ctx, emsg);
+        rc = SBX_EINVAL;
+        goto done;
+      }
+
+      rc = parse_sbg_relative_offset_token(time_tok, &off_sec);
+      if (rc != SBX_OK) {
+        char emsg[256];
+        snprintf(emsg, sizeof(emsg),
+                 "line %lu: invalid block-relative timing token '%s' (use +HH:MM[:SS][+...])",
+                 (unsigned long)line_no, time_tok);
+        set_ctx_error(ctx, emsg);
+        rc = SBX_EINVAL;
+        goto done;
+      }
+      if (active_block_last_off >= 0.0 && off_sec < active_block_last_off) {
+        char emsg[256];
+        snprintf(emsg, sizeof(emsg),
+                 "line %lu: block '%s' timings must be non-decreasing",
+                 (unsigned long)line_no, blk->name ? blk->name : "?");
+        set_ctx_error(ctx, emsg);
+        rc = SBX_EINVAL;
+        goto done;
+      }
+      active_block_last_off = off_sec;
+
+      {
+        char *tokv[6];
+        int nt = 0;
+        int idx = 0;
+        char *r = rest;
+        while (*r) {
+          if (nt >= (int)(sizeof(tokv) / sizeof(tokv[0]))) {
+            char emsg[224];
+            snprintf(emsg, sizeof(emsg),
+                     "line %lu: too many tokens in block '%s' entry",
+                     (unsigned long)line_no, blk->name ? blk->name : "?");
+            set_ctx_error(ctx, emsg);
+            rc = SBX_EINVAL;
+            goto done;
+          }
+          tokv[nt++] = r;
+          while (*r && !isspace((unsigned char)*r)) r++;
+          if (*r) {
+            *r++ = 0;
+            r = (char *)skip_ws(r);
+          }
+        }
+
+        if (nt <= 0) {
+          char emsg[224];
+          snprintf(emsg, sizeof(emsg),
+                   "line %lu: missing tone-spec or named tone-set token in block '%s'",
+                   (unsigned long)line_no, blk->name ? blk->name : "?");
+          set_ctx_error(ctx, emsg);
+          rc = SBX_EINVAL;
+          goto done;
+        }
+
+        if (is_sbg_transition_token(tokv[idx])) {
+          interp = sbg_transition_token_to_interp(tokv[idx]);
+          idx++;
+        }
+        if (idx >= nt) {
+          char emsg[224];
+          snprintf(emsg, sizeof(emsg),
+                   "line %lu: missing tone-spec or named tone-set after transition token in block '%s'",
+                   (unsigned long)line_no, blk->name ? blk->name : "?");
+          set_ctx_error(ctx, emsg);
+          rc = SBX_EINVAL;
+          goto done;
+        }
+
+        tone_tok = tokv[idx++];
+        if (strcmp(tone_tok, "-") == 0) {
+          sbx_default_tone_spec(&blk_tone);
+          blk_tone.mode = SBX_TONE_NONE;
+          blk_tone.amplitude = 0.0;
+        } else {
+          int didx = named_tone_find(defs, ndefs, tone_tok);
+          if (didx >= 0) {
+            blk_tone = defs[didx].tone;
+          } else {
+            rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &blk_tone);
+            if (rc != SBX_OK) {
+              char emsg[256];
+              snprintf(emsg, sizeof(emsg),
+                       "line %lu: invalid block tone-spec or unknown named tone-set '%s'",
+                       (unsigned long)line_no, tone_tok);
+              set_ctx_error(ctx, emsg);
+              rc = SBX_EINVAL;
+              goto done;
+            }
+          }
+        }
+
+        while (idx < nt) {
+          int interp_tmp;
+          if (parse_interp_mode_token(tokv[idx], &interp_tmp) == SBX_OK) {
+            interp = interp_tmp;
+            idx++;
+            continue;
+          }
+          if (is_sbg_transition_token(tokv[idx])) {
+            interp = sbg_transition_token_to_interp(tokv[idx]);
+            idx++;
+            continue;
+          }
+          {
+            char emsg[256];
+            snprintf(emsg, sizeof(emsg),
+                     "line %lu: unexpected trailing token '%s' in block '%s'",
+                     (unsigned long)line_no, tokv[idx], blk->name ? blk->name : "?");
+            set_ctx_error(ctx, emsg);
+            rc = SBX_EINVAL;
+            goto done;
+          }
+        }
+      }
+
+      rc = block_append_entry(blk, off_sec, &blk_tone, interp);
+      if (rc != SBX_OK) {
+        set_ctx_error(ctx, "out of memory");
+        rc = SBX_ENOMEM;
+        goto done;
+      }
+      line = next;
+      continue;
+    }
+
     /* Accept named tone-set definitions: name: <tone-spec> */
     {
       size_t l0 = strlen(p);
@@ -1806,6 +2038,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       char *r = rest;
       char *name = p;
       int didx;
+      int bidx;
 
       if (*name == 0) {
         char emsg[208];
@@ -1820,6 +2053,63 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         char emsg[208];
         snprintf(emsg, sizeof(emsg),
                  "line %lu: named tone-set '%s' is missing tone-spec",
+                 (unsigned long)line_no, name);
+        set_ctx_error(ctx, emsg);
+        rc = SBX_EINVAL;
+        goto done;
+      }
+
+      bidx = named_block_find(blocks, nblocks, name);
+      if (strcmp(r, "{") == 0) {
+        if (bidx < 0 && named_tone_find(defs, ndefs, name) >= 0) {
+          char emsg[224];
+          snprintf(emsg, sizeof(emsg),
+                   "line %lu: '%s' is already defined as a named tone-set",
+                   (unsigned long)line_no, name);
+          set_ctx_error(ctx, emsg);
+          rc = SBX_EINVAL;
+          goto done;
+        }
+
+        if (bidx >= 0) {
+          if (blocks[bidx].entries) free(blocks[bidx].entries);
+          blocks[bidx].entries = 0;
+          blocks[bidx].count = 0;
+          blocks[bidx].cap = 0;
+        } else {
+          if (nblocks == blocks_cap) {
+            size_t ncap = blocks_cap ? (blocks_cap * 2) : 8;
+            SbxNamedBlockDef *tmp =
+                (SbxNamedBlockDef *)realloc(blocks, ncap * sizeof(*blocks));
+            if (!tmp) {
+              set_ctx_error(ctx, "out of memory");
+              rc = SBX_ENOMEM;
+              goto done;
+            }
+            blocks = tmp;
+            blocks_cap = ncap;
+          }
+          bidx = (int)nblocks;
+          blocks[nblocks].name = sbx_strdup_local(name);
+          blocks[nblocks].entries = 0;
+          blocks[nblocks].count = 0;
+          blocks[nblocks].cap = 0;
+          if (!blocks[nblocks].name) {
+            set_ctx_error(ctx, "out of memory");
+            rc = SBX_ENOMEM;
+            goto done;
+          }
+          nblocks++;
+        }
+        active_block_idx = bidx;
+        active_block_last_off = -1.0;
+        line = next;
+        continue;
+      }
+      if (bidx >= 0) {
+        char emsg[224];
+        snprintf(emsg, sizeof(emsg),
+                 "line %lu: '%s' is already defined as a block name",
                  (unsigned long)line_no, name);
         set_ctx_error(ctx, emsg);
         rc = SBX_EINVAL;
@@ -1914,6 +2204,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       char *tokv[6];
       int nt = 0;
       int idx = 0;
+      int had_leading_transition = 0;
       char *r = rest;
       while (*r) {
         if (nt >= (int)(sizeof(tokv) / sizeof(tokv[0]))) {
@@ -1945,6 +2236,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
 
       if (is_sbg_transition_token(tokv[idx])) {
         interp = sbg_transition_token_to_interp(tokv[idx]);
+        had_leading_transition = 1;
         idx++;
       }
       if (idx >= nt) {
@@ -1958,50 +2250,111 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       }
 
       tone_tok = tokv[idx++];
-      if (strcmp(tone_tok, "-") == 0) {
-        sbx_default_tone_spec(&tone);
-        tone.mode = SBX_TONE_NONE;
-        tone.amplitude = 0.0;
-      } else {
-        int didx = named_tone_find(defs, ndefs, tone_tok);
-        if (didx >= 0) {
-          tone = defs[didx].tone;
-        } else {
-          rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &tone);
-          if (rc != SBX_OK) {
-            char emsg[224];
+      {
+        int bidx = named_block_find(blocks, nblocks, tone_tok);
+        if (bidx >= 0) {
+          size_t bi;
+          const double day_sec = 24.0 * 60.0 * 60.0;
+          if (had_leading_transition) {
+            char emsg[256];
             snprintf(emsg, sizeof(emsg),
-                     "line %lu: invalid tone-spec or unknown named tone-set '%s'",
+                     "line %lu: transition tokens are not supported on block invocations ('%s')",
                      (unsigned long)line_no, tone_tok);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
           }
-        }
-      }
+          if (idx < nt) {
+            char emsg[256];
+            snprintf(emsg, sizeof(emsg),
+                     "line %lu: block invocation '%s' does not accept trailing tokens",
+                     (unsigned long)line_no, tone_tok);
+            set_ctx_error(ctx, emsg);
+            rc = SBX_EINVAL;
+            goto done;
+          }
+          if (blocks[bidx].count == 0) {
+            char emsg[256];
+            snprintf(emsg, sizeof(emsg),
+                     "line %lu: block '%s' has no entries",
+                     (unsigned long)line_no, tone_tok);
+            set_ctx_error(ctx, emsg);
+            rc = SBX_EINVAL;
+            goto done;
+          }
+          for (bi = 0; bi < blocks[bidx].count; bi++) {
+            double etim = fmod(tsec + blocks[bidx].entries[bi].offset_sec, day_sec);
+            if (etim < 0.0) etim += day_sec;
+            if (count == cap) {
+              size_t ncap = cap ? (cap * 2) : 8;
+              SbxProgramKeyframe *tmp;
+              tmp = (SbxProgramKeyframe *)realloc(frames, ncap * sizeof(*frames));
+              if (!tmp) {
+                set_ctx_error(ctx, "out of memory");
+                rc = SBX_ENOMEM;
+                goto done;
+              }
+              frames = tmp;
+              cap = ncap;
+            }
+            frames[count].time_sec = etim;
+            frames[count].tone = blocks[bidx].entries[bi].tone;
+            frames[count].interp = blocks[bidx].entries[bi].interp;
+            count++;
+          }
+          expanded_block = 1;
+        } else {
+          if (strcmp(tone_tok, "-") == 0) {
+            sbx_default_tone_spec(&tone);
+            tone.mode = SBX_TONE_NONE;
+            tone.amplitude = 0.0;
+          } else {
+            int didx = named_tone_find(defs, ndefs, tone_tok);
+            if (didx >= 0) {
+              tone = defs[didx].tone;
+            } else {
+              rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &tone);
+              if (rc != SBX_OK) {
+                char emsg[224];
+                snprintf(emsg, sizeof(emsg),
+                         "line %lu: invalid tone-spec or unknown named tone-set '%s'",
+                         (unsigned long)line_no, tone_tok);
+                set_ctx_error(ctx, emsg);
+                rc = SBX_EINVAL;
+                goto done;
+              }
+            }
+          }
 
-      while (idx < nt) {
-        int interp_tmp;
-        if (parse_interp_mode_token(tokv[idx], &interp_tmp) == SBX_OK) {
-          interp = interp_tmp;
-          idx++;
-          continue;
-        }
-        if (is_sbg_transition_token(tokv[idx])) {
-          interp = sbg_transition_token_to_interp(tokv[idx]);
-          idx++;
-          continue;
-        }
-        {
-          char emsg[224];
-          snprintf(emsg, sizeof(emsg),
-                   "line %lu: unexpected trailing token '%s'",
-                   (unsigned long)line_no, tokv[idx]);
-          set_ctx_error(ctx, emsg);
-          rc = SBX_EINVAL;
-          goto done;
+          while (idx < nt) {
+            int interp_tmp;
+            if (parse_interp_mode_token(tokv[idx], &interp_tmp) == SBX_OK) {
+              interp = interp_tmp;
+              idx++;
+              continue;
+            }
+            if (is_sbg_transition_token(tokv[idx])) {
+              interp = sbg_transition_token_to_interp(tokv[idx]);
+              idx++;
+              continue;
+            }
+            {
+              char emsg[224];
+              snprintf(emsg, sizeof(emsg),
+                       "line %lu: unexpected trailing token '%s'",
+                       (unsigned long)line_no, tokv[idx]);
+              set_ctx_error(ctx, emsg);
+              rc = SBX_EINVAL;
+              goto done;
+            }
+          }
         }
       }
+    }
+
+    if (expanded_block) {
+      line = next;
+      continue;
     }
 
     if (count == cap) {
@@ -2024,6 +2377,16 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     line = next;
   }
 
+  if (active_block_idx >= 0) {
+    char emsg[256];
+    snprintf(emsg, sizeof(emsg),
+             "unterminated block definition '%s' (missing closing '}')",
+             blocks[active_block_idx].name ? blocks[active_block_idx].name : "?");
+    set_ctx_error(ctx, emsg);
+    rc = SBX_EINVAL;
+    goto done;
+  }
+
   if (count == 0) {
     set_ctx_error(ctx, "sbg timing text contains no keyframes");
     rc = SBX_EINVAL;
@@ -2039,6 +2402,14 @@ done:
       if (defs[i].name) free(defs[i].name);
     }
     free(defs);
+  }
+  if (blocks) {
+    size_t i;
+    for (i = 0; i < nblocks; i++) {
+      if (blocks[i].name) free(blocks[i].name);
+      if (blocks[i].entries) free(blocks[i].entries);
+    }
+    free(blocks);
   }
   if (frames) free(frames);
   if (buf) free(buf);
