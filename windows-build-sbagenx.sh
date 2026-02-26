@@ -16,9 +16,39 @@ if ! command -v i686-w64-mingw32-gcc &> /dev/null || ! command -v x86_64-w64-min
     info "On Arch: sudo pacman -S mingw-w64-gcc"
     exit 1
 fi
-if ! command -v i686-w64-mingw32-ar &> /dev/null || ! command -v x86_64-w64-mingw32-ar &> /dev/null; then
-    error "MinGW archiver tools not found (i686-w64-mingw32-ar / x86_64-w64-mingw32-ar)."
+
+resolve_mingw_ar() {
+    local target="$1"
+    local ar_path=""
+    ar_path=$(command -v "${target}-ar" 2>/dev/null || true)
+    if [ -n "$ar_path" ]; then
+        echo "$ar_path"
+        return 0
+    fi
+    ar_path=$(command -v "${target}-gcc-ar" 2>/dev/null || true)
+    if [ -n "$ar_path" ]; then
+        echo "$ar_path"
+        return 0
+    fi
+    return 1
+}
+
+AR_32=$(resolve_mingw_ar "i686-w64-mingw32" || true)
+AR_64=$(resolve_mingw_ar "x86_64-w64-mingw32" || true)
+
+if [ -z "$AR_32" ] || [ -z "$AR_64" ]; then
+    error "MinGW archiver tools not found."
+    warning "Expected one of:"
+    warning "  i686-w64-mingw32-ar or i686-w64-mingw32-gcc-ar"
+    warning "  x86_64-w64-mingw32-ar or x86_64-w64-mingw32-gcc-ar"
     exit 1
+fi
+
+if [ "$(basename "$AR_32")" != "i686-w64-mingw32-ar" ]; then
+    warning "Using fallback archiver for win32: $(basename "$AR_32")"
+fi
+if [ "$(basename "$AR_64")" != "x86_64-w64-mingw32-ar" ]; then
+    warning "Using fallback archiver for win64: $(basename "$AR_64")"
 fi
 
 # Create libs directory if it doesn't exist
@@ -730,7 +760,7 @@ SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
 
 i686-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win32.o
 if [ $? -eq 0 ]; then
-    i686-w64-mingw32-ar rcs dist/libsbagenx-win32.a build/sbagenxlib/sbagenxlib-win32.o
+    "$AR_32" rcs dist/libsbagenx-win32.a build/sbagenxlib/sbagenxlib-win32.o
     if [ $? -eq 0 ]; then
         success "Created sbagenxlib archive: dist/libsbagenx-win32.a"
     else
@@ -742,7 +772,7 @@ fi
 
 x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win64.o
 if [ $? -eq 0 ]; then
-    x86_64-w64-mingw32-ar rcs dist/libsbagenx-win64.a build/sbagenxlib/sbagenxlib-win64.o
+    "$AR_64" rcs dist/libsbagenx-win64.a build/sbagenxlib/sbagenxlib-win64.o
     if [ $? -eq 0 ]; then
         success "Created sbagenxlib archive: dist/libsbagenx-win64.a"
     else
