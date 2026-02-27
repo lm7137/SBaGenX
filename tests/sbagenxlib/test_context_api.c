@@ -153,6 +153,11 @@ int main(void) {
       fail("mixam beat-bind parse failed");
     if (!fx.mixam_bind_program_beat)
       fail("mixam beat-bind parse flag mismatch");
+    if (sbx_parse_mix_fx_spec("mixpulse:beat:s=0:d=0.5:a=0.1:r=0.1:e=3:f=0.25",
+                              SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mixpulse:beat compatibility parse failed");
+    if (fx.type != SBX_MIXFX_AM || !fx.mixam_bind_program_beat)
+      fail("mixpulse:beat compatibility parse mismatch");
     if (sbx_parse_mix_fx_spec("mixam:6:a=0.8:r=0.5", SBX_WAVE_SINE, &fx) != SBX_EINVAL)
       fail("mixam a+r constraint should fail");
   }
@@ -181,6 +186,11 @@ int main(void) {
       fail("parse extra beat-bound mixam token failed");
     if (typ != SBX_EXTRA_MIXFX || fx.type != SBX_MIXFX_AM || !fx.mixam_bind_program_beat)
       fail("parse extra beat-bound mixam token mismatch");
+    if (sbx_parse_extra_token("mixpulse:beat:d=0.5:a=0.1:r=0.1:e=3:f=0.2",
+                              SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
+      fail("parse extra beat-bound mixpulse compatibility token failed");
+    if (typ != SBX_EXTRA_MIXFX || fx.type != SBX_MIXFX_AM || !fx.mixam_bind_program_beat)
+      fail("parse extra beat-bound mixpulse compatibility token mismatch");
     if (sbx_parse_extra_token("triangle:200+8/20", SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
       fail("parse extra tone token failed");
     if (typ != SBX_EXTRA_TONE || tone.mode != SBX_TONE_BINAURAL || tone.waveform != SBX_WAVE_TRIANGLE)

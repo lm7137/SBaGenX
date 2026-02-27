@@ -8950,9 +8950,10 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
 void 
 bad_drop() {
    error("Bad arguments: expecting -p drop [<time-spec>] <drop-spec> [<tone-specs...>]"
-	 NL "<drop-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]"
+	 NL "<drop-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
 	 NL "The optional :S=<val> sets start beat/pulse frequency in Hz (default 10)."
@@ -8975,6 +8976,7 @@ create_drop(int ac, char **av) {
    char *fmt;
    char *p, *q;
    int a;
+   int mute_prog_tone= 0;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    double carr, amp, c0, c2;
@@ -9012,10 +9014,16 @@ create_drop(int ac, char **av) {
       p += sprintf(p, " %s", av[0]);
       ac--; av++;
    }
-   
+
    // Scan the format
-   carr= 200 - 2 * strtod(fmt, &p);
-   if (p == fmt || carr < 0) BAD;
+   if (fmt[0] == 'N' || fmt[0] == 'n') {
+      mute_prog_tone= 1;
+      carr= 200.0;
+      p= fmt + 1;
+   } else {
+      carr= 200 - 2 * strtod(fmt, &p);
+      if (p == fmt || carr < 0) BAD;
+   }
 
    a= tolower(*p) - 'a'; p++;
    if (a < 0 || a >= sizeof(beat_targets) / sizeof(beat_targets[0])) BAD;
@@ -9070,6 +9078,8 @@ create_drop(int ac, char **av) {
       error("M monaural mode cannot be combined with '@' isochronic drop specs");
    if (!(beat_start > 0.0) || !isfinite(beat_start))
       error("Invalid drop start beat/pulse frequency :S=%g (must be > 0)", beat_start);
+   if (mute_prog_tone)
+      amp= 0.0;
 
 #undef BAD
       
@@ -9148,6 +9158,8 @@ create_drop(int ac, char **av) {
       if (wakeup) {
 	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
       }
+      if (mute_prog_tone)
+	 warn(" N mode active: generated program tones are muted; beat/pulse trajectory is still generated");
       if (opt_A) {
 	 warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
 	      opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
@@ -9213,9 +9225,10 @@ create_drop(int ac, char **av) {
 void
 bad_sigmoid() {
    error("Bad arguments: expecting -p sigmoid [<time-spec>] <sigmoid-spec> [<tone-specs...>]"
-	 NL "<sigmoid-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]"
+	 NL "<sigmoid-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
 	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0),"
@@ -9236,6 +9249,7 @@ create_sigmoid(int ac, char **av) {
    char *p, *q;
    char depth_ch;
    int a;
+   int mute_prog_tone= 0;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    double level;
@@ -9278,9 +9292,16 @@ create_sigmoid(int ac, char **av) {
    }
 
    // Scan the format
-   level= strtod(fmt, &p);
-   carr= 200 - 2 * level;
-   if (p == fmt || carr < 0) BAD;
+   if (fmt[0] == 'N' || fmt[0] == 'n') {
+      mute_prog_tone= 1;
+      level= 0.0;
+      carr= 200.0;
+      p= fmt + 1;
+   } else {
+      level= strtod(fmt, &p);
+      carr= 200 - 2 * level;
+      if (p == fmt || carr < 0) BAD;
+   }
 
    depth_ch= tolower((unsigned char)*p);
    a= depth_ch - 'a'; p++;
@@ -9348,6 +9369,8 @@ create_sigmoid(int ac, char **av) {
       error("M monaural mode cannot be combined with '@' isochronic sigmoid specs");
    if (!(beat_start > 0.0) || !isfinite(beat_start))
       error("Invalid sigmoid start beat/pulse frequency :S=%g (must be > 0)", beat_start);
+   if (mute_prog_tone)
+      amp= 0.0;
 
 #undef BAD
 
@@ -9440,6 +9463,8 @@ create_sigmoid(int ac, char **av) {
       if (wakeup) {
 	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
       }
+      if (mute_prog_tone)
+	 warn(" N mode active: generated program tones are muted; beat/pulse trajectory is still generated");
       if (opt_A) {
 	 warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
 	      opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
@@ -9511,9 +9536,10 @@ bad_curve() {
 	 NL "  mixamp = <expression>, and piecewise variants of carrier/amp/mixamp,"
 	 NL "  param <name> = <value>[m|s],"
 	 NL "  solve <u1>,<u2>,... : <lhs1>=<rhs1> ; <lhs2>=<rhs2> ; ..."
-	 NL "<curve-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:<name>=<value>...]"
+	 NL "<curve-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:<name>=<value>...]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (default is equivalent to 't30,30,3')."
 	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
@@ -9533,6 +9559,7 @@ create_curve(int ac, char **av) {
    char *p, *q;
    char depth_ch;
    int a;
+   int mute_prog_tone= 0;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    int len, len0= 1800, len1= 1800, len2= 180;
@@ -9591,9 +9618,16 @@ create_curve(int ac, char **av) {
    have_mix_in_extra= curve_find_mix_amp_in_extra(extra, &base_mix_amp);
 
    // Scan the format
-   level= strtod(fmt, &p);
-   carr= 200 - 2 * level;
-   if (p == fmt || carr < 0) BAD;
+   if (fmt[0] == 'N' || fmt[0] == 'n') {
+      mute_prog_tone= 1;
+      level= 0.0;
+      carr= 200.0;
+      p= fmt + 1;
+   } else {
+      level= strtod(fmt, &p);
+      carr= 200 - 2 * level;
+      if (p == fmt || carr < 0) BAD;
+   }
 
    depth_ch= tolower((unsigned char)*p);
    a= depth_ch - 'a'; p++;
@@ -9665,6 +9699,8 @@ create_curve(int ac, char **av) {
       error("M monaural mode cannot be combined with '@' isochronic curve specs");
    if (!(beat_start > 0.0) || !isfinite(beat_start))
       error("Invalid curve start beat/pulse frequency :S=%g (must be > 0)", beat_start);
+   if (mute_prog_tone)
+      amp= 0.0;
 
 #undef BAD
 
@@ -9768,6 +9804,8 @@ create_curve(int ac, char **av) {
 	 warn(" Carrier expression enabled from .sbgf");
       if (have_amp_curve)
 	 warn(" Beat amplitude expression enabled from .sbgf");
+      if (mute_prog_tone && have_amp_curve)
+	 warn(" N mode active: amp expression from .sbgf is ignored because generated program tones are muted");
       if (have_mixamp_curve) {
 	 if (have_mix_in_extra)
 	    warn(" Mix amplitude expression enabled from .sbgf");
@@ -9782,6 +9820,8 @@ create_curve(int ac, char **av) {
       }
       if (ismono)
 	 warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
+      if (mute_prog_tone)
+	 warn(" N mode active: generated program tones are muted; beat/pulse trajectory is still generated");
       if (wakeup)
 	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
       if (opt_A) {
@@ -9793,6 +9833,7 @@ create_curve(int ac, char **av) {
       if (slide) {
 	 for (a= 0; a<n_step; a++) {
 	    double amp_t= have_amp_curve ? amp_sam[a] : amp;
+	    if (mute_prog_tone) amp_t= 0.0;
 	    double tim= a * len0 / (double)(n_step-1);
 	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_sam[a], beat[a], amp_t);
 	    sbx_kfb_add(&kfb, tim, &tone, SBX_INTERP_LINEAR);
@@ -9801,6 +9842,7 @@ create_curve(int ac, char **av) {
 	 }
 	 if (islong) {
 	    double amp_t= have_amp_curve ? amp_end : amp;
+	    if (mute_prog_tone) amp_t= 0.0;
 	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, amp_t);
 	    sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
 	    if (have_mixamp_curve && have_mix_in_extra)
@@ -9816,12 +9858,17 @@ create_curve(int ac, char **av) {
 	    if (!eval_custom_curve_point(tim1, &beat_t, &carr_t, &amp_t, &mix_t))
 	       error("Custom curve evaluation failed at t=%d seconds", tim1);
 	    if (!have_amp_curve) amp_t= amp;
+	    if (mute_prog_tone) amp_t= 0.0;
 	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat_t, amp_t);
 	    sbx_kfb_add(&kfb, (double)tim0, &tone, SBX_INTERP_STEP);
 	    if (have_mixamp_curve && have_mix_in_extra)
 	       sbx_mixkfb_add(&mkfb, (double)tim0, mix_t, SBX_INTERP_STEP);
 	 }
-	 sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, have_amp_curve ? amp_end : amp);
+	 {
+	    double amp_t= have_amp_curve ? amp_end : amp;
+	    if (mute_prog_tone) amp_t= 0.0;
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, amp_t);
+	 }
 	 sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_STEP);
 	 if (have_mixamp_curve && have_mix_in_extra)
 	    sbx_mixkfb_add(&mkfb, (double)len, mix_end, SBX_INTERP_STEP);
@@ -9830,6 +9877,7 @@ create_curve(int ac, char **av) {
 
       if (wakeup) {
 	 double amp_t= have_amp_curve ? amp_start_eval : amp;
+	 if (mute_prog_tone) amp_t= 0.0;
 	 sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_start_eval, beat_start_eval, amp_t);
 	 sbx_kfb_add(&kfb, (double)(end_sec + len2), &tone, SBX_INTERP_LINEAR);
 	 if (have_mixamp_curve && have_mix_in_extra)

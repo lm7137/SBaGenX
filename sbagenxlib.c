@@ -1265,6 +1265,25 @@ sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_
     fx.carr = carr;
     fx.res = res;
     fx.amp = amp_pct / 100.0;
+  } else if (strncasecmp(p, "mixpulse:beat", 13) == 0 &&
+             (p[13] == 0 || p[13] == ':' || isspace((unsigned char)p[13]))) {
+    /* Compatibility alias: mixpulse:beat[:params] -> mixam:beat[:params]. */
+    const char *q = p + 13;
+    q = skip_ws(q);
+    sbx_mixam_set_defaults(&fx);
+    fx.type = SBX_MIXFX_AM;
+    fx.amp = 1.0;
+    fx.mixam_bind_program_beat = 1;
+    fx.res = 0.0;
+    if (*q == ':') q++;
+    q = skip_ws(q);
+    if (*q) {
+      rc = sbx_parse_mixam_params(q, &fx);
+      if (rc != SBX_OK) return rc;
+    } else {
+      rc = sbx_validate_mixam_fields(&fx);
+      if (rc != SBX_OK) return rc;
+    }
   } else if (sscanf(p, "mixpulse:%lf/%lf %n", &res, &amp_pct, &n) == 2 &&
              *skip_ws(p + n) == 0) {
     fx.type = SBX_MIXFX_PULSE;

@@ -868,9 +868,9 @@ lots of practice.
 
 Usage: 
 
-  -p drop <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>] <tone-specs> ...
+  -p drop <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>] <tone-specs> ...
   -G -p drop [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]
+      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]
 
 Examples:
 
@@ -882,6 +882,7 @@ Examples:
   -p drop 00d@/3 brown/15
   -p drop 00d+M/2
   -p drop 00ls+:S=2 mix/100 mixam:beat
+  -p drop Nls+:S=2 mix/100 mixam:beat
   -A -p drop 00ds+/3 mix/97
   -A d=0.3:e=0.3:k=10:E=0.7 -p drop 00ds+/3 mix/97
 
@@ -889,6 +890,9 @@ The argument after the "drop" gives the level and depth of the
 sequence to run.  `<signed-level>` may be non-negative (00, 01, ...,
 99) or negative (-01, -02, ...), and it may include a decimal point
 for fine tuning (for example 20.5a).
+Using `N` in place of the signed level mutes generated program tones
+while still generating the beat/pulse trajectory (for example to drive
+`mixam:beat` without adding a separate binaural/isochronic/monaural tone).
 
 Carrier formula (for quick reference):
   Let L = signed level value
@@ -1243,9 +1247,9 @@ cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
 Usage:
 
   -p sigmoid [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>] <tone-specs> ...
+      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>] <tone-specs> ...
   -G -p sigmoid [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]
+      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]
 
 Examples:
 
@@ -1256,6 +1260,7 @@ Examples:
   -p sigmoid -01ds+@/3:l=0.125:h=0 brown/15
   -p sigmoid 00ds+M/2:l=0.125:h=0
   -p sigmoid 00ls+:l=0.125:h=0:S=2 mix/100 mixam:beat
+  -p sigmoid Nls+:l=0.125:h=0:S=2 mix/100 mixam:beat
   -A -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
   -A d=0.3:e=0.3:k=10:E=0.7 -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
 
@@ -1264,6 +1269,10 @@ Level and carrier behavior:
   Let L = signed level value
   Starting carrier (Hz):   f_start = 205 - 2*L
   Reverse lookup:          L = (205 - f_start) / 2
+
+Using `N` in place of the signed level mutes generated program tones
+while still generating the beat/pulse trajectory (for example to drive
+`mixam:beat` without adding a separate binaural/isochronic/monaural tone).
 
 As with `-p drop`, the carrier falls by 5Hz at t=D.  If `+` is present,
 it continues to drop over hold at the same linear rate as in drop, for
@@ -1403,7 +1412,7 @@ an external function file.  The file extension is `.sbgf` (required).
 Usage:
 
   -p curve <curve-file.sbgf> [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:name=value ...]
+      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:name=value ...]
       <tone-specs> ...
 
 In `<curve-spec>`, `:S=<val>` sets the start beat/pulse frequency in Hz
@@ -1424,6 +1433,8 @@ Examples:
     -p curve examples/basics/curve-amp-mix-demo.sbgf 00ls+ mix/97
   sbagenx -m river1.ogg \
     -p curve examples/basics/curve-sigmoid-like.sbgf 00ls+ mix/99
+  sbagenx -m river1.ogg \
+    -p curve examples/basics/curve-sigmoid-like.sbgf Nls:S=2:l=0.2:h=0 mix/100 mixam:beat
   sbagenx -G -p curve examples/basics/curve-sigmoid-like.sbgf \
     00ls:l=0.2:h=0
   sbagenx -G -p curve examples/basics/curve-expfit-solve-demo.sbgf \
@@ -1433,6 +1444,7 @@ The level/depth/time modifiers are interpreted the same way as in
 `-p drop`/`-p sigmoid`:
 
   - Signed level selects starting carrier baseline.
+  - `N` mutes generated program tones but keeps beat/pulse trajectory active.
   - Letter `a-l` selects target beat/pulse endpoint (`b1`).
   - `s` = continuous runtime curve evaluation.
   - `k` or default = stepped checkpoints sampled from the expression.
@@ -2048,6 +2060,8 @@ Constraint: a+r must be <=1. Example:
 `mixam:<pulse>` uses a fixed AM frequency in Hz.
 `mixam:beat` binds AM frequency to the current program beat/pulse value
 for `-p` sessions, so it varies continuously as the program varies.
+Compatibility alias: `mixpulse:beat[:params]` is accepted and treated as
+`mixam:beat[:params]`.
 You can still pass inline mixam params for compatibility, but when `-H` is
 set, the `-H` envelope is applied globally to all mixam effects.
 mixam is implemented in the sbagenxlib runtime extra-token path.
