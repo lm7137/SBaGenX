@@ -692,9 +692,9 @@ def render_mixam_cycle(args):
     ml, mr, mt, mb = 130, 40, 40, 160
     gap = 70
     pw = width - ml - mr
-    ph = (height - mt - mb - gap) / 2.0
+    panel_h = (height - mt - mb - gap) / 2.0
     top_y0 = mt
-    bot_y0 = mt + ph + gap
+    bot_y0 = mt + panel_h + gap
 
     h_m = str(getattr(args, "h_m", "pulse") or "pulse").strip().lower()
     h_s = float(args.h_s)
@@ -716,12 +716,12 @@ def render_mixam_cycle(args):
         return ml + (pw - 1) * u
 
     def y_map(v, y0):
-        return y0 + (1.0 - v) * (ph - 1)
+        return y0 + (1.0 - v) * (panel_h - 1)
 
     y_ticks = [1.0 - 0.1 * i for i in range(11)]
     x_ticks = _build_linear_ticks(1.0, 10)
-    _draw_grid_box(ctx, ml, top_y0, pw, ph, 10, y_ticks, lambda v: y_map(v, top_y0))
-    _draw_grid_box(ctx, ml, bot_y0, pw, ph, 10, y_ticks, lambda v: y_map(v, bot_y0))
+    _draw_grid_box(ctx, ml, top_y0, pw, panel_h, 10, y_ticks, lambda v: y_map(v, top_y0))
+    _draw_grid_box(ctx, ml, bot_y0, pw, panel_h, 10, y_ticks, lambda v: y_map(v, bot_y0))
 
     # envelope line
     ctx.set_source_rgb(0.86, 0.16, 0.16)
@@ -731,8 +731,8 @@ def render_mixam_cycle(args):
     for i in range(samples + 1):
         u = i / float(samples)
         if h_m == "cos":
-            ph = (u + h_s) - math.floor(u + h_s)
-            env = 0.5 * (1.0 + math.cos(2.0 * PI * ph))
+            phase = (u + h_s) - math.floor(u + h_s)
+            env = 0.5 * (1.0 + math.cos(2.0 * PI * phase))
         else:
             env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
         px = x_map(u)
@@ -751,8 +751,8 @@ def render_mixam_cycle(args):
     for i in range(samples + 1):
         u = i / float(samples)
         if h_m == "cos":
-            ph = (u + h_s) - math.floor(u + h_s)
-            env = 0.5 * (1.0 + math.cos(2.0 * PI * ph))
+            phase = (u + h_s) - math.floor(u + h_s)
+            env = 0.5 * (1.0 + math.cos(2.0 * PI * phase))
         else:
             env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
         gain = h_f + (1.0 - h_f) * env
@@ -773,13 +773,13 @@ def render_mixam_cycle(args):
     for u in x_ticks:
         x = x_map(u)
         ctx.set_source_rgb(0.35, 0.35, 0.35)
-        ctx.move_to(x, bot_y0 + ph - 1)
-        ctx.line_to(x, bot_y0 + ph + 4)
+        ctx.move_to(x, bot_y0 + panel_h - 1)
+        ctx.line_to(x, bot_y0 + panel_h + 4)
         ctx.stroke()
         txt = _fmt_tick(u)
         ext = ctx.text_extents(txt)
         ctx.set_source_rgb(0.15, 0.15, 0.15)
-        ctx.move_to(x - ext.width / 2, bot_y0 + ph + 22)
+        ctx.move_to(x - ext.width / 2, bot_y0 + panel_h + 22)
         ctx.show_text(txt)
 
     for yv in y_ticks:
@@ -809,10 +809,10 @@ def render_mixam_cycle(args):
 
     x_label = "CYCLE"
     ext = ctx.text_extents(x_label)
-    ctx.move_to(ml + (pw - ext.width) / 2, bot_y0 + ph + 56)
+    ctx.move_to(ml + (pw - ext.width) / 2, bot_y0 + panel_h + 56)
     ctx.show_text(x_label)
 
-    for label, y0 in (("ENVELOPE", top_y0 + ph / 2), ("GAIN", bot_y0 + ph / 2)):
+    for label, y0 in (("ENVELOPE", top_y0 + panel_h / 2), ("GAIN", bot_y0 + panel_h / 2)):
         ctx.save()
         ctx.translate(28, y0)
         ctx.rotate(-PI / 2.0)
