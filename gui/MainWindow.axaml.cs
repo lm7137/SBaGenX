@@ -17,6 +17,7 @@ namespace gui;
 public partial class MainWindow : Window
 {
     private Process? _activeProcess;
+    private bool _uiReady;
 
     private enum RunAction
     {
@@ -37,6 +38,7 @@ public partial class MainWindow : Window
         EnsureDefaultSelections();
         UpdateModeUi();
         UpdateQualityHint(resetValue: true);
+        _uiReady = true;
         RefreshCommandPreview();
     }
 
@@ -115,6 +117,10 @@ public partial class MainWindow : Window
 
     private void OnRunModeChanged(object? sender, RoutedEventArgs e)
     {
+        if (!_uiReady)
+        {
+            return;
+        }
         UpdateModeUi();
         RefreshCommandPreview();
     }
@@ -133,12 +139,20 @@ public partial class MainWindow : Window
 
     private void OnInputsChanged(object? sender, RoutedEventArgs e)
     {
+        if (!_uiReady)
+        {
+            return;
+        }
         UpdateModeUi();
         RefreshCommandPreview();
     }
 
     private void OnOutputFormatChanged(object? sender, RoutedEventArgs e)
     {
+        if (!_uiReady)
+        {
+            return;
+        }
         UpdateQualityHint(resetValue: false);
         RefreshCommandPreview();
     }
@@ -647,9 +661,9 @@ public partial class MainWindow : Window
         return Path.ChangeExtension(path, ext);
     }
 
-    private static string GetComboSelection(ComboBox combo, string fallback)
+    private static string GetComboSelection(ComboBox? combo, string fallback)
     {
-        if (combo.SelectedItem is ComboBoxItem item && item.Content is string selected)
+        if (combo?.SelectedItem is ComboBoxItem item && item.Content is string selected)
         {
             return selected.Trim();
         }
