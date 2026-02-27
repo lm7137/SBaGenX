@@ -246,6 +246,8 @@ int is_mix_mod_option_spec(const char *spec);
 void parse_mix_mod_option_spec(const char *spec);
 int is_iso_gate_option_spec(const char *spec);
 void parse_iso_gate_option_spec(const char *spec);
+int is_mixam_env_option_spec(const char *spec);
+void parse_mixam_env_option_spec(const char *spec);
 void clear_mix_mod_curve(void);
 void setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level,
 			 double main_len_min, double wake_len_min, int wake_enabled);
@@ -416,6 +418,10 @@ help() {
 	  NL "          -I [spec] Customize isochronic (@) pulse envelope; spec is"
 	  NL "                      s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>"
 	  NL "                      defaults s=0.0485:d=0.4030:a=0.5:r=0.5:e=2"
+	  NL "          -H [spec] Customize global mixam envelope for mixam:<pulse>"
+	  NL "                      spec is s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>"
+	  NL "                      order-independent; omitted params use defaults"
+	  NL "                      defaults s=0:d=0.5:a=0.5:r=0.5:e=3:f=0"
 	  NL
 	  NL "          -R rate   Select rate in Hz that frequency changes are recalculated"
 	  NL "                     (for file/pipe output only, default is 10Hz)"
@@ -592,6 +598,13 @@ double opt_I_d= 0.403014;	// Gate duty as cycle proportion (legacy-equivalent de
 double opt_I_a= 0.5;		// Attack as fraction of ON window
 double opt_I_r= 0.5;		// Release as fraction of ON window
 int opt_I_e= 2;			// Edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
+int opt_H;			// Enable global mixam envelope override
+double opt_H_s= 0.0;		// mixam start-cycle (phase offset)
+double opt_H_d= 0.5;		// mixam duty
+double opt_H_a= 0.5;		// mixam attack share
+double opt_H_r= 0.5;		// mixam release share
+int opt_H_e= 3;			// mixam edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
+double opt_H_f= 0.0;		// mixam floor gain
 char *waveform_name[] = {"sine", "square", "triangle", "sawtooth"}; // To be used for messages
 
 FILE *mix_in;			// Input stream for mix sound data, or 0
@@ -2372,6 +2385,96 @@ parse_iso_gate_option_spec(const char *spec) {
       error("-I parameters a+r must be <= 1");
    if (opt_I_e < 0 || opt_I_e > 3)
       error("-I parameter e must be in range 0..3");
+}
+
+int
+is_mixam_env_option_spec(const char *spec) {
+   const char *p= spec;
+   if (!p || !*p) return 0;
+   if (*p == '-') return 0;
+   if (!strchr(p, '=')) return 0;
+   if (*p == ':') p++;
+   return (*p == 's' || *p == 'd' || *p == 'a' || *p == 'r' || *p == 'e' || *p == 'f');
+}
+
+void
+parse_mixam_env_option_spec(const char *spec) {
+   char tmp[256];
+   char *p, *q, *q2;
+   long edge;
+   if (!spec || !*spec) return;
+   if (strlen(spec) >= sizeof(tmp))
+      error("-H spec is too long");
+   strcpy(tmp, spec);
+   p= tmp;
+
+   while (*p) {
+      while (*p == ':') p++;
+      if (!*p) break;
+      switch (*p++) {
+       case 's':
+	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_s= strtod(p, &q);
+	  if (q == p) error("-H parameter s requires a numeric value");
+	  p= q;
+	  break;
+       case 'd':
+	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_d= strtod(p, &q);
+	  if (q == p) error("-H parameter d requires a numeric value");
+	  p= q;
+	  break;
+       case 'a':
+	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_a= strtod(p, &q);
+	  if (q == p) error("-H parameter a requires a numeric value");
+	  p= q;
+	  break;
+       case 'r':
+	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_r= strtod(p, &q);
+	  if (q == p) error("-H parameter r requires a numeric value");
+	  p= q;
+	  break;
+       case 'e':
+	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  edge= strtol(p, &q, 10);
+	  if (q == p) error("-H parameter e requires an integer value");
+	  q2= q;
+	  while (isspace((unsigned char)*q2)) q2++;
+	  if (*q2 && *q2 != ':')
+	     error("-H parameter e must be an integer in range 0..3");
+	  opt_H_e= (int)edge;
+	  p= q;
+	  break;
+       case 'f':
+	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_f= strtod(p, &q);
+	  if (q == p) error("-H parameter f requires a numeric value");
+	  p= q;
+	  break;
+       default:
+	  error("-H only supports s=, d=, a=, r=, e= and f= parameters");
+      }
+
+      if (*p == ':') p++;
+      else if (*p) error("-H expects colon-separated parameters");
+   }
+
+   if (opt_H_s < 0.0 || opt_H_s > 1.0)
+      error("-H parameter s must be in range [0,1]");
+   if (opt_H_d < 0.0 || opt_H_d > 1.0)
+      error("-H parameter d must be in range [0,1]");
+   if (opt_H_a < 0.0 || opt_H_a > 1.0)
+      error("-H parameter a must be in range [0,1]");
+   if (opt_H_r < 0.0 || opt_H_r > 1.0)
+      error("-H parameter r must be in range [0,1]");
+   if (opt_H_a + opt_H_r > 1.0)
+      error("-H parameters a+r must be <= 1");
+   if (opt_H_e < 0 || opt_H_e > 3)
+      error("-H parameter e must be in range 0..3");
+   if (opt_H_f < 0.0 || opt_H_f > 1.0)
+      error("-H parameter f must be in range [0,1]");
 }
 
 static double
@@ -4404,6 +4507,18 @@ scanOptions(int *acp, char ***avp) {
 		p += strlen(p);
 	     } else if (argc > 0 && is_iso_gate_option_spec(argv[0])) {
 		parse_iso_gate_option_spec(*argv++);
+		argc--;
+	     }
+	     break;
+	  case 'H':
+	     opt_H= 1;
+	     if (*p) {
+		if (!is_mixam_env_option_spec(p))
+		   error("-H optional spec must be s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+		parse_mixam_env_option_spec(p);
+		p += strlen(p);
+	     } else if (argc > 0 && is_mixam_env_option_spec(argv[0])) {
+		parse_mixam_env_option_spec(*argv++);
 		argc--;
 	     }
 	     break;
@@ -7622,6 +7737,18 @@ legacy_voice_from_sbx_tone(const SbxToneSpec *tone, Voice *out) {
   return 0;
 }
 
+static void
+apply_mixam_envelope_override(SbxMixFxSpec *fx) {
+   if (!fx || !opt_H || fx->type != SBX_MIXFX_AM)
+      return;
+   fx->mixam_start= opt_H_s;
+   fx->mixam_duty= opt_H_d;
+   fx->mixam_attack= opt_H_a;
+   fx->mixam_release= opt_H_r;
+   fx->mixam_edge_mode= opt_H_e;
+   fx->mixam_floor= opt_H_f;
+}
+
 static int
 parse_legacy_voice_token(const char *tok, Voice *out, int *out_sets_mix_flag) {
    char dmy;
@@ -7649,6 +7776,8 @@ parse_legacy_voice_token(const char *tok, Voice *out, int *out_sets_mix_flag) {
    }
 
    if (SBX_OK == sbx_parse_extra_token(tok, opt_w, &extra_type, &tone, &fx, &mix_pct)) {
+      if (extra_type == SBX_EXTRA_MIXFX)
+	 apply_mixam_envelope_override(&fx);
       if (extra_type == SBX_EXTRA_MIXAMP) {
 	 out->typ= 5;
 	 out->amp= AMP_DA(mix_pct);
@@ -8269,6 +8398,7 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
 	 continue;
       }
       if (extra_type == SBX_EXTRA_MIXFX) {
+	 apply_mixam_envelope_override(&mix_fx_tmp);
 	 if (mix_fx_count >= SBX_MAX_AUX_TONES)
 	    return 0;
 	 mix_fx[mix_fx_count++]= mix_fx_tmp;
@@ -8401,6 +8531,7 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
 	       spec->have_mix= 1;
 	       spec->mix_amp_pct= mix_pct;
 	    } else if (extra_type == SBX_EXTRA_MIXFX) {
+	       apply_mixam_envelope_override(&mix_fx);
 	       if (spec->mix_fx_count >= SBX_MAX_AUX_TONES)
 		  error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_MAX_AUX_TONES);
 	       spec->mix_fx[spec->mix_fx_count++]= mix_fx;
@@ -8438,7 +8569,7 @@ sbx_handle_runtime_unsupported_extra(const char *prog_name, const SbxRuntimeExtr
       return;
    if (!opt_D)
       error("Unsupported extra tone-spec '%s' for %s sbagenxlib runtime"
-	    NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+	    NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat/mixam, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 	    spec->bad_token, prog_name ? prog_name : "sbagenx");
    warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
 	spec->bad_token);

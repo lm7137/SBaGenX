@@ -140,6 +140,23 @@ int main(void) {
       fail("mix fx parse value mismatch");
   }
   {
+    SbxMixFxSpec fx;
+    if (sbx_parse_mix_fx_spec("mixam:8:s=0:d=0.5:a=0.1:r=0.1:e=3:f=0.25",
+                              SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mixam parse failed");
+    if (fx.type != SBX_MIXFX_AM)
+      fail("mixam parse type mismatch");
+    if (fabs(fx.res - 8.0) > 1e-9 || fabs(fx.mixam_floor - 0.25) > 1e-9)
+      fail("mixam parse value mismatch");
+    if (sbx_parse_mix_fx_spec("mixam:beat:s=0:d=0.5:a=0.1:r=0.1:e=3:f=0.25",
+                              SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mixam beat-bind parse failed");
+    if (!fx.mixam_bind_program_beat)
+      fail("mixam beat-bind parse flag mismatch");
+    if (sbx_parse_mix_fx_spec("mixam:6:a=0.8:r=0.5", SBX_WAVE_SINE, &fx) != SBX_EINVAL)
+      fail("mixam a+r constraint should fail");
+  }
+  {
     int typ = SBX_EXTRA_INVALID;
     SbxToneSpec tone;
     SbxMixFxSpec fx;
@@ -154,6 +171,16 @@ int main(void) {
       fail("parse extra mixfx token failed");
     if (typ != SBX_EXTRA_MIXFX || fx.type != SBX_MIXFX_BEAT || fx.waveform != SBX_WAVE_SAWTOOTH)
       fail("parse extra mixfx token mismatch");
+    if (sbx_parse_extra_token("mixam:6:d=0.5:a=0.1:r=0.1:e=3:f=0.2",
+                              SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
+      fail("parse extra mixam token failed");
+    if (typ != SBX_EXTRA_MIXFX || fx.type != SBX_MIXFX_AM)
+      fail("parse extra mixam token mismatch");
+    if (sbx_parse_extra_token("mixam:beat:d=0.5:a=0.1:r=0.1:e=3:f=0.2",
+                              SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
+      fail("parse extra beat-bound mixam token failed");
+    if (typ != SBX_EXTRA_MIXFX || fx.type != SBX_MIXFX_AM || !fx.mixam_bind_program_beat)
+      fail("parse extra beat-bound mixam token mismatch");
     if (sbx_parse_extra_token("triangle:200+8/20", SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
       fail("parse extra tone token failed");
     if (typ != SBX_EXTRA_TONE || tone.mode != SBX_TONE_BINAURAL || tone.waveform != SBX_WAVE_TRIANGLE)
@@ -168,6 +195,24 @@ int main(void) {
       fail("mix fx format roundtrip type/wave mismatch");
     if (fabs(fx_rt.carr - fx.carr) > 1e-9 || fabs(fx_rt.res - fx.res) > 1e-9 || fabs(fx_rt.amp - fx.amp) > 1e-9)
       fail("mix fx format roundtrip value mismatch");
+    if (sbx_parse_mix_fx_spec("mixam:7:d=0.6:a=0.2:r=0.2:e=2:f=0.1", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mixam parse for format failed");
+    if (sbx_format_mix_fx_spec(&fx, spec, sizeof(spec)) != SBX_OK)
+      fail("mixam format failed");
+    if (sbx_parse_mix_fx_spec(spec, SBX_WAVE_SINE, &fx_rt) != SBX_OK)
+      fail("mixam parse after format failed");
+    if (fx_rt.type != SBX_MIXFX_AM || fabs(fx_rt.res - 7.0) > 1e-9)
+      fail("mixam format roundtrip type mismatch");
+    if (fabs(fx_rt.mixam_duty - 0.6) > 1e-9 || fabs(fx_rt.mixam_floor - 0.1) > 1e-9)
+      fail("mixam format roundtrip value mismatch");
+    if (sbx_parse_mix_fx_spec("mixam:beat:d=0.6:a=0.2:r=0.2:e=2:f=0.1", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mixam beat-bind parse for format failed");
+    if (sbx_format_mix_fx_spec(&fx, spec, sizeof(spec)) != SBX_OK)
+      fail("mixam beat-bind format failed");
+    if (sbx_parse_mix_fx_spec(spec, SBX_WAVE_SINE, &fx_rt) != SBX_OK)
+      fail("mixam beat-bind parse after format failed");
+    if (!fx_rt.mixam_bind_program_beat)
+      fail("mixam beat-bind format roundtrip flag mismatch");
   }
 
   sbx_default_engine_config(&cfg);
@@ -272,6 +317,90 @@ int main(void) {
       fail("mix stream sample produced zero contribution");
     if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, 0, 0, 0, 0) != SBX_OK)
       fail("clear runtime config failed");
+  }
+  {
+    SbxMixFxSpec fx;
+    double add_l = 0.0, add_r = 0.0;
+    double max_abs_l = 0.0;
+    double min_abs_l = 1e9;
+    int i;
+    if (sbx_parse_mix_fx_spec("mixam:2:d=0.5:a=0:r=0:e=0:f=0", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("parse mixam for runtime sample failed");
+    if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, &fx, 1, 0, 0) != SBX_OK)
+      fail("configure runtime with mixam failed");
+    for (i = 0; i < 50000; i++) {
+      if (sbx_context_mix_stream_sample(ctx, (double)i / cfg.sample_rate,
+                                        1600, -1200, 1.0, &add_l, &add_r) != SBX_OK)
+        fail("mix stream sample with mixam failed");
+      {
+        double al = fabs(add_l);
+        if (al > max_abs_l) max_abs_l = al;
+        if (al < min_abs_l) min_abs_l = al;
+      }
+      if (fabs(add_l) > 100.0001 || fabs(add_r) > 75.0001)
+        fail("mixam should not amplify above dry stream");
+    }
+    if (!(max_abs_l > 90.0))
+      fail("mixam should preserve near-full level during ON phase");
+    if (!(min_abs_l < 5.0))
+      fail("mixam should gate near zero during OFF phase");
+    if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, 0, 0, 0, 0) != SBX_OK)
+      fail("clear runtime config after mixam failed");
+  }
+  {
+    SbxProgramKeyframe kf[2];
+    SbxToneSpec t0, t1;
+    SbxMixFxSpec fx;
+    int i;
+    int edges_early = 0, edges_late = 0;
+    int prev_on = 0;
+    if (sbx_parse_tone_spec("200+2/20", &t0) != SBX_OK)
+      fail("parse start tone for beat-bound mixam failed");
+    if (sbx_parse_tone_spec("200+8/20", &t1) != SBX_OK)
+      fail("parse end tone for beat-bound mixam failed");
+    kf[0].time_sec = 0.0;
+    kf[0].tone = t0;
+    kf[0].interp = SBX_INTERP_LINEAR;
+    kf[1].time_sec = 10.0;
+    kf[1].tone = t1;
+    kf[1].interp = SBX_INTERP_LINEAR;
+    if (sbx_context_load_keyframes(ctx, kf, 2, 0) != SBX_OK)
+      fail("load keyframes for beat-bound mixam failed");
+    if (sbx_parse_mix_fx_spec("mixam:beat:d=0.5:a=0:r=0:e=0:f=0", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("parse beat-bound mixam for runtime sample failed");
+
+    if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, &fx, 1, 0, 0) != SBX_OK)
+      fail("configure runtime with beat-bound mixam (early window) failed");
+    prev_on = 0;
+    for (i = 0; i < (int)cfg.sample_rate; i++) {
+      double add_l = 0.0, add_r = 0.0;
+      int on;
+      if (sbx_context_mix_stream_sample(ctx, (double)i / cfg.sample_rate,
+                                        1600, -1200, 1.0, &add_l, &add_r) != SBX_OK)
+        fail("mix stream sample with beat-bound mixam (early window) failed");
+      on = (fabs(add_l) > 50.0) ? 1 : 0;
+      if (on && !prev_on) edges_early++;
+      prev_on = on;
+    }
+
+    if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, &fx, 1, 0, 0) != SBX_OK)
+      fail("configure runtime with beat-bound mixam (late window) failed");
+    prev_on = 0;
+    for (i = 0; i < (int)cfg.sample_rate; i++) {
+      double t = 9.0 + (double)i / cfg.sample_rate;
+      double add_l = 0.0, add_r = 0.0;
+      int on;
+      if (sbx_context_mix_stream_sample(ctx, t, 1600, -1200, 1.0, &add_l, &add_r) != SBX_OK)
+        fail("mix stream sample with beat-bound mixam (late window) failed");
+      on = (fabs(add_l) > 50.0) ? 1 : 0;
+      if (on && !prev_on) edges_late++;
+      prev_on = on;
+    }
+
+    if (!(edges_late > edges_early + 2))
+      fail("beat-bound mixam should track rising program beat frequency");
+    if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, 0, 0, 0, 0) != SBX_OK)
+      fail("clear runtime config after beat-bound mixam failed");
   }
 
   buf = (float *)calloc(frames * 2, sizeof(float));

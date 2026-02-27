@@ -268,6 +268,78 @@ parse_time_seconds_token(const char *tok, double *out_sec) {
   return SBX_OK;
 }
 
+static void
+sbx_mixam_set_defaults(SbxMixFxSpec *fx) {
+  if (!fx) return;
+  fx->mixam_start = 0.0;
+  fx->mixam_duty = 0.5;
+  fx->mixam_attack = 0.5;
+  fx->mixam_release = 0.5;
+  fx->mixam_edge_mode = 3;
+  fx->mixam_floor = 0.0;
+  fx->mixam_bind_program_beat = 0;
+}
+
+static int
+sbx_validate_mixam_fields(const SbxMixFxSpec *fx) {
+  if (!fx) return SBX_EINVAL;
+  if (!isfinite(fx->res)) return SBX_EINVAL;
+  if (!fx->mixam_bind_program_beat && fx->res <= 0.0) return SBX_EINVAL;
+  if (fx->mixam_bind_program_beat != 0 && fx->mixam_bind_program_beat != 1) return SBX_EINVAL;
+  if (!isfinite(fx->mixam_start) || fx->mixam_start < 0.0 || fx->mixam_start > 1.0) return SBX_EINVAL;
+  if (!isfinite(fx->mixam_duty) || fx->mixam_duty < 0.0 || fx->mixam_duty > 1.0) return SBX_EINVAL;
+  if (!isfinite(fx->mixam_attack) || fx->mixam_attack < 0.0 || fx->mixam_attack > 1.0) return SBX_EINVAL;
+  if (!isfinite(fx->mixam_release) || fx->mixam_release < 0.0 || fx->mixam_release > 1.0) return SBX_EINVAL;
+  if (fx->mixam_edge_mode < 0 || fx->mixam_edge_mode > 3) return SBX_EINVAL;
+  if (!isfinite(fx->mixam_floor) || fx->mixam_floor < 0.0 || fx->mixam_floor > 1.0) return SBX_EINVAL;
+  if ((fx->mixam_attack + fx->mixam_release) > (1.0 + 1e-12)) return SBX_EINVAL;
+  return SBX_OK;
+}
+
+static int
+sbx_parse_mixam_params(const char *params, SbxMixFxSpec *fx) {
+  const char *p = params;
+  if (!fx) return SBX_EINVAL;
+  if (!p) return SBX_OK;
+
+  while (*p) {
+    char key;
+    char *end = 0;
+    double val;
+
+    while (*p && (isspace((unsigned char)*p) || *p == ':')) p++;
+    if (!*p) break;
+
+    key = (char)tolower((unsigned char)*p++);
+    if (*p != '=') return SBX_EINVAL;
+    p++;
+    val = strtod(p, &end);
+    if (end == p || !isfinite(val)) return SBX_EINVAL;
+
+    switch (key) {
+      case 's': fx->mixam_start = val; break;
+      case 'd': fx->mixam_duty = val; break;
+      case 'a': fx->mixam_attack = val; break;
+      case 'r': fx->mixam_release = val; break;
+      case 'f': fx->mixam_floor = val; break;
+      case 'e': {
+        int mode = (int)val;
+        if (fabs(val - (double)mode) > 1e-9) return SBX_EINVAL;
+        fx->mixam_edge_mode = mode;
+        break;
+      }
+      default:
+        return SBX_EINVAL;
+    }
+    p = end;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p == 0) break;
+    if (*p != ':') return SBX_EINVAL;
+  }
+
+  return sbx_validate_mixam_fields(fx);
+}
+
 static int
 parse_hhmmss_token(const char *tok, double *out_sec) {
   size_t used = 0;
@@ -926,6 +998,34 @@ ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
   ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, t_sec, &ctx->kf_seg, out);
 }
 
+static double
+ctx_eval_program_beat_hz(SbxContext *ctx, double t_sec) {
+  SbxToneSpec tone;
+  if (!ctx || !ctx->eng) return 0.0;
+
+  switch (ctx->source_mode) {
+    case SBX_CTX_SRC_KEYFRAMES: {
+      size_t seg = ctx->kf_seg;
+      double eval_t = t_sec;
+      if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+        eval_t = fmod(eval_t, ctx->kf_duration_sec);
+        if (eval_t < 0.0) eval_t += ctx->kf_duration_sec;
+      }
+      ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, eval_t, &seg, &tone);
+      break;
+    }
+    case SBX_CTX_SRC_STATIC:
+      tone = ctx->eng->tone;
+      break;
+    default:
+      return 0.0;
+  }
+
+  if (!isfinite(tone.beat_hz)) return 0.0;
+  if (tone.beat_hz <= 0.0) return fabs(tone.beat_hz);
+  return tone.beat_hz;
+}
+
 const char *
 sbx_version(void) {
   return SBAGENXLIB_VERSION;
@@ -1144,6 +1244,7 @@ sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_
   int waveform;
   SbxMixFxSpec fx;
   double carr = 0.0, res = 0.0, amp_pct = 0.0;
+  int rc = SBX_OK;
 
   if (!spec || !out_fx) return SBX_EINVAL;
   if (default_waveform < SBX_WAVE_SINE || default_waveform > SBX_WAVE_SAWTOOTH)
@@ -1174,6 +1275,36 @@ sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_
     fx.type = SBX_MIXFX_BEAT;
     fx.res = res;
     fx.amp = amp_pct / 100.0;
+  } else if (strncasecmp(p, "mixam:", 6) == 0) {
+    const char *q = p + 6;
+    char *end = 0;
+    q = skip_ws(q);
+    sbx_mixam_set_defaults(&fx);
+    fx.type = SBX_MIXFX_AM;
+    fx.amp = 1.0;
+    if (*q == 0) return SBX_EINVAL;
+    if (strncasecmp(q, "beat", 4) == 0 &&
+        (q[4] == 0 || q[4] == ':' || isspace((unsigned char)q[4]))) {
+      fx.mixam_bind_program_beat = 1;
+      fx.res = 0.0;
+      q += 4;
+      q = skip_ws(q);
+    } else if (!(tolower((unsigned char)q[0]) >= 'a' && tolower((unsigned char)q[0]) <= 'z' && q[1] == '=')) {
+      fx.res = strtod(q, &end);
+      if (end == q || !isfinite(fx.res)) return SBX_EINVAL;
+      q = skip_ws(end);
+    } else {
+      fx.res = 10.0; /* default pulse/beat rate when omitted */
+    }
+    if (*q == ':') q++;
+    q = skip_ws(q);
+    if (*q) {
+      rc = sbx_parse_mixam_params(q, &fx);
+      if (rc != SBX_OK) return rc;
+    } else {
+      rc = sbx_validate_mixam_fields(&fx);
+      if (rc != SBX_OK) return rc;
+    }
   } else {
     return SBX_EINVAL;
   }
@@ -1181,6 +1312,8 @@ sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_
   if (fx.waveform < SBX_WAVE_SINE || fx.waveform > SBX_WAVE_SAWTOOTH)
     return SBX_EINVAL;
   if (!isfinite(fx.carr) || !isfinite(fx.res) || !isfinite(fx.amp) || fx.amp < 0.0)
+    return SBX_EINVAL;
+  if (fx.type == SBX_MIXFX_AM && sbx_validate_mixam_fields(&fx) != SBX_OK)
     return SBX_EINVAL;
 
   *out_fx = fx;
@@ -1255,9 +1388,11 @@ int
 sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz) {
   const char *wname;
   if (!fx || !out || out_sz == 0) return SBX_EINVAL;
-  if (fx->type < SBX_MIXFX_SPIN || fx->type > SBX_MIXFX_BEAT) return SBX_EINVAL;
+  if (fx->type < SBX_MIXFX_SPIN || fx->type > SBX_MIXFX_AM) return SBX_EINVAL;
   if (fx->waveform < SBX_WAVE_SINE || fx->waveform > SBX_WAVE_SAWTOOTH) return SBX_EINVAL;
   if (!isfinite(fx->carr) || !isfinite(fx->res) || !isfinite(fx->amp) || fx->amp < 0.0)
+    return SBX_EINVAL;
+  if (fx->type == SBX_MIXFX_AM && sbx_validate_mixam_fields(fx) != SBX_OK)
     return SBX_EINVAL;
 
   wname = wave_name_for_tone(fx->waveform);
@@ -1276,6 +1411,22 @@ sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz) {
       if (!snprintf_checked(out, out_sz, "%s:mixbeat:%g/%g",
                             wname, fx->res, fx->amp * 100.0))
         return SBX_EINVAL;
+      return SBX_OK;
+    case SBX_MIXFX_AM:
+      if (fx->mixam_bind_program_beat) {
+        if (!snprintf_checked(out, out_sz, "mixam:beat:s=%g:d=%g:a=%g:r=%g:e=%d:f=%g",
+                              fx->mixam_start, fx->mixam_duty,
+                              fx->mixam_attack, fx->mixam_release,
+                              fx->mixam_edge_mode, fx->mixam_floor))
+          return SBX_EINVAL;
+      } else {
+        if (!snprintf_checked(out, out_sz, "mixam:%g:s=%g:d=%g:a=%g:r=%g:e=%d:f=%g",
+                              fx->res,
+                              fx->mixam_start, fx->mixam_duty,
+                              fx->mixam_attack, fx->mixam_release,
+                              fx->mixam_edge_mode, fx->mixam_floor))
+          return SBX_EINVAL;
+      }
       return SBX_OK;
     default:
       break;
@@ -2642,7 +2793,7 @@ sbx_context_set_mix_effects(SbxContext *ctx, const SbxMixFxSpec *fxv, size_t fx_
   }
   for (i = 0; i < fx_count; i++) {
     states[i].spec = fxv[i];
-    if (states[i].spec.type < SBX_MIXFX_NONE || states[i].spec.type > SBX_MIXFX_BEAT) {
+    if (states[i].spec.type < SBX_MIXFX_NONE || states[i].spec.type > SBX_MIXFX_AM) {
       free(states);
       set_ctx_error(ctx, "invalid mix effect type");
       return SBX_EINVAL;
@@ -2656,6 +2807,12 @@ sbx_context_set_mix_effects(SbxContext *ctx, const SbxMixFxSpec *fxv, size_t fx_
         !isfinite(states[i].spec.amp) || states[i].spec.amp < 0.0) {
       free(states);
       set_ctx_error(ctx, "invalid mix effect parameter");
+      return SBX_EINVAL;
+    }
+    if (states[i].spec.type == SBX_MIXFX_AM &&
+        sbx_validate_mixam_fields(&states[i].spec) != SBX_OK) {
+      free(states);
+      set_ctx_error(ctx, "invalid mixam envelope parameter");
       return SBX_EINVAL;
     }
     sbx_mix_fx_reset_state(&states[i]);
@@ -2680,6 +2837,22 @@ sbx_context_get_mix_effect(const SbxContext *ctx, size_t index, SbxMixFxSpec *ou
   if (index >= ctx->mix_fx_count) return SBX_EINVAL;
   *out_fx = ctx->mix_fx[index].spec;
   return SBX_OK;
+}
+
+static double
+sbx_mixam_gain_step(SbxMixFxState *fx, double sr, double res_hz) {
+  double p;
+  double g;
+  if (!fx || sr <= 0.0 || !isfinite(res_hz) || res_hz <= 0.0) return 1.0;
+  fx->phase = sbx_dsp_wrap_unit(fx->phase + res_hz / sr);
+  p = sbx_dsp_iso_mod_factor_custom(fx->phase,
+                                    fx->spec.mixam_start,
+                                    fx->spec.mixam_duty,
+                                    fx->spec.mixam_attack,
+                                    fx->spec.mixam_release,
+                                    fx->spec.mixam_edge_mode);
+  g = fx->spec.mixam_floor + (1.0 - fx->spec.mixam_floor) * p;
+  return sbx_dsp_clamp(g, fx->spec.mixam_floor, 1.0);
 }
 
 int
@@ -2755,6 +2928,9 @@ sbx_context_apply_mix_effects(SbxContext *ctx,
         *out_add_r += base_amp * fx_r;
         break;
       }
+      case SBX_MIXFX_AM:
+        /* Pure multiplicative AM is applied in sbx_context_mix_stream_sample(). */
+        break;
       default:
         break;
     }
@@ -2774,6 +2950,12 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
   double mix_r;
   double mix_pct;
   double mix_mul;
+  double am_gain = 1.0;
+  double program_beat_hz = 0.0;
+  size_t i;
+  int have_am = 0;
+  int need_program_beat = 0;
+  double sr = 0.0;
 
   if (!ctx || !out_add_l || !out_add_r) return SBX_EINVAL;
   if (!isfinite(mix_mod_mul)) mix_mod_mul = 1.0;
@@ -2794,6 +2976,35 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
     if (rc != SBX_OK) return rc;
     *out_add_l += fx_add_l;
     *out_add_r += fx_add_r;
+
+    sr = ctx->eng ? ctx->eng->cfg.sample_rate : 0.0;
+    if (!(isfinite(sr) && sr > 0.0)) {
+      set_ctx_error(ctx, "engine configuration is invalid");
+      return SBX_ENOTREADY;
+    }
+    for (i = 0; i < ctx->mix_fx_count; i++) {
+      if (ctx->mix_fx[i].spec.type == SBX_MIXFX_AM &&
+          ctx->mix_fx[i].spec.mixam_bind_program_beat) {
+        need_program_beat = 1;
+        break;
+      }
+    }
+    if (need_program_beat)
+      program_beat_hz = ctx_eval_program_beat_hz(ctx, t_sec);
+    for (i = 0; i < ctx->mix_fx_count; i++) {
+      if (ctx->mix_fx[i].spec.type == SBX_MIXFX_AM) {
+        double am_res_hz = ctx->mix_fx[i].spec.mixam_bind_program_beat ?
+          program_beat_hz : ctx->mix_fx[i].spec.res;
+        double g = sbx_mixam_gain_step(&ctx->mix_fx[i], sr, am_res_hz);
+        am_gain *= g;
+        if (isfinite(am_res_hz) && am_res_hz > 0.0)
+          have_am = 1;
+      }
+    }
+    if (have_am) {
+      *out_add_l *= am_gain;
+      *out_add_r *= am_gain;
+    }
   }
 
   return SBX_OK;

@@ -1748,6 +1748,12 @@ follows:
               Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.
               Constraint: a+r <= 1.
               e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
+  -H [spec] Customize mixam envelope globally.
+              Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>
+              Order does not matter. Omitted parameters use defaults.
+              Defaults: s=0, d=0.5, a=0.5, r=0.5, e=3, f=0.
+              Constraint: a+r <= 1.
+              e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
 
   -i ...    Generate the whole sequence from an 'immediate' spec
   -p ...    Generate the whole sequence from a predefined sequence type,
@@ -1817,6 +1823,7 @@ Examples:
   spatial-mix: mix/80 triangle:mixspin:400+6.0/40
   rhythmic-mix: mix/75 square:mixpulse:8/50
   binauralized-mix: mix/80 mixbeat:6/45
+  am-mix: mix/80 mixam:8
 
 The name starts with a letter, and may continue with letters, numbers,
 '_' or '-'.  Following the colon is a list of one or more tone
@@ -1839,6 +1846,7 @@ Here are the different types:
   mixspin:<width>+<freq>/<intensity>  # Spinning effect on mix input
   mixpulse:<pulse>/<intensity>        # Pulse effect on mix input
   mixbeat:<beat>/<intensity>          # Hilbert-shifted binauralized mix
+  mixam:<pulse|beat>                # Pure AM on mix input (envelope via -H)
   <carrier>@<pulse>/<amp>             # Isochronic tones
   <waveform>:<carrier><sign><freq>/<amp> # Binaural tones with specific waveform
   <waveform>:<carrier>@<pulse>/<amp>  # Isochronic tones with specific waveform
@@ -1925,6 +1933,9 @@ The waveform specification can be applied to:
 Note: For mixspin/mixpulse/mixbeat effects, the waveform modulates the
 effect envelope. For mixbeat, a sine waveform is recommended for the
 cleanest spectral result.
+Note: mixam uses explicit envelope parameters (s,d,a,r,e,f) via `-H` (or
+inline in the token for compatibility), and does not use waveform prefixes
+for shaping.
 
 The isochronic tones use amplitude modulation of a single carrier frequency
 to create a pulsing effect. The <carrier> is the frequency of the tone in Hz,
@@ -1999,6 +2010,26 @@ pulse effect where the sound intensity fluctuates at the given rate.
 Waveforms can also be applied to mixpulse effects to shape the pulse envelope.
 For example, square:mixpulse:8/60 uses a square wave to create sharp on/off 
 pulses, while sine:mixpulse:8/60 creates smoother pulsing variations.
+
+The mixam effect applies true multiplicative amplitude modulation to the mix
+stream: out(t)=mix(t)*mix_mul*g(t). The gain envelope g(t) is bounded in
+[f,1] and is configured by:
+  s phase offset in cycle (default 0)
+  d duty in cycle (default 0.5)
+  a attack share of ON window (default 0.5)
+  r release share of ON window (default 0.5)
+  e edge mode: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep (default 3)
+  f floor gain (default 0)
+Constraint: a+r must be <=1. Example:
+  -H s=0:d=0.5:a=0.1:r=0.1:e=3:f=0.25
+  mix/80 mixam:8
+  mix/80 mixam:beat
+`mixam:<pulse>` uses a fixed AM frequency in Hz.
+`mixam:beat` binds AM frequency to the current program beat/pulse value
+for `-p` sessions, so it varies continuously as the program varies.
+You can still pass inline mixam params for compatibility, but when `-H` is
+set, the `-H` envelope is applied globally to all mixam effects.
+mixam is implemented in the sbagenxlib runtime extra-token path.
 
 The mixbeat effect applies a Hilbert-transform frequency shift to the mix
 stream (specified with mix/<amp>) and routes opposite shifts to left/right
