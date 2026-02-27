@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 5   /* public API contract revision */
+#define SBX_API_VERSION 6   /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -59,6 +59,11 @@ typedef enum {
   SBX_MIXFX_AM = 4
 } SbxMixFxType;
 
+typedef enum {
+  SBX_MIXAM_MODE_PULSE = 0,
+  SBX_MIXAM_MODE_COS = 1
+} SbxMixamMode;
+
 typedef struct {
   int type;      /* SBX_MIXFX_* */
   int waveform;  /* SBX_WAVE_* */
@@ -66,6 +71,7 @@ typedef struct {
   double res;    /* modulation/spin frequency in Hz */
   double amp;    /* 0..1 effect amount */
   /* mixam envelope controls (all cycle-relative 0..1 unless noted). */
+  int mixam_mode;        /* m: 0 pulse (d/a/r/e active), 1 raised-cosine (d/a/r/e ignored) */
   double mixam_start;    /* s: cycle phase offset */
   double mixam_duty;     /* d: on-window duty */
   double mixam_attack;   /* a: attack share of on-window */

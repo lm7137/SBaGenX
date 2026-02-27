@@ -307,7 +307,7 @@ int try_external_iso_cycle_graph_png(const char *out_fname,
 				     double carr_hz, double pulse_hz,
 				     double amp_pct, int waveform);
 int try_external_mixam_cycle_graph_png(const char *out_fname,
-				       double s, double d, double a, double r,
+				       int m, double s, double d, double a, double r,
 				       int e, double f);
 static void emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested);
 
@@ -427,10 +427,11 @@ help() {
 	  NL "          -I [spec] Customize isochronic (@) pulse envelope; spec is"
 	  NL "                      s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>"
 	  NL "                      defaults s=0.0485:d=0.4030:a=0.5:r=0.5:e=2"
-	  NL "          -H [spec] Customize global mixam envelope for mixam:<pulse>"
-	  NL "                      spec is s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>"
+	  NL "          -H [spec] Customize global mixam envelope for mixam:<pulse|beat>"
+	  NL "                      spec is m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>"
 	  NL "                      order-independent; omitted params use defaults"
-	  NL "                      defaults s=0:d=0.5:a=0.5:r=0.5:e=3:f=0"
+	  NL "                      defaults m=pulse:s=0:d=0.5:a=0.5:r=0.5:e=3:f=0"
+	  NL "                      in m=cos mode, d/a/r/e are ignored; s/f apply"
 	  NL
 	  NL "          -R rate   Select rate in Hz that frequency changes are recalculated"
 	  NL "                     (for file/pipe output only, default is 10Hz)"
@@ -608,6 +609,7 @@ double opt_I_a= 0.5;		// Attack as fraction of ON window
 double opt_I_r= 0.5;		// Release as fraction of ON window
 int opt_I_e= 2;			// Edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
 int opt_H;			// Enable global mixam envelope override
+int opt_H_m= SBX_MIXAM_MODE_PULSE;	// mixam model: 0 pulse, 1 raised-cosine
 double opt_H_s= 0.0;		// mixam start-cycle (phase offset)
 double opt_H_d= 0.5;		// mixam duty
 double opt_H_a= 0.5;		// mixam attack share
@@ -2403,7 +2405,7 @@ is_mixam_env_option_spec(const char *spec) {
    if (*p == '-') return 0;
    if (!strchr(p, '=')) return 0;
    if (*p == ':') p++;
-   return (*p == 's' || *p == 'd' || *p == 'a' || *p == 'r' || *p == 'e' || *p == 'f');
+   return (*p == 'm' || *p == 's' || *p == 'd' || *p == 'a' || *p == 'r' || *p == 'e' || *p == 'f');
 }
 
 void
@@ -2421,32 +2423,52 @@ parse_mixam_env_option_spec(const char *spec) {
       while (*p == ':') p++;
       if (!*p) break;
       switch (*p++) {
+       case 'm':
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  q= p;
+	  while (*q && *q != ':' && !isspace((unsigned char)*q)) q++;
+	  if (q == p) error("-H parameter m requires a value (pulse or cos)");
+	  {
+	     size_t n= (size_t)(q - p);
+	     char mtok[16];
+	     if (n >= sizeof(mtok)) error("-H parameter m value is too long");
+	     memcpy(mtok, p, n);
+	     mtok[n]= 0;
+	     if (0 == strcasecmp(mtok, "pulse"))
+		opt_H_m= SBX_MIXAM_MODE_PULSE;
+	     else if (0 == strcasecmp(mtok, "cos"))
+		opt_H_m= SBX_MIXAM_MODE_COS;
+	     else
+		error("-H parameter m must be 'pulse' or 'cos'");
+	  }
+	  p= q;
+	  break;
        case 's':
-	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  opt_H_s= strtod(p, &q);
 	  if (q == p) error("-H parameter s requires a numeric value");
 	  p= q;
 	  break;
        case 'd':
-	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  opt_H_d= strtod(p, &q);
 	  if (q == p) error("-H parameter d requires a numeric value");
 	  p= q;
 	  break;
        case 'a':
-	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  opt_H_a= strtod(p, &q);
 	  if (q == p) error("-H parameter a requires a numeric value");
 	  p= q;
 	  break;
        case 'r':
-	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  opt_H_r= strtod(p, &q);
 	  if (q == p) error("-H parameter r requires a numeric value");
 	  p= q;
 	  break;
        case 'e':
-	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  edge= strtol(p, &q, 10);
 	  if (q == p) error("-H parameter e requires an integer value");
 	  q2= q;
@@ -2457,13 +2479,13 @@ parse_mixam_env_option_spec(const char *spec) {
 	  p= q;
 	  break;
        case 'f':
-	  if (*p++ != '=') error("-H expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  opt_H_f= strtod(p, &q);
 	  if (q == p) error("-H parameter f requires a numeric value");
 	  p= q;
 	  break;
        default:
-	  error("-H only supports s=, d=, a=, r=, e= and f= parameters");
+	  error("-H only supports m=, s=, d=, a=, r=, e= and f= parameters");
       }
 
       if (*p == ':') p++;
@@ -2472,16 +2494,18 @@ parse_mixam_env_option_spec(const char *spec) {
 
    if (opt_H_s < 0.0 || opt_H_s > 1.0)
       error("-H parameter s must be in range [0,1]");
-   if (opt_H_d < 0.0 || opt_H_d > 1.0)
-      error("-H parameter d must be in range [0,1]");
-   if (opt_H_a < 0.0 || opt_H_a > 1.0)
-      error("-H parameter a must be in range [0,1]");
-   if (opt_H_r < 0.0 || opt_H_r > 1.0)
-      error("-H parameter r must be in range [0,1]");
-   if (opt_H_a + opt_H_r > 1.0)
-      error("-H parameters a+r must be <= 1");
-   if (opt_H_e < 0 || opt_H_e > 3)
-      error("-H parameter e must be in range 0..3");
+   if (opt_H_m == SBX_MIXAM_MODE_PULSE) {
+      if (opt_H_d < 0.0 || opt_H_d > 1.0)
+	 error("-H parameter d must be in range [0,1] in m=pulse mode");
+      if (opt_H_a < 0.0 || opt_H_a > 1.0)
+	 error("-H parameter a must be in range [0,1] in m=pulse mode");
+      if (opt_H_r < 0.0 || opt_H_r > 1.0)
+	 error("-H parameter r must be in range [0,1] in m=pulse mode");
+      if (opt_H_a + opt_H_r > 1.0)
+	 error("-H parameters a+r must be <= 1 in m=pulse mode");
+      if (opt_H_e < 0 || opt_H_e > 3)
+	 error("-H parameter e must be in range 0..3");
+   }
    if (opt_H_f < 0.0 || opt_H_f > 1.0)
       error("-H parameter f must be in range [0,1]");
 }
@@ -3397,7 +3421,7 @@ try_external_iso_cycle_graph_png(const char *out_fname,
 
 int
 try_external_mixam_cycle_graph_png(const char *out_fname,
-				   double s, double d, double a, double r,
+				   int m, double s, double d, double a, double r,
 				   int e, double f) {
    char script[PATH_MAX];
    char args[2048];
@@ -3410,8 +3434,8 @@ try_external_mixam_cycle_graph_png(const char *out_fname,
    }
 
    snprintf(args, sizeof(args),
-	    " mixam-cycle --out \"%s\" --h-s %.12g --h-d %.12g --h-a %.12g --h-r %.12g --h-e %d --h-f %.12g",
-	    out_fname, s, d, a, r, e, f);
+	    " mixam-cycle --out \"%s\" --h-m %d --h-s %.12g --h-d %.12g --h-a %.12g --h-r %.12g --h-e %d --h-f %.12g",
+	    out_fname, m, s, d, a, r, e, f);
 
    return plot_try_external_cmd(script, out_fname, args);
 }
@@ -4095,7 +4119,10 @@ write_mixam_cycle_graph_png(void) {
    char s_tok[64], d_tok[64], a_tok[64], r_tok[64], f_tok[64], fname[512];
    char tick_txt[64];
    char ptxt1[256], ptxt2[256];
-   const char *title= "MIXAM SINGLE-CYCLE ENVELOPE PLOT";
+   const char *mode_name= (opt_H_m == SBX_MIXAM_MODE_COS) ? "cos" : "pulse";
+   const char *title= (opt_H_m == SBX_MIXAM_MODE_COS)
+      ? "MIXAM SINGLE-CYCLE CONTINUOUS-AM PLOT"
+      : "MIXAM SINGLE-CYCLE ENVELOPE PLOT";
 
    sanitize_filename_token("mixam_cycle", fname, sizeof(fname));
    double_to_token(opt_H_s, s_tok, sizeof(s_tok));
@@ -4104,10 +4131,11 @@ write_mixam_cycle_graph_png(void) {
    double_to_token(opt_H_r, r_tok, sizeof(r_tok));
    double_to_token(opt_H_f, f_tok, sizeof(f_tok));
    snprintf(fname, sizeof(fname),
-	    "mixam_cycle_s%s_d%s_a%s_r%s_e%d_f%s.png",
-	    s_tok, d_tok, a_tok, r_tok, opt_H_e, f_tok);
+	    "mixam_cycle_m%s_s%s_d%s_a%s_r%s_e%d_f%s.png",
+	    mode_name, s_tok, d_tok, a_tok, r_tok, opt_H_e, f_tok);
 
    if (try_external_mixam_cycle_graph_png(fname,
+					  opt_H_m,
 					  opt_H_s, opt_H_d, opt_H_a, opt_H_r,
 					  opt_H_e, opt_H_f)) {
       if (!opt_Q)
@@ -4147,8 +4175,14 @@ write_mixam_cycle_graph_png(void) {
    for (a= 0; a<pw; a++) {
       int ex= ml + a;
       double phase= a / (double)(pw-1);
-      double env= sbx_dsp_iso_mod_factor_custom(phase, opt_H_s, opt_H_d,
-						opt_H_a, opt_H_r, opt_H_e);
+      double env;
+      if (opt_H_m == SBX_MIXAM_MODE_COS) {
+	 double phx= sbx_dsp_wrap_unit(phase + opt_H_s);
+	 env= 0.5 * (1.0 + cos(2.0 * M_PI * phx));
+      } else {
+	 env= sbx_dsp_iso_mod_factor_custom(phase, opt_H_s, opt_H_d,
+					    opt_H_a, opt_H_r, opt_H_e);
+      }
       double gain= opt_H_f + (1.0 - opt_H_f) * env;
       int ey= top_y0 + (int)((1.0 - env) * (ph-1) + 0.5);
       int gy= bot_y0 + (int)((1.0 - gain) * (ph-1) + 0.5);
@@ -4220,8 +4254,11 @@ write_mixam_cycle_graph_png(void) {
       font5x7_draw_text(img_hi, hw, hh, x0, y02, y2_label, label_scale, 1, 30, 30, 30);
    }
 
-   snprintf(ptxt1, sizeof(ptxt1), "H:s=%.4f d=%.4f a=%.2f r=%.2f e=%d f=%.3f",
-	    opt_H_s, opt_H_d, opt_H_a, opt_H_r, opt_H_e, opt_H_f);
+   if (opt_H_m == SBX_MIXAM_MODE_COS)
+      snprintf(ptxt1, sizeof(ptxt1), "H:m=cos s=%.4f f=%.3f", opt_H_s, opt_H_f);
+   else
+      snprintf(ptxt1, sizeof(ptxt1), "H:m=pulse s=%.4f d=%.4f a=%.2f r=%.2f e=%d f=%.3f",
+	       opt_H_s, opt_H_d, opt_H_a, opt_H_r, opt_H_e, opt_H_f);
    snprintf(ptxt2, sizeof(ptxt2), "mixam cycle gain = f + (1-f)*envelope");
    {
       int tw1= font5x7_text_width(ptxt1, param_scale);
@@ -4716,8 +4753,8 @@ scanOptions(int *acp, char ***avp) {
 	  case 'H':
 	     opt_H= 1;
 	     if (*p) {
-		if (!is_mixam_env_option_spec(p))
-		   error("-H optional spec must be s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+		 if (!is_mixam_env_option_spec(p))
+		    error("-H optional spec must be m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 		parse_mixam_env_option_spec(p);
 		p += strlen(p);
 	     } else if (argc > 0 && is_mixam_env_option_spec(argv[0])) {
@@ -8025,6 +8062,7 @@ static void
 apply_mixam_envelope_override(SbxMixFxSpec *fx) {
    if (!fx || !opt_H || fx->type != SBX_MIXFX_AM)
       return;
+   fx->mixam_mode= opt_H_m;
    fx->mixam_start= opt_H_s;
    fx->mixam_duty= opt_H_d;
    fx->mixam_attack= opt_H_a;

@@ -277,6 +277,7 @@ sbx_mixam_set_defaults(SbxMixFxSpec *fx) {
   fx->mixam_release = 0.5;
   fx->mixam_edge_mode = 3;
   fx->mixam_floor = 0.0;
+  fx->mixam_mode = SBX_MIXAM_MODE_PULSE;
   fx->mixam_bind_program_beat = 0;
 }
 
@@ -286,13 +287,17 @@ sbx_validate_mixam_fields(const SbxMixFxSpec *fx) {
   if (!isfinite(fx->res)) return SBX_EINVAL;
   if (!fx->mixam_bind_program_beat && fx->res <= 0.0) return SBX_EINVAL;
   if (fx->mixam_bind_program_beat != 0 && fx->mixam_bind_program_beat != 1) return SBX_EINVAL;
+  if (fx->mixam_mode != SBX_MIXAM_MODE_PULSE &&
+      fx->mixam_mode != SBX_MIXAM_MODE_COS) return SBX_EINVAL;
   if (!isfinite(fx->mixam_start) || fx->mixam_start < 0.0 || fx->mixam_start > 1.0) return SBX_EINVAL;
-  if (!isfinite(fx->mixam_duty) || fx->mixam_duty < 0.0 || fx->mixam_duty > 1.0) return SBX_EINVAL;
-  if (!isfinite(fx->mixam_attack) || fx->mixam_attack < 0.0 || fx->mixam_attack > 1.0) return SBX_EINVAL;
-  if (!isfinite(fx->mixam_release) || fx->mixam_release < 0.0 || fx->mixam_release > 1.0) return SBX_EINVAL;
-  if (fx->mixam_edge_mode < 0 || fx->mixam_edge_mode > 3) return SBX_EINVAL;
   if (!isfinite(fx->mixam_floor) || fx->mixam_floor < 0.0 || fx->mixam_floor > 1.0) return SBX_EINVAL;
-  if ((fx->mixam_attack + fx->mixam_release) > (1.0 + 1e-12)) return SBX_EINVAL;
+  if (fx->mixam_mode == SBX_MIXAM_MODE_PULSE) {
+    if (!isfinite(fx->mixam_duty) || fx->mixam_duty < 0.0 || fx->mixam_duty > 1.0) return SBX_EINVAL;
+    if (!isfinite(fx->mixam_attack) || fx->mixam_attack < 0.0 || fx->mixam_attack > 1.0) return SBX_EINVAL;
+    if (!isfinite(fx->mixam_release) || fx->mixam_release < 0.0 || fx->mixam_release > 1.0) return SBX_EINVAL;
+    if (fx->mixam_edge_mode < 0 || fx->mixam_edge_mode > 3) return SBX_EINVAL;
+    if ((fx->mixam_attack + fx->mixam_release) > (1.0 + 1e-12)) return SBX_EINVAL;
+  }
   return SBX_OK;
 }
 
@@ -313,23 +318,39 @@ sbx_parse_mixam_params(const char *params, SbxMixFxSpec *fx) {
     key = (char)tolower((unsigned char)*p++);
     if (*p != '=') return SBX_EINVAL;
     p++;
-    val = strtod(p, &end);
-    if (end == p || !isfinite(val)) return SBX_EINVAL;
-
-    switch (key) {
-      case 's': fx->mixam_start = val; break;
-      case 'd': fx->mixam_duty = val; break;
-      case 'a': fx->mixam_attack = val; break;
-      case 'r': fx->mixam_release = val; break;
-      case 'f': fx->mixam_floor = val; break;
-      case 'e': {
-        int mode = (int)val;
-        if (fabs(val - (double)mode) > 1e-9) return SBX_EINVAL;
-        fx->mixam_edge_mode = mode;
-        break;
-      }
-      default:
+    if (key == 'm') {
+      size_t mlen = 0;
+      char mode_tok[16];
+      while (p[mlen] && p[mlen] != ':' && !isspace((unsigned char)p[mlen])) mlen++;
+      if (mlen == 0 || mlen >= sizeof(mode_tok)) return SBX_EINVAL;
+      memcpy(mode_tok, p, mlen);
+      mode_tok[mlen] = 0;
+      if (strcasecmp(mode_tok, "pulse") == 0)
+        fx->mixam_mode = SBX_MIXAM_MODE_PULSE;
+      else if (strcasecmp(mode_tok, "cos") == 0)
+        fx->mixam_mode = SBX_MIXAM_MODE_COS;
+      else
         return SBX_EINVAL;
+      end = (char *)(p + mlen);
+    } else {
+      val = strtod(p, &end);
+      if (end == p || !isfinite(val)) return SBX_EINVAL;
+
+      switch (key) {
+        case 's': fx->mixam_start = val; break;
+        case 'd': fx->mixam_duty = val; break;
+        case 'a': fx->mixam_attack = val; break;
+        case 'r': fx->mixam_release = val; break;
+        case 'f': fx->mixam_floor = val; break;
+        case 'e': {
+          int mode = (int)val;
+          if (fabs(val - (double)mode) > 1e-9) return SBX_EINVAL;
+          fx->mixam_edge_mode = mode;
+          break;
+        }
+        default:
+          return SBX_EINVAL;
+      }
     }
     p = end;
     while (*p && isspace((unsigned char)*p)) p++;
@@ -1433,18 +1454,30 @@ sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz) {
       return SBX_OK;
     case SBX_MIXFX_AM:
       if (fx->mixam_bind_program_beat) {
-        if (!snprintf_checked(out, out_sz, "mixam:beat:s=%g:d=%g:a=%g:r=%g:e=%d:f=%g",
-                              fx->mixam_start, fx->mixam_duty,
-                              fx->mixam_attack, fx->mixam_release,
-                              fx->mixam_edge_mode, fx->mixam_floor))
-          return SBX_EINVAL;
+        if (fx->mixam_mode == SBX_MIXAM_MODE_COS) {
+          if (!snprintf_checked(out, out_sz, "mixam:beat:m=cos:s=%g:f=%g",
+                                fx->mixam_start, fx->mixam_floor))
+            return SBX_EINVAL;
+        } else {
+          if (!snprintf_checked(out, out_sz, "mixam:beat:s=%g:d=%g:a=%g:r=%g:e=%d:f=%g",
+                                fx->mixam_start, fx->mixam_duty,
+                                fx->mixam_attack, fx->mixam_release,
+                                fx->mixam_edge_mode, fx->mixam_floor))
+            return SBX_EINVAL;
+        }
       } else {
-        if (!snprintf_checked(out, out_sz, "mixam:%g:s=%g:d=%g:a=%g:r=%g:e=%d:f=%g",
-                              fx->res,
-                              fx->mixam_start, fx->mixam_duty,
-                              fx->mixam_attack, fx->mixam_release,
-                              fx->mixam_edge_mode, fx->mixam_floor))
-          return SBX_EINVAL;
+        if (fx->mixam_mode == SBX_MIXAM_MODE_COS) {
+          if (!snprintf_checked(out, out_sz, "mixam:%g:m=cos:s=%g:f=%g",
+                                fx->res, fx->mixam_start, fx->mixam_floor))
+            return SBX_EINVAL;
+        } else {
+          if (!snprintf_checked(out, out_sz, "mixam:%g:s=%g:d=%g:a=%g:r=%g:e=%d:f=%g",
+                                fx->res,
+                                fx->mixam_start, fx->mixam_duty,
+                                fx->mixam_attack, fx->mixam_release,
+                                fx->mixam_edge_mode, fx->mixam_floor))
+            return SBX_EINVAL;
+        }
       }
       return SBX_OK;
     default:
@@ -2864,12 +2897,17 @@ sbx_mixam_gain_step(SbxMixFxState *fx, double sr, double res_hz) {
   double g;
   if (!fx || sr <= 0.0 || !isfinite(res_hz) || res_hz <= 0.0) return 1.0;
   fx->phase = sbx_dsp_wrap_unit(fx->phase + res_hz / sr);
-  p = sbx_dsp_iso_mod_factor_custom(fx->phase,
-                                    fx->spec.mixam_start,
-                                    fx->spec.mixam_duty,
-                                    fx->spec.mixam_attack,
-                                    fx->spec.mixam_release,
-                                    fx->spec.mixam_edge_mode);
+  if (fx->spec.mixam_mode == SBX_MIXAM_MODE_COS) {
+    double ph = sbx_dsp_wrap_unit(fx->phase + fx->spec.mixam_start);
+    p = 0.5 * (1.0 + cos(SBX_TAU * ph));
+  } else {
+    p = sbx_dsp_iso_mod_factor_custom(fx->phase,
+                                      fx->spec.mixam_start,
+                                      fx->spec.mixam_duty,
+                                      fx->spec.mixam_attack,
+                                      fx->spec.mixam_release,
+                                      fx->spec.mixam_edge_mode);
+  }
   g = fx->spec.mixam_floor + (1.0 - fx->spec.mixam_floor) * p;
   return sbx_dsp_clamp(g, fx->spec.mixam_floor, 1.0);
 }

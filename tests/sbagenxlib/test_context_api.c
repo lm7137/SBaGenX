@@ -158,6 +158,11 @@ int main(void) {
       fail("mixpulse:beat compatibility parse failed");
     if (fx.type != SBX_MIXFX_AM || !fx.mixam_bind_program_beat)
       fail("mixpulse:beat compatibility parse mismatch");
+    if (sbx_parse_mix_fx_spec("mixam:8:m=cos:s=0:f=0.4",
+                              SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mixam cos parse failed");
+    if (fx.mixam_mode != SBX_MIXAM_MODE_COS || fabs(fx.mixam_floor - 0.4) > 1e-9)
+      fail("mixam cos parse value mismatch");
     if (sbx_parse_mix_fx_spec("mixam:6:a=0.8:r=0.5", SBX_WAVE_SINE, &fx) != SBX_EINVAL)
       fail("mixam a+r constraint should fail");
   }
@@ -191,6 +196,12 @@ int main(void) {
       fail("parse extra beat-bound mixpulse compatibility token failed");
     if (typ != SBX_EXTRA_MIXFX || fx.type != SBX_MIXFX_AM || !fx.mixam_bind_program_beat)
       fail("parse extra beat-bound mixpulse compatibility token mismatch");
+    if (sbx_parse_extra_token("mixam:beat:m=cos:s=0.1:f=0.35",
+                              SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
+      fail("parse extra beat-bound mixam cos token failed");
+    if (typ != SBX_EXTRA_MIXFX || fx.type != SBX_MIXFX_AM ||
+        !fx.mixam_bind_program_beat || fx.mixam_mode != SBX_MIXAM_MODE_COS)
+      fail("parse extra beat-bound mixam cos token mismatch");
     if (sbx_parse_extra_token("triangle:200+8/20", SBX_WAVE_SINE, &typ, &tone, &fx, &mixpct) != SBX_OK)
       fail("parse extra tone token failed");
     if (typ != SBX_EXTRA_TONE || tone.mode != SBX_TONE_BINAURAL || tone.waveform != SBX_WAVE_TRIANGLE)
@@ -223,6 +234,14 @@ int main(void) {
       fail("mixam beat-bind parse after format failed");
     if (!fx_rt.mixam_bind_program_beat)
       fail("mixam beat-bind format roundtrip flag mismatch");
+    if (sbx_parse_mix_fx_spec("mixam:7:m=cos:s=0.2:f=0.3", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mixam cos parse for format failed");
+    if (sbx_format_mix_fx_spec(&fx, spec, sizeof(spec)) != SBX_OK)
+      fail("mixam cos format failed");
+    if (sbx_parse_mix_fx_spec(spec, SBX_WAVE_SINE, &fx_rt) != SBX_OK)
+      fail("mixam cos parse after format failed");
+    if (fx_rt.mixam_mode != SBX_MIXAM_MODE_COS || fabs(fx_rt.mixam_floor - 0.3) > 1e-9)
+      fail("mixam cos format roundtrip mismatch");
   }
 
   sbx_default_engine_config(&cfg);
@@ -411,6 +430,35 @@ int main(void) {
       fail("beat-bound mixam should track rising program beat frequency");
     if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, 0, 0, 0, 0) != SBX_OK)
       fail("clear runtime config after beat-bound mixam failed");
+  }
+  {
+    SbxMixFxSpec fx;
+    double add_l = 0.0, add_r = 0.0;
+    double max_abs_l = 0.0;
+    double min_abs_l = 1e9;
+    int i;
+    if (sbx_parse_mix_fx_spec("mixam:2:m=cos:s=0:f=0.4", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("parse mixam cos for runtime sample failed");
+    if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, &fx, 1, 0, 0) != SBX_OK)
+      fail("configure runtime with mixam cos failed");
+    for (i = 0; i < 50000; i++) {
+      if (sbx_context_mix_stream_sample(ctx, (double)i / cfg.sample_rate,
+                                        1600, -1200, 1.0, &add_l, &add_r) != SBX_OK)
+        fail("mix stream sample with mixam cos failed");
+      {
+        double al = fabs(add_l);
+        if (al > max_abs_l) max_abs_l = al;
+        if (al < min_abs_l) min_abs_l = al;
+      }
+      if (fabs(add_l) > 100.0001 || fabs(add_r) > 75.0001)
+        fail("mixam cos should not amplify above dry stream");
+    }
+    if (!(max_abs_l > 95.0))
+      fail("mixam cos should reach near full level");
+    if (!(min_abs_l > 35.0 && min_abs_l < 45.0))
+      fail("mixam cos floor behavior mismatch");
+    if (sbx_context_configure_runtime(ctx, 0, 0, 100.0, 0, 0, 0, 0) != SBX_OK)
+      fail("clear runtime config after mixam cos failed");
   }
 
   buf = (float *)calloc(frames * 2, sizeof(float));

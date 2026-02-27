@@ -696,12 +696,19 @@ def render_mixam_cycle(args):
     top_y0 = mt
     bot_y0 = mt + ph + gap
 
+    h_m = str(getattr(args, "h_m", "pulse") or "pulse").strip().lower()
     h_s = float(args.h_s)
     h_d = float(args.h_d)
     h_a = float(args.h_a)
     h_r = float(args.h_r)
     h_e = int(args.h_e)
     h_f = float(args.h_f)
+    if h_m in ("0",):
+        h_m = "pulse"
+    elif h_m in ("1",):
+        h_m = "cos"
+    if h_m not in ("pulse", "cos"):
+        raise ValueError("h-m must be pulse|cos (or 0|1)")
 
     surface, ctx = _setup_canvas(width, height)
 
@@ -723,7 +730,11 @@ def render_mixam_cycle(args):
     samples = 8000
     for i in range(samples + 1):
         u = i / float(samples)
-        env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
+        if h_m == "cos":
+            ph = (u + h_s) - math.floor(u + h_s)
+            env = 0.5 * (1.0 + math.cos(2.0 * PI * ph))
+        else:
+            env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
         px = x_map(u)
         py = y_map(env, top_y0)
         if first:
@@ -739,7 +750,11 @@ def render_mixam_cycle(args):
     first = True
     for i in range(samples + 1):
         u = i / float(samples)
-        env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
+        if h_m == "cos":
+            ph = (u + h_s) - math.floor(u + h_s)
+            env = 0.5 * (1.0 + math.cos(2.0 * PI * ph))
+        else:
+            env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
         gain = h_f + (1.0 - h_f) * env
         px = x_map(u)
         py = y_map(gain, bot_y0)
@@ -783,7 +798,10 @@ def render_mixam_cycle(args):
     # titles
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
     ctx.set_font_size(17)
-    title = "MIXAM SINGLE-CYCLE ENVELOPE PLOT"
+    if h_m == "cos":
+        title = "MIXAM SINGLE-CYCLE CONTINUOUS-AM PLOT"
+    else:
+        title = "MIXAM SINGLE-CYCLE ENVELOPE PLOT"
     ext = ctx.text_extents(title)
     ctx.set_source_rgb(0.12, 0.12, 0.12)
     ctx.move_to(ml + (pw - ext.width) / 2, 28)
@@ -806,7 +824,10 @@ def render_mixam_cycle(args):
     # parameter lines
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
     ctx.set_font_size(14)
-    line1 = f"H:s={h_s:.4f} d={h_d:.4f} a={h_a:.2f} r={h_r:.2f} e={h_e} f={h_f:.3f}"
+    if h_m == "cos":
+        line1 = f"H:m=cos s={h_s:.4f} f={h_f:.3f}"
+    else:
+        line1 = f"H:m=pulse s={h_s:.4f} d={h_d:.4f} a={h_a:.2f} r={h_r:.2f} e={h_e} f={h_f:.3f}"
     line2 = "mixam cycle gain = f + (1-f)*envelope"
 
     ext = ctx.text_extents(line1)
@@ -1250,6 +1271,7 @@ def main():
 
     mp = sub.add_parser("mixam-cycle", help="Render mixam single-cycle envelope/gain plot")
     mp.add_argument("--out", required=True)
+    mp.add_argument("--h-m", type=str, default="pulse")
     mp.add_argument("--h-s", type=float, required=True)
     mp.add_argument("--h-d", type=float, required=True)
     mp.add_argument("--h-a", type=float, required=True)
