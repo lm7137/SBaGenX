@@ -839,14 +839,17 @@ use '@' on the end of the level specification:
   sbagenx -m river1.ogg -p drop 00ds+@/3 white/10
 
 To render the drop beat/pulse curve as an image instead of running
-audio output, add `-P` with `-p drop`:
+audio output, add `-G` with `-p drop`:
 
-  sbagenx -P -p drop t40,10,5 -01ds+
+  sbagenx -G -p drop t40,10,5 -01ds+
 
 This writes a PNG graph of the beat/pulse curve over the drop period
 only, then exits.  The graph uses whole-number tick labels on both
 axes (time in minutes and frequency in Hz).  `@` and `M` are reflected
 in the plotted mode label (pulse vs monaural beat).
+
+Compatibility fallback: `-P` also triggers this program graph when no
+cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
 
 Once you have completed level 00, you can move onto the next (01, 02,
 03, etc).  However if you like, instead you can try increasing the
@@ -866,7 +869,7 @@ lots of practice.
 Usage: 
 
   -p drop <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>] <tone-specs> ...
-  -P -p drop [t<drop>,<hold>,<wake>]
+  -G -p drop [t<drop>,<hold>,<wake>]
       <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]
 
 Examples:
@@ -1210,9 +1213,9 @@ with `-p drop`:
   sbagenx -p sigmoid 00ls+:l=0.125:h=0:S=2 mix/100 mixam:beat
 
 To render the sigmoid beat/pulse curve as an image instead of running
-audio output, add `-P` with `-p sigmoid`:
+audio output, add `-G` with `-p sigmoid`:
 
-  sbagenx -P -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
+  sbagenx -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
 
 This writes a PNG graph of the beat/pulse curve over the drop period
 only, then exits.  The filename is generated from the sigmoid
@@ -1226,11 +1229,12 @@ smoother curves and cleaner line quality.  The bottom caption also
 prints the active sigmoid parameters (start/target, D, l/h, and solved
 a/b values) for reference.
 
-`-P` first tries the Python+Cairo backend (bundled by default in current
+`-G` first tries the Python+Cairo backend (bundled by default in current
 Windows builds).  If not available, it falls back to the built-in
 renderer.
 
-(`-G` remains accepted as a legacy alias for sigmoid plotting.)
+Compatibility fallback: `-P` also triggers this program graph when no
+cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
 
 
 2.10.1: More detailed notes on -p sigmoid options
@@ -1240,7 +1244,7 @@ Usage:
 
   -p sigmoid [t<drop>,<hold>,<wake>]
       <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>] <tone-specs> ...
-  -P -p sigmoid [t<drop>,<hold>,<wake>]
+  -G -p sigmoid [t<drop>,<hold>,<wake>]
       <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]
 
 Examples:
@@ -1420,9 +1424,9 @@ Examples:
     -p curve examples/basics/curve-amp-mix-demo.sbgf 00ls+ mix/97
   sbagenx -m river1.ogg \
     -p curve examples/basics/curve-sigmoid-like.sbgf 00ls+ mix/99
-  sbagenx -P -p curve examples/basics/curve-sigmoid-like.sbgf \
+  sbagenx -G -p curve examples/basics/curve-sigmoid-like.sbgf \
     00ls:l=0.2:h=0
-  sbagenx -P -p curve examples/basics/curve-expfit-solve-demo.sbgf \
+  sbagenx -G -p curve examples/basics/curve-expfit-solve-demo.sbgf \
     00ls:l=-0.15
 
 The level/depth/time modifiers are interpreted the same way as in
@@ -1440,8 +1444,11 @@ For `amp` and `mixamp`:
 
 `@` (isochronic) and `M` (monaural) are mutually exclusive.
 
-With `-P`, `-p curve` plots the evaluated beat/pulse frequency curve
+With `-G`, `-p curve` plots the evaluated beat/pulse frequency curve
 over the drop period (`D`) and exits.
+
+Compatibility fallback: `-P` also triggers this program graph when no
+cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
 
 
 2.11.1: The .sbgf function file format
@@ -1745,12 +1752,18 @@ follows:
   -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid.
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
-  -P        Plot graph as PNG and exit.
-              With -p drop/-p sigmoid/-p curve: renders beat/pulse curve graph.
+  -P        Plot one-cycle envelope/waveform graph as PNG and exit.
+              With -H: renders one-cycle mixam envelope/gain.
+              With -p ... and mixam:<...> extras: renders one-cycle
+              mixam envelope/gain using current/default -H parameters.
               Otherwise: renders one-cycle isochronic (@) waveform
               using current tone and `-I` settings.
+              Compatibility: with -p drop/-p sigmoid/-p curve and no
+              cycle target, falls back to the program beat/pulse graph.
               Python+Cairo backend is preferred; otherwise built-in
               plotting is used.
+  -G        Plot program beat/pulse-vs-time graph as PNG and exit.
+              Supported with -p drop/-p sigmoid/-p curve.
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
               Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.
