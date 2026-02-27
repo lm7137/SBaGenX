@@ -2,8 +2,150 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="840"
         x:Class="gui.MainWindow"
-        Title="gui">
-    Welcome to Avalonia!
+        Width="1200"
+        Height="840"
+        MinWidth="980"
+        MinHeight="700"
+        Title="SBaGenX GUI (Phase 1)">
+    <Grid RowDefinitions="Auto,*,Auto,*">
+        <Border Grid.Row="0" Padding="12" BorderThickness="0,0,0,1" BorderBrush="#303030">
+            <DockPanel LastChildFill="False">
+                <StackPanel Orientation="Horizontal" Spacing="8" DockPanel.Dock="Left">
+                    <Button Name="PlayButton" Content="Play" Click="OnPlayClick"/>
+                    <Button Name="StopButton" Content="Stop" Click="OnStopClick" IsEnabled="False"/>
+                    <Button Name="ExportButton" Content="Export" Click="OnExportClick"/>
+                    <Button Name="PlotButton" Content="Plot" Click="OnPlotClick"/>
+                </StackPanel>
+                <TextBlock Name="StatusTextBlock"
+                           DockPanel.Dock="Right"
+                           VerticalAlignment="Center"
+                           Text="Idle"/>
+            </DockPanel>
+        </Border>
+
+        <Border Grid.Row="1" Margin="12" Padding="12" BorderThickness="1" BorderBrush="#303030" CornerRadius="6">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="10">
+                    <TextBlock FontSize="16" FontWeight="SemiBold" Text="Run Configuration (Built-in Program Mode)"/>
+
+                    <Grid ColumnDefinitions="180,*,130,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="8">
+                        <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="Executable"/>
+                        <TextBox Name="ExecutableTextBox"
+                                 Grid.Row="0"
+                                 Grid.Column="1"
+                                 Watermark="Path to sbagenx binary (auto-detect if empty)"
+                                 TextChanged="OnInputsChanged"/>
+                        <Button Grid.Row="0" Grid.Column="2" Content="Browse..." Click="OnBrowseExecutableClick"/>
+                        <Button Grid.Row="0" Grid.Column="3" HorizontalAlignment="Left" Content="Auto-detect" Click="OnDetectExecutableClick"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Program"/>
+                        <ComboBox Name="ProgramComboBox" Grid.Row="1" Grid.Column="1" SelectionChanged="OnInputsChanged">
+                            <ComboBoxItem Content="drop" IsSelected="True"/>
+                            <ComboBoxItem Content="sigmoid"/>
+                            <ComboBoxItem Content="slide"/>
+                            <ComboBoxItem Content="curve"/>
+                        </ComboBox>
+                        <TextBlock Grid.Row="1" Grid.Column="2" VerticalAlignment="Center" Text="Program Spec"/>
+                        <TextBox Name="ProgramSpecTextBox"
+                                 Grid.Row="1"
+                                 Grid.Column="3"
+                                 Text="00ls"
+                                 Watermark="e.g. 00ls, 00ls+:l=0.2, 200+10/1"
+                                 TextChanged="OnInputsChanged"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Timing Override"/>
+                        <TextBox Name="TimingTextBox"
+                                 Grid.Row="2"
+                                 Grid.Column="1"
+                                 Watermark="Optional, e.g. t30,30,0"
+                                 TextChanged="OnInputsChanged"/>
+                        <TextBlock Grid.Row="2" Grid.Column="2" VerticalAlignment="Center" Text="Tone Specs"/>
+                        <TextBox Name="ToneSpecsTextBox"
+                                 Grid.Row="2"
+                                 Grid.Column="3"
+                                 Text="mix/99"
+                                 Watermark="Space-separated tone specs, e.g. mix/99"
+                                 TextChanged="OnInputsChanged"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="Curve File (.sbgf)"/>
+                        <TextBox Name="CurveFileTextBox"
+                                 Grid.Row="3"
+                                 Grid.Column="1"
+                                 Watermark="Required only for program=curve"
+                                 TextChanged="OnInputsChanged"/>
+                        <Button Grid.Row="3" Grid.Column="2" Content="Browse..." Click="OnBrowseCurveFileClick"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" VerticalAlignment="Center" Text="Mix File (-m)"/>
+                        <TextBox Name="MixFileTextBox"
+                                 Grid.Row="4"
+                                 Grid.Column="1"
+                                 Watermark="Optional path to mix audio file"
+                                 TextChanged="OnInputsChanged"/>
+                        <Button Grid.Row="4" Grid.Column="2" Content="Browse..." Click="OnBrowseMixFileClick"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" Text="Output File (-o)"/>
+                        <TextBox Name="OutputFileTextBox"
+                                 Grid.Row="5"
+                                 Grid.Column="1"
+                                 Watermark="Required for Export"
+                                 TextChanged="OnInputsChanged"/>
+                        <Button Grid.Row="5" Grid.Column="2" Content="Browse..." Click="OnBrowseOutputFileClick"/>
+
+                        <TextBlock Grid.Row="6" Grid.Column="0" VerticalAlignment="Center" Text="Output Format"/>
+                        <ComboBox Name="OutputFormatComboBox" Grid.Row="6" Grid.Column="1" SelectionChanged="OnOutputFormatChanged">
+                            <ComboBoxItem Content="wav" IsSelected="True"/>
+                            <ComboBoxItem Content="ogg"/>
+                            <ComboBoxItem Content="mp3"/>
+                            <ComboBoxItem Content="flac"/>
+                        </ComboBox>
+                        <TextBlock Grid.Row="6" Grid.Column="2" VerticalAlignment="Center" Text="MP3 Mode"/>
+                        <ComboBox Name="Mp3ModeComboBox"
+                                  Grid.Row="6"
+                                  Grid.Column="3"
+                                  SelectionChanged="OnOutputFormatChanged">
+                            <ComboBoxItem Content="CBR" IsSelected="True"/>
+                            <ComboBoxItem Content="VBR"/>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="7" Grid.Column="0" VerticalAlignment="Center" Text="Quality"/>
+                        <TextBox Name="QualityTextBox"
+                                 Grid.Row="7"
+                                 Grid.Column="1"
+                                 Text="6"
+                                 Watermark="Format-dependent quality value"
+                                 TextChanged="OnInputsChanged"/>
+                        <TextBlock Grid.Row="7" Grid.Column="2" VerticalAlignment="Center" Text="Extra Args"/>
+                        <TextBox Name="ExtraArgsTextBox"
+                                 Grid.Row="7"
+                                 Grid.Column="3"
+                                 Watermark="Optional global args, e.g. -r 44100"
+                                 TextChanged="OnInputsChanged"/>
+
+                        <TextBlock Grid.Row="8"
+                                   Grid.Column="0"
+                                   Grid.ColumnSpan="4"
+                                   Name="QualityHintTextBlock"
+                                   Foreground="#C0C0C0"
+                                   Text="WAV: no quality flag"/>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <Border Grid.Row="2" Margin="12,0,12,12" Padding="10" BorderThickness="1" BorderBrush="#303030" CornerRadius="6">
+            <StackPanel Spacing="6">
+                <TextBlock FontWeight="SemiBold" Text="Command Preview"/>
+                <TextBox Name="CommandPreviewTextBox" IsReadOnly="True" AcceptsReturn="True" MinHeight="58"/>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="3" Margin="12,0,12,12" Padding="10" BorderThickness="1" BorderBrush="#303030" CornerRadius="6">
+            <StackPanel Spacing="6">
+                <TextBlock FontWeight="SemiBold" Text="Output / Logs"/>
+                <TextBox Name="LogTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+    </Grid>
 </Window>
