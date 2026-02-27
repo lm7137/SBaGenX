@@ -93,8 +93,7 @@
                         <TextBox Name="ToneSpecsTextBox"
                                  Grid.Row="4"
                                  Grid.Column="3"
-                                 Text="mix/99"
-                                 Watermark="Space-separated tone specs, e.g. mix/99"
+                                 Watermark="Optional overlays, e.g. white/10"
                                  TextChanged="OnInputsChanged"/>
 
                         <TextBlock Name="CurveFileLabelTextBlock" Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" Text="Curve File (.sbgf)"/>

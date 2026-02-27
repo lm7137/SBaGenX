@@ -15,5 +15,6 @@ sbagenx-*
 docs/api/
 gui/bin/
 gui/obj/
+gui/native/
 
 !/examples/**/*.sbg

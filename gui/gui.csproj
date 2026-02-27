@@ -18,4 +18,14 @@
       <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
     </PackageReference>
   </ItemGroup>
+
+  <Target Name="BuildNativeSbxLib" BeforeTargets="Build" Condition="'$(OS)' != 'Windows_NT'">
+    <Exec Command="mkdir -p &quot;$(MSBuildProjectDirectory)/native&quot; &amp;&amp; gcc -shared -fPIC -O3 -o &quot;$(MSBuildProjectDirectory)/native/libsbagenxlib.so&quot; &quot;$(MSBuildProjectDirectory)/../sbagenxlib.c&quot; -lm" />
+  </Target>
+
+  <Target Name="CopyNativeSbxLib" AfterTargets="Build" Condition="'$(OS)' != 'Windows_NT' and Exists('$(MSBuildProjectDirectory)/native/libsbagenxlib.so')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/native/libsbagenxlib.so"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
 </Project>

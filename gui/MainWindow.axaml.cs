@@ -232,6 +232,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (await TryRunWithSbxLibAsync(action))
+        {
+            return;
+        }
+
         if (!TryBuildInvocation(action, out var executable, out var arguments, out var error))
         {
             SetStatus("Invalid configuration");
@@ -840,7 +845,7 @@ public partial class MainWindow : Window
                 ProgramComboBox.SelectedIndex = 0;
                 ProgramSpecTextBox.Text = "00ls+";
                 TimingTextBox.Text = "t30,90,0";
-                ToneSpecsTextBox.Text = "mix/99";
+                ToneSpecsTextBox.Text = "white/10";
                 break;
 
             case "Sigmoid Default (00ls+)":
@@ -848,7 +853,7 @@ public partial class MainWindow : Window
                 ProgramComboBox.SelectedIndex = 1;
                 ProgramSpecTextBox.Text = "00ls+:l=0.125:h=0";
                 TimingTextBox.Text = "t30,30,0";
-                ToneSpecsTextBox.Text = "mix/99";
+                ToneSpecsTextBox.Text = "white/10";
                 break;
 
             case "Slide Focus (200+10/1)":
@@ -856,7 +861,7 @@ public partial class MainWindow : Window
                 ProgramComboBox.SelectedIndex = 2;
                 ProgramSpecTextBox.Text = "200+10/1";
                 TimingTextBox.Text = "t60";
-                ToneSpecsTextBox.Text = "mix/99";
+                ToneSpecsTextBox.Text = "white/10";
                 break;
 
             case "Curve Example (sigmoid-like)":
@@ -864,7 +869,7 @@ public partial class MainWindow : Window
                 ProgramComboBox.SelectedIndex = 3;
                 ProgramSpecTextBox.Text = "00ls:l=0.2:h=0";
                 TimingTextBox.Text = "t30,30,0";
-                ToneSpecsTextBox.Text = "mix/99";
+                ToneSpecsTextBox.Text = "white/10";
                 CurveFileTextBox.Text = FindExistingPath(
                     Path.Combine(Environment.CurrentDirectory, "examples", "basics", "curve-sigmoid-like.sbgf"),
                     Path.Combine(Environment.CurrentDirectory, "..", "examples", "basics", "curve-sigmoid-like.sbgf")) ?? string.Empty;
