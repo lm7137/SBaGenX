@@ -865,9 +865,9 @@ lots of practice.
 
 Usage: 
 
-  -p drop <signed-level><a-l>[s|k][+][^][@|M][/<amp>] <tone-specs> ...
+  -p drop <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>] <tone-specs> ...
   -P -p drop [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>]
+      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]
 
 Examples:
 
@@ -878,6 +878,7 @@ Examples:
   -p drop -01ds+ white/10
   -p drop 00d@/3 brown/15
   -p drop 00d+M/2
+  -p drop 00ls+:S=2 mix/100 mixam:beat
   -A -p drop 00ds+/3 mix/97
   -A d=0.3:e=0.3:k=10:E=0.7 -p drop 00ds+/3 mix/97
 
@@ -914,13 +915,13 @@ Later deep levels require headphones that can reproduce really low
 bass frequencies, ideally down to 10Hz or lower.
 
 The letter a-l (or A-L if you prefer) selects the depth of the beat
-frequencies.  Beat/Pulse frequencies always start at 10Hz, and then drop
-exponentially to a target, which is as follows for letters A-L: 4.4,
-3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3.  Using A, you
-never get down to delta frequencies.  The deeper beats (i.e. later
-letters) are supposed to be better, so long as you really are
-entraining to them.  Like the carriers, this is something to build up
-over time.
+frequencies.  Beat/Pulse frequencies default to a 10Hz start, then drop
+exponentially to a target.  You can override the start value with
+`:S=<val>` in Hz.  Targets for letters A-L are: 4.4, 3.7, 3.1, 2.5,
+2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3.  Using A, you never get down
+to delta frequencies.  The deeper beats (i.e. later letters) are
+supposed to be better, so long as you really are entraining to them.
+Like the carriers, this is something to build up over time.
 
 Reference (lowest beat/pulse target by letter):
   +--------+-----+-----+-----+-----+-----+-----+
@@ -1206,6 +1207,7 @@ And you can use signed levels, including negative values, exactly as
 with `-p drop`:
 
   sbagenx -p sigmoid -01ds+:l=0.125:h=0
+  sbagenx -p sigmoid 00ls+:l=0.125:h=0:S=2 mix/100 mixam:beat
 
 To render the sigmoid beat/pulse curve as an image instead of running
 audio output, add `-P` with `-p sigmoid`:
@@ -1237,9 +1239,9 @@ renderer.
 Usage:
 
   -p sigmoid [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>] <tone-specs> ...
+      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>] <tone-specs> ...
   -P -p sigmoid [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>]
+      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]
 
 Examples:
 
@@ -1249,6 +1251,7 @@ Examples:
   -p sigmoid 34.5dk+/1.5:l=0.20:h=-2 pink/30
   -p sigmoid -01ds+@/3:l=0.125:h=0 brown/15
   -p sigmoid 00ds+M/2:l=0.125:h=0
+  -p sigmoid 00ls+:l=0.125:h=0:S=2 mix/100 mixam:beat
   -A -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
   -A d=0.3:e=0.3:k=10:E=0.7 -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
 
@@ -1288,6 +1291,7 @@ Sigmoid shape parameters:
 The optional shape parameters are:
   :l=<value>   (default 0.125)
   :h=<value>   (default 0)
+  :S=<value>   (default 10.0, start beat/pulse in Hz)
 
 Order does not matter.  Either can be omitted, and both can be used
 together.  Time for these parameters is interpreted in minutes.
@@ -1302,7 +1306,7 @@ Where:
   l, h = user shape parameters
 
 Boundary conditions:
-  f(0) = 10.0
+  f(0) = S (default 10.0, configurable via :S=<value>)
   f(D) = target from depth letter (a-l)
 
 `a` and `b` are solved automatically from those boundary conditions.
@@ -1395,17 +1399,21 @@ an external function file.  The file extension is `.sbgf` (required).
 Usage:
 
   -p curve <curve-file.sbgf> [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:name=value ...]
+      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:name=value ...]
       <tone-specs> ...
 
-In `<curve-spec>`, each `:name=value` token overrides a matching
-`param name = ...` in the `.sbgf` file.  The names are generic, so
-`l`/`h` are only examples used by some curve files.
+In `<curve-spec>`, `:S=<val>` sets the start beat/pulse frequency in Hz
+(default 10.0).  Each `:name=value` token overrides a matching
+`param name = ...` in the `.sbgf` file (except reserved `S`).
+The names are generic, so `l`/`h` are only examples used by some curve
+files.
 
 Examples:
 
   sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf \
     00ls:l=0.2:h=0
+  sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf \
+    00ls:S=2:l=0.2:h=0
   sbagenx -p curve examples/basics/curve-piecewise-demo.sbgf \
     t30,30,0 00ls+:p1=8:p2=18
   sbagenx -m river1.ogg \
@@ -2276,7 +2284,7 @@ The most commonly used predefined sequences are:
 
 3. **sigmoid** - Similar to drop, but in `s` mode the beat/pulse follows a
    sigmoid curve over the drop period.  Example:
-   `sbagenx -p sigmoid 00ds+:l=0.125:h=0`
+   `sbagenx -p sigmoid 00ds+:l=0.125:h=0:S=2`
 
 4. **curve** - Uses expressions from a `.sbgf` file to define beat/pulse
    (and optionally carrier) over time.  Example:
@@ -2286,8 +2294,8 @@ These predefined sequences accept various parameters to customize their behavior
 See sections 2.6, 2.7, 2.10 and 2.11 for detailed information on
 existing parameters and options.  The sigmoid sequence accepts the same
 drop-style format plus optional shape parameters `:l=<value>` and
-`:h=<value>` (order does not matter), with defaults `l=0.125` and
-`h=0`.
+`:h=<value>` and optional start-beat `:S=<value>` (order does not
+matter), with defaults `l=0.125`, `h=0`, and `S=10.0`.
 
 For `-p sigmoid ...s...`, the beat/pulse frequency follows:
 
@@ -2299,7 +2307,7 @@ Where:
   l, h = user shape parameters
 
 Boundary conditions:
-  f(0) = 10.0
+  f(0) = S (default 10.0)
   f(D) = target from depth letter (a-l), same targets as `-p drop`
 
 `a` and `b` are solved automatically from those boundary conditions:

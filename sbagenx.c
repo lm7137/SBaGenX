@@ -3417,20 +3417,22 @@ build_integer_axis_ticks(double max_v, double *ticks, int max_ticks) {
 }
 
 static double
-drop_eval(double t_min, double d_min, double beat_target,
+drop_eval(double t_min, double d_min, double beat_start, double beat_target,
 	  int slide, int n_step, int steplen_sec) {
    if (d_min <= 0.0) return beat_target;
    if (t_min < 0.0) t_min= 0.0;
    if (t_min > d_min) t_min= d_min;
+   if (!(beat_start > 0.0))
+      beat_start= 10.0;
 
    if (!slide && n_step > 1 && steplen_sec > 0) {
       int idx= (int)(t_min * 60.0 / steplen_sec);
       if (idx < 0) idx= 0;
       if (idx > n_step-1) idx= n_step-1;
-      return 10.0 * exp(log(beat_target/10.0) * idx / (double)(n_step-1));
+      return beat_start * exp(log(beat_target/beat_start) * idx / (double)(n_step-1));
    }
 
-   return 10.0 * exp(log(beat_target/10.0) * t_min / d_min);
+   return beat_start * exp(log(beat_target/beat_start) * t_min / d_min);
 }
 
 static const char *
@@ -3511,7 +3513,7 @@ write_drop_graph_png(const char *fmt, double level,
 
    for (a= 0; a<=2000; a++) {
       double t_min= d_min * a / 2000.0;
-      double y= drop_eval(t_min, d_min, beat_target, slide, n_step, steplen);
+      double y= drop_eval(t_min, d_min, beat_start, beat_target, slide, n_step, steplen);
       if (y < y_min) y_min= y;
       if (y > y_max) y_max= y;
    }
@@ -3549,7 +3551,7 @@ write_drop_graph_png(const char *fmt, double level,
 
    for (a= 0; a<pw; a++) {
       double t_min= d_min * a / (double)(pw-1);
-      double y= drop_eval(t_min, d_min, beat_target, slide, n_step, steplen);
+      double y= drop_eval(t_min, d_min, beat_start, beat_target, slide, n_step, steplen);
       int px= ml + a;
       int py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
       if (a == 0) start_y= py;
@@ -8636,11 +8638,12 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
 void 
 bad_drop() {
    error("Bad arguments: expecting -p drop [<time-spec>] <drop-spec> [<tone-specs...>]"
-	 NL "<drop-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>]"
+	 NL "<drop-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
+	 NL "The optional :S=<val> sets start beat/pulse frequency in Hz (default 10)."
 	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
@@ -8663,7 +8666,7 @@ create_drop(int ac, char **av) {
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    double carr, amp, c0, c2;
-   double beat_target;
+   double beat_target, beat_start= 10.0;
    double beat[40];
    static double beat_targets[]= { 
       4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
@@ -8734,6 +8737,16 @@ create_drop(int ac, char **av) {
 	 if (p == q) BAD;
 	 continue;
       }
+      if (*p == ':') {
+	 p++;
+	 if (p[0] == 'S' && p[1] == '=') {
+	    p += 2; q= p;
+	    beat_start= strtod(p, &p);
+	    if (p == q) BAD;
+	    continue;
+	 }
+	 BAD;
+      }
       break;
    }
 
@@ -8742,6 +8755,8 @@ create_drop(int ac, char **av) {
 
    if (ismono && isisochronic)
       error("M monaural mode cannot be combined with '@' isochronic drop specs");
+   if (!(beat_start > 0.0) || !isfinite(beat_start))
+      error("Invalid drop start beat/pulse frequency :S=%g (must be > 0)", beat_start);
 
 #undef BAD
       
@@ -8764,7 +8779,7 @@ create_drop(int ac, char **av) {
       opt_P_drop= 1;
       write_drop_graph_png(fmt, (200.0 - carr) / 2.0, (char)('a' + a),
 			   len0, len1, len2,
-			   10.0, beat_target,
+			   beat_start, beat_target,
 			   slide, n_step, steplen,
 			   isisochronic, ismono);
       return;
@@ -8772,7 +8787,7 @@ create_drop(int ac, char **av) {
 
    // Calculate beats
    for (a= 0; a<n_step; a++)
-      beat[a]= 10 * exp(log(beat_target/10) * a / (n_step-1));
+      beat[a]= beat_start * exp(log(beat_target/beat_start) * a / (n_step-1));
 
    {
       SbxRuntimeExtraSpec extra_spec;
@@ -8880,12 +8895,13 @@ create_drop(int ac, char **av) {
 void
 bad_sigmoid() {
    error("Bad arguments: expecting -p sigmoid [<time-spec>] <sigmoid-spec> [<tone-specs...>]"
-	 NL "<sigmoid-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>]"
+	 NL "<sigmoid-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
-	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0)."
+	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0),"
+	 NL "  and :S=<val> sets start beat/pulse frequency in Hz (default 10)."
 	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the sequence"
@@ -8961,7 +8977,7 @@ create_sigmoid(int ac, char **av) {
    have_step_mode= 0;
    amp= 1.0;
 
-   // Parse optional flags in any order, including :l= and :h=
+   // Parse optional flags in any order, including :l=, :h= and :S=
    while (1) {
       if (*p == 's' || *p == 'k') {
 	 if (have_step_mode) BAD;
@@ -8995,6 +9011,12 @@ create_sigmoid(int ac, char **av) {
 	    if (p == q) BAD;
 	    continue;
 	 }
+	 if (p[0] == 'S' && p[1] == '=') {
+	    p += 2; q= p;
+	    beat_start= strtod(p, &p);
+	    if (p == q) BAD;
+	    continue;
+	 }
 	 BAD;
       }
       break;
@@ -9005,6 +9027,8 @@ create_sigmoid(int ac, char **av) {
 
    if (ismono && isisochronic)
       error("M monaural mode cannot be combined with '@' isochronic sigmoid specs");
+   if (!(beat_start > 0.0) || !isfinite(beat_start))
+      error("Invalid sigmoid start beat/pulse frequency :S=%g (must be > 0)", beat_start);
 
 #undef BAD
 
@@ -9163,12 +9187,13 @@ bad_curve() {
 	 NL "  mixamp = <expression>, and piecewise variants of carrier/amp/mixamp,"
 	 NL "  param <name> = <value>[m|s],"
 	 NL "  solve <u1>,<u2>,... : <lhs1>=<rhs1> ; <lhs2>=<rhs2> ; ..."
-	 NL "<curve-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:<name>=<value>...]"
+	 NL "<curve-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:<name>=<value>...]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (default is equivalent to 't30,30,3')."
 	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
+	 NL "Use :S=<val> to set start beat/pulse frequency in Hz (default 10)."
 	 NL "Use :<name>=<value> in <curve-spec> to override .sbgf parameters."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>.");
 }
@@ -9285,6 +9310,12 @@ create_curve(int ac, char **av) {
 	 int ni= 0;
 	 char name[CURVE_NAME_MAX];
 	 p++;
+	 if (p[0] == 'S' && p[1] == '=') {
+	    p += 2; q= p;
+	    beat_start= strtod(p, &p);
+	    if (p == q) BAD;
+	    continue;
+	 }
 	 if (!curve_name_char((unsigned char)*p, 1)) BAD;
 	 while (*p && curve_name_char((unsigned char)*p, ni == 0)) {
 	    if (ni >= CURVE_NAME_MAX-1) BAD;
@@ -9310,6 +9341,8 @@ create_curve(int ac, char **av) {
 
    if (ismono && isisochronic)
       error("M monaural mode cannot be combined with '@' isochronic curve specs");
+   if (!(beat_start > 0.0) || !isfinite(beat_start))
+      error("Invalid curve start beat/pulse frequency :S=%g (must be > 0)", beat_start);
 
 #undef BAD
 
