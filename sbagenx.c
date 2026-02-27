@@ -199,6 +199,7 @@ int t_per0(int t0, int t1) ;
 int t_mid(int t0, int t1) ;
 int main(int argc, char **argv) ;
 void status(char *) ;
+void statusSbx(char *) ;
 void dispCurrPer( FILE* ) ;
 void init_sin_table() ;
 void debug(char *fmt, ...) ;
@@ -4754,6 +4755,78 @@ status(char *err) {
   fflush(stderr);
 }
 
+void
+statusSbx(char *err) {
+  int a;
+  char *p= buf, *p0, *p1;
+  double t_sec;
+  int tim_ms;
+  SbxToneSpec tone;
+  char tok[256];
+  size_t aux_n;
+
+  if (opt_Q || !sbx_runtime_active || !sbx_runtime_ctx) return;
+
+#ifdef ANSI_TTY
+  if (tty_erase) p += sprintf(p, "\033[K");
+#endif
+
+  t_sec= sbx_context_time_sec(sbx_runtime_ctx);
+  tim_ms= (int)(t_sec * 1000.0 + 0.5);
+  tim_ms %= H24;
+  if (tim_ms < 0) tim_ms += H24;
+
+  p0= p;
+  *p++= ' '; *p++= ' ';
+  p += sprintTime(p, tim_ms);
+
+  if (SBX_OK == sbx_context_sample_tones(sbx_runtime_ctx, t_sec, t_sec, 1, 0, &tone)) {
+    if (SBX_OK == sbx_format_tone_spec(&tone, tok, sizeof(tok)))
+      p += sprintf(p, " %s", tok);
+  }
+
+  aux_n= sbx_context_aux_tone_count(sbx_runtime_ctx);
+  for (a= 0; a < (int)aux_n; a++) {
+    if (SBX_OK == sbx_context_get_aux_tone(sbx_runtime_ctx, (size_t)a, &tone) &&
+	SBX_OK == sbx_format_tone_spec(&tone, tok, sizeof(tok)))
+      p += sprintf(p, " %s", tok);
+  }
+
+  if (mix_in) {
+    double mix_pct= sbx_context_mix_amp_at(sbx_runtime_ctx, t_sec);
+    if (opt_A) mix_pct *= mix_mod_multiplier(now);
+    p += sprintf(p, " mix/%.2f", mix_pct);
+  }
+
+  {
+    size_t fx_n= sbx_context_mix_effect_count(sbx_runtime_ctx);
+    SbxMixFxSpec fx;
+    for (a= 0; a < (int)fx_n; a++) {
+      if (SBX_OK == sbx_context_get_mix_effect(sbx_runtime_ctx, (size_t)a, &fx) &&
+	  SBX_OK == sbx_format_mix_fx_spec(&fx, tok, sizeof(tok)))
+	p += sprintf(p, " %s", tok);
+    }
+  }
+
+  if (err) p += sprintf(p, " %s", err);
+  p1= p;
+
+#ifndef ANSI_TTY
+  if (p1-p0 > 79) {
+    p1 = p0 + 76;
+    p1 += sprintf(p1, "...");
+  }
+#endif
+
+#ifndef ANSI_TTY
+  while (tty_erase > p-p0) *p++= ' ';
+#endif
+
+  tty_erase= p1-p0;
+  fprintf(stderr, "%s\r", buf);
+  fflush(stderr);
+}
+
 void 				// Display current period details
 dispCurrPer(FILE *fp) {
   int a;
@@ -5765,6 +5838,7 @@ loop() {
      status(0);
   } else if (!opt_Q) {
      warn("SBAGENXLIB runtime active");
+     statusSbx(0);
   }
   
   while (1) {
@@ -5777,11 +5851,17 @@ loop() {
       if (now_lo >= 0x10000) { ms_inc += now_lo >> 16; now_lo &= 0xFFFF; }
       now += ms_inc;
       if (now > H24) now -= H24;
-      if (!sbx_runtime_active && vfast && (c&1)) status(0);
+      if (vfast && (c&1)) {
+	 if (sbx_runtime_active) statusSbx(0);
+	 else status(0);
+      }
     }
 
     if (fast) {
-      if (!sbx_runtime_active && !vfast) status(0);
+      if (!vfast) {
+	 if (sbx_runtime_active) statusSbx(0);
+	 else status(0);
+      }
     }
     else {
       // Synchronize with real clock, gently over the next second or so
@@ -5799,7 +5879,9 @@ loop() {
 	utime= userTime();
 	sprintf(buf, "%d ticks", utime-prev);		// Replaces standard message
       }
-      if (!sbx_runtime_active)
+      if (sbx_runtime_active)
+	 statusSbx(buf);
+      else
 	 status(buf);
     }
   }
