@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 
@@ -24,11 +25,56 @@ public partial class MainWindow : Window
         Plot
     }
 
+    private enum RunMode
+    {
+        BuiltInProgram,
+        ScriptFile
+    }
+
     public MainWindow()
     {
         InitializeComponent();
+        EnsureDefaultSelections();
+        UpdateModeUi();
         UpdateQualityHint(resetValue: true);
         RefreshCommandPreview();
+    }
+
+    private void EnsureDefaultSelections()
+    {
+        if (RunModeComboBox.SelectedIndex < 0)
+        {
+            RunModeComboBox.SelectedIndex = 0;
+        }
+        if (ProgramComboBox.SelectedIndex < 0)
+        {
+            ProgramComboBox.SelectedIndex = 0;
+        }
+        if (PresetComboBox.SelectedIndex < 0)
+        {
+            PresetComboBox.SelectedIndex = 0;
+        }
+        if (OutputFormatComboBox.SelectedIndex < 0)
+        {
+            OutputFormatComboBox.SelectedIndex = 0;
+        }
+        if (Mp3ModeComboBox.SelectedIndex < 0)
+        {
+            Mp3ModeComboBox.SelectedIndex = 0;
+        }
+    }
+
+    private RunMode GetRunMode()
+    {
+        var selected = GetComboSelection(RunModeComboBox, "Built-in Program");
+        return selected.StartsWith("Script", StringComparison.OrdinalIgnoreCase)
+            ? RunMode.ScriptFile
+            : RunMode.BuiltInProgram;
+    }
+
+    private bool IsBuiltInMode()
+    {
+        return GetRunMode() == RunMode.BuiltInProgram;
     }
 
     private async void OnPlayClick(object? sender, RoutedEventArgs e)
@@ -67,8 +113,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnRunModeChanged(object? sender, RoutedEventArgs e)
+    {
+        UpdateModeUi();
+        RefreshCommandPreview();
+    }
+
+    private void OnPresetChanged(object? sender, RoutedEventArgs e)
+    {
+        // Selection alone does not mutate fields.
+    }
+
+    private void OnApplyPresetClick(object? sender, RoutedEventArgs e)
+    {
+        var preset = GetComboSelection(PresetComboBox, "None");
+        ApplyPreset(preset);
+        RefreshCommandPreview();
+    }
+
     private void OnInputsChanged(object? sender, RoutedEventArgs e)
     {
+        UpdateModeUi();
         RefreshCommandPreview();
     }
 
@@ -102,11 +167,18 @@ public partial class MainWindow : Window
         SetStatus("Executable detected");
     }
 
+    private async void OnBrowseScriptFileClick(object? sender, RoutedEventArgs e)
+    {
+        var path = await PickFileAsync("Select Script File", new[] { "*.sbg", "*.*" });
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            ScriptFileTextBox.Text = path;
+        }
+    }
+
     private async void OnBrowseCurveFileClick(object? sender, RoutedEventArgs e)
     {
-        var path = await PickFileAsync(
-            "Select Curve File",
-            new[] { "*.sbgf", "*.*" });
+        var path = await PickFileAsync("Select Curve File", new[] { "*.sbgf", "*.*" });
         if (!string.IsNullOrWhiteSpace(path))
         {
             CurveFileTextBox.Text = path;
@@ -127,11 +199,10 @@ public partial class MainWindow : Window
     private async void OnBrowseOutputFileClick(object? sender, RoutedEventArgs e)
     {
         var fmt = GetComboSelection(OutputFormatComboBox, "wav");
-        var defaultExt = fmt;
         var savePath = await PickSaveFileAsync(
             "Select Output File",
-            $"SBaGenX Output (*.{defaultExt})",
-            new[] { $"*.{defaultExt}", "*.*" });
+            $"SBaGenX Output (*.{fmt})",
+            new[] { $"*.{fmt}", "*.*" });
 
         if (!string.IsNullOrWhiteSpace(savePath))
         {
@@ -244,8 +315,15 @@ public partial class MainWindow : Window
             return false;
         }
 
-        var extraArgs = SplitArgs(ExtraArgsTextBox.Text);
-        args.AddRange(extraArgs);
+        var runMode = GetRunMode();
+
+        if (action == RunAction.Plot && runMode == RunMode.ScriptFile)
+        {
+            error = "Plot is currently available only in Built-in Program mode.";
+            return false;
+        }
+
+        args.AddRange(SplitArgs(ExtraArgsTextBox.Text));
 
         var mixFile = (MixFileTextBox.Text ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(mixFile))
@@ -279,6 +357,18 @@ public partial class MainWindow : Window
         if (action == RunAction.Plot)
         {
             args.Add("-P");
+        }
+
+        if (runMode == RunMode.ScriptFile)
+        {
+            var scriptFile = (ScriptFileTextBox.Text ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(scriptFile))
+            {
+                error = "Script mode requires a .sbg script file.";
+                return false;
+            }
+            args.Add(scriptFile);
+            return true;
         }
 
         var program = GetComboSelection(ProgramComboBox, "drop");
@@ -326,14 +416,13 @@ public partial class MainWindow : Window
     private bool TryAppendEncoderArgs(List<string> args, string format, out string error)
     {
         error = string.Empty;
-        var qualityText = (QualityTextBox.Text ?? string.Empty).Trim();
 
         if (format == "wav")
         {
             return true;
         }
 
-        if (!int.TryParse(qualityText, out var q))
+        if (!int.TryParse((QualityTextBox.Text ?? string.Empty).Trim(), out var q))
         {
             error = "Quality value must be an integer.";
             return false;
@@ -397,7 +486,9 @@ public partial class MainWindow : Window
         var fromField = (ExecutableTextBox.Text ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(fromField))
         {
-            if (Path.IsPathRooted(fromField) || fromField.Contains(Path.DirectorySeparatorChar) || fromField.Contains(Path.AltDirectorySeparatorChar))
+            if (Path.IsPathRooted(fromField) ||
+                fromField.Contains(Path.DirectorySeparatorChar) ||
+                fromField.Contains(Path.AltDirectorySeparatorChar))
             {
                 return fromField;
             }
@@ -438,10 +529,9 @@ public partial class MainWindow : Window
             }
         }
 
-        var inPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
             ? FindInPath("sbagenx.exe") ?? FindInPath("sbagenx")
             : FindInPath("sbagenx");
-        return inPath;
     }
 
     private static string? FindInPath(string executableName)
@@ -477,10 +567,12 @@ public partial class MainWindow : Window
         if (!TryBuildInvocation(RunAction.Play, out var exe, out var args, out var error))
         {
             CommandPreviewTextBox.Text = $"# {error}";
+            UpdateValidationState(error);
             return;
         }
 
         CommandPreviewTextBox.Text = BuildPreviewCommand(exe, args);
+        UpdateValidationState();
     }
 
     private static string BuildPreviewCommand(string executable, IReadOnlyCollection<string> args)
@@ -617,12 +709,184 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateModeUi()
+    {
+        var builtIn = IsBuiltInMode();
+        var isCurve = builtIn && GetComboSelection(ProgramComboBox, "drop") == "curve";
+
+        ConfigTitleTextBlock.Text = builtIn
+            ? "Run Configuration (Built-in Program Mode)"
+            : "Run Configuration (Script Mode)";
+
+        SetEnabled(builtIn,
+            ProgramLabelTextBlock,
+            ProgramComboBox,
+            ProgramSpecLabelTextBlock,
+            ProgramSpecTextBox,
+            TimingLabelTextBlock,
+            TimingTextBox,
+            ToneSpecsLabelTextBlock,
+            ToneSpecsTextBox);
+
+        SetEnabled(!builtIn,
+            ScriptFileLabelTextBlock,
+            ScriptFileTextBox,
+            ScriptBrowseButton);
+
+        SetEnabled(isCurve,
+            CurveFileLabelTextBlock,
+            CurveFileTextBox,
+            CurveBrowseButton);
+
+        SetRunningState(_activeProcess != null && !_activeProcess.HasExited);
+    }
+
+    private static void SetEnabled(bool enabled, params Control[] controls)
+    {
+        foreach (var control in controls)
+        {
+            control.IsEnabled = enabled;
+            control.Opacity = enabled ? 1.0 : 0.55;
+        }
+    }
+
+    private void UpdateValidationState(string? previewError = null)
+    {
+        var issues = new List<string>();
+        var warnings = new List<string>();
+
+        var exe = ResolveExecutable();
+        if (string.IsNullOrWhiteSpace(exe))
+        {
+            issues.Add("Executable not found.");
+        }
+
+        if (GetRunMode() == RunMode.ScriptFile)
+        {
+            if (string.IsNullOrWhiteSpace((ScriptFileTextBox.Text ?? string.Empty).Trim()))
+            {
+                issues.Add("Script mode requires a .sbg file.");
+            }
+        }
+        else
+        {
+            var spec = (ProgramSpecTextBox.Text ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(spec))
+            {
+                issues.Add("Program spec is required.");
+            }
+
+            var tones = SplitArgs(ToneSpecsTextBox.Text);
+            if (tones.Count == 0)
+            {
+                issues.Add("At least one tone spec is required.");
+            }
+
+            var program = GetComboSelection(ProgramComboBox, "drop");
+            if (program == "curve" && string.IsNullOrWhiteSpace((CurveFileTextBox.Text ?? string.Empty).Trim()))
+            {
+                issues.Add("Program 'curve' requires a .sbgf file.");
+            }
+        }
+
+        if (!TryAppendEncoderArgs(new List<string>(), GetComboSelection(OutputFormatComboBox, "wav"), out var qualityError))
+        {
+            warnings.Add(qualityError);
+        }
+
+        if (!string.IsNullOrWhiteSpace(previewError))
+        {
+            warnings.Add(previewError);
+        }
+
+        if (issues.Count > 0)
+        {
+            ValidationTextBlock.Foreground = new SolidColorBrush(Color.Parse("#E67E7E"));
+            ValidationTextBlock.Text = $"Validation: Error - {issues[0]}";
+            return;
+        }
+
+        if (warnings.Count > 0)
+        {
+            ValidationTextBlock.Foreground = new SolidColorBrush(Color.Parse("#E7C06A"));
+            ValidationTextBlock.Text = $"Validation: Warning - {warnings[0]}";
+            return;
+        }
+
+        ValidationTextBlock.Foreground = new SolidColorBrush(Color.Parse("#78C778"));
+        ValidationTextBlock.Text = "Validation: Ready";
+    }
+
+    private void ApplyPreset(string preset)
+    {
+        switch (preset)
+        {
+            case "Drop Relax (00ls+, 2h)":
+                RunModeComboBox.SelectedIndex = 0;
+                ProgramComboBox.SelectedIndex = 0;
+                ProgramSpecTextBox.Text = "00ls+";
+                TimingTextBox.Text = "t30,90,0";
+                ToneSpecsTextBox.Text = "mix/99";
+                break;
+
+            case "Sigmoid Default (00ls+)":
+                RunModeComboBox.SelectedIndex = 0;
+                ProgramComboBox.SelectedIndex = 1;
+                ProgramSpecTextBox.Text = "00ls+:l=0.125:h=0";
+                TimingTextBox.Text = "t30,30,0";
+                ToneSpecsTextBox.Text = "mix/99";
+                break;
+
+            case "Slide Focus (200+10/1)":
+                RunModeComboBox.SelectedIndex = 0;
+                ProgramComboBox.SelectedIndex = 2;
+                ProgramSpecTextBox.Text = "200+10/1";
+                TimingTextBox.Text = "t60";
+                ToneSpecsTextBox.Text = "mix/99";
+                break;
+
+            case "Curve Example (sigmoid-like)":
+                RunModeComboBox.SelectedIndex = 0;
+                ProgramComboBox.SelectedIndex = 3;
+                ProgramSpecTextBox.Text = "00ls:l=0.2:h=0";
+                TimingTextBox.Text = "t30,30,0";
+                ToneSpecsTextBox.Text = "mix/99";
+                CurveFileTextBox.Text = FindExistingPath(
+                    Path.Combine(Environment.CurrentDirectory, "examples", "basics", "curve-sigmoid-like.sbgf"),
+                    Path.Combine(Environment.CurrentDirectory, "..", "examples", "basics", "curve-sigmoid-like.sbgf")) ?? string.Empty;
+                break;
+        }
+
+        UpdateModeUi();
+    }
+
+    private static string? FindExistingPath(params string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                return Path.GetFullPath(candidate);
+            }
+        }
+        return null;
+    }
+
     private void SetRunningState(bool running)
     {
-        PlayButton.IsEnabled = !running;
-        ExportButton.IsEnabled = !running;
-        PlotButton.IsEnabled = !running;
-        StopButton.IsEnabled = running;
+        if (running)
+        {
+            PlayButton.IsEnabled = false;
+            ExportButton.IsEnabled = false;
+            PlotButton.IsEnabled = false;
+            StopButton.IsEnabled = true;
+            return;
+        }
+
+        PlayButton.IsEnabled = true;
+        ExportButton.IsEnabled = true;
+        PlotButton.IsEnabled = IsBuiltInMode();
+        StopButton.IsEnabled = false;
     }
 
     private void SetStatus(string status)
