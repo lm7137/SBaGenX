@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 9   /* public API contract revision */
+#define SBX_API_VERSION 10  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -115,6 +115,14 @@ typedef struct {
 } SbxToneSpec;
 
 typedef struct {
+  double start;   /* cycle-relative start phase (0..1) */
+  double duty;    /* cycle-relative on-window width (0..1) */
+  double attack;  /* attack share of on-window (0..1) */
+  double release; /* release share of on-window (0..1) */
+  int edge_mode;  /* 0 hard, 1 linear, 2 smoothstep, 3 smootherstep */
+} SbxIsoEnvelopeSpec;
+
+typedef struct {
   double time_sec; /* keyframe timestamp, >= 0, increasing */
   SbxToneSpec tone;
   int interp; /* interpolation mode to next keyframe: SBX_INTERP_* */
@@ -141,6 +149,9 @@ void sbx_default_engine_config(SbxEngineConfig *cfg);
 
 /* Fill tone with default binaural-safe values. */
 void sbx_default_tone_spec(SbxToneSpec *tone);
+
+/* Fill spec with library-default isochronic envelope values. */
+void sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec);
 
 /* ----- Engine API ----- */
 
@@ -366,6 +377,49 @@ int sbx_context_sample_tones(SbxContext *ctx,
                              size_t sample_count,
                              double *out_t_sec,
                              SbxToneSpec *out_tones);
+
+/*
+ * Sample effective program beat/pulse frequency over [t0_sec, t1_sec].
+ * - sample_count must be >= 1.
+ * - out_hz must have sample_count elements.
+ * - out_t_sec is optional (may be NULL).
+ * - Looping keyframed programs are wrapped to program duration when sampled.
+ */
+int sbx_context_sample_program_beat(SbxContext *ctx,
+                                    double t0_sec,
+                                    double t1_sec,
+                                    size_t sample_count,
+                                    double *out_t_sec,
+                                    double *out_hz);
+
+/*
+ * Sample one mixam cycle for plotting/inspection.
+ * - fx must be an SBX_MIXFX_AM spec with valid mixam fields.
+ * - rate_hz controls the cycle duration on the time axis.
+ * - at least one of out_envelope/out_gain must be non-NULL.
+ * - out_t_sec is optional (may be NULL).
+ */
+int sbx_sample_mixam_cycle(const SbxMixFxSpec *fx,
+                           double rate_hz,
+                           size_t sample_count,
+                           double *out_t_sec,
+                           double *out_envelope,
+                           double *out_gain);
+
+/*
+ * Sample one isochronic cycle for plotting/inspection.
+ * - tone must be an isochronic tone with beat_hz > 0.
+ * - if env is NULL, library runtime defaults are used:
+ *   start=0, duty=tone->duty_cycle, attack=0.15, release=0.15, edge=2.
+ * - at least one of out_envelope/out_wave must be non-NULL.
+ * - out_t_sec is optional (may be NULL).
+ */
+int sbx_sample_isochronic_cycle(const SbxToneSpec *tone,
+                                const SbxIsoEnvelopeSpec *env,
+                                size_t sample_count,
+                                double *out_t_sec,
+                                double *out_envelope,
+                                double *out_wave);
 
 /* Render interleaved stereo float frames from context source. */
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);

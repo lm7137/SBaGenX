@@ -130,6 +130,26 @@ int rc = sbx_context_sample_tones(ctx, 0.0, 1800.0, 256, tsec, curve);
 
 Use this to drive GUI plots directly from library-evaluated tone values.
 
+Additional plot-data helpers:
+
+```c
+double beat_hz[256];
+double mix_env[256], mix_gain[256];
+double iso_env[256], iso_wave[256];
+SbxToneSpec iso_tone;
+SbxMixFxSpec fx;
+SbxIsoEnvelopeSpec iso;
+
+sbx_context_sample_program_beat(ctx, 0.0, 1800.0, 256, tsec, beat_hz);
+
+sbx_parse_mix_fx_spec("mixam:1:m=cos:s=0:f=0.45", SBX_WAVE_SINE, &fx);
+sbx_sample_mixam_cycle(&fx, 1.0, 256, tsec, mix_env, mix_gain);
+
+sbx_parse_tone_spec("200@1/100", &iso_tone);
+sbx_default_iso_envelope_spec(&iso);
+sbx_sample_isochronic_cycle(&iso_tone, &iso, 256, tsec, iso_env, iso_wave);
+```
+
 Minimal SBG Timing Subset Load
 ------------------------------
 

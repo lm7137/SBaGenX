@@ -219,6 +219,10 @@ them from render output.
 7) Plot/data sampling support
 
 - `sbx_context_sample_tones(...)`
+- `sbx_context_sample_program_beat(...)`
+- `sbx_sample_mixam_cycle(...)`
+- `sbx_sample_isochronic_cycle(...)`
+- `sbx_default_iso_envelope_spec(...)`
 
 `sbx_context_sample_tones` evaluates the currently loaded source over a caller
 provided time range (`[t0_sec, t1_sec]`) into `sample_count` tone samples.
@@ -227,6 +231,18 @@ provided time range (`[t0_sec, t1_sec]`) into `sample_count` tone samples.
 - For looped keyframes, evaluation wraps to program duration.
 - Does not advance context render clock (`sbx_context_time_sec`).
 - Returns optional sample-time output via `out_t_sec` when non-NULL.
+
+`sbx_context_sample_program_beat` samples the effective program beat/pulse
+frequency over a time range using the same keyframe evaluation logic as the
+runtime adapter. This is the preferred frontend API for beat-vs-time graphs.
+
+`sbx_sample_mixam_cycle` samples one cycle of a `mixam` envelope plus the
+derived gain curve (`f + (1-f) * envelope`) for plotting/inspection.
+
+`sbx_sample_isochronic_cycle` samples one isochronic cycle into envelope and
+waveform arrays. If no explicit `SbxIsoEnvelopeSpec` is provided, the helper
+uses the library runtime defaults (`start=0`, `duty=tone->duty_cycle`,
+`attack=0.15`, `release=0.15`, `edge=2`).
 
 Minimal Lifecycle
 -----------------

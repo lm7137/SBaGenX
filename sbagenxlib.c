@@ -2126,6 +2126,16 @@ sbx_default_tone_spec(SbxToneSpec *tone) {
   tone->duty_cycle = 0.4;
 }
 
+void
+sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec) {
+  if (!spec) return;
+  spec->start = 0.0;
+  spec->duty = 0.4;
+  spec->attack = 0.15;
+  spec->release = 0.15;
+  spec->edge_mode = 2;
+}
+
 SbxEngine *
 sbx_engine_create(const SbxEngineConfig *cfg_in) {
   SbxEngine *eng;
@@ -3783,24 +3793,36 @@ ctx_eval_sbg_mix_effects(SbxContext *ctx, double t_sec, SbxMixFxSpec *out_fxv, s
 }
 
 static double
-sbx_mixam_gain_step(SbxMixFxState *fx, double sr, double res_hz) {
-  double p;
+sbx_mixam_env_at_phase(const SbxMixFxSpec *fx, double phase) {
+  if (!fx) return 1.0;
+  phase = sbx_dsp_wrap_unit(phase);
+  if (fx->mixam_mode == SBX_MIXAM_MODE_COS) {
+    double mix_phase = sbx_dsp_wrap_unit(phase + fx->mixam_start);
+    return 0.5 * (1.0 + cos(SBX_TAU * mix_phase));
+  }
+  return sbx_dsp_iso_mod_factor_custom(phase,
+                                       fx->mixam_start,
+                                       fx->mixam_duty,
+                                       fx->mixam_attack,
+                                       fx->mixam_release,
+                                       fx->mixam_edge_mode);
+}
+
+static double
+sbx_mixam_gain_at_phase(const SbxMixFxSpec *fx, double phase) {
+  double env;
   double g;
+  if (!fx) return 1.0;
+  env = sbx_mixam_env_at_phase(fx, phase);
+  g = fx->mixam_floor + (1.0 - fx->mixam_floor) * env;
+  return sbx_dsp_clamp(g, fx->mixam_floor, 1.0);
+}
+
+static double
+sbx_mixam_gain_step(SbxMixFxState *fx, double sr, double res_hz) {
   if (!fx || sr <= 0.0 || !isfinite(res_hz) || res_hz <= 0.0) return 1.0;
   fx->phase = sbx_dsp_wrap_unit(fx->phase + res_hz / sr);
-  if (fx->spec.mixam_mode == SBX_MIXAM_MODE_COS) {
-    double ph = sbx_dsp_wrap_unit(fx->phase + fx->spec.mixam_start);
-    p = 0.5 * (1.0 + cos(SBX_TAU * ph));
-  } else {
-    p = sbx_dsp_iso_mod_factor_custom(fx->phase,
-                                      fx->spec.mixam_start,
-                                      fx->spec.mixam_duty,
-                                      fx->spec.mixam_attack,
-                                      fx->spec.mixam_release,
-                                      fx->spec.mixam_edge_mode);
-  }
-  g = fx->spec.mixam_floor + (1.0 - fx->spec.mixam_floor) * p;
-  return sbx_dsp_clamp(g, fx->spec.mixam_floor, 1.0);
+  return sbx_mixam_gain_at_phase(&fx->spec, fx->phase);
 }
 
 static void
@@ -4234,6 +4256,36 @@ sbx_context_duration_sec(const SbxContext *ctx) {
 }
 
 int
+sbx_context_sample_program_beat(SbxContext *ctx,
+                                double t0_sec,
+                                double t1_sec,
+                                size_t sample_count,
+                                double *out_t_sec,
+                                double *out_hz) {
+  size_t i;
+  if (!ctx || !ctx->eng || !out_hz || sample_count == 0)
+    return SBX_EINVAL;
+  if (!ctx->loaded) {
+    set_ctx_error(ctx, "no tone/program loaded");
+    return SBX_ENOTREADY;
+  }
+  if (!isfinite(t0_sec) || !isfinite(t1_sec)) {
+    set_ctx_error(ctx, "sampling times must be finite");
+    return SBX_EINVAL;
+  }
+
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double ts = sbx_lerp(t0_sec, t1_sec, u);
+    out_hz[i] = ctx_eval_program_beat_hz(ctx, ts);
+    if (out_t_sec) out_t_sec[i] = ts;
+  }
+
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
 sbx_context_sample_tones(SbxContext *ctx,
                          double t0_sec,
                          double t1_sec,
@@ -4284,6 +4336,86 @@ sbx_context_sample_tones(SbxContext *ctx,
   }
   ctx->kf_seg = seg_saved;
   set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
+sbx_sample_mixam_cycle(const SbxMixFxSpec *fx,
+                       double rate_hz,
+                       size_t sample_count,
+                       double *out_t_sec,
+                       double *out_envelope,
+                       double *out_gain) {
+  size_t i;
+  if (!fx || sample_count == 0) return SBX_EINVAL;
+  if (!out_envelope && !out_gain) return SBX_EINVAL;
+  if (!isfinite(rate_hz) || rate_hz <= 0.0) return SBX_EINVAL;
+  if (fx->type != SBX_MIXFX_AM) return SBX_EINVAL;
+  if (sbx_validate_mixam_fields(fx) != SBX_OK) return SBX_EINVAL;
+
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double env = sbx_mixam_env_at_phase(fx, u);
+    if (out_t_sec) out_t_sec[i] = u / rate_hz;
+    if (out_envelope) out_envelope[i] = env;
+    if (out_gain) out_gain[i] = sbx_mixam_gain_at_phase(fx, u);
+  }
+
+  return SBX_OK;
+}
+
+int
+sbx_sample_isochronic_cycle(const SbxToneSpec *tone_in,
+                            const SbxIsoEnvelopeSpec *env,
+                            size_t sample_count,
+                            double *out_t_sec,
+                            double *out_envelope,
+                            double *out_wave) {
+  SbxToneSpec tone;
+  SbxIsoEnvelopeSpec use_env;
+  char err[160];
+  size_t i;
+
+  if (!tone_in || sample_count == 0) return SBX_EINVAL;
+  if (!out_envelope && !out_wave) return SBX_EINVAL;
+
+  tone = *tone_in;
+  if (normalize_tone(&tone, err, sizeof(err)) != SBX_OK) return SBX_EINVAL;
+  if (tone.mode != SBX_TONE_ISOCHRONIC) return SBX_EINVAL;
+  if (!isfinite(tone.beat_hz) || tone.beat_hz <= 0.0) return SBX_EINVAL;
+
+  if (env) {
+    use_env = *env;
+  } else {
+    sbx_default_iso_envelope_spec(&use_env);
+    use_env.duty = tone.duty_cycle;
+  }
+
+  if (!isfinite(use_env.start) || use_env.start < 0.0 || use_env.start > 1.0) return SBX_EINVAL;
+  if (!isfinite(use_env.duty) || use_env.duty < 0.0 || use_env.duty > 1.0) return SBX_EINVAL;
+  if (!isfinite(use_env.attack) || use_env.attack < 0.0 || use_env.attack > 1.0) return SBX_EINVAL;
+  if (!isfinite(use_env.release) || use_env.release < 0.0 || use_env.release > 1.0) return SBX_EINVAL;
+  if (use_env.edge_mode < 0 || use_env.edge_mode > 3) return SBX_EINVAL;
+  if ((use_env.attack + use_env.release) > (1.0 + 1e-12)) return SBX_EINVAL;
+
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double t_sec = u / tone.beat_hz;
+    double env_sample = sbx_dsp_iso_mod_factor_custom(u,
+                                                      use_env.start,
+                                                      use_env.duty,
+                                                      use_env.attack,
+                                                      use_env.release,
+                                                      use_env.edge_mode);
+    if (out_t_sec) out_t_sec[i] = t_sec;
+    if (out_envelope) out_envelope[i] = env_sample;
+    if (out_wave) {
+      double carr = 0.0;
+      engine_wave_sample(tone.waveform, SBX_TAU * tone.carrier_hz * t_sec, &carr);
+      out_wave[i] = tone.amplitude * env_sample * carr;
+    }
+  }
+
   return SBX_OK;
 }
 

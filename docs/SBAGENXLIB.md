@@ -563,10 +563,23 @@ Phase 3.78
 - Add regression checks for shipped shared-library artifacts and Debian
   package payload contents.
 
+Phase 3.79
+- Add library-native plotting sample APIs so frontends can obtain plot data
+  directly from `sbagenxlib` instead of shelling out to the CLI or reimplementing
+  the plot math:
+  - `sbx_context_sample_program_beat(...)`
+  - `sbx_sample_mixam_cycle(...)`
+  - `sbx_sample_isochronic_cycle(...)`
+  - `sbx_default_iso_envelope_spec(...)`
+- Refactor mixam envelope/gain evaluation into reusable pure helpers shared by
+  runtime DSP and the new cycle-sampling API.
+- Add direct regression coverage for program-beat sampling, raised-cosine
+  mixam sampling, and isochronic single-cycle sampling.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.68 Slice)
+Current API (Phase 3.79 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -1021,6 +1034,14 @@ Shared Library Artifact Smoke Test (Phase 3.78)
 ```bash
 tests/sbagenxlib/test_dist_shared_library_artifacts.sh
 tests/sbagenxlib/test_deb_library_payload.sh
+```
+
+Plot Sampling API Smoke Test (Phase 3.79)
+-----------------------------------------
+
+```bash
+gcc -O2 -I. tests/sbagenxlib/test_plot_sampling_api.c sbagenxlib.c -lm -o /tmp/test_plot_sampling_api
+/tmp/test_plot_sampling_api
 ```
 
 Notes:
