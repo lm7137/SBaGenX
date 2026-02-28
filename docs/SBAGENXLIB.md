@@ -460,6 +460,16 @@ Phase 3.69
   in the frontend layer while letting many historical `.sbg` examples route
   through the library without falling back to the legacy parser.
 
+Phase 3.70
+- Add a real-example native bridge smoke corpus for `.sbg` files already known
+  to route through `sbagenxlib`.
+- Cover representative historical examples for:
+  - multivoice named tone-sets,
+  - legacy `waveNN` custom envelopes,
+  - direct example files shipped in the repository.
+- Use this corpus as the regression floor while investigating the remaining
+  historical examples that still require fallback.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -858,6 +868,13 @@ Seq Backend Safe-Preamble Bridge Smoke Test (Phase 3.69)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_safe_preamble_subset.sh
+```
+
+Seq Backend Real-Example Corpus Smoke Test (Phase 3.70)
+-------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_real_examples_subset.sh
 ```
 
 Notes:
