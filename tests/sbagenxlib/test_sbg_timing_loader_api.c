@@ -77,6 +77,12 @@ main(void) {
       "23:59:59 off ->\n"
       "00:00:00 base ->\n"
       "00:00:02 off\n";
+  const char *sbg_equal_time_text =
+      "a: 180+0/20\n"
+      "b: 220+0/20\n"
+      "00:00 a ->\n"
+      "00:00 b ->\n"
+      "00:00:01 a\n";
   const char *sbg_multivoice_named_text =
       "solo: 180+0/20\n"
       "duo: 180+0/20 260+0/20\n"
@@ -229,6 +235,17 @@ main(void) {
     fail("day-wrap keyframe #1 time mismatch");
   if (sbx_context_get_keyframe(ctx, 2, &kf) != SBX_OK || fabs(kf.time_sec - 86402.0) > 1e-9)
     fail("day-wrap keyframe #2 time mismatch");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_equal_time_text, 0);
+  if (rc != SBX_OK) fail("equal-time sbg timing load failed");
+  if (sbx_context_keyframe_count(ctx) != 3)
+    fail("equal-time sbg timing should preserve all keyframes");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK || fabs(kf.time_sec - 0.0) > 1e-9)
+    fail("equal-time keyframe #0 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 0.0) > 1e-9)
+    fail("equal-time keyframe #1 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 2, &kf) != SBX_OK || fabs(kf.time_sec - 1.0) > 1e-9)
+    fail("equal-time keyframe #2 time mismatch");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_named_text, 0);
   if (rc != SBX_OK) fail("multivoice named sbg timing load failed");

@@ -509,6 +509,17 @@ Phase 3.73
   around-midnight example files, and it retires the largest remaining
   incompatibility bucket in the forced-native corpus.
 
+Phase 3.74
+- Relax native keyframe validation from strictly increasing timestamps to
+  non-decreasing timestamps:
+  - preserve adjacent equal-time keyframes loaded from historical `.sbg`
+    files,
+  - keep the evaluation rules already present for zero-duration segments,
+  - apply the same tolerance to derived native mix timelines.
+- This restores another legacy sequencing pattern used in historical block and
+  chord-transition examples, where one state ends and the next begins at the
+  same wall-clock instant.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -931,6 +942,14 @@ tests/sbagenxlib/test_seq_backend_safe_preamble_subset.sh
 ```
 
 Seq Backend Real-Example Corpus Smoke Test (Phase 3.73)
+-------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_real_examples_subset.sh
+tests/sbagenxlib/test_sbg_timing_loader_api.c
+```
+
+Seq Backend Real-Example Corpus Smoke Test (Phase 3.74)
 -------------------------------------------------------
 
 ```bash

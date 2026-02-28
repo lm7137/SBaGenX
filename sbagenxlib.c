@@ -1354,9 +1354,9 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
       set_ctx_error(ctx, "keyframe time_sec must be finite and >= 0");
       return SBX_EINVAL;
     }
-    if (i > 0 && !(copy[i].time_sec > copy[i - 1].time_sec)) {
+    if (i > 0 && copy[i].time_sec < copy[i - 1].time_sec) {
       free(copy);
-      set_ctx_error(ctx, "keyframe time_sec values must be strictly increasing");
+      set_ctx_error(ctx, "keyframe time_sec values must be non-decreasing");
       return SBX_EINVAL;
     }
     if (copy[i].interp != SBX_INTERP_LINEAR &&
@@ -3673,10 +3673,10 @@ ctx_set_sbg_mix_effect_keyframes_internal(SbxContext *ctx,
       set_ctx_error(ctx, "sbg mix-effect keyframe time_sec must be finite and >= 0");
       return SBX_EINVAL;
     }
-    if (i > 0 && !(copy[i].time_sec > copy[i - 1].time_sec)) {
+    if (i > 0 && copy[i].time_sec < copy[i - 1].time_sec) {
       free(copy);
       free(states);
-      set_ctx_error(ctx, "sbg mix-effect keyframe time_sec values must be strictly increasing");
+      set_ctx_error(ctx, "sbg mix-effect keyframe time_sec values must be non-decreasing");
       return SBX_EINVAL;
     }
     if (copy[i].interp != SBX_INTERP_LINEAR && copy[i].interp != SBX_INTERP_STEP) {
@@ -4012,9 +4012,9 @@ sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
         set_ctx_error(ctx, "mix amp keyframe time_sec must be finite and >= 0");
         return SBX_EINVAL;
       }
-      if (i > 0 && !(copy[i].time_sec > copy[i - 1].time_sec)) {
+      if (i > 0 && copy[i].time_sec < copy[i - 1].time_sec) {
         free(copy);
-        set_ctx_error(ctx, "mix amp keyframe time_sec values must be strictly increasing");
+        set_ctx_error(ctx, "mix amp keyframe time_sec values must be non-decreasing");
         return SBX_EINVAL;
       }
       if (copy[i].interp != SBX_INTERP_LINEAR &&
