@@ -405,10 +405,27 @@ Phase 3.64
   - evaluate `mix/<amp>` and mix effects over time inside `sbagenxlib`
     instead of dropping back to the legacy CLI runtime.
 
+Phase 3.65
+- Remove the native `.sbg` loader's fixed six-token ceiling for timeline
+  entries and block entries.
+- Let direct `.sbg` token lists scale to the same multivoice/mix-slot limits
+  already enforced by `SBX_MAX_SBG_VOICES` and `SBX_MAX_SBG_MIXFX`.
+- Add loader and CLI bridge regression coverage for long multivoice lines so
+  real `.sbg` content is no longer rejected by an artificial parser limit.
+
+Phase 3.66
+- Add library-side mix-content introspection:
+  - `sbx_context_has_mix_amp_control()`
+  - `sbx_context_has_mix_effects()`
+- Use those hooks in the CLI/runtime bridge so native-loaded `.sbg` / `libsbg`
+  content gets the same mix-stream validation path as legacy sequence loading.
+- Add regression coverage for native `sbagenxlib` sequence files that carry
+  mix effects but are run without an active mix input stream.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.64 Slice)
+Current API (Phase 3.66 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -453,6 +470,8 @@ Public header: `sbagenxlib.h`
   - `sbx_context_set_mix_amp_keyframes()`
   - `sbx_context_configure_runtime()`
   - `sbx_context_mix_amp_at()`
+  - `sbx_context_has_mix_amp_control()`
+  - `sbx_context_has_mix_effects()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_get_keyframe()`
   - `sbx_context_duration_sec()`
@@ -536,6 +555,9 @@ SBG timing subset form (Phase 3.4):
     - with optional transition/interp tokens, e.g. `==` / `->` / `step`.
   - direct timeline and block-entry token lists may mix normal tone tokens
     with native `mix/<amp>` / mix-effect tokens on the same line (Phase 3.64).
+  - direct timeline and block-entry tokenization is no longer capped at six
+    whitespace tokens; long multivoice lines now scale to the native loader's
+    voice/effect capacities (Phase 3.65).
 - Extended timeline time forms (Phase 3.54):
   - `NOW`
   - `NOW+HH:MM[:SS][+HH:MM[:SS]...]`
@@ -745,6 +767,20 @@ Seq Backend Nested-Block Subset Bridge Smoke Test (Phase 3.56)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_nested_block_subset.sh
+```
+
+Seq Backend Many-Token Subset Bridge Smoke Test (Phase 3.65)
+------------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_many_tokens_subset.sh
+```
+
+Seq Backend MixFX-Requires-Mix Smoke Test (Phase 3.66)
+------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_mixfx_requires_mix.sh
 ```
 
 Notes:

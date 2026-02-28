@@ -149,11 +149,17 @@ These are designed so front-ends can share parser semantics with CLI code.
 - `sbx_context_apply_mix_effects(...)`
 - `sbx_context_set_mix_amp_keyframes(...)`
 - `sbx_context_mix_amp_at(...)`
+- `sbx_context_has_mix_amp_control(...)`
+- `sbx_context_has_mix_effects(...)`
 - `sbx_context_mix_stream_sample(...)`
 - `sbx_context_configure_runtime(...)`
 
 `sbx_context_configure_runtime` is the one-call setup path for mix keyframes,
 mix effects, and auxiliary tones.
+
+`sbx_context_has_mix_amp_control` and `sbx_context_has_mix_effects` are useful
+when a frontend has loaded native `.sbg`/`libsbg` content and needs to know
+whether the loaded context depends on an external mix stream.
 
 7) Plot/data sampling support
 
@@ -197,6 +203,15 @@ Supported tone forms include:
 
 `libsbg` subset loader currently supports HH:MM[:SS], NOW/relative forms,
 named tone-sets, block definitions, and nested block invocation.
+
+Current native `.sbg` notes:
+
+- direct timeline entries and block entries are not artificially capped at six
+  whitespace tokens; they scale to the library's native multivoice/mix-slot
+  limits,
+- native-loaded `.sbg` content may include explicit mix control/effects, and
+  frontends can detect that through
+  `sbx_context_has_mix_amp_control()` / `sbx_context_has_mix_effects()`.
 
 See Also
 --------
