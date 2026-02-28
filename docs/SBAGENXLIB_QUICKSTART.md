@@ -7,9 +7,17 @@ Prerequisites
 -------------
 
 - `sbagenxlib.h`
-- static library built by project scripts:
-  - Linux: `dist/libsbagenx-linux64.a`
-  - Windows: `dist/libsbagenx-win64.a` (when available from Windows build)
+- library built by project scripts:
+  - Linux shared:
+    - `dist/libsbagenx.so`
+    - `dist/pkgconfig/sbagenxlib.pc`
+  - Linux static:
+    - `dist/libsbagenx-linux64.a`
+  - Windows:
+    - `dist/sbagenxlib-win64.dll`
+    - `dist/libsbagenx-win64.dll.a`
+  - macOS:
+    - `dist/libsbagenx.dylib`
 - math library (`-lm`) when linking on POSIX.
 
 Compile/Link (Linux)
@@ -18,6 +26,24 @@ Compile/Link (Linux)
 ```bash
 gcc -O2 -I. your_app.c dist/libsbagenx-linux64.a -lm -o your_app
 ```
+
+Compile/Link (Linux shared, pkg-config)
+---------------------------------------
+
+```bash
+gcc -O2 your_app.c $(PKG_CONFIG_PATH=dist/pkgconfig pkg-config --cflags --libs sbagenxlib) -o your_app
+```
+
+Installable Package (Debian/Ubuntu)
+-----------------------------------
+
+After running `linux-build-sbagenx.sh` and `linux-create-deb.sh`, the generated
+package installs:
+
+- `sbagenx` into `/usr/bin`
+- `sbagenxlib.h` and `sbagenlib.h` into `/usr/include`
+- `libsbagenx.so*` and `libsbagenx.a` into `/usr/lib/<multiarch>`
+- `sbagenxlib.pc` into `/usr/lib/<multiarch>/pkgconfig`
 
 Minimal Render Example
 ----------------------

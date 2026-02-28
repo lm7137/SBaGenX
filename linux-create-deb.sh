@@ -92,6 +92,23 @@ detect_deb_arch_from_binary() {
     fi
 }
 
+map_deb_arch_to_multiarch_libdir() {
+    case "$1" in
+        amd64)
+            echo "x86_64-linux-gnu"
+            ;;
+        i386)
+            echo "i386-linux-gnu"
+            ;;
+        arm64)
+            echo "aarch64-linux-gnu"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         -b|--binary)
@@ -209,6 +226,7 @@ fi
 
 PKG_FULL_VERSION="${DEB_VERSION}-${DEB_REVISION}"
 MAINTAINER="${SBAGENX_DEB_MAINTAINER:-$MAINTAINER_DEFAULT}"
+MULTIARCH_LIBDIR="$(map_deb_arch_to_multiarch_libdir "$DEB_ARCH")"
 
 if [ -z "$OUTPUT_DEB" ]; then
     OUTPUT_DEB="dist/${PKG_NAME}_${PKG_FULL_VERSION}_${DEB_ARCH}.deb"
@@ -219,6 +237,7 @@ STAGE_DIR="${BUILD_ROOT}/stage"
 
 info "Using binary: $BINARY_PATH"
 info "Debian architecture: $DEB_ARCH"
+info "Multiarch library dir: /usr/lib/${MULTIARCH_LIBDIR}"
 info "Package version: $PKG_FULL_VERSION"
 info "Output package: $OUTPUT_DEB"
 
@@ -226,6 +245,9 @@ rm -rf "$STAGE_DIR"
 
 create_dir_if_not_exists "$STAGE_DIR/DEBIAN"
 create_dir_if_not_exists "$STAGE_DIR/usr/bin"
+create_dir_if_not_exists "$STAGE_DIR/usr/include"
+create_dir_if_not_exists "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}"
+create_dir_if_not_exists "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/pkgconfig"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/docs"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/examples"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/scripts"
@@ -234,6 +256,49 @@ create_dir_if_not_exists "$STAGE_DIR/usr/share/doc/${PKG_NAME}"
 
 # Program binary
 cp "$BINARY_PATH" "$STAGE_DIR/usr/bin/${APP_NAME}"
+
+# Library development/runtime artifacts
+if [ -f "dist/include/sbagenxlib.h" ]; then
+    cp "dist/include/sbagenxlib.h" "$STAGE_DIR/usr/include/"
+fi
+if [ -f "dist/include/sbagenlib.h" ]; then
+    cp "dist/include/sbagenlib.h" "$STAGE_DIR/usr/include/"
+fi
+
+STATIC_ARCHIVE=""
+case "$DEB_ARCH" in
+    amd64)
+        [ -f "dist/libsbagenx-linux64.a" ] && STATIC_ARCHIVE="dist/libsbagenx-linux64.a"
+        ;;
+    i386)
+        [ -f "dist/libsbagenx-linux32.a" ] && STATIC_ARCHIVE="dist/libsbagenx-linux32.a"
+        ;;
+    arm64)
+        [ -f "dist/libsbagenx-linux-arm64.a" ] && STATIC_ARCHIVE="dist/libsbagenx-linux-arm64.a"
+        ;;
+esac
+
+if [ -n "$STATIC_ARCHIVE" ]; then
+    cp "$STATIC_ARCHIVE" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/libsbagenx.a"
+fi
+
+if [ -L "dist/libsbagenx.so" ] || [ -f "dist/libsbagenx.so" ]; then
+    cp -a "dist/libsbagenx.so" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/"
+fi
+SO_MAJOR_LINK=$(find dist -maxdepth 1 -type l -name 'libsbagenx.so.*' | head -n 1)
+if [ -n "$SO_MAJOR_LINK" ]; then
+    cp -a "$SO_MAJOR_LINK" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/"
+fi
+SO_REAL=$(find dist -maxdepth 1 -type f -name 'libsbagenx.so.*' | head -n 1)
+if [ -n "$SO_REAL" ]; then
+    cp "$SO_REAL" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/"
+fi
+
+if [ -f "dist/pkgconfig/sbagenxlib.pc" ]; then
+    sed "s|^libdir=.*|libdir=\${exec_prefix}/lib/${MULTIARCH_LIBDIR}|" \
+        "dist/pkgconfig/sbagenxlib.pc" \
+        > "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/pkgconfig/sbagenxlib.pc"
+fi
 
 # Project assets/resources
 if [ -d docs ]; then
@@ -302,6 +367,9 @@ Description: Sequenced Brainwave Generator command-line synthesizer
  SBaGenX is a command-line tool for generating binaural beats,
  isochronic tones, and scripted brainwave sessions.
  It is a continuation of the SBaGen lineage for modern systems.
+ .
+ This package also installs the reusable sbagenxlib C library,
+ public headers, and pkg-config metadata for frontend/binding development.
 CONTROL
 
 # Optional package metadata integrity list.

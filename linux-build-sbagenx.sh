@@ -32,6 +32,7 @@ TREMOR_LIB_PATH_ARM64="libs/linux-arm64-libvorbisidec.a"
 
 # Get the version number from the VERSION file
 VERSION=$(cat VERSION)
+SO_MAJOR=$(printf '%s' "$VERSION" | sed -n 's/^\([0-9][0-9]*\).*/\1/p')
 PLOT_SCRIPT_SRC="scripts/sbagenx_plot.py"
 
 # Skip 32-bit build on ARM64
@@ -179,6 +180,7 @@ rm -f sbagenx.tmp.c
 section_header "Building sbagenxlib static libraries..."
 create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
+create_dir_if_not_exists "dist/pkgconfig"
 
 SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
 
@@ -196,6 +198,30 @@ if [ $SKIP_32BIT = 0 ]; then
     fi
 fi
 
+section_header "Building sbagenxlib shared libraries..."
+if [ -z "$SO_MAJOR" ]; then
+    warning "Could not derive shared library major version from VERSION='$VERSION'"
+    SO_MAJOR="0"
+fi
+
+if [ $SKIP_32BIT = 0 ]; then
+    gcc $SBX_LIB_CFLAGS -fPIC -m32 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux32.pic.o
+    if [ $? -eq 0 ]; then
+        gcc -shared -m32 -Wl,-soname,libsbagenx-linux32.so.$SO_MAJOR \
+            -o dist/libsbagenx-linux32.so.$VERSION \
+            build/sbagenxlib/sbagenxlib-linux32.pic.o -lm
+        if [ $? -eq 0 ]; then
+            ln -sfn "libsbagenx-linux32.so.$VERSION" dist/libsbagenx-linux32.so.$SO_MAJOR
+            ln -sfn "libsbagenx-linux32.so.$SO_MAJOR" dist/libsbagenx-linux32.so
+            success "Created sbagenxlib shared library: dist/libsbagenx-linux32.so.$VERSION"
+        else
+            warning "Failed to link dist/libsbagenx-linux32.so.$VERSION"
+        fi
+    else
+        warning "Failed to compile PIC sbagenxlib for 32-bit"
+    fi
+fi
+
 if [ "$HOST_ARCH" = "aarch64" ]; then
     gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux-arm64.o
     if [ $? -eq 0 ]; then
@@ -208,6 +234,22 @@ if [ "$HOST_ARCH" = "aarch64" ]; then
     else
         warning "Failed to compile sbagenxlib for ARM64"
     fi
+
+    gcc $SBX_LIB_CFLAGS -fPIC -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux-arm64.pic.o
+    if [ $? -eq 0 ]; then
+        gcc -shared -Wl,-soname,libsbagenx.so.$SO_MAJOR \
+            -o dist/libsbagenx.so.$VERSION \
+            build/sbagenxlib/sbagenxlib-linux-arm64.pic.o -lm
+        if [ $? -eq 0 ]; then
+            ln -sfn "libsbagenx.so.$VERSION" dist/libsbagenx.so.$SO_MAJOR
+            ln -sfn "libsbagenx.so.$SO_MAJOR" dist/libsbagenx.so
+            success "Created sbagenxlib shared library: dist/libsbagenx.so.$VERSION"
+        else
+            warning "Failed to link dist/libsbagenx.so.$VERSION"
+        fi
+    else
+        warning "Failed to compile PIC sbagenxlib for ARM64"
+    fi
 else
     gcc $SBX_LIB_CFLAGS -m64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux64.o
     if [ $? -eq 0 ]; then
@@ -219,6 +261,22 @@ else
         fi
     else
         warning "Failed to compile sbagenxlib for 64-bit"
+    fi
+
+    gcc $SBX_LIB_CFLAGS -fPIC -m64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux64.pic.o
+    if [ $? -eq 0 ]; then
+        gcc -shared -m64 -Wl,-soname,libsbagenx.so.$SO_MAJOR \
+            -o dist/libsbagenx.so.$VERSION \
+            build/sbagenxlib/sbagenxlib-linux64.pic.o -lm
+        if [ $? -eq 0 ]; then
+            ln -sfn "libsbagenx.so.$VERSION" dist/libsbagenx.so.$SO_MAJOR
+            ln -sfn "libsbagenx.so.$SO_MAJOR" dist/libsbagenx.so
+            success "Created sbagenxlib shared library: dist/libsbagenx.so.$VERSION"
+        else
+            warning "Failed to link dist/libsbagenx.so.$VERSION"
+        fi
+    else
+        warning "Failed to compile PIC sbagenxlib for 64-bit"
     fi
 fi
 
@@ -233,6 +291,24 @@ if [ $? -eq 0 ]; then
     success "Bundled compatibility header: dist/include/sbagenlib.h"
 else
     warning "Could not copy sbagenlib.h into dist/include"
+fi
+
+cat > dist/pkgconfig/sbagenxlib.pc <<EOF
+prefix=/usr
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: sbagenxlib
+Description: SBaGenX reusable synthesis/runtime library
+Version: ${VERSION}
+Libs: -L\${libdir} -lsbagenx -lm
+Cflags: -I\${includedir}
+EOF
+if [ $? -eq 0 ]; then
+    success "Bundled pkg-config metadata: dist/pkgconfig/sbagenxlib.pc"
+else
+    warning "Could not write dist/pkgconfig/sbagenxlib.pc"
 fi
 
 # Bundle Python/Cairo plot backend script for dist binaries

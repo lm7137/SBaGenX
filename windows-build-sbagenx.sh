@@ -756,6 +756,7 @@ fi
 section_header "Building sbagenxlib static libraries..."
 create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
+create_dir_if_not_exists "dist/pkgconfig"
 SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
 
 i686-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win32.o
@@ -782,6 +783,27 @@ else
     warning "Failed to compile sbagenxlib for win64"
 fi
 
+section_header "Building sbagenxlib shared libraries..."
+i686-w64-mingw32-gcc $SBX_LIB_CFLAGS -shared sbagenxlib.c \
+    -Wl,--out-implib,dist/libsbagenx-win32.dll.a \
+    -Wl,--export-all-symbols -Wl,--enable-auto-import \
+    -o dist/sbagenxlib-win32.dll -lm
+if [ $? -eq 0 ]; then
+    success "Created sbagenxlib shared library: dist/sbagenxlib-win32.dll"
+else
+    warning "Failed to link dist/sbagenxlib-win32.dll"
+fi
+
+x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS -shared sbagenxlib.c \
+    -Wl,--out-implib,dist/libsbagenx-win64.dll.a \
+    -Wl,--export-all-symbols -Wl,--enable-auto-import \
+    -o dist/sbagenxlib-win64.dll -lm
+if [ $? -eq 0 ]; then
+    success "Created sbagenxlib shared library: dist/sbagenxlib-win64.dll"
+else
+    warning "Failed to link dist/sbagenxlib-win64.dll"
+fi
+
 cp sbagenxlib.h dist/include/sbagenxlib.h
 if [ $? -eq 0 ]; then
     success "Bundled public header: dist/include/sbagenxlib.h"
@@ -793,6 +815,24 @@ if [ $? -eq 0 ]; then
     success "Bundled compatibility header: dist/include/sbagenlib.h"
 else
     warning "Could not copy sbagenlib.h into dist/include"
+fi
+
+cat > dist/pkgconfig/sbagenxlib.pc <<EOF
+prefix=/usr
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: sbagenxlib
+Description: SBaGenX reusable synthesis/runtime library
+Version: ${VERSION}
+Libs: -L\${libdir} -lsbagenx -lm
+Cflags: -I\${includedir}
+EOF
+if [ $? -eq 0 ]; then
+    success "Bundled pkg-config metadata: dist/pkgconfig/sbagenxlib.pc"
+else
+    warning "Could not write dist/pkgconfig/sbagenxlib.pc"
 fi
 
 section_header "Bundling optional runtime encoder DLLs..."

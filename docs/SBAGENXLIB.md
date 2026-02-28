@@ -548,6 +548,21 @@ Phase 3.77
 - Current milestone at the time of landing: `150/150` repository examples
   route through `sbagenxlib` without falling back to the legacy parser.
 
+Phase 3.78
+- Promote `sbagenxlib` from a static-only build byproduct to a consumable
+  developer/runtime artifact:
+  - Linux build now emits `libsbagenx.so.<version>` plus SONAME symlinks,
+  - Windows build now emits `sbagenxlib-*.dll` plus import libraries,
+  - macOS build now emits a versioned `.dylib`,
+  - all build scripts now bundle `dist/pkgconfig/sbagenxlib.pc`.
+- Extend Debian packaging so the generated `.deb` installs:
+  - the CLI binary,
+  - the shared and static `sbagenxlib` artifacts,
+  - public headers,
+  - multiarch `pkg-config` metadata.
+- Add regression checks for shipped shared-library artifacts and Debian
+  package payload contents.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -998,6 +1013,14 @@ Seq Backend Full Example Corpus Smoke Test (Phase 3.77)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_full_example_corpus.sh
+```
+
+Shared Library Artifact Smoke Test (Phase 3.78)
+-----------------------------------------------
+
+```bash
+tests/sbagenxlib/test_dist_shared_library_artifacts.sh
+tests/sbagenxlib/test_deb_library_payload.sh
 ```
 
 Notes:

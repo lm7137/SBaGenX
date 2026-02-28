@@ -77,6 +77,7 @@ rm -f sbagenx.tmp.c
 section_header "Building sbagenxlib universal static library..."
 create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
+create_dir_if_not_exists "dist/pkgconfig"
 
 SBX_LIB_CFLAGS="-Wall -O3 -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
 gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-macos-universal.o
@@ -91,6 +92,22 @@ else
     warning "Failed to compile sbagenxlib for macOS universal"
 fi
 
+section_header "Building sbagenxlib universal shared library..."
+SO_MAJOR=$(printf '%s' "$VERSION" | sed -n 's/^\([0-9][0-9]*\).*/\1/p')
+if [ -z "$SO_MAJOR" ]; then
+    SO_MAJOR="0"
+fi
+gcc $SBX_LIB_CFLAGS -dynamiclib \
+    -Wl,-install_name,@rpath/libsbagenx.$SO_MAJOR.dylib \
+    -o dist/libsbagenx.$VERSION.dylib build/sbagenxlib/sbagenxlib-macos-universal.o -lm
+if [ $? -eq 0 ]; then
+    ln -sfn "libsbagenx.$VERSION.dylib" dist/libsbagenx.$SO_MAJOR.dylib
+    ln -sfn "libsbagenx.$SO_MAJOR.dylib" dist/libsbagenx.dylib
+    success "Created sbagenxlib shared library: dist/libsbagenx.$VERSION.dylib"
+else
+    warning "Failed to link dist/libsbagenx.$VERSION.dylib"
+fi
+
 cp sbagenxlib.h dist/include/sbagenxlib.h
 if [ $? -eq 0 ]; then
     success "Bundled public header: dist/include/sbagenxlib.h"
@@ -102,6 +119,24 @@ if [ $? -eq 0 ]; then
     success "Bundled compatibility header: dist/include/sbagenlib.h"
 else
     warning "Could not copy sbagenlib.h into dist/include"
+fi
+
+cat > dist/pkgconfig/sbagenxlib.pc <<EOF
+prefix=/usr/local
+exec_prefix=\${prefix}
+libdir=\${exec_prefix}/lib
+includedir=\${prefix}/include
+
+Name: sbagenxlib
+Description: SBaGenX reusable synthesis/runtime library
+Version: ${VERSION}
+Libs: -L\${libdir} -lsbagenx -lm
+Cflags: -I\${includedir}
+EOF
+if [ $? -eq 0 ]; then
+    success "Bundled pkg-config metadata: dist/pkgconfig/sbagenxlib.pc"
+else
+    warning "Could not write dist/pkgconfig/sbagenxlib.pc"
 fi
 
 section_header "Build process completed!" 

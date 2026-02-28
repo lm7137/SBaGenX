@@ -18,6 +18,9 @@ Out of scope
   applications own device playback.
 - PNG image rendering. `sbagenxlib` exposes sampling APIs; frontends own
   plotting/visualization implementation.
+- Package manager policy details. Build scripts now emit shared libraries and
+  `pkg-config` metadata, but distro packaging policy remains outside the core
+  API contract.
 
 Versioning and Compatibility
 ----------------------------
@@ -28,6 +31,30 @@ Versioning and Compatibility
 
 For bindings/front-ends, gate features by `sbx_api_version()` rather than
 parsing version strings.
+
+Distribution Artifacts
+----------------------
+
+Current build scripts ship these developer-facing artifacts:
+
+- Linux:
+  - `dist/libsbagenx.so.<version>` plus SONAME symlinks
+  - `dist/libsbagenx-linux64.a` / `dist/libsbagenx-linux32.a`
+- Windows:
+  - `dist/sbagenxlib-win64.dll` / `dist/sbagenxlib-win32.dll`
+  - `dist/libsbagenx-win64.dll.a` / `dist/libsbagenx-win32.dll.a`
+- macOS:
+  - `dist/libsbagenx.<version>.dylib` plus compatibility symlinks
+- Common:
+  - `dist/include/sbagenxlib.h`
+  - `dist/include/sbagenlib.h` (compatibility alias)
+  - `dist/pkgconfig/sbagenxlib.pc`
+
+On Debian packaging, those are installed under:
+
+- `/usr/include`
+- `/usr/lib/<multiarch>`
+- `/usr/lib/<multiarch>/pkgconfig`
 
 Core Concepts
 -------------
