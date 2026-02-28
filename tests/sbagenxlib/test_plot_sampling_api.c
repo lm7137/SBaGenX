@@ -98,6 +98,8 @@ main(void) {
 
   rc = sbx_context_load_tone_spec(ctx, "200+6/40");
   if (rc != SBX_OK) fail("load_tone_spec failed");
+  if (sbx_context_voice_count(ctx) != 1)
+    fail("static tone context should expose one primary voice lane");
   rc = sbx_context_sample_tones(ctx, 0.0, 1.0, 4, ts, samples);
   if (rc != SBX_OK) fail("sample_tones static failed");
   rc = sbx_context_sample_program_beat(ctx, 0.0, 1.0, 4, ts, hz);
@@ -111,6 +113,10 @@ main(void) {
   if (!near(samples[1].beat_hz, samples[0].beat_hz, 1e-12) ||
       !near(samples[3].beat_hz, samples[0].beat_hz, 1e-12))
     fail("static samples should be constant");
+  rc = sbx_context_sample_tones_voice(ctx, 1, 0.0, 1.0, 4, ts, samples);
+  if (rc != SBX_EINVAL) fail("static tone secondary voice sampling should fail");
+  rc = sbx_context_sample_program_beat_voice(ctx, 1, 0.0, 1.0, 4, ts, hz);
+  if (rc != SBX_EINVAL) fail("static beat secondary voice sampling should fail");
 
   rc = sbx_context_sample_tones(ctx, 0.0, 1.0, 0, ts, samples);
   if (rc != SBX_EINVAL) fail("sample_count=0 should fail");
@@ -170,6 +176,37 @@ main(void) {
   if (rc != SBX_OK) fail("sample_mix_effects timed failed");
   if (fxv[0].type != SBX_MIXFX_BEAT || fxv[1].type != SBX_MIXFX_PULSE)
     fail("sample_mix_effects timed content mismatch");
+
+  {
+    const char *sbg_multivoice_sampling_text =
+      "duo: 180+10/20 260+2/15\n"
+      "swap: 180+0/20 260+8/15\n"
+      "00:00 duo ->\n"
+      "00:00:10 swap\n";
+    rc = sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_sampling_text, 0);
+    if (rc != SBX_OK) fail("load_sbg_timing_text multivoice sampling failed");
+    if (sbx_context_voice_count(ctx) != 2)
+      fail("multivoice sampling fixture should expose two voice lanes");
+    rc = sbx_context_sample_tones_voice(ctx, 1, 0.0, 10.0, 3, ts, samples);
+    if (rc != SBX_OK) fail("sample_tones_voice failed");
+    if (!near(samples[0].carrier_hz, 260.0, 1e-9) ||
+        !near(samples[0].beat_hz, 2.0, 1e-9) ||
+        !near(samples[0].amplitude, 0.15, 1e-9))
+      fail("sample_tones_voice start mismatch");
+    if (!near(samples[1].beat_hz, 5.0, 1e-9) ||
+        !near(samples[2].beat_hz, 8.0, 1e-9))
+      fail("sample_tones_voice interpolation mismatch");
+    rc = sbx_context_sample_program_beat_voice(ctx, 1, 0.0, 10.0, 3, ts, hz);
+    if (rc != SBX_OK) fail("sample_program_beat_voice failed");
+    if (!near(hz[0], 2.0, 1e-9) || !near(hz[1], 5.0, 1e-9) || !near(hz[2], 8.0, 1e-9))
+      fail("sample_program_beat_voice mismatch");
+    if (!near(sbx_context_time_sec(ctx), 0.0, 1e-12))
+      fail("voice sampling must not advance context render time");
+    rc = sbx_context_sample_tones_voice(ctx, 2, 0.0, 10.0, 3, ts, samples);
+    if (rc != SBX_EINVAL) fail("out-of-range sample_tones_voice should fail");
+    rc = sbx_context_sample_program_beat_voice(ctx, 2, 0.0, 10.0, 3, ts, hz);
+    if (rc != SBX_EINVAL) fail("out-of-range sample_program_beat_voice should fail");
+  }
 
   if (sbx_parse_mix_fx_spec("mixam:1:m=cos:s=0:f=0.45", SBX_WAVE_SINE, &mixam) != SBX_OK)
     fail("parse mixam cosine spec failed");

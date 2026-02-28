@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 11  /* public API contract revision */
+#define SBX_API_VERSION 12  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -374,7 +374,7 @@ int sbx_context_sample_mix_effects(SbxContext *ctx,
 /* Number of currently loaded keyframes. */
 size_t sbx_context_keyframe_count(const SbxContext *ctx);
 
-/* Number of active voice lanes in loaded keyframe content. */
+/* Number of active voice lanes in the loaded source (1 for static tones). */
 size_t sbx_context_voice_count(const SbxContext *ctx);
 
 /* Read keyframe by index. */
@@ -412,6 +412,19 @@ int sbx_context_sample_tones(SbxContext *ctx,
                              SbxToneSpec *out_tones);
 
 /*
+ * Sample one specific voice lane over [t0_sec, t1_sec].
+ * - voice_index 0 is the primary lane.
+ * - secondary lanes are available for multivoice native `.sbg` content.
+ */
+int sbx_context_sample_tones_voice(SbxContext *ctx,
+                                   size_t voice_index,
+                                   double t0_sec,
+                                   double t1_sec,
+                                   size_t sample_count,
+                                   double *out_t_sec,
+                                   SbxToneSpec *out_tones);
+
+/*
  * Sample effective program beat/pulse frequency over [t0_sec, t1_sec].
  * - sample_count must be >= 1.
  * - out_hz must have sample_count elements.
@@ -424,6 +437,19 @@ int sbx_context_sample_program_beat(SbxContext *ctx,
                                     size_t sample_count,
                                     double *out_t_sec,
                                     double *out_hz);
+
+/*
+ * Sample effective beat/pulse frequency for one specific voice lane.
+ * - voice_index 0 is the primary lane.
+ * - secondary lanes are available for multivoice native `.sbg` content.
+ */
+int sbx_context_sample_program_beat_voice(SbxContext *ctx,
+                                          size_t voice_index,
+                                          double t0_sec,
+                                          double t1_sec,
+                                          size_t sample_count,
+                                          double *out_t_sec,
+                                          double *out_hz);
 
 /*
  * Sample one mixam cycle for plotting/inspection.

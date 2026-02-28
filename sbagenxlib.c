@@ -1584,6 +1584,41 @@ ctx_eval_program_beat_hz(SbxContext *ctx, double t_sec) {
   return tone.beat_hz;
 }
 
+static double
+ctx_eval_program_beat_hz_voice(SbxContext *ctx, size_t voice_index, double t_sec) {
+  SbxToneSpec tone;
+  size_t seg = 0;
+  const SbxProgramKeyframe *kfs = 0;
+
+  if (!ctx || !ctx->eng) return 0.0;
+
+  switch (ctx->source_mode) {
+    case SBX_CTX_SRC_KEYFRAMES: {
+      double eval_t = t_sec;
+      if (voice_index >= sbx_context_voice_count(ctx))
+        return 0.0;
+      if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+        eval_t = fmod(eval_t, ctx->kf_duration_sec);
+        if (eval_t < 0.0) eval_t += ctx->kf_duration_sec;
+      }
+      kfs = (voice_index == 0 || !ctx->mv_kfs) ? ctx->kfs : SBX_MV_KF(ctx, voice_index);
+      seg = (voice_index == 0) ? ctx->kf_seg : 0;
+      ctx_eval_keyframed_tone_at(kfs, ctx->kf_count, eval_t, &seg, &tone);
+      break;
+    }
+    case SBX_CTX_SRC_STATIC:
+      if (voice_index != 0) return 0.0;
+      tone = ctx->eng->tone;
+      break;
+    default:
+      return 0.0;
+  }
+
+  if (!isfinite(tone.beat_hz)) return 0.0;
+  if (tone.beat_hz <= 0.0) return fabs(tone.beat_hz);
+  return tone.beat_hz;
+}
+
 const char *
 sbx_version(void) {
   return SBAGENXLIB_VERSION;
@@ -4289,7 +4324,10 @@ sbx_context_keyframe_count(const SbxContext *ctx) {
 
 size_t
 sbx_context_voice_count(const SbxContext *ctx) {
-  if (!ctx || !ctx->kfs || ctx->kf_count == 0) return 0;
+  if (!ctx || !ctx->loaded) return 0;
+  if (ctx->source_mode != SBX_CTX_SRC_KEYFRAMES ||
+      !ctx->kfs || ctx->kf_count == 0)
+    return 1;
   if (ctx->mv_voice_count == 0) return 1;
   return ctx->mv_voice_count;
 }
@@ -4350,12 +4388,28 @@ sbx_context_sample_program_beat(SbxContext *ctx,
                                 size_t sample_count,
                                 double *out_t_sec,
                                 double *out_hz) {
+  return sbx_context_sample_program_beat_voice(ctx, 0, t0_sec, t1_sec,
+                                               sample_count, out_t_sec, out_hz);
+}
+
+int
+sbx_context_sample_program_beat_voice(SbxContext *ctx,
+                                      size_t voice_index,
+                                      double t0_sec,
+                                      double t1_sec,
+                                      size_t sample_count,
+                                      double *out_t_sec,
+                                      double *out_hz) {
   size_t i;
   if (!ctx || !ctx->eng || !out_hz || sample_count == 0)
     return SBX_EINVAL;
   if (!ctx->loaded) {
     set_ctx_error(ctx, "no tone/program loaded");
     return SBX_ENOTREADY;
+  }
+  if (voice_index >= sbx_context_voice_count(ctx)) {
+    set_ctx_error(ctx, "voice index is out of range");
+    return SBX_EINVAL;
   }
   if (!isfinite(t0_sec) || !isfinite(t1_sec)) {
     set_ctx_error(ctx, "sampling times must be finite");
@@ -4365,7 +4419,7 @@ sbx_context_sample_program_beat(SbxContext *ctx,
   for (i = 0; i < sample_count; i++) {
     double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
     double ts = sbx_lerp(t0_sec, t1_sec, u);
-    out_hz[i] = ctx_eval_program_beat_hz(ctx, ts);
+    out_hz[i] = ctx_eval_program_beat_hz_voice(ctx, voice_index, ts);
     if (out_t_sec) out_t_sec[i] = ts;
   }
 
@@ -4380,13 +4434,30 @@ sbx_context_sample_tones(SbxContext *ctx,
                          size_t sample_count,
                          double *out_t_sec,
                          SbxToneSpec *out_tones) {
+  return sbx_context_sample_tones_voice(ctx, 0, t0_sec, t1_sec,
+                                        sample_count, out_t_sec, out_tones);
+}
+
+int
+sbx_context_sample_tones_voice(SbxContext *ctx,
+                               size_t voice_index,
+                               double t0_sec,
+                               double t1_sec,
+                               size_t sample_count,
+                               double *out_t_sec,
+                               SbxToneSpec *out_tones) {
   size_t i;
   size_t seg_saved;
+  const SbxProgramKeyframe *kfs = 0;
   if (!ctx || !ctx->eng || !out_tones || sample_count == 0)
     return SBX_EINVAL;
   if (!ctx->loaded) {
     set_ctx_error(ctx, "no tone/program loaded");
     return SBX_ENOTREADY;
+  }
+  if (voice_index >= sbx_context_voice_count(ctx)) {
+    set_ctx_error(ctx, "voice index is out of range");
+    return SBX_EINVAL;
   }
   if (!isfinite(t0_sec) || !isfinite(t1_sec)) {
     set_ctx_error(ctx, "sampling times must be finite");
@@ -4394,6 +4465,10 @@ sbx_context_sample_tones(SbxContext *ctx,
   }
 
   if (ctx->source_mode != SBX_CTX_SRC_KEYFRAMES) {
+    if (voice_index != 0) {
+      set_ctx_error(ctx, "voice index is out of range");
+      return SBX_EINVAL;
+    }
     for (i = 0; i < sample_count; i++) {
       double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
       double ts = sbx_lerp(t0_sec, t1_sec, u);
@@ -4409,7 +4484,8 @@ sbx_context_sample_tones(SbxContext *ctx,
     return SBX_ENOTREADY;
   }
 
-  seg_saved = ctx->kf_seg;
+  kfs = (voice_index == 0 || !ctx->mv_kfs) ? ctx->kfs : SBX_MV_KF(ctx, voice_index);
+  seg_saved = (voice_index == 0) ? ctx->kf_seg : 0;
   for (i = 0; i < sample_count; i++) {
     double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
     double ts = sbx_lerp(t0_sec, t1_sec, u);
@@ -4418,11 +4494,11 @@ sbx_context_sample_tones(SbxContext *ctx,
       eval_t = fmod(eval_t, ctx->kf_duration_sec);
       if (eval_t < 0.0) eval_t += ctx->kf_duration_sec;
     }
-    ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, eval_t, &ctx->kf_seg,
-                               &out_tones[i]);
+    ctx_eval_keyframed_tone_at(kfs, ctx->kf_count, eval_t, &seg_saved, &out_tones[i]);
     if (out_t_sec) out_t_sec[i] = ts;
   }
-  ctx->kf_seg = seg_saved;
+  if (voice_index == 0)
+    ctx->kf_seg = seg_saved;
   set_ctx_error(ctx, NULL);
   return SBX_OK;
 }

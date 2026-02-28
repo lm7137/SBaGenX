@@ -136,11 +136,21 @@ Minimal Plot-Sampling Example
 
 ```c
 SbxToneSpec curve[256];
+SbxToneSpec lane1_curve[256];
 double tsec[256];
+double lane1_beat_hz[256];
 int rc = sbx_context_sample_tones(ctx, 0.0, 1800.0, 256, tsec, curve);
+int lane_count = (int)sbx_context_voice_count(ctx);
+
+if (lane_count > 1) {
+  sbx_context_sample_tones_voice(ctx, 1, 0.0, 1800.0, 256, tsec, lane1_curve);
+  sbx_context_sample_program_beat_voice(ctx, 1, 0.0, 1800.0, 256, tsec, lane1_beat_hz);
+}
 ```
 
 Use this to drive GUI plots directly from library-evaluated tone values.
+For multivoice native `.sbg` content, use the `*_voice(...)` variants to sample
+secondary lanes directly instead of reconstructing them from the primary lane.
 
 If a frontend needs transport/scrubbing, set the context clock explicitly:
 

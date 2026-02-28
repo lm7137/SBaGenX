@@ -617,10 +617,21 @@ Phase 3.82
 - This closes the gap between “shared library artifacts exist” and “a third
   party app can actually compile and run against them from the dist tree”.
 
+Phase 3.83
+- Add voice-indexed sampling helpers for multivoice native `.sbg` content:
+  - `sbx_context_sample_tones_voice()`
+  - `sbx_context_sample_program_beat_voice()`
+- Keep the existing range-sampling APIs stable on voice lane 0 while letting
+  frontends sample secondary lanes directly for plots, inspectors, and GUI
+  previews.
+- This closes the remaining gap between “multivoice keyframes are visible” and
+  “multivoice content can be sampled directly without reconstructing it from
+  primary-lane output”.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.82 Slice)
+Current API (Phase 3.83 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -682,6 +693,9 @@ Public header: `sbagenxlib.h`
   - `sbx_context_duration_sec()`
   - `sbx_context_set_time_sec()`
   - `sbx_context_sample_tones()`
+  - `sbx_context_sample_tones_voice()`
+  - `sbx_context_sample_program_beat()`
+  - `sbx_context_sample_program_beat_voice()`
   - `sbx_context_render_f32()`
   - `sbx_context_time_sec()`
   - `sbx_context_last_error()`
@@ -822,6 +836,11 @@ Notes
   active multivoice lanes loaded from `.sbg`.
 - `sbx_context_voice_count()` / `sbx_context_get_keyframe_voice()` expose those
   secondary lanes explicitly for frontends, tests, and richer native dump paths.
+- `sbx_context_sample_tones_voice()` /
+  `sbx_context_sample_program_beat_voice()` are the sampling-side companions to
+  that keyframe introspection. Frontends can now sample secondary voice lanes
+  directly instead of sampling only the primary lane and reverse-engineering
+  multivoice behavior externally.
 - `sbx_context_mix_amp_keyframe_count()` /
   `sbx_context_get_mix_amp_keyframe()` expose the explicit native `mix/<amp>`
   timeline loaded from `.sbg`.

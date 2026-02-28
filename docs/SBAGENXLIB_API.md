@@ -181,10 +181,20 @@ and preview playback.
 - `sbx_context_duration_sec(const SbxContext *ctx)`
 - `sbx_context_set_time_sec(SbxContext *ctx, double t_sec)`
 - `sbx_context_sample_tones(SbxContext *ctx, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, SbxToneSpec *out_tones)`
+- `sbx_context_sample_tones_voice(SbxContext *ctx, size_t voice_index, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, SbxToneSpec *out_tones)`
+- `sbx_context_sample_program_beat(SbxContext *ctx, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, double *out_hz)`
+- `sbx_context_sample_program_beat_voice(SbxContext *ctx, size_t voice_index, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, double *out_hz)`
 
 `sbx_context_get_keyframe` continues to expose the primary voice lane for
 stability. Use `sbx_context_voice_count` plus `sbx_context_get_keyframe_voice`
 to inspect secondary voice lanes loaded from native multivoice `.sbg` content.
+Use `sbx_context_sample_tones_voice` and `sbx_context_sample_program_beat_voice`
+when a frontend needs plot/preview data for those secondary lanes rather than
+just keyframe inspection.
+
+`sbx_context_voice_count` returns `1` for loaded single-voice/static contexts,
+so frontends can treat voice-lane enumeration uniformly instead of special-
+casing static tones as “zero lanes”.
 
 6) Runtime extras (aux tones, mix effects, mix amp profile)
 
@@ -245,7 +255,9 @@ Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
 7) Plot/data sampling support
 
 - `sbx_context_sample_tones(...)`
+- `sbx_context_sample_tones_voice(...)`
 - `sbx_context_sample_program_beat(...)`
+- `sbx_context_sample_program_beat_voice(...)`
 - `sbx_sample_mixam_cycle(...)`
 - `sbx_sample_isochronic_cycle(...)`
 - `sbx_default_iso_envelope_spec(...)`
@@ -261,6 +273,11 @@ provided time range (`[t0_sec, t1_sec]`) into `sample_count` tone samples.
 `sbx_context_sample_program_beat` samples the effective program beat/pulse
 frequency over a time range using the same keyframe evaluation logic as the
 runtime adapter. This is the preferred frontend API for beat-vs-time graphs.
+
+`sbx_context_sample_tones_voice` and `sbx_context_sample_program_beat_voice`
+do the same work for one specific voice lane. Voice lane `0` is the primary
+lane; higher indices address secondary lanes loaded from native multivoice
+`.sbg` content.
 
 `sbx_context_sample_mix_amp` samples the effective `mix/<amp>` profile over a
 time range without advancing render time.
