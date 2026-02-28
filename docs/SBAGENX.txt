@@ -839,14 +839,17 @@ use '@' on the end of the level specification:
   sbagenx -m river1.ogg -p drop 00ds+@/3 white/10
 
 To render the drop beat/pulse curve as an image instead of running
-audio output, add `-P` with `-p drop`:
+audio output, add `-G` with `-p drop`:
 
-  sbagenx -P -p drop t40,10,5 -01ds+
+  sbagenx -G -p drop t40,10,5 -01ds+
 
 This writes a PNG graph of the beat/pulse curve over the drop period
 only, then exits.  The graph uses whole-number tick labels on both
 axes (time in minutes and frequency in Hz).  `@` and `M` are reflected
 in the plotted mode label (pulse vs monaural beat).
+
+Compatibility fallback: `-P` also triggers this program graph when no
+cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
 
 Once you have completed level 00, you can move onto the next (01, 02,
 03, etc).  However if you like, instead you can try increasing the
@@ -865,9 +868,9 @@ lots of practice.
 
 Usage: 
 
-  -p drop <signed-level><a-l>[s|k][+][^][@|M][/<amp>] <tone-specs> ...
-  -P -p drop [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>]
+  -p drop <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>] <tone-specs> ...
+  -G -p drop [t<drop>,<hold>,<wake>]
+      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]
 
 Examples:
 
@@ -878,6 +881,8 @@ Examples:
   -p drop -01ds+ white/10
   -p drop 00d@/3 brown/15
   -p drop 00d+M/2
+  -p drop 00ls+:S=2 mix/100 mixam:beat
+  -p drop Nls+:S=2 mix/100 mixam:beat
   -A -p drop 00ds+/3 mix/97
   -A d=0.3:e=0.3:k=10:E=0.7 -p drop 00ds+/3 mix/97
 
@@ -885,6 +890,9 @@ The argument after the "drop" gives the level and depth of the
 sequence to run.  `<signed-level>` may be non-negative (00, 01, ...,
 99) or negative (-01, -02, ...), and it may include a decimal point
 for fine tuning (for example 20.5a).
+Using `N` in place of the signed level mutes generated program tones
+while still generating the beat/pulse trajectory (for example to drive
+`mixam:beat` without adding a separate binaural/isochronic/monaural tone).
 
 Carrier formula (for quick reference):
   Let L = signed level value
@@ -914,13 +922,13 @@ Later deep levels require headphones that can reproduce really low
 bass frequencies, ideally down to 10Hz or lower.
 
 The letter a-l (or A-L if you prefer) selects the depth of the beat
-frequencies.  Beat/Pulse frequencies always start at 10Hz, and then drop
-exponentially to a target, which is as follows for letters A-L: 4.4,
-3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3.  Using A, you
-never get down to delta frequencies.  The deeper beats (i.e. later
-letters) are supposed to be better, so long as you really are
-entraining to them.  Like the carriers, this is something to build up
-over time.
+frequencies.  Beat/Pulse frequencies default to a 10Hz start, then drop
+exponentially to a target.  You can override the start value with
+`:S=<val>` in Hz.  Targets for letters A-L are: 4.4, 3.7, 3.1, 2.5,
+2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3.  Using A, you never get down
+to delta frequencies.  The deeper beats (i.e. later letters) are
+supposed to be better, so long as you really are entraining to them.
+Like the carriers, this is something to build up over time.
 
 Reference (lowest beat/pulse target by letter):
   +--------+-----+-----+-----+-----+-----+-----+
@@ -1206,11 +1214,12 @@ And you can use signed levels, including negative values, exactly as
 with `-p drop`:
 
   sbagenx -p sigmoid -01ds+:l=0.125:h=0
+  sbagenx -p sigmoid 00ls+:l=0.125:h=0:S=2 mix/100 mixam:beat
 
 To render the sigmoid beat/pulse curve as an image instead of running
-audio output, add `-P` with `-p sigmoid`:
+audio output, add `-G` with `-p sigmoid`:
 
-  sbagenx -P -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
+  sbagenx -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
 
 This writes a PNG graph of the beat/pulse curve over the drop period
 only, then exits.  The filename is generated from the sigmoid
@@ -1224,11 +1233,12 @@ smoother curves and cleaner line quality.  The bottom caption also
 prints the active sigmoid parameters (start/target, D, l/h, and solved
 a/b values) for reference.
 
-`-P` first tries the Python+Cairo backend (bundled by default in current
+`-G` first tries the Python+Cairo backend (bundled by default in current
 Windows builds).  If not available, it falls back to the built-in
 renderer.
 
-(`-G` remains accepted as a legacy alias for sigmoid plotting.)
+Compatibility fallback: `-P` also triggers this program graph when no
+cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
 
 
 2.10.1: More detailed notes on -p sigmoid options
@@ -1237,9 +1247,9 @@ renderer.
 Usage:
 
   -p sigmoid [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>] <tone-specs> ...
-  -P -p sigmoid [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>]
+      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>] <tone-specs> ...
+  -G -p sigmoid [t<drop>,<hold>,<wake>]
+      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]
 
 Examples:
 
@@ -1249,6 +1259,8 @@ Examples:
   -p sigmoid 34.5dk+/1.5:l=0.20:h=-2 pink/30
   -p sigmoid -01ds+@/3:l=0.125:h=0 brown/15
   -p sigmoid 00ds+M/2:l=0.125:h=0
+  -p sigmoid 00ls+:l=0.125:h=0:S=2 mix/100 mixam:beat
+  -p sigmoid Nls+:l=0.125:h=0:S=2 mix/100 mixam:beat
   -A -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
   -A d=0.3:e=0.3:k=10:E=0.7 -p sigmoid 00ls+/3:l=0.125:h=0 mix/97
 
@@ -1257,6 +1269,10 @@ Level and carrier behavior:
   Let L = signed level value
   Starting carrier (Hz):   f_start = 205 - 2*L
   Reverse lookup:          L = (205 - f_start) / 2
+
+Using `N` in place of the signed level mutes generated program tones
+while still generating the beat/pulse trajectory (for example to drive
+`mixam:beat` without adding a separate binaural/isochronic/monaural tone).
 
 As with `-p drop`, the carrier falls by 5Hz at t=D.  If `+` is present,
 it continues to drop over hold at the same linear rate as in drop, for
@@ -1288,6 +1304,7 @@ Sigmoid shape parameters:
 The optional shape parameters are:
   :l=<value>   (default 0.125)
   :h=<value>   (default 0)
+  :S=<value>   (default 10.0, start beat/pulse in Hz)
 
 Order does not matter.  Either can be omitted, and both can be used
 together.  Time for these parameters is interpreted in minutes.
@@ -1302,7 +1319,7 @@ Where:
   l, h = user shape parameters
 
 Boundary conditions:
-  f(0) = 10.0
+  f(0) = S (default 10.0, configurable via :S=<value>)
   f(D) = target from depth letter (a-l)
 
 `a` and `b` are solved automatically from those boundary conditions.
@@ -1395,32 +1412,39 @@ an external function file.  The file extension is `.sbgf` (required).
 Usage:
 
   -p curve <curve-file.sbgf> [t<drop>,<hold>,<wake>]
-      <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:name=value ...]
+      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:name=value ...]
       <tone-specs> ...
 
-In `<curve-spec>`, each `:name=value` token overrides a matching
-`param name = ...` in the `.sbgf` file.  The names are generic, so
-`l`/`h` are only examples used by some curve files.
+In `<curve-spec>`, `:S=<val>` sets the start beat/pulse frequency in Hz
+(default 10.0).  Each `:name=value` token overrides a matching
+`param name = ...` in the `.sbgf` file (except reserved `S`).
+The names are generic, so `l`/`h` are only examples used by some curve
+files.
 
 Examples:
 
   sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf \
     00ls:l=0.2:h=0
+  sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf \
+    00ls:S=2:l=0.2:h=0
   sbagenx -p curve examples/basics/curve-piecewise-demo.sbgf \
     t30,30,0 00ls+:p1=8:p2=18
   sbagenx -m river1.ogg \
     -p curve examples/basics/curve-amp-mix-demo.sbgf 00ls+ mix/97
   sbagenx -m river1.ogg \
     -p curve examples/basics/curve-sigmoid-like.sbgf 00ls+ mix/99
-  sbagenx -P -p curve examples/basics/curve-sigmoid-like.sbgf \
+  sbagenx -m river1.ogg \
+    -p curve examples/basics/curve-sigmoid-like.sbgf Nls:S=2:l=0.2:h=0 mix/100 mixam:beat
+  sbagenx -G -p curve examples/basics/curve-sigmoid-like.sbgf \
     00ls:l=0.2:h=0
-  sbagenx -P -p curve examples/basics/curve-expfit-solve-demo.sbgf \
+  sbagenx -G -p curve examples/basics/curve-expfit-solve-demo.sbgf \
     00ls:l=-0.15
 
 The level/depth/time modifiers are interpreted the same way as in
 `-p drop`/`-p sigmoid`:
 
   - Signed level selects starting carrier baseline.
+  - `N` mutes generated program tones but keeps beat/pulse trajectory active.
   - Letter `a-l` selects target beat/pulse endpoint (`b1`).
   - `s` = continuous runtime curve evaluation.
   - `k` or default = stepped checkpoints sampled from the expression.
@@ -1432,8 +1456,11 @@ For `amp` and `mixamp`:
 
 `@` (isochronic) and `M` (monaural) are mutually exclusive.
 
-With `-P`, `-p curve` plots the evaluated beat/pulse frequency curve
+With `-G`, `-p curve` plots the evaluated beat/pulse frequency curve
 over the drop period (`D`) and exits.
+
+Compatibility fallback: `-P` also triggers this program graph when no
+cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
 
 
 2.11.1: The .sbgf function file format
@@ -1737,16 +1764,30 @@ follows:
   -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid.
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
-  -P        Plot graph as PNG and exit.
-              With -p drop/-p sigmoid/-p curve: renders beat/pulse curve graph.
+  -P        Plot one-cycle envelope/waveform graph as PNG and exit.
+              With -H: renders one-cycle mixam envelope/gain.
+              With -p ... and mixam:<...> extras: renders one-cycle
+              mixam envelope/gain using current/default -H parameters.
               Otherwise: renders one-cycle isochronic (@) waveform
               using current tone and `-I` settings.
+              Compatibility: with -p drop/-p sigmoid/-p curve and no
+              cycle target, falls back to the program beat/pulse graph.
               Python+Cairo backend is preferred; otherwise built-in
               plotting is used.
+  -G        Plot program beat/pulse-vs-time graph as PNG and exit.
+              Supported with -p drop/-p sigmoid/-p curve.
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
               Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.
               Constraint: a+r <= 1.
+              e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
+  -H [spec] Customize mixam envelope globally.
+              Optional spec: m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>
+              Order does not matter. Omitted parameters use defaults.
+              Defaults: m=cos, s=0, d=0.5, a=0.5, r=0.5, e=3, f=0.45.
+              Compatibility: if d/a/r/e are supplied without m=..., pulse mode is implied.
+              In m=cos mode, d/a/r/e are ignored (continuous raised-cosine AM).
+              Constraint: in m=pulse mode, a+r <= 1.
               e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
 
   -i ...    Generate the whole sequence from an 'immediate' spec
@@ -1817,6 +1858,7 @@ Examples:
   spatial-mix: mix/80 triangle:mixspin:400+6.0/40
   rhythmic-mix: mix/75 square:mixpulse:8/50
   binauralized-mix: mix/80 mixbeat:6/45
+  am-mix: mix/80 mixam:8
 
 The name starts with a letter, and may continue with letters, numbers,
 '_' or '-'.  Following the colon is a list of one or more tone
@@ -1839,6 +1881,7 @@ Here are the different types:
   mixspin:<width>+<freq>/<intensity>  # Spinning effect on mix input
   mixpulse:<pulse>/<intensity>        # Pulse effect on mix input
   mixbeat:<beat>/<intensity>          # Hilbert-shifted binauralized mix
+  mixam:<pulse|beat>                # Pure AM on mix input (envelope via -H)
   <carrier>@<pulse>/<amp>             # Isochronic tones
   <waveform>:<carrier><sign><freq>/<amp> # Binaural tones with specific waveform
   <waveform>:<carrier>@<pulse>/<amp>  # Isochronic tones with specific waveform
@@ -1925,6 +1968,9 @@ The waveform specification can be applied to:
 Note: For mixspin/mixpulse/mixbeat effects, the waveform modulates the
 effect envelope. For mixbeat, a sine waveform is recommended for the
 cleanest spectral result.
+Note: mixam uses explicit envelope parameters (m,s,d,a,r,e,f) via `-H` (or
+inline in the token for compatibility), and does not use waveform prefixes
+for shaping.
 
 The isochronic tones use amplitude modulation of a single carrier frequency
 to create a pulsing effect. The <carrier> is the frequency of the tone in Hz,
@@ -1999,6 +2045,31 @@ pulse effect where the sound intensity fluctuates at the given rate.
 Waveforms can also be applied to mixpulse effects to shape the pulse envelope.
 For example, square:mixpulse:8/60 uses a square wave to create sharp on/off 
 pulses, while sine:mixpulse:8/60 creates smoother pulsing variations.
+
+The mixam effect applies true multiplicative amplitude modulation to the mix
+stream: out(t)=mix(t)*mix_mul*g(t). The gain envelope g(t) is bounded in
+[f,1] and is configured by:
+  m envelope model: cos (default, raised-cosine continuous AM) or pulse
+  s phase offset in cycle (default 0)
+  d duty in cycle (default 0.5)
+  a attack share of ON window (default 0.5)
+  r release share of ON window (default 0.5)
+  e edge mode: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep (default 3)
+  f floor gain (default 0.45)
+If d/a/r/e are supplied without m=..., pulse mode is implied for compatibility.
+Constraint: in m=pulse mode, a+r must be <=1. Examples:
+  -H s=0:d=0.5:a=0.1:r=0.1:e=3:f=0.25
+  -H m=cos:s=0:f=0.45
+  mix/80 mixam:8
+  mix/80 mixam:beat
+`mixam:<pulse>` uses a fixed AM frequency in Hz.
+`mixam:beat` binds AM frequency to the current program beat/pulse value
+for `-p` sessions, so it varies continuously as the program varies.
+Compatibility alias: `mixpulse:beat[:params]` is accepted and treated as
+`mixam:beat[:params]`.
+You can still pass inline mixam params for compatibility, but when `-H` is
+set, the `-H` envelope is applied globally to all mixam effects.
+mixam is implemented in the sbagenxlib runtime extra-token path.
 
 The mixbeat effect applies a Hilbert-transform frequency shift to the mix
 stream (specified with mix/<amp>) and routes opposite shifts to left/right
@@ -2245,7 +2316,7 @@ The most commonly used predefined sequences are:
 
 3. **sigmoid** - Similar to drop, but in `s` mode the beat/pulse follows a
    sigmoid curve over the drop period.  Example:
-   `sbagenx -p sigmoid 00ds+:l=0.125:h=0`
+   `sbagenx -p sigmoid 00ds+:l=0.125:h=0:S=2`
 
 4. **curve** - Uses expressions from a `.sbgf` file to define beat/pulse
    (and optionally carrier) over time.  Example:
@@ -2255,8 +2326,8 @@ These predefined sequences accept various parameters to customize their behavior
 See sections 2.6, 2.7, 2.10 and 2.11 for detailed information on
 existing parameters and options.  The sigmoid sequence accepts the same
 drop-style format plus optional shape parameters `:l=<value>` and
-`:h=<value>` (order does not matter), with defaults `l=0.125` and
-`h=0`.
+`:h=<value>` and optional start-beat `:S=<value>` (order does not
+matter), with defaults `l=0.125`, `h=0`, and `S=10.0`.
 
 For `-p sigmoid ...s...`, the beat/pulse frequency follows:
 
@@ -2268,7 +2339,7 @@ Where:
   l, h = user shape parameters
 
 Boundary conditions:
-  f(0) = 10.0
+  f(0) = S (default 10.0)
   f(D) = target from depth letter (a-l), same targets as `-p drop`
 
 `a` and `b` are solved automatically from those boundary conditions:

@@ -4,9 +4,10 @@ High-quality SBaGenX plot renderer (Python + Cairo).
 
 Modes:
   - sigmoid:   beat/pulse curve used by -G
-  - drop:      beat/pulse curve used by -P with -p drop
-  - curve:     beat/pulse curve used by -P with -p curve
+  - drop:      beat/pulse curve used by -G with -p drop
+  - curve:     beat/pulse curve used by -G with -p curve
   - iso-cycle: one-cycle isochronic envelope + waveform used by -P
+  - mixam-cycle: one-cycle mixam envelope + gain used by -P -H
   - wave-lr:   one-cycle custom waveNN envelope + L/R waveforms
 """
 
@@ -163,17 +164,19 @@ def _sigmoid_eval(t_min, d_min, beat_target, sig_l, sig_h, sig_a, sig_b):
     return sig_a * math.tanh(sig_l * (t_min - d_min / 2.0 - sig_h)) + sig_b
 
 
-def _drop_eval(t_min, d_min, beat_target, slide, n_step, step_len_sec):
+def _drop_eval(t_min, d_min, beat_start, beat_target, slide, n_step, step_len_sec):
     if d_min <= 0:
         return beat_target
     t_min = min(max(t_min, 0.0), d_min)
+    if beat_start <= 0.0:
+        beat_start = 10.0
 
     if not slide and n_step > 1 and step_len_sec > 0:
         idx = int((t_min * 60.0) / step_len_sec)
         idx = max(0, min(idx, n_step - 1))
-        return 10.0 * math.exp(math.log(beat_target / 10.0) * idx / (n_step - 1))
+        return beat_start * math.exp(math.log(beat_target / beat_start) * idx / (n_step - 1))
 
-    return 10.0 * math.exp(math.log(beat_target / 10.0) * (t_min / d_min))
+    return beat_start * math.exp(math.log(beat_target / beat_start) * (t_min / d_min))
 
 
 def render_sigmoid(args):
@@ -341,7 +344,7 @@ def render_drop(args):
     y_max = float("-inf")
     for i in range(2001):
         t = d_min * i / 2000.0
-        y = _drop_eval(t, d_min, args.beat_target, slide, n_step, step_len_sec)
+        y = _drop_eval(t, d_min, args.beat_start, args.beat_target, slide, n_step, step_len_sec)
         y_min = min(y_min, y)
         y_max = max(y_max, y)
     y_min = min(y_min, args.beat_start, args.beat_target)
@@ -381,7 +384,7 @@ def render_drop(args):
     first = True
     for i in range(2001):
         t = d_min * i / 2000.0
-        y = _drop_eval(t, d_min, args.beat_target, slide, n_step, step_len_sec)
+        y = _drop_eval(t, d_min, args.beat_start, args.beat_target, slide, n_step, step_len_sec)
         px = x_map(t)
         py = y_map(y)
         if first:
@@ -393,7 +396,7 @@ def render_drop(args):
 
     # endpoint markers
     for t in (0.0, d_min):
-        y = _drop_eval(t, d_min, args.beat_target, slide, n_step, step_len_sec)
+        y = _drop_eval(t, d_min, args.beat_start, args.beat_target, slide, n_step, step_len_sec)
         px = x_map(t)
         py = y_map(y)
         ctx.set_source_rgb(0.86, 0.16, 0.16)
@@ -682,6 +685,160 @@ def _iso_mod_custom(phase, start, duty, attack, release, edge_mode):
     if release > 0.0:
         return _iso_edge_shape((1.0 - u) / release, edge_mode)
     return 0.0
+
+
+def render_mixam_cycle(args):
+    width, height = 1500, 900
+    ml, mr, mt, mb = 130, 40, 40, 160
+    gap = 70
+    pw = width - ml - mr
+    panel_h = (height - mt - mb - gap) / 2.0
+    top_y0 = mt
+    bot_y0 = mt + panel_h + gap
+
+    h_m = str(getattr(args, "h_m", "pulse") or "pulse").strip().lower()
+    h_s = float(args.h_s)
+    h_d = float(args.h_d)
+    h_a = float(args.h_a)
+    h_r = float(args.h_r)
+    h_e = int(args.h_e)
+    h_f = float(args.h_f)
+    if h_m in ("0",):
+        h_m = "pulse"
+    elif h_m in ("1",):
+        h_m = "cos"
+    if h_m not in ("pulse", "cos"):
+        raise ValueError("h-m must be pulse|cos (or 0|1)")
+
+    surface, ctx = _setup_canvas(width, height)
+
+    def x_map(u):
+        return ml + (pw - 1) * u
+
+    def y_map(v, y0):
+        return y0 + (1.0 - v) * (panel_h - 1)
+
+    y_ticks = [1.0 - 0.1 * i for i in range(11)]
+    x_ticks = _build_linear_ticks(1.0, 10)
+    _draw_grid_box(ctx, ml, top_y0, pw, panel_h, 10, y_ticks, lambda v: y_map(v, top_y0))
+    _draw_grid_box(ctx, ml, bot_y0, pw, panel_h, 10, y_ticks, lambda v: y_map(v, bot_y0))
+
+    # envelope line
+    ctx.set_source_rgb(0.86, 0.16, 0.16)
+    ctx.set_line_width(2.0)
+    first = True
+    samples = 8000
+    for i in range(samples + 1):
+        u = i / float(samples)
+        if h_m == "cos":
+            phase = (u + h_s) - math.floor(u + h_s)
+            env = 0.5 * (1.0 + math.cos(2.0 * PI * phase))
+        else:
+            env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
+        px = x_map(u)
+        py = y_map(env, top_y0)
+        if first:
+            ctx.move_to(px, py)
+            first = False
+        else:
+            ctx.line_to(px, py)
+    ctx.stroke()
+
+    # gain line
+    ctx.set_source_rgb(0.13, 0.37, 0.88)
+    ctx.set_line_width(2.0)
+    first = True
+    for i in range(samples + 1):
+        u = i / float(samples)
+        if h_m == "cos":
+            phase = (u + h_s) - math.floor(u + h_s)
+            env = 0.5 * (1.0 + math.cos(2.0 * PI * phase))
+        else:
+            env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
+        gain = h_f + (1.0 - h_f) * env
+        px = x_map(u)
+        py = y_map(gain, bot_y0)
+        if first:
+            ctx.move_to(px, py)
+            first = False
+        else:
+            ctx.line_to(px, py)
+    ctx.stroke()
+
+    # ticks + labels
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(16)
+    ctx.set_source_rgb(0.15, 0.15, 0.15)
+
+    for u in x_ticks:
+        x = x_map(u)
+        ctx.set_source_rgb(0.35, 0.35, 0.35)
+        ctx.move_to(x, bot_y0 + panel_h - 1)
+        ctx.line_to(x, bot_y0 + panel_h + 4)
+        ctx.stroke()
+        txt = _fmt_tick(u)
+        ext = ctx.text_extents(txt)
+        ctx.set_source_rgb(0.15, 0.15, 0.15)
+        ctx.move_to(x - ext.width / 2, bot_y0 + panel_h + 22)
+        ctx.show_text(txt)
+
+    for yv in y_ticks:
+        for y0 in (top_y0, bot_y0):
+            y = y_map(yv, y0)
+            txt = _fmt_tick(yv)
+            ext = ctx.text_extents(txt)
+            ctx.set_source_rgb(0.35, 0.35, 0.35)
+            ctx.move_to(ml - 4, y)
+            ctx.line_to(ml, y)
+            ctx.stroke()
+            ctx.set_source_rgb(0.15, 0.15, 0.15)
+            ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
+            ctx.show_text(txt)
+
+    # titles
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_font_size(17)
+    if h_m == "cos":
+        title = "MIXAM SINGLE-CYCLE CONTINUOUS-AM PLOT"
+    else:
+        title = "MIXAM SINGLE-CYCLE ENVELOPE PLOT"
+    ext = ctx.text_extents(title)
+    ctx.set_source_rgb(0.12, 0.12, 0.12)
+    ctx.move_to(ml + (pw - ext.width) / 2, 28)
+    ctx.show_text(title)
+
+    x_label = "CYCLE"
+    ext = ctx.text_extents(x_label)
+    ctx.move_to(ml + (pw - ext.width) / 2, bot_y0 + panel_h + 56)
+    ctx.show_text(x_label)
+
+    for label, y0 in (("ENVELOPE", top_y0 + panel_h / 2), ("GAIN", bot_y0 + panel_h / 2)):
+        ctx.save()
+        ctx.translate(28, y0)
+        ctx.rotate(-PI / 2.0)
+        ext = ctx.text_extents(label)
+        ctx.move_to(-ext.width / 2, 0)
+        ctx.show_text(label)
+        ctx.restore()
+
+    # parameter lines
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(14)
+    if h_m == "cos":
+        line1 = f"H:m=cos s={h_s:.4f} f={h_f:.3f}"
+    else:
+        line1 = f"H:m=pulse s={h_s:.4f} d={h_d:.4f} a={h_a:.2f} r={h_r:.2f} e={h_e} f={h_f:.3f}"
+    line2 = "mixam cycle gain = f + (1-f)*envelope"
+
+    ext = ctx.text_extents(line1)
+    ctx.move_to(ml + (pw - ext.width) / 2, height - 40)
+    ctx.show_text(line1)
+    ext = ctx.text_extents(line2)
+    ctx.move_to(ml + (pw - ext.width) / 2, height - 18)
+    ctx.show_text(line2)
+
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    surface.write_to_png(args.out)
 
 
 def _iso_mod_legacy(phase, waveform):
@@ -1112,6 +1269,16 @@ def main():
     ip.add_argument("--i-r", type=float, required=True)
     ip.add_argument("--i-e", type=int, required=True)
 
+    mp = sub.add_parser("mixam-cycle", help="Render mixam single-cycle envelope/gain plot")
+    mp.add_argument("--out", required=True)
+    mp.add_argument("--h-m", type=str, default="pulse")
+    mp.add_argument("--h-s", type=float, required=True)
+    mp.add_argument("--h-d", type=float, required=True)
+    mp.add_argument("--h-a", type=float, required=True)
+    mp.add_argument("--h-r", type=float, required=True)
+    mp.add_argument("--h-e", type=int, required=True)
+    mp.add_argument("--h-f", type=float, required=True)
+
     wp = sub.add_parser("wave-lr", help="Render custom waveNN left/right plot")
     wp.add_argument("--out", required=True)
     wp.add_argument("--carrier-hz", type=float, required=True)
@@ -1131,6 +1298,8 @@ def main():
         render_curve(args)
     elif args.mode == "iso-cycle":
         render_iso_cycle(args)
+    elif args.mode == "mixam-cycle":
+        render_mixam_cycle(args)
     elif args.mode == "wave-lr":
         render_wave_lr(args)
     else:

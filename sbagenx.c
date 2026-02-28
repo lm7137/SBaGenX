@@ -247,6 +247,8 @@ int is_mix_mod_option_spec(const char *spec);
 void parse_mix_mod_option_spec(const char *spec);
 int is_iso_gate_option_spec(const char *spec);
 void parse_iso_gate_option_spec(const char *spec);
+int is_mixam_env_option_spec(const char *spec);
+void parse_mixam_env_option_spec(const char *spec);
 void clear_mix_mod_curve(void);
 void setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level,
 			 double main_len_min, double wake_len_min, int wake_enabled);
@@ -284,6 +286,7 @@ void write_curve_graph_png(const char *fmt, double level,
 			   int isisochronic, int ismono,
 			   double beat_start, double beat_target);
 void write_iso_cycle_graph_png_from_sequence(void);
+void write_mixam_cycle_graph_png(void);
 int try_external_sigmoid_graph_png(const char *out_fname,
 				   int len0_sec,
 				   double beat_start, double beat_target,
@@ -303,6 +306,9 @@ int try_external_curve_graph_png(const char *out_fname,
 int try_external_iso_cycle_graph_png(const char *out_fname,
 				     double carr_hz, double pulse_hz,
 				     double amp_pct, int waveform);
+int try_external_mixam_cycle_graph_png(const char *out_fname,
+				       int m, double s, double d, double a, double r,
+				       int e, double f);
 static void emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested);
 
 #define ALLOC_ARR(cnt, type) ((type*)Alloc((cnt) * sizeof(type)))
@@ -356,10 +362,14 @@ help() {
 	  NL "Options:  -h        Display this help-text"
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
-		  NL "          -P        Plot graph as PNG and exit (prefers Python/Cairo when available)"
-		  NL "                     With -p drop/-p sigmoid/-p curve: plots beat/pulse curve"
-		  NL "                     Otherwise: plots one-cycle isochronic waveform"
-		  NL "          -G        Legacy alias for sigmoid plotting (-P with -p sigmoid)"
+	  NL "          -P        Plot one-cycle envelope/waveform PNG and exit"
+	  NL "                     With -H: plots mixam envelope/gain cycle"
+	  NL "                     With -p ... and mixam:<...> extras: plots mixam cycle"
+	  NL "                     Otherwise: plots one-cycle isochronic waveform"
+	  NL "                     Compatibility: with -p drop/-p sigmoid/-p curve and no"
+	  NL "                     cycle target, falls back to program beat/pulse graph"
+	  NL "          -G        Plot program beat/pulse-vs-time PNG and exit"
+	  NL "                     Supported with -p drop/-p sigmoid/-p curve"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -417,6 +427,12 @@ help() {
 	  NL "          -I [spec] Customize isochronic (@) pulse envelope; spec is"
 	  NL "                      s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>"
 	  NL "                      defaults s=0.0485:d=0.4030:a=0.5:r=0.5:e=2"
+	  NL "          -H [spec] Customize global mixam envelope for mixam:<pulse|beat>"
+	  NL "                      spec is m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>"
+	  NL "                      order-independent; omitted params use defaults"
+	  NL "                      defaults m=cos:s=0:d=0.5:a=0.5:r=0.5:e=3:f=0.45"
+	  NL "                      if d/a/r/e are set without m=..., pulse mode is implied"
+	  NL "                      in m=cos mode, d/a/r/e are ignored; s/f apply"
 	  NL
 	  NL "          -R rate   Select rate in Hz that frequency changes are recalculated"
 	  NL "                     (for file/pipe output only, default is 10Hz)"
@@ -562,11 +578,11 @@ int tty_erase;			// Chars to erase from current line (for ESC[K emulation)
 
 int opt_Q;			// Quiet mode
 int opt_D;
-int opt_G;			// Legacy graph flag for -p sigmoid (-G)
-int opt_P;			// Unified plot flag (-P)
-int opt_P_sigmoid;		// -P used with -p sigmoid, so render sigmoid graph
-int opt_P_drop;		// -P used with -p drop, so render drop graph
-int opt_P_curve;		// -P used with -p curve, so render curve graph
+int opt_G;			// Program beat/pulse graph flag (-G)
+int opt_P;			// Cycle plot flag (-P)
+int opt_P_sigmoid;		// Program graph requested for -p sigmoid
+int opt_P_drop;		// Program graph requested for -p drop
+int opt_P_curve;		// Program graph requested for -p curve
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -593,6 +609,14 @@ double opt_I_d= 0.403014;	// Gate duty as cycle proportion (legacy-equivalent de
 double opt_I_a= 0.5;		// Attack as fraction of ON window
 double opt_I_r= 0.5;		// Release as fraction of ON window
 int opt_I_e= 2;			// Edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
+int opt_H;			// Enable global mixam envelope override
+int opt_H_m= SBX_MIXAM_MODE_COS;	// mixam model: 0 pulse, 1 raised-cosine
+double opt_H_s= 0.0;		// mixam start-cycle (phase offset)
+double opt_H_d= 0.5;		// mixam duty
+double opt_H_a= 0.5;		// mixam attack share
+double opt_H_r= 0.5;		// mixam release share
+int opt_H_e= 3;			// mixam edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
+double opt_H_f= 0.45;		// mixam floor gain
 char *waveform_name[] = {"sine", "square", "triangle", "sawtooth"}; // To be used for messages
 
 FILE *mix_in;			// Input stream for mix sound data, or 0
@@ -2375,6 +2399,128 @@ parse_iso_gate_option_spec(const char *spec) {
       error("-I parameter e must be in range 0..3");
 }
 
+int
+is_mixam_env_option_spec(const char *spec) {
+   const char *p= spec;
+   if (!p || !*p) return 0;
+   if (*p == '-') return 0;
+   if (!strchr(p, '=')) return 0;
+   if (*p == ':') p++;
+   return (*p == 'm' || *p == 's' || *p == 'd' || *p == 'a' || *p == 'r' || *p == 'e' || *p == 'f');
+}
+
+void
+parse_mixam_env_option_spec(const char *spec) {
+   char tmp[256];
+   char *p, *q, *q2;
+   long edge;
+   int saw_mode= 0;
+   int saw_pulse_shape= 0;
+   if (!spec || !*spec) return;
+   if (strlen(spec) >= sizeof(tmp))
+      error("-H spec is too long");
+   strcpy(tmp, spec);
+   p= tmp;
+
+   while (*p) {
+      while (*p == ':') p++;
+      if (!*p) break;
+      switch (*p++) {
+       case 'm':
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  q= p;
+	  while (*q && *q != ':' && !isspace((unsigned char)*q)) q++;
+	  if (q == p) error("-H parameter m requires a value (pulse or cos)");
+	  {
+	     size_t n= (size_t)(q - p);
+	     char mtok[16];
+	     if (n >= sizeof(mtok)) error("-H parameter m value is too long");
+	     memcpy(mtok, p, n);
+	     mtok[n]= 0;
+	     if (0 == strcasecmp(mtok, "pulse"))
+		opt_H_m= SBX_MIXAM_MODE_PULSE;
+	     else if (0 == strcasecmp(mtok, "cos"))
+		opt_H_m= SBX_MIXAM_MODE_COS;
+	     else
+		error("-H parameter m must be 'pulse' or 'cos'");
+	     saw_mode= 1;
+	  }
+	  p= q;
+	  break;
+       case 's':
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_s= strtod(p, &q);
+	  if (q == p) error("-H parameter s requires a numeric value");
+	  p= q;
+	  break;
+       case 'd':
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_d= strtod(p, &q);
+	  if (q == p) error("-H parameter d requires a numeric value");
+	  saw_pulse_shape= 1;
+	  p= q;
+	  break;
+       case 'a':
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_a= strtod(p, &q);
+	  if (q == p) error("-H parameter a requires a numeric value");
+	  saw_pulse_shape= 1;
+	  p= q;
+	  break;
+       case 'r':
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_r= strtod(p, &q);
+	  if (q == p) error("-H parameter r requires a numeric value");
+	  saw_pulse_shape= 1;
+	  p= q;
+	  break;
+       case 'e':
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  edge= strtol(p, &q, 10);
+	  if (q == p) error("-H parameter e requires an integer value");
+	  q2= q;
+	  while (isspace((unsigned char)*q2)) q2++;
+	  if (*q2 && *q2 != ':')
+	     error("-H parameter e must be an integer in range 0..3");
+	  opt_H_e= (int)edge;
+	  saw_pulse_shape= 1;
+	  p= q;
+	  break;
+       case 'f':
+	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+	  opt_H_f= strtod(p, &q);
+	  if (q == p) error("-H parameter f requires a numeric value");
+	  p= q;
+	  break;
+       default:
+	  error("-H only supports m=, s=, d=, a=, r=, e= and f= parameters");
+      }
+
+      if (*p == ':') p++;
+      else if (*p) error("-H expects colon-separated parameters");
+   }
+
+   if (!saw_mode && saw_pulse_shape)
+      opt_H_m= SBX_MIXAM_MODE_PULSE;
+
+   if (opt_H_s < 0.0 || opt_H_s > 1.0)
+      error("-H parameter s must be in range [0,1]");
+   if (opt_H_m == SBX_MIXAM_MODE_PULSE) {
+      if (opt_H_d < 0.0 || opt_H_d > 1.0)
+	 error("-H parameter d must be in range [0,1] in m=pulse mode");
+      if (opt_H_a < 0.0 || opt_H_a > 1.0)
+	 error("-H parameter a must be in range [0,1] in m=pulse mode");
+      if (opt_H_r < 0.0 || opt_H_r > 1.0)
+	 error("-H parameter r must be in range [0,1] in m=pulse mode");
+      if (opt_H_a + opt_H_r > 1.0)
+	 error("-H parameters a+r must be <= 1 in m=pulse mode");
+      if (opt_H_e < 0 || opt_H_e > 3)
+	 error("-H parameter e must be in range 0..3");
+   }
+   if (opt_H_f < 0.0 || opt_H_f > 1.0)
+      error("-H parameter f must be in range [0,1]");
+}
+
 static double
 isochronic_mod_factor_phase_custom(double phase,
 				   double start, double duty,
@@ -3284,6 +3430,27 @@ try_external_iso_cycle_graph_png(const char *out_fname,
    return plot_try_external_cmd(script, out_fname, args);
 }
 
+int
+try_external_mixam_cycle_graph_png(const char *out_fname,
+				   int m, double s, double d, double a, double r,
+				   int e, double f) {
+   char script[PATH_MAX];
+   char args[2048];
+   int force_external= plot_external_force();
+
+   if (!plot_find_script(script, sizeof(script))) {
+      if (force_external)
+	 error("External Python/Cairo plot backend requested but plot script was not found (set SBAGENX_PLOT_SCRIPT or use SBAGENX_PLOT_BACKEND=internal)");
+      return 0;
+   }
+
+   snprintf(args, sizeof(args),
+	    " mixam-cycle --out \"%s\" --h-m %d --h-s %.12g --h-d %.12g --h-a %.12g --h-r %.12g --h-e %d --h-f %.12g",
+	    out_fname, m, s, d, a, r, e, f);
+
+   return plot_try_external_cmd(script, out_fname, args);
+}
+
 static double
 sigmoid_eval(double t_min, double d_min, double beat_target,
 	     double sig_l, double sig_h, double sig_a, double sig_b) {
@@ -3315,20 +3482,22 @@ build_integer_axis_ticks(double max_v, double *ticks, int max_ticks) {
 }
 
 static double
-drop_eval(double t_min, double d_min, double beat_target,
+drop_eval(double t_min, double d_min, double beat_start, double beat_target,
 	  int slide, int n_step, int steplen_sec) {
    if (d_min <= 0.0) return beat_target;
    if (t_min < 0.0) t_min= 0.0;
    if (t_min > d_min) t_min= d_min;
+   if (!(beat_start > 0.0))
+      beat_start= 10.0;
 
    if (!slide && n_step > 1 && steplen_sec > 0) {
       int idx= (int)(t_min * 60.0 / steplen_sec);
       if (idx < 0) idx= 0;
       if (idx > n_step-1) idx= n_step-1;
-      return 10.0 * exp(log(beat_target/10.0) * idx / (double)(n_step-1));
+      return beat_start * exp(log(beat_target/beat_start) * idx / (double)(n_step-1));
    }
 
-   return 10.0 * exp(log(beat_target/10.0) * t_min / d_min);
+   return beat_start * exp(log(beat_target/beat_start) * t_min / d_min);
 }
 
 static const char *
@@ -3409,7 +3578,7 @@ write_drop_graph_png(const char *fmt, double level,
 
    for (a= 0; a<=2000; a++) {
       double t_min= d_min * a / 2000.0;
-      double y= drop_eval(t_min, d_min, beat_target, slide, n_step, steplen);
+      double y= drop_eval(t_min, d_min, beat_start, beat_target, slide, n_step, steplen);
       if (y < y_min) y_min= y;
       if (y > y_max) y_max= y;
    }
@@ -3447,7 +3616,7 @@ write_drop_graph_png(const char *fmt, double level,
 
    for (a= 0; a<pw; a++) {
       double t_min= d_min * a / (double)(pw-1);
-      double y= drop_eval(t_min, d_min, beat_target, slide, n_step, steplen);
+      double y= drop_eval(t_min, d_min, beat_start, beat_target, slide, n_step, steplen);
       int px= ml + a;
       int py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
       if (a == 0) start_y= py;
@@ -3942,6 +4111,187 @@ write_sigmoid_graph_png(const char *fmt, double level,
    free(img);
 }
 
+void
+write_mixam_cycle_graph_png(void) {
+   int w= 1500, h= 900, ss= 4;
+   int hw= w * ss, hh= h * ss;
+   int ml= 130 * ss, mr= 40 * ss, mt= 40 * ss, mb= 160 * ss;
+   int gap= 70 * ss;
+   int pw= hw - ml - mr;
+   int ph= (hh - mt - mb - gap) / 2;
+   int top_y0= mt, top_y1= mt + ph - 1;
+   int bot_y0= mt + ph + gap, bot_y1= mt + ph + gap + ph - 1;
+   int tick_scale= 2 * ss;
+   int label_scale= 3 * ss;
+   int param_scale= 3 * ss;
+   int a, i, prev_ex= -1, prev_ey= -1, prev_gx= -1, prev_gy= -1;
+   unsigned char *img_hi;
+   unsigned char *img;
+   char s_tok[64], d_tok[64], a_tok[64], r_tok[64], f_tok[64], fname[512];
+   char tick_txt[64];
+   char ptxt1[256], ptxt2[256];
+   const char *mode_name= (opt_H_m == SBX_MIXAM_MODE_COS) ? "cos" : "pulse";
+   const char *title= (opt_H_m == SBX_MIXAM_MODE_COS)
+      ? "MIXAM SINGLE-CYCLE CONTINUOUS-AM PLOT"
+      : "MIXAM SINGLE-CYCLE ENVELOPE PLOT";
+
+   sanitize_filename_token("mixam_cycle", fname, sizeof(fname));
+   double_to_token(opt_H_s, s_tok, sizeof(s_tok));
+   double_to_token(opt_H_d, d_tok, sizeof(d_tok));
+   double_to_token(opt_H_a, a_tok, sizeof(a_tok));
+   double_to_token(opt_H_r, r_tok, sizeof(r_tok));
+   double_to_token(opt_H_f, f_tok, sizeof(f_tok));
+   snprintf(fname, sizeof(fname),
+	    "mixam_cycle_m%s_s%s_d%s_a%s_r%s_e%d_f%s.png",
+	    mode_name, s_tok, d_tok, a_tok, r_tok, opt_H_e, f_tok);
+
+   if (try_external_mixam_cycle_graph_png(fname,
+					  opt_H_m,
+					  opt_H_s, opt_H_d, opt_H_a, opt_H_r,
+					  opt_H_e, opt_H_f)) {
+      if (!opt_Q)
+	 warn("Mixam cycle graph saved to: %s (Python/Cairo)", fname);
+      return;
+   }
+
+   img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
+   plot_fill(img_hi, hw, hh, 255, 255, 255);
+   plot_fill_rect(img_hi, hw, hh, ml, top_y0, ml+pw-1, top_y1, 250, 250, 250);
+   plot_fill_rect(img_hi, hw, hh, ml, bot_y0, ml+pw-1, bot_y1, 250, 250, 250);
+
+   for (i= 0; i<=10; i++) {
+      int gx= ml + (pw-1) * i / 10;
+      plot_vline(img_hi, hw, hh, gx, top_y0, top_y1, 236, 236, 236);
+      plot_vline(img_hi, hw, hh, gx, bot_y0, bot_y1, 236, 236, 236);
+   }
+   for (i= 0; i<=10; i++) {
+      int gy= top_y0 + (ph-1) * i / 10;
+      plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
+   }
+   for (i= 0; i<=10; i++) {
+      int gy= bot_y0 + (ph-1) * i / 10;
+      plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
+   }
+
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, top_y0, 90, 90, 90);
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, top_y1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml, top_y0, top_y1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml+pw-1, top_y0, top_y1, 90, 90, 90);
+
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, bot_y0, 90, 90, 90);
+   plot_hline(img_hi, hw, hh, ml, ml+pw-1, bot_y1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml, bot_y0, bot_y1, 90, 90, 90);
+   plot_vline(img_hi, hw, hh, ml+pw-1, bot_y0, bot_y1, 90, 90, 90);
+
+   for (a= 0; a<pw; a++) {
+      int ex= ml + a;
+      double phase= a / (double)(pw-1);
+      double env;
+      if (opt_H_m == SBX_MIXAM_MODE_COS) {
+	 double phx= sbx_dsp_wrap_unit(phase + opt_H_s);
+	 env= 0.5 * (1.0 + cos(2.0 * M_PI * phx));
+      } else {
+	 env= sbx_dsp_iso_mod_factor_custom(phase, opt_H_s, opt_H_d,
+					    opt_H_a, opt_H_r, opt_H_e);
+      }
+      double gain= opt_H_f + (1.0 - opt_H_f) * env;
+      int ey= top_y0 + (int)((1.0 - env) * (ph-1) + 0.5);
+      int gy= bot_y0 + (int)((1.0 - gain) * (ph-1) + 0.5);
+
+      if (prev_ex >= 0) {
+	 plot_line_thick(img_hi, hw, hh, prev_ex, prev_ey, ex, ey, ss+1, 220, 40, 40);
+	 plot_line_thick(img_hi, hw, hh, prev_gx, prev_gy, ex, gy, ss+1, 34, 94, 224);
+      }
+      prev_ex= ex; prev_ey= ey;
+      prev_gx= ex; prev_gy= gy;
+   }
+
+   for (i= 0; i<=10; i++) {
+      int gx= ml + (pw-1) * i / 10;
+      double xv= i / 10.0;
+      int tx, tw;
+      format_tick_value(xv, tick_txt, sizeof(tick_txt));
+      plot_vline(img_hi, hw, hh, gx, bot_y1, bot_y1 + 4*ss, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= gx - tw/2;
+      font5x7_draw_text(img_hi, hw, hh, tx, bot_y1 + 10*ss, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   for (i= 0; i<=10; i++) {
+      double yv= 1.0 - i * 0.1;
+      int gy= top_y0 + (int)((1.0 - yv) * (ph-1) + 0.5);
+      int tw, tx, ty;
+      format_tick_value(yv, tick_txt, sizeof(tick_txt));
+      plot_hline(img_hi, hw, hh, ml - 4*ss, ml, gy, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= ml - 8*ss - tw;
+      ty= gy - (7 * tick_scale) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   for (i= 0; i<=10; i++) {
+      double yv= 1.0 - i * 0.1;
+      int gy= bot_y0 + (int)((1.0 - yv) * (ph-1) + 0.5);
+      int tw, tx, ty;
+      format_tick_value(yv, tick_txt, sizeof(tick_txt));
+      plot_hline(img_hi, hw, hh, ml - 4*ss, ml, gy, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= ml - 8*ss - tw;
+      ty= gy - (7 * tick_scale) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
+   }
+
+   {
+      int tw= font5x7_text_width(title, label_scale);
+      int tx= ml + (pw - tw) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, 8*ss, title, label_scale, 0, 25, 25, 25);
+   }
+   {
+      const char *x_label= "CYCLE";
+      int tw= font5x7_text_width(x_label, label_scale);
+      int tx= ml + (pw - tw) / 2;
+      int ty= bot_y1 + 32*ss;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, x_label, label_scale, 0, 30, 30, 30);
+   }
+   {
+      const char *y1_label= "ENVELOPE";
+      const char *y2_label= "GAIN";
+      int yh1= font5x7_text_height_rot90(y1_label, label_scale);
+      int yh2= font5x7_text_height_rot90(y2_label, label_scale);
+      int x0= 18 * ss;
+      int y01= top_y0 + (ph - yh1) / 2;
+      int y02= bot_y0 + (ph - yh2) / 2;
+      font5x7_draw_text(img_hi, hw, hh, x0, y01, y1_label, label_scale, 1, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y02, y2_label, label_scale, 1, 30, 30, 30);
+   }
+
+   if (opt_H_m == SBX_MIXAM_MODE_COS)
+      snprintf(ptxt1, sizeof(ptxt1), "H:m=cos s=%.4f f=%.3f", opt_H_s, opt_H_f);
+   else
+      snprintf(ptxt1, sizeof(ptxt1), "H:m=pulse s=%.4f d=%.4f a=%.2f r=%.2f e=%d f=%.3f",
+	       opt_H_s, opt_H_d, opt_H_a, opt_H_r, opt_H_e, opt_H_f);
+   snprintf(ptxt2, sizeof(ptxt2), "mixam cycle gain = f + (1-f)*envelope");
+   {
+      int tw1= font5x7_text_width(ptxt1, param_scale);
+      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tx1= ml + (pw - tw1) / 2;
+      int tx2= ml + (pw - tw2) / 2;
+      int ty1= hh - 66 * ss;
+      int ty2= hh - 38 * ss;
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+   }
+
+   img= plot_downsample_box(img_hi, hw, hh, ss);
+   free(img_hi);
+
+   if (!stbi_write_png(fname, w, h, 3, img, w*3))
+      error("Failed to write mixam cycle graph PNG file");
+   if (!opt_Q)
+      warn("Mixam cycle graph saved to: %s", fname);
+   free(img);
+}
+
 static int
 find_first_iso_voice(Voice *out) {
    Period *pp;
@@ -4224,17 +4574,17 @@ main(int argc, char **argv) {
    if (rv == 'i') {
       // Immediate mode
       if (opt_G)
-	 error("-G is only supported with -p sigmoid");
+	 error("-G is only supported with -p drop/-p sigmoid/-p curve");
       readSeqImm(argc, argv);
    } else if (rv == 'p') {
       // Pre-programmed sequence
       readPreProg(argc, argv);
-      if (opt_G || opt_P_sigmoid || opt_P_drop || opt_P_curve) return 0;
+      if (opt_G || opt_P_sigmoid || opt_P_drop || opt_P_curve || (opt_P && opt_H)) return 0;
    } else {
       // Sequenced mode -- sequence may include options, so options
       // are not settled until below this point
       if (opt_G)
-	 error("-G is only supported with -p sigmoid");
+	 error("-G is only supported with -p drop/-p sigmoid/-p curve");
       if (argc < 1) usage();
       readSeq(argc, argv);
    }
@@ -4243,7 +4593,10 @@ main(int argc, char **argv) {
    init_mixbeat_hilbert();
 
    if (opt_P) {
-      write_iso_cycle_graph_png_from_sequence();
+      if (opt_H)
+	 write_mixam_cycle_graph_png();
+      else
+	 write_iso_cycle_graph_png_from_sequence();
       return 0;
    }
    
@@ -4405,6 +4758,18 @@ scanOptions(int *acp, char ***avp) {
 		p += strlen(p);
 	     } else if (argc > 0 && is_iso_gate_option_spec(argv[0])) {
 		parse_iso_gate_option_spec(*argv++);
+		argc--;
+	     }
+	     break;
+	  case 'H':
+	     opt_H= 1;
+	     if (*p) {
+		 if (!is_mixam_env_option_spec(p))
+		    error("-H optional spec must be m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
+		parse_mixam_env_option_spec(p);
+		p += strlen(p);
+	     } else if (argc > 0 && is_mixam_env_option_spec(argv[0])) {
+		parse_mixam_env_option_spec(*argv++);
 		argc--;
 	     }
 	     break;
@@ -7704,6 +8069,19 @@ legacy_voice_from_sbx_tone(const SbxToneSpec *tone, Voice *out) {
   return 0;
 }
 
+static void
+apply_mixam_envelope_override(SbxMixFxSpec *fx) {
+   if (!fx || !opt_H || fx->type != SBX_MIXFX_AM)
+      return;
+   fx->mixam_mode= opt_H_m;
+   fx->mixam_start= opt_H_s;
+   fx->mixam_duty= opt_H_d;
+   fx->mixam_attack= opt_H_a;
+   fx->mixam_release= opt_H_r;
+   fx->mixam_edge_mode= opt_H_e;
+   fx->mixam_floor= opt_H_f;
+}
+
 static int
 parse_legacy_voice_token(const char *tok, Voice *out, int *out_sets_mix_flag) {
    char dmy;
@@ -7731,6 +8109,8 @@ parse_legacy_voice_token(const char *tok, Voice *out, int *out_sets_mix_flag) {
    }
 
    if (SBX_OK == sbx_parse_extra_token(tok, opt_w, &extra_type, &tone, &fx, &mix_pct)) {
+      if (extra_type == SBX_EXTRA_MIXFX)
+	 apply_mixam_envelope_override(&fx);
       if (extra_type == SBX_EXTRA_MIXAMP) {
 	 out->typ= 5;
 	 out->amp= AMP_DA(mix_pct);
@@ -8128,11 +8508,22 @@ readPreProg(int ac, char **av) {
    if (opt_A && !opt_m && !opt_M)
       error("-A requires a mix input stream; use -m <file> or -M");
 
-   if (opt_G && strcmp(av[0], "sigmoid") != 0)
-      error("-G is only supported with -p sigmoid (or use -P for -p drop/-p sigmoid/-p curve plots, or isochronic waveform plots)");
+   if (opt_P && !opt_G && opt_H) {
+      write_mixam_cycle_graph_png();
+      return;
+   }
+
+   if (opt_G &&
+       strcmp(av[0], "drop") != 0 &&
+       strcmp(av[0], "sigmoid") != 0 &&
+       strcmp(av[0], "curve") != 0) {
+      error("-G is only supported with -p drop/-p sigmoid/-p curve");
+   }
    
    // Handle 'drop'
    if (0 == strcmp(av[0], "drop")) {
+      if (opt_G || (opt_P && !opt_H))
+	 opt_P_drop= 1;
       ac--; av++;
       create_drop(ac, av);
       return;
@@ -8140,6 +8531,8 @@ readPreProg(int ac, char **av) {
 
    // Handle 'curve'
    if (0 == strcmp(av[0], "curve")) {
+      if (opt_G || (opt_P && !opt_H))
+	 opt_P_curve= 1;
       ac--; av++;
       create_curve(ac, av);
       return;
@@ -8147,6 +8540,8 @@ readPreProg(int ac, char **av) {
 
    // Handle 'libseq' (sbagenxlib keyframe file: <time> <tone> [interp])
    if (0 == strcmp(av[0], "libseq")) {
+      if (opt_G)
+	 error("-G is not supported with -p libseq");
       ac--; av++;
       create_libseq(ac, av, 0);
       return;
@@ -8154,6 +8549,8 @@ readPreProg(int ac, char **av) {
 
    // Handle 'libsbg' (sbagenxlib HH:MM[:SS] timing subset)
    if (0 == strcmp(av[0], "libsbg")) {
+      if (opt_G)
+	 error("-G is not supported with -p libsbg");
       ac--; av++;
       create_libseq(ac, av, 1);
       return;
@@ -8161,6 +8558,8 @@ readPreProg(int ac, char **av) {
 
    // Handle 'slide'
    if (0 == strcmp(av[0], "slide")) {
+      if (opt_G)
+	 error("-G is not supported with -p slide");
       if (opt_A && !opt_Q)
 	 warn("-A mix modulation currently applies only to -p drop/-p sigmoid; ignoring for -p slide");
       ac--; av++;
@@ -8170,7 +8569,7 @@ readPreProg(int ac, char **av) {
 
    // Handle 'sigmoid'
    if (0 == strcmp(av[0], "sigmoid")) {
-      if (opt_P && !opt_G)
+      if (opt_G || (opt_P && !opt_H))
 	 opt_P_sigmoid= 1;
       ac--; av++;
       create_sigmoid(ac, av);
@@ -8351,6 +8750,7 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
 	 continue;
       }
       if (extra_type == SBX_EXTRA_MIXFX) {
+	 apply_mixam_envelope_override(&mix_fx_tmp);
 	 if (mix_fx_count >= SBX_MAX_AUX_TONES)
 	    return 0;
 	 mix_fx[mix_fx_count++]= mix_fx_tmp;
@@ -8483,6 +8883,7 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
 	       spec->have_mix= 1;
 	       spec->mix_amp_pct= mix_pct;
 	    } else if (extra_type == SBX_EXTRA_MIXFX) {
+	       apply_mixam_envelope_override(&mix_fx);
 	       if (spec->mix_fx_count >= SBX_MAX_AUX_TONES)
 		  error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_MAX_AUX_TONES);
 	       spec->mix_fx[spec->mix_fx_count++]= mix_fx;
@@ -8514,13 +8915,24 @@ sbx_validate_runtime_extra_mix_fx(const char *prog_name, const SbxRuntimeExtraSp
       error("%s mix effects require mix/<amp> in extra tone-specs", prog_name ? prog_name : "sbagenx");
 }
 
+static int
+sbx_runtime_extra_has_mixam(const SbxRuntimeExtraSpec *spec) {
+   size_t i;
+   if (!spec) return 0;
+   for (i= 0; i<spec->mix_fx_count; i++) {
+      if (spec->mix_fx[i].type == SBX_MIXFX_AM)
+	 return 1;
+   }
+   return 0;
+}
+
 static void
 sbx_handle_runtime_unsupported_extra(const char *prog_name, const SbxRuntimeExtraSpec *spec) {
    if (!spec || !spec->unsupported)
       return;
    if (!opt_D)
       error("Unsupported extra tone-spec '%s' for %s sbagenxlib runtime"
-	    NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+	    NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat/mixam, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
 	    spec->bad_token, prog_name ? prog_name : "sbagenx");
    warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
 	spec->bad_token);
@@ -8587,11 +8999,13 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
 void 
 bad_drop() {
    error("Bad arguments: expecting -p drop [<time-spec>] <drop-spec> [<tone-specs...>]"
-	 NL "<drop-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>]"
+	 NL "<drop-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
+	 NL "The optional :S=<val> sets start beat/pulse frequency in Hz (default 10)."
 	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the drop"
@@ -8611,15 +9025,17 @@ create_drop(int ac, char **av) {
    char *fmt;
    char *p, *q;
    int a;
+   int mute_prog_tone= 0;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    double carr, amp, c0, c2;
-   double beat_target;
+   double beat_target, beat_start= 10.0;
    double beat[40];
    static double beat_targets[]= { 
       4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
    };
    char extra[256];
+   SbxRuntimeExtraSpec extra_spec;
    int len, len0= 1800, len1= 1800, len2= 180;
    int steplen;
    
@@ -8647,10 +9063,16 @@ create_drop(int ac, char **av) {
       p += sprintf(p, " %s", av[0]);
       ac--; av++;
    }
-   
+
    // Scan the format
-   carr= 200 - 2 * strtod(fmt, &p);
-   if (p == fmt || carr < 0) BAD;
+   if (fmt[0] == 'N' || fmt[0] == 'n') {
+      mute_prog_tone= 1;
+      carr= 200.0;
+      p= fmt + 1;
+   } else {
+      carr= 200 - 2 * strtod(fmt, &p);
+      if (p == fmt || carr < 0) BAD;
+   }
 
    a= tolower(*p) - 'a'; p++;
    if (a < 0 || a >= sizeof(beat_targets) / sizeof(beat_targets[0])) BAD;
@@ -8685,6 +9107,16 @@ create_drop(int ac, char **av) {
 	 if (p == q) BAD;
 	 continue;
       }
+      if (*p == ':') {
+	 p++;
+	 if (p[0] == 'S' && p[1] == '=') {
+	    p += 2; q= p;
+	    beat_start= strtod(p, &p);
+	    if (p == q) BAD;
+	    continue;
+	 }
+	 BAD;
+      }
       break;
    }
 
@@ -8693,6 +9125,10 @@ create_drop(int ac, char **av) {
 
    if (ismono && isisochronic)
       error("M monaural mode cannot be combined with '@' isochronic drop specs");
+   if (!(beat_start > 0.0) || !isfinite(beat_start))
+      error("Invalid drop start beat/pulse frequency :S=%g (must be > 0)", beat_start);
+   if (mute_prog_tone)
+      amp= 0.0;
 
 #undef BAD
       
@@ -8711,11 +9147,19 @@ create_drop(int ac, char **av) {
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
 
-   if (opt_P) {
+   if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
+      error("Internal error parsing -p drop extra tone-specs");
+
+   if (opt_P && !opt_G && !opt_H && sbx_runtime_extra_has_mixam(&extra_spec)) {
+      write_mixam_cycle_graph_png();
+      return;
+   }
+
+   if (opt_G || opt_P_drop) {
       opt_P_drop= 1;
       write_drop_graph_png(fmt, (200.0 - carr) / 2.0, (char)('a' + a),
 			   len0, len1, len2,
-			   10.0, beat_target,
+			   beat_start, beat_target,
 			   slide, n_step, steplen,
 			   isisochronic, ismono);
       return;
@@ -8723,16 +9167,13 @@ create_drop(int ac, char **av) {
 
    // Calculate beats
    for (a= 0; a<n_step; a++)
-      beat[a]= 10 * exp(log(beat_target/10) * a / (n_step-1));
+      beat[a]= beat_start * exp(log(beat_target/beat_start) * a / (n_step-1));
 
    {
-      SbxRuntimeExtraSpec extra_spec;
       SbxKfBuilder kfb= {0};
       SbxToneSpec tone;
       int end_sec;
 
-      if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
-	 error("Internal error parsing -p drop extra tone-specs");
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p drop extras but no mix input stream is active");
       sbx_validate_runtime_extra_mix_fx("-p drop", &extra_spec);
@@ -8766,6 +9207,8 @@ create_drop(int ac, char **av) {
       if (wakeup) {
 	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
       }
+      if (mute_prog_tone)
+	 warn(" N mode active: generated program tones are muted; beat/pulse trajectory is still generated");
       if (opt_A) {
 	 warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
 	      opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
@@ -8831,12 +9274,14 @@ create_drop(int ac, char **av) {
 void
 bad_sigmoid() {
    error("Bad arguments: expecting -p sigmoid [<time-spec>] <sigmoid-spec> [<tone-specs...>]"
-	 NL "<sigmoid-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>]"
+	 NL "<sigmoid-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
-	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0)."
+	 NL "The optional shape parameters are l and h (defaults: l=0.125, h=0),"
+	 NL "  and :S=<val> sets start beat/pulse frequency in Hz (default 10)."
 	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>."
 	 NL "The optional <tone-specs...> let you mix other stuff with the sequence"
@@ -8853,6 +9298,7 @@ create_sigmoid(int ac, char **av) {
    char *p, *q;
    char depth_ch;
    int a;
+   int mute_prog_tone= 0;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    double level;
@@ -8863,6 +9309,7 @@ create_sigmoid(int ac, char **av) {
       4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
    };
    char extra[256];
+   SbxRuntimeExtraSpec extra_spec;
    int len, len0= 1800, len1= 1800, len2= 180;
    int steplen;
    double sig_l= 0.125, sig_h= 0.0;
@@ -8894,9 +9341,16 @@ create_sigmoid(int ac, char **av) {
    }
 
    // Scan the format
-   level= strtod(fmt, &p);
-   carr= 200 - 2 * level;
-   if (p == fmt || carr < 0) BAD;
+   if (fmt[0] == 'N' || fmt[0] == 'n') {
+      mute_prog_tone= 1;
+      level= 0.0;
+      carr= 200.0;
+      p= fmt + 1;
+   } else {
+      level= strtod(fmt, &p);
+      carr= 200 - 2 * level;
+      if (p == fmt || carr < 0) BAD;
+   }
 
    depth_ch= tolower((unsigned char)*p);
    a= depth_ch - 'a'; p++;
@@ -8912,7 +9366,7 @@ create_sigmoid(int ac, char **av) {
    have_step_mode= 0;
    amp= 1.0;
 
-   // Parse optional flags in any order, including :l= and :h=
+   // Parse optional flags in any order, including :l=, :h= and :S=
    while (1) {
       if (*p == 's' || *p == 'k') {
 	 if (have_step_mode) BAD;
@@ -8946,6 +9400,12 @@ create_sigmoid(int ac, char **av) {
 	    if (p == q) BAD;
 	    continue;
 	 }
+	 if (p[0] == 'S' && p[1] == '=') {
+	    p += 2; q= p;
+	    beat_start= strtod(p, &p);
+	    if (p == q) BAD;
+	    continue;
+	 }
 	 BAD;
       }
       break;
@@ -8956,6 +9416,10 @@ create_sigmoid(int ac, char **av) {
 
    if (ismono && isisochronic)
       error("M monaural mode cannot be combined with '@' isochronic sigmoid specs");
+   if (!(beat_start > 0.0) || !isfinite(beat_start))
+      error("Invalid sigmoid start beat/pulse frequency :S=%g (must be > 0)", beat_start);
+   if (mute_prog_tone)
+      amp= 0.0;
 
 #undef BAD
 
@@ -8985,6 +9449,14 @@ create_sigmoid(int ac, char **av) {
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
 
+   if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
+      error("Internal error parsing -p sigmoid extra tone-specs");
+
+   if (opt_P && !opt_G && !opt_H && sbx_runtime_extra_has_mixam(&extra_spec)) {
+      write_mixam_cycle_graph_png();
+      return;
+   }
+
    if (opt_G || opt_P_sigmoid) {
       write_sigmoid_graph_png(fmt, level, depth_ch, len0, len1, len2,
 			      beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
@@ -9002,13 +9474,10 @@ create_sigmoid(int ac, char **av) {
    }
 
    {
-      SbxRuntimeExtraSpec extra_spec;
       SbxKfBuilder kfb= {0};
       SbxToneSpec tone;
       int end_sec;
 
-      if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
-	 error("Internal error parsing -p sigmoid extra tone-specs");
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p sigmoid extras but no mix input stream is active");
       sbx_validate_runtime_extra_mix_fx("-p sigmoid", &extra_spec);
@@ -9043,6 +9512,8 @@ create_sigmoid(int ac, char **av) {
       if (wakeup) {
 	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
       }
+      if (mute_prog_tone)
+	 warn(" N mode active: generated program tones are muted; beat/pulse trajectory is still generated");
       if (opt_A) {
 	 warn(" Mix modulation enabled: -A d=%g:e=%g:k=%g:E=%g (T=%g min%s)",
 	      opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, wakeup ? ", wake ramp active" : "");
@@ -9114,12 +9585,14 @@ bad_curve() {
 	 NL "  mixamp = <expression>, and piecewise variants of carrier/amp/mixamp,"
 	 NL "  param <name> = <value>[m|s],"
 	 NL "  solve <u1>,<u2>,... : <lhs1>=<rhs1> ; <lhs2>=<rhs2> ; ..."
-	 NL "<curve-spec> is <signed-level><a-l>[s|k][+][^][@|M][/<amp>][:<name>=<value>...]"
+	 NL "<curve-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:<name>=<value>...]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (default is equivalent to 't30,30,3')."
 	 NL "'@' selects isochronic pulse mode.  'M' selects monaural mode."
+	 NL "Use :S=<val> to set start beat/pulse frequency in Hz (default 10)."
 	 NL "Use :<name>=<value> in <curve-spec> to override .sbgf parameters."
 	 NL "Use -A[spec] to enable mix modulation; spec is d=<v>:e=<v>:k=<v>:E=<v>.");
 }
@@ -9135,6 +9608,7 @@ create_curve(int ac, char **av) {
    char *p, *q;
    char depth_ch;
    int a;
+   int mute_prog_tone= 0;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
    int have_step_mode;
    int len, len0= 1800, len1= 1800, len2= 180;
@@ -9155,14 +9629,12 @@ create_curve(int ac, char **av) {
    int have_mix_in_extra= 0;
    int have_amp_curve= 0, have_mixamp_curve= 0;
    char extra[256];
+   SbxRuntimeExtraSpec extra_spec;
    static double beat_targets[]= {
       4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
    };
 
 #define BAD bad_curve()
-
-   if (opt_G)
-      error("-G is only supported with -p sigmoid");
 
    if (ac < 2) BAD;
    curve_file= *av++;
@@ -9195,9 +9667,16 @@ create_curve(int ac, char **av) {
    have_mix_in_extra= curve_find_mix_amp_in_extra(extra, &base_mix_amp);
 
    // Scan the format
-   level= strtod(fmt, &p);
-   carr= 200 - 2 * level;
-   if (p == fmt || carr < 0) BAD;
+   if (fmt[0] == 'N' || fmt[0] == 'n') {
+      mute_prog_tone= 1;
+      level= 0.0;
+      carr= 200.0;
+      p= fmt + 1;
+   } else {
+      level= strtod(fmt, &p);
+      carr= 200 - 2 * level;
+      if (p == fmt || carr < 0) BAD;
+   }
 
    depth_ch= tolower((unsigned char)*p);
    a= depth_ch - 'a'; p++;
@@ -9236,6 +9715,12 @@ create_curve(int ac, char **av) {
 	 int ni= 0;
 	 char name[CURVE_NAME_MAX];
 	 p++;
+	 if (p[0] == 'S' && p[1] == '=') {
+	    p += 2; q= p;
+	    beat_start= strtod(p, &p);
+	    if (p == q) BAD;
+	    continue;
+	 }
 	 if (!curve_name_char((unsigned char)*p, 1)) BAD;
 	 while (*p && curve_name_char((unsigned char)*p, ni == 0)) {
 	    if (ni >= CURVE_NAME_MAX-1) BAD;
@@ -9261,6 +9746,10 @@ create_curve(int ac, char **av) {
 
    if (ismono && isisochronic)
       error("M monaural mode cannot be combined with '@' isochronic curve specs");
+   if (!(beat_start > 0.0) || !isfinite(beat_start))
+      error("Invalid curve start beat/pulse frequency :S=%g (must be > 0)", beat_start);
+   if (mute_prog_tone)
+      amp= 0.0;
 
 #undef BAD
 
@@ -9305,7 +9794,16 @@ create_curve(int ac, char **av) {
    if (!eval_custom_curve_point(0.0, &beat_start_eval, &carr_start_eval, &amp_start_eval, &mix_start_eval))
       error("Custom curve evaluation failed at session start");
 
-   if (opt_P) {
+   if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
+      error("Internal error parsing -p curve extra tone-specs");
+
+   if (opt_P && !opt_G && !opt_H && sbx_runtime_extra_has_mixam(&extra_spec)) {
+      clear_func_curve();
+      write_mixam_cycle_graph_png();
+      return;
+   }
+
+   if (opt_G || opt_P_curve) {
       opt_P_curve= 1;
       write_curve_graph_png(fmt, level, depth_ch,
 			    len0, len1, len2,
@@ -9317,14 +9815,11 @@ create_curve(int ac, char **av) {
    }
 
    {
-      SbxRuntimeExtraSpec extra_spec;
       int end_sec;
       SbxKfBuilder kfb= {0};
       SbxMixKfBuilder mkfb= {0};
       SbxToneSpec tone;
 
-      if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
-	 error("Internal error parsing -p curve extra tone-specs");
       have_mix_in_extra= extra_spec.have_mix;
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p curve extras but no mix input stream is active");
@@ -9358,6 +9853,8 @@ create_curve(int ac, char **av) {
 	 warn(" Carrier expression enabled from .sbgf");
       if (have_amp_curve)
 	 warn(" Beat amplitude expression enabled from .sbgf");
+      if (mute_prog_tone && have_amp_curve)
+	 warn(" N mode active: amp expression from .sbgf is ignored because generated program tones are muted");
       if (have_mixamp_curve) {
 	 if (have_mix_in_extra)
 	    warn(" Mix amplitude expression enabled from .sbgf");
@@ -9372,6 +9869,8 @@ create_curve(int ac, char **av) {
       }
       if (ismono)
 	 warn(" Monaural tone pair per step: f1=carr-beat/2, f2=carr+beat/2");
+      if (mute_prog_tone)
+	 warn(" N mode active: generated program tones are muted; beat/pulse trajectory is still generated");
       if (wakeup)
 	 warn(" Final wake-up of %d minutes, to return to initial frequencies", len2/60);
       if (opt_A) {
@@ -9383,6 +9882,7 @@ create_curve(int ac, char **av) {
       if (slide) {
 	 for (a= 0; a<n_step; a++) {
 	    double amp_t= have_amp_curve ? amp_sam[a] : amp;
+	    if (mute_prog_tone) amp_t= 0.0;
 	    double tim= a * len0 / (double)(n_step-1);
 	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_sam[a], beat[a], amp_t);
 	    sbx_kfb_add(&kfb, tim, &tone, SBX_INTERP_LINEAR);
@@ -9391,6 +9891,7 @@ create_curve(int ac, char **av) {
 	 }
 	 if (islong) {
 	    double amp_t= have_amp_curve ? amp_end : amp;
+	    if (mute_prog_tone) amp_t= 0.0;
 	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, amp_t);
 	    sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
 	    if (have_mixamp_curve && have_mix_in_extra)
@@ -9406,12 +9907,17 @@ create_curve(int ac, char **av) {
 	    if (!eval_custom_curve_point(tim1, &beat_t, &carr_t, &amp_t, &mix_t))
 	       error("Custom curve evaluation failed at t=%d seconds", tim1);
 	    if (!have_amp_curve) amp_t= amp;
+	    if (mute_prog_tone) amp_t= 0.0;
 	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat_t, amp_t);
 	    sbx_kfb_add(&kfb, (double)tim0, &tone, SBX_INTERP_STEP);
 	    if (have_mixamp_curve && have_mix_in_extra)
 	       sbx_mixkfb_add(&mkfb, (double)tim0, mix_t, SBX_INTERP_STEP);
 	 }
-	 sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, have_amp_curve ? amp_end : amp);
+	 {
+	    double amp_t= have_amp_curve ? amp_end : amp;
+	    if (mute_prog_tone) amp_t= 0.0;
+	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, amp_t);
+	 }
 	 sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_STEP);
 	 if (have_mixamp_curve && have_mix_in_extra)
 	    sbx_mixkfb_add(&mkfb, (double)len, mix_end, SBX_INTERP_STEP);
@@ -9420,6 +9926,7 @@ create_curve(int ac, char **av) {
 
       if (wakeup) {
 	 double amp_t= have_amp_curve ? amp_start_eval : amp;
+	 if (mute_prog_tone) amp_t= 0.0;
 	 sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_start_eval, beat_start_eval, amp_t);
 	 sbx_kfb_add(&kfb, (double)(end_sec + len2), &tone, SBX_INTERP_LINEAR);
 	 if (have_mixamp_curve && have_mix_in_extra)
