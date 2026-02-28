@@ -539,6 +539,15 @@ Phase 3.76
 - Their effects remain in the CLI/frontend layer, but they no longer force a
   fallback away from native sbagenxlib loading.
 
+Phase 3.77
+- Promote the forced-native `.sbg` example sweep to a first-class regression
+  test:
+  - iterate across every `.sbg` example shipped in the repository,
+  - force `SBAGENX_SEQ_BACKEND=sbagenxlib`,
+  - require the direct `-D` path to succeed for the full corpus.
+- Current milestone at the time of landing: `150/150` repository examples
+  route through `sbagenxlib` without falling back to the legacy parser.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -982,6 +991,13 @@ Seq Backend Safe-Preamble Bridge Smoke Test (Phase 3.76)
 ```bash
 tests/sbagenxlib/test_seq_backend_safe_preamble_subset.sh
 tests/sbagenxlib/test_sbg_timing_loader_api.c
+```
+
+Seq Backend Full Example Corpus Smoke Test (Phase 3.77)
+-------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_full_example_corpus.sh
 ```
 
 Notes:
