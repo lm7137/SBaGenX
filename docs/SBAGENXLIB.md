@@ -530,6 +530,15 @@ Phase 3.75
   files that use these shorthand forms for structural reasons rather than for
   distinct DSP behavior.
 
+Phase 3.76
+- Extend the safe sequence-file preamble bridge to accept additional runtime
+  options that occur in historical `.sbg` wrappers:
+  - `-r <rate>`
+  - `-F <fade-ms>`
+  - `-q <mult>`
+- Their effects remain in the CLI/frontend layer, but they no longer force a
+  fallback away from native sbagenxlib loading.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -964,6 +973,14 @@ Seq Backend Real-Example Corpus Smoke Test (Phase 3.74)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_real_examples_subset.sh
+tests/sbagenxlib/test_sbg_timing_loader_api.c
+```
+
+Seq Backend Safe-Preamble Bridge Smoke Test (Phase 3.76)
+--------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_safe_preamble_subset.sh
 tests/sbagenxlib/test_sbg_timing_loader_api.c
 ```
 

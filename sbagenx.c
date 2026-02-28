@@ -4965,11 +4965,16 @@ static int
 sbx_parse_safe_seqfile_option_line(const char *line,
 				   int *out_S, int *out_E,
 				   int *out_have_T, int *out_T_ms,
+				   int *out_have_q, int *out_q_mult,
+				   int *out_have_r, int *out_rate,
+				   int *out_have_F, int *out_fade_ms,
 				   char **out_mix_path) {
    char *dup, *argv[64], *p;
    int argc= 0, i;
 
-   if (!line || !out_S || !out_E || !out_have_T || !out_T_ms || !out_mix_path)
+   if (!line || !out_S || !out_E || !out_have_T || !out_T_ms ||
+       !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
+       !out_have_F || !out_fade_ms || !out_mix_path)
       return 0;
    dup= StrDup((char *)line);
    p= dup;
@@ -5016,6 +5021,35 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     }
 	     if (!*out_mix_path)
 		*out_mix_path= StrDup(argv[i+1]);
+	     i++;
+	     a= strlen(tok) - 1;
+	     break;
+	  case 'q':
+	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_q_mult)) {
+		free(dup);
+		return 0;
+	     }
+	     if (*out_q_mult < 1)
+		*out_q_mult= 1;
+	     *out_have_q= 1;
+	     i++;
+	     a= strlen(tok) - 1;
+	     break;
+	  case 'r':
+	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_rate)) {
+		free(dup);
+		return 0;
+	     }
+	     *out_have_r= 1;
+	     i++;
+	     a= strlen(tok) - 1;
+	     break;
+	  case 'F':
+	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_fade_ms)) {
+		free(dup);
+		return 0;
+	     }
+	     *out_have_F= 1;
 	     i++;
 	     a= strlen(tok) - 1;
 	     break;
@@ -5144,17 +5178,28 @@ static int
 sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 				 int *out_S, int *out_E,
 				 int *out_have_T, int *out_T_ms,
+				 int *out_have_q, int *out_q_mult,
+				 int *out_have_r, int *out_rate,
+				 int *out_have_F, int *out_fade_ms,
 				 char **out_mix_path) {
    char *text, *line;
    int rc;
 
-   if (!out_text || !out_S || !out_E || !out_have_T || !out_T_ms || !out_mix_path)
+   if (!out_text || !out_S || !out_E || !out_have_T || !out_T_ms ||
+       !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
+       !out_have_F || !out_fade_ms || !out_mix_path)
       return SBX_EINVAL;
    *out_text= 0;
    *out_S= 0;
    *out_E= 0;
    *out_have_T= 0;
    *out_T_ms= -1;
+   *out_have_q= 0;
+   *out_q_mult= 1;
+   *out_have_r= 0;
+   *out_rate= 44100;
+   *out_have_F= 0;
+   *out_fade_ms= 60000;
    *out_mix_path= 0;
 
    rc= sbx_read_text_file_alloc_cli(fnam, &text);
@@ -5195,6 +5240,9 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 	 if (!sbx_parse_safe_seqfile_option_line(trim,
 						 out_S, out_E,
 						 out_have_T, out_T_ms,
+						 out_have_q, out_q_mult,
+						 out_have_r, out_rate,
+						 out_have_F, out_fade_ms,
 						 out_mix_path)) {
 	    if (*out_mix_path) free(*out_mix_path);
 	    *out_mix_path= 0;
@@ -7949,6 +7997,9 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    char *seq_text= 0;
    char *safe_mix_path= 0;
    int safe_S= 0, safe_E= 0, safe_have_T= 0, safe_T_ms= -1;
+   int safe_have_q= 0, safe_q_mult= 1;
+   int safe_have_r= 0, safe_rate= 44100;
+   int safe_have_F= 0, safe_fade_ms= 60000;
 
    if (ac != 1 || !av)
       return 0;
@@ -7962,11 +8013,25 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    rc= sbx_prepare_seqfile_runtime_text(fnam, &seq_text,
 					&safe_S, &safe_E,
 					&safe_have_T, &safe_T_ms,
+					&safe_have_q, &safe_q_mult,
+					&safe_have_r, &safe_rate,
+					&safe_have_F, &safe_fade_ms,
 					&safe_mix_path);
    if (rc == SBX_ENOMEM)
       error("Out of memory preparing sequence file for sbagenxlib runtime");
    if (rc != SBX_OK)
       return 0;
+
+   if (safe_have_r) {
+      out_rate= safe_rate;
+      out_rate_def= 0;
+   }
+   if (safe_have_F)
+      fade_int= safe_fade_ms;
+   if (safe_have_q) {
+      opt_S= 1;
+      fast_mult= safe_q_mult;
+   }
 
    sbx_default_engine_config(&cfg);
    cfg.sample_rate= (double)out_rate;
