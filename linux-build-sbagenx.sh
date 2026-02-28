@@ -311,6 +311,24 @@ else
     warning "Could not write dist/pkgconfig/sbagenxlib.pc"
 fi
 
+cat > dist/pkgconfig/sbagenxlib-uninstalled.pc <<EOF
+prefix=\${pcfiledir}/..
+exec_prefix=\${prefix}
+libdir=\${prefix}
+includedir=\${prefix}/include
+
+Name: sbagenxlib-uninstalled
+Description: SBaGenX reusable synthesis/runtime library (uninstalled tree)
+Version: ${VERSION}
+Libs: -L\${libdir} -lsbagenx -lm
+Cflags: -I\${includedir}
+EOF
+if [ $? -eq 0 ]; then
+    success "Bundled uninstalled pkg-config metadata: dist/pkgconfig/sbagenxlib-uninstalled.pc"
+else
+    warning "Could not write dist/pkgconfig/sbagenxlib-uninstalled.pc"
+fi
+
 # Bundle Python/Cairo plot backend script for dist binaries
 section_header "Bundling plot backend script..."
 if [ -f "$PLOT_SCRIPT_SRC" ]; then

@@ -26,6 +26,7 @@ require_link "dist/libsbagenx.so"
 require_file "dist/include/sbagenxlib.h"
 require_file "dist/include/sbagenlib.h"
 require_file "dist/pkgconfig/sbagenxlib.pc"
+require_file "dist/pkgconfig/sbagenxlib-uninstalled.pc"
 
 TARGET_MAJOR="$(readlink dist/libsbagenx.so.$SO_MAJOR)"
 TARGET_BASE="$(readlink dist/libsbagenx.so)"
@@ -34,5 +35,7 @@ TARGET_BASE="$(readlink dist/libsbagenx.so)"
 
 grep -q "^Version: $VERSION\$" dist/pkgconfig/sbagenxlib.pc || fail "pkg-config version mismatch"
 grep -q '^Libs: -L${libdir} -lsbagenx -lm$' dist/pkgconfig/sbagenxlib.pc || fail "pkg-config libs mismatch"
+grep -q "^Version: $VERSION\$" dist/pkgconfig/sbagenxlib-uninstalled.pc || fail "uninstalled pkg-config version mismatch"
+grep -q '^Libs: -L${libdir} -lsbagenx -lm$' dist/pkgconfig/sbagenxlib-uninstalled.pc || fail "uninstalled pkg-config libs mismatch"
 
 echo "PASS: shared library dist artifacts present"

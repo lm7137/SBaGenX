@@ -31,7 +31,19 @@ Compile/Link (Linux shared, pkg-config)
 ---------------------------------------
 
 ```bash
-gcc -O2 your_app.c $(PKG_CONFIG_PATH=dist/pkgconfig pkg-config --cflags --libs sbagenxlib) -o your_app
+gcc -O2 your_app.c $(PKG_CONFIG_PATH=dist/pkgconfig pkg-config --cflags --libs sbagenxlib-uninstalled) -o your_app
+```
+
+Use `sbagenxlib-uninstalled` when linking directly against the `dist/` tree.
+Use `sbagenxlib` after the library has been installed system-wide by a package
+or into a prefix on your machine.
+
+Compile/Link (Linux shared, direct dist paths)
+----------------------------------------------
+
+```bash
+gcc -O2 -Idist/include your_app.c -Ldist -lsbagenx -lm -o your_app
+LD_LIBRARY_PATH=dist ./your_app
 ```
 
 Installable Package (Debian/Ubuntu)

@@ -49,6 +49,11 @@ Current build scripts ship these developer-facing artifacts:
   - `dist/include/sbagenxlib.h`
   - `dist/include/sbagenlib.h` (compatibility alias)
   - `dist/pkgconfig/sbagenxlib.pc`
+  - `dist/pkgconfig/sbagenxlib-uninstalled.pc`
+
+Use `sbagenxlib-uninstalled.pc` when linking directly against the unpacked
+`dist/` tree. Use `sbagenxlib.pc` after installation into `/usr` or another
+prefix.
 
 On Debian packaging, those are installed under:
 
