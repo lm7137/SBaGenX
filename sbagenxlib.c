@@ -917,8 +917,21 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
                   tone->mode == SBX_TONE_SPIN_WHITE);
   strict_carrier_positive = (tone->mode == SBX_TONE_BINAURAL ||
                              tone->mode == SBX_TONE_MONAURAL ||
-                             tone->mode == SBX_TONE_ISOCHRONIC ||
-                             tone->mode == SBX_TONE_BELL);
+                             tone->mode == SBX_TONE_ISOCHRONIC);
+
+  /* Legacy .sbg files often use 0+0/0 as a silent placeholder voice lane. */
+  if (tone->mode == SBX_TONE_BINAURAL &&
+      fabs(tone->carrier_hz) <= 1e-12 &&
+      fabs(tone->beat_hz) <= 1e-12 &&
+      fabs(tone->amplitude) <= 1e-12) {
+    tone->mode = SBX_TONE_NONE;
+    tone->carrier_hz = 0.0;
+    tone->beat_hz = 0.0;
+    tone->amplitude = 0.0;
+    tone->waveform = SBX_WAVE_SINE;
+    tone->duty_cycle = 0.4;
+    return SBX_OK;
+  }
 
   if (uses_carrier) {
     int custom_idx = sbx_custom_wave_index(tone->waveform);
@@ -962,8 +975,10 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
 
   if (tone->mode == SBX_TONE_MONAURAL || tone->mode == SBX_TONE_ISOCHRONIC)
     tone->beat_hz = fabs(tone->beat_hz);
-  if (tone->mode == SBX_TONE_BELL)
+  if (tone->mode == SBX_TONE_BELL) {
+    tone->carrier_hz = fabs(tone->carrier_hz);
     tone->beat_hz = 0.0;
+  }
 
   if (tone->mode == SBX_TONE_ISOCHRONIC) {
     if (tone->beat_hz <= 0.0) {
@@ -1671,7 +1686,7 @@ parse_tone_spec_with_default_waveform(const char *spec,
   // Bell tone: bell<carrier>/<amp>
   if (sscanf(p, "bell%lf/%lf %n", &carrier, &amp_pct, &n) == 2 &&
       *skip_ws(p + n) == 0) {
-    if (carrier <= 0.0 || !isfinite(carrier) || !isfinite(amp_pct) || amp_pct < 0.0)
+    if (!isfinite(carrier) || !isfinite(amp_pct) || amp_pct < 0.0)
       return SBX_EINVAL;
     out_tone->mode = SBX_TONE_BELL;
     out_tone->carrier_hz = carrier;
@@ -1744,7 +1759,10 @@ parse_tone_spec_with_default_waveform(const char *spec,
   if (sscanf(p, "%lf%c%lf/%lf %n", &carrier, &c, &beat, &amp_pct, &n) == 4 &&
       *skip_ws(p + n) == 0 &&
       (c == '+' || c == '-')) {
-    if (carrier <= 0.0 || !isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+    if (!isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    if (carrier <= 0.0 &&
+        !(fabs(carrier) <= 1e-12 && fabs(beat) <= 1e-12 && fabs(amp_pct) <= 1e-12))
       return SBX_EINVAL;
     out_tone->mode = SBX_TONE_BINAURAL;
     out_tone->carrier_hz = carrier;

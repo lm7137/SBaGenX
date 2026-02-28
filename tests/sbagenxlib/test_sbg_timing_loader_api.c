@@ -83,6 +83,12 @@ main(void) {
       "00:00 a ->\n"
       "00:00 b ->\n"
       "00:00:01 a\n";
+  const char *sbg_placeholder_voice_text =
+      "stack: 500+12/25 0+0/0 0+0/0\n"
+      "NOW stack\n";
+  const char *sbg_negative_bell_text =
+      "hit: bell-4000/30\n"
+      "NOW hit\n";
   const char *sbg_multivoice_named_text =
       "solo: 180+0/20\n"
       "duo: 180+0/20 260+0/20\n"
@@ -246,6 +252,22 @@ main(void) {
     fail("equal-time keyframe #1 time mismatch");
   if (sbx_context_get_keyframe(ctx, 2, &kf) != SBX_OK || fabs(kf.time_sec - 1.0) > 1e-9)
     fail("equal-time keyframe #2 time mismatch");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_placeholder_voice_text, 0);
+  if (rc != SBX_OK) fail("placeholder-voice sbg timing load failed");
+  if (sbx_context_voice_count(ctx) != 3)
+    fail("placeholder-voice timing should preserve voice lane count");
+  if (sbx_context_get_keyframe_voice(ctx, 0, 1, &kf) != SBX_OK || kf.tone.mode != SBX_TONE_NONE)
+    fail("placeholder-voice secondary lane #1 should normalize to silence");
+  if (sbx_context_get_keyframe_voice(ctx, 0, 2, &kf) != SBX_OK || kf.tone.mode != SBX_TONE_NONE)
+    fail("placeholder-voice secondary lane #2 should normalize to silence");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_negative_bell_text, 0);
+  if (rc != SBX_OK) fail("negative-bell sbg timing load failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("negative-bell keyframe retrieval failed");
+  if (kf.tone.mode != SBX_TONE_BELL || fabs(kf.tone.carrier_hz - 4000.0) > 1e-6)
+    fail("negative bell carrier should normalize to positive magnitude");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_named_text, 0);
   if (rc != SBX_OK) fail("multivoice named sbg timing load failed");

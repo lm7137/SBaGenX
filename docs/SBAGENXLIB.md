@@ -520,6 +520,16 @@ Phase 3.74
   chord-transition examples, where one state ends and the next begins at the
   same wall-clock instant.
 
+Phase 3.75
+- Normalize two remaining historical tone-spec idioms in native `.sbg` loads:
+  - accept signed `bell` carriers such as `bell-4000/30` by preserving the
+    magnitude and discarding the sign,
+  - treat `0+0/0` placeholder voice lanes as explicit silence rather than as
+    invalid binaural tones.
+- This restores compatibility with older multivoice and bell-heavy example
+  files that use these shorthand forms for structural reasons rather than for
+  distinct DSP behavior.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
