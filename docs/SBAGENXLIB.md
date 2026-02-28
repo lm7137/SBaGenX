@@ -470,6 +470,17 @@ Phase 3.70
 - Use this corpus as the regression floor while investigating the remaining
   historical examples that still require fallback.
 
+Phase 3.71
+- Extend the direct sequence-file bridge with option-only wrapper handling:
+  - accept historical `.sbg` files whose non-comment payload is only one or
+    more option lines,
+  - if one of those lines contains `-p` or `-i`, dispatch through the existing
+    CLI preprogram/immediate path instead of rejecting the file as
+    "not compatible with sbagenxlib subset loader".
+- This unlocks wrapper examples such as `prog-drop-00d.sbg` and
+  `prog-slide-alpha-10.sbg`, whose generated runtime is already backed by
+  `sbagenxlib`.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -875,6 +886,13 @@ Seq Backend Real-Example Corpus Smoke Test (Phase 3.70)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_real_examples_subset.sh
+```
+
+Seq Backend Option-Wrapper Example Smoke Test (Phase 3.71)
+----------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_option_wrapper_examples.sh
 ```
 
 Notes:

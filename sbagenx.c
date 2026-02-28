@@ -5030,6 +5030,83 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 }
 
 static int
+sbx_line_contains_seq_mode_option(const char *line) {
+   char *dup, *argv[64], *p;
+   int argc= 0, i;
+
+   if (!line)
+      return 0;
+   dup= StrDup((char *)line);
+   p= dup;
+   while (*p) {
+      if (argc >= (int)(sizeof(argv) / sizeof(argv[0])))
+	 break;
+      while (isspace((unsigned char)*p)) p++;
+      if (!*p) break;
+      argv[argc++]= p;
+      while (*p && !isspace((unsigned char)*p)) p++;
+      if (*p) *p++= 0;
+   }
+   for (i= 0; i<argc; i++) {
+      if ((0 == strcmp(argv[i], "-p")) || (0 == strcmp(argv[i], "-i"))) {
+	 free(dup);
+	 return 1;
+      }
+   }
+   free(dup);
+   return 0;
+}
+
+static int
+sbx_try_run_option_only_seq_wrapper(const char *fnam) {
+   char *text, *line;
+   int rc, saw_mode= 0;
+
+   if (!fnam || 0 == strcmp(fnam, "-"))
+      return 0;
+   rc= sbx_read_text_file_alloc_cli(fnam, &text);
+   if (rc == SBX_ENOMEM)
+      error("Out of memory preparing sequence wrapper file");
+   if (rc != SBX_OK)
+      return 0;
+
+   line= text;
+   while (line && *line) {
+      char *next= strchr(line, '\n');
+      char *trim= line;
+      char saved= 0;
+      char *end;
+
+      if (next)
+	 next++;
+      while (*trim && isspace((unsigned char)*trim)) trim++;
+      if (!*trim || *trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
+	 line= next;
+	 continue;
+      }
+      if (*trim != '-') {
+	 free(text);
+	 return 0;
+      }
+      end= line + strlen(line);
+      if (next)
+	 end= next - 1;
+      if (end > line && end[-1] == '\r')
+	 end--;
+      saved= *end;
+      *end= 0;
+      if (sbx_line_contains_seq_mode_option(trim))
+	 saw_mode= 1;
+      handleOptions(trim);
+      *end= saved;
+      line= next;
+   }
+
+   free(text);
+   return saw_mode ? 1 : 0;
+}
+
+static int
 sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 				 int *out_S, int *out_E,
 				 int *out_have_T, int *out_T_ms,
@@ -7837,6 +7914,9 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    fnam= av[0];
    if (!fnam || 0 == strcmp(fnam, "-"))
       return 0;
+
+   if (sbx_try_run_option_only_seq_wrapper(fnam))
+      return 1;
 
    rc= sbx_prepare_seqfile_runtime_text(fnam, &seq_text,
 					&safe_S, &safe_E,
