@@ -71,6 +71,11 @@ main(void) {
       "base: 120+0/30\n"
       "NOW base\n"
       "+00:00:02 base\n";
+  const char *sbg_multivoice_named_text =
+      "solo: 180+0/20\n"
+      "duo: 180+0/20 260+0/20\n"
+      "00:00 solo ==\n"
+      "00:00:01 duo\n";
   const char *sbg_block_text =
       "off: -\n"
       "base: 180+0/35\n"
@@ -92,6 +97,14 @@ main(void) {
       "  +00:02 pulse\n"
       "}\n"
       "NOW double\n";
+  const char *sbg_multivoice_block_text =
+      "off: -\n"
+      "duo: 180+0/20 260+0/20\n"
+      "burst: {\n"
+      "  +00:00 off ==\n"
+      "  +00:00:01 duo\n"
+      "}\n"
+      "NOW burst\n";
   const char *tmp_path = "/tmp/sbx_sbg_timing_test.sbg";
   double t_actual, t_expect;
 
@@ -180,6 +193,24 @@ main(void) {
   if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 2.0) > 1e-9)
     fail("relative +HH:MM:SS keyframe time mismatch");
 
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_named_text, 0);
+  if (rc != SBX_OK) fail("multivoice named sbg timing load failed");
+  if (sbx_context_keyframe_count(ctx) != 2)
+    fail("multivoice named timing should produce 2 keyframes");
+  if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK)
+    fail("multivoice named second keyframe retrieval failed");
+  if (fabs(kf.tone.carrier_hz - 180.0) > 1e-6)
+    fail("multivoice named keyframe should expose primary voice in public keyframe API");
+  free(buf);
+  frames = (size_t)(1.6 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (multivoice named)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("multivoice named sbg timing render failed");
+  if (!(abs_sum_window(buf, (size_t)(1.1 * cfg.sample_rate), (size_t)(1.45 * cfg.sample_rate)) >
+        abs_sum_window(buf, (size_t)(0.15 * cfg.sample_rate), (size_t)(0.5 * cfg.sample_rate)) * 1.15))
+    fail("multivoice named sbg timing should render higher energy after second voice enters");
+
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_block_text, 0);
   if (rc != SBX_OK) fail("block-definition sbg timing load failed");
   if (sbx_context_keyframe_count(ctx) != 6)
@@ -215,6 +246,18 @@ main(void) {
     fail("nested block keyframe #2 time mismatch");
   if (sbx_context_get_keyframe(ctx, 3, &kf) != SBX_OK || fabs(kf.time_sec - 180.0) > 1e-9)
     fail("nested block keyframe #3 time mismatch");
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_block_text, 0);
+  if (rc != SBX_OK) fail("multivoice block-definition sbg timing load failed");
+  free(buf);
+  frames = (size_t)(1.6 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (multivoice block)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("multivoice block-definition render failed");
+  if (!(abs_sum_window(buf, (size_t)(0.1 * cfg.sample_rate), (size_t)(0.4 * cfg.sample_rate)) < 1e-4))
+    fail("multivoice block should be silent in initial off segment");
+  if (!(abs_sum_window(buf, (size_t)(1.1 * cfg.sample_rate), (size_t)(1.45 * cfg.sample_rate)) > 1e-3))
+    fail("multivoice block should render energy in active duo segment");
   rc = sbx_context_load_sbg_timing_text(ctx, "self: {\n+00:00 self\n}\nNOW self\n", 0);
   if (rc != SBX_EINVAL)
     fail("self-referential nested block should fail");

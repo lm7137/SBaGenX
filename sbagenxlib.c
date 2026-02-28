@@ -21,6 +21,7 @@
 #define SBX_CTX_SRC_NONE 0
 #define SBX_CTX_SRC_STATIC 1
 #define SBX_CTX_SRC_KEYFRAMES 2
+#define SBX_MAX_SBG_VOICES 16
 #define SBX_MIXBEAT_HILBERT_TAPS 31
 
 typedef struct {
@@ -58,6 +59,9 @@ struct SbxContext {
   int kf_loop;
   size_t kf_seg;
   double kf_duration_sec;
+  SbxProgramKeyframe *mv_kfs; /* optional multivoice keyframes: [voice][kf] */
+  SbxEngine **mv_eng;         /* engines for voices 1..mv_voice_count-1 */
+  size_t mv_voice_count;      /* number of active voice lanes in mv_kfs */
   double t_sec;
   SbxToneSpec *aux_tones;
   SbxEngine **aux_eng;
@@ -71,6 +75,8 @@ struct SbxContext {
   size_t mix_kf_seg;
   double mix_default_amp_pct;
 };
+
+#define SBX_MV_KF(ctx, voice_idx) ((ctx)->mv_kfs + ((voice_idx) * (ctx)->kf_count))
 
 static void engine_wave_sample(int waveform, double phase, double *out_sample);
 
@@ -394,19 +400,19 @@ parse_interp_mode_token(const char *tok, int *out_interp) {
 }
 
 typedef struct {
+  double time_sec;
+  SbxToneSpec tones[SBX_MAX_SBG_VOICES];
+  int interp;
+} SbxVoiceSetKeyframe;
+
+typedef struct {
   char *name;
-  SbxToneSpec tone;
+  SbxToneSpec tones[SBX_MAX_SBG_VOICES];
 } SbxNamedToneDef;
 
 typedef struct {
-  double offset_sec;
-  SbxToneSpec tone;
-  int interp;
-} SbxBlockEntry;
-
-typedef struct {
   char *name;
-  SbxBlockEntry *entries;
+  SbxVoiceSetKeyframe *entries;
   size_t count;
   size_t cap;
 } SbxNamedBlockDef;
@@ -471,23 +477,47 @@ parse_sbg_relative_offset_token(const char *tok, double *out_sec) {
 static int
 block_append_entry(SbxNamedBlockDef *blk,
                    double offset_sec,
-                   const SbxToneSpec *tone,
+                   const SbxToneSpec *tones,
                    int interp) {
-  SbxBlockEntry *tmp;
+  SbxVoiceSetKeyframe *tmp;
   size_t ncap;
-  if (!blk || !tone) return SBX_EINVAL;
+  if (!blk || !tones) return SBX_EINVAL;
   if (blk->count == blk->cap) {
     ncap = blk->cap ? (blk->cap * 2) : 8;
-    tmp = (SbxBlockEntry *)realloc(blk->entries, ncap * sizeof(*blk->entries));
+    tmp = (SbxVoiceSetKeyframe *)realloc(blk->entries, ncap * sizeof(*blk->entries));
     if (!tmp) return SBX_ENOMEM;
     blk->entries = tmp;
     blk->cap = ncap;
   }
-  blk->entries[blk->count].offset_sec = offset_sec;
-  blk->entries[blk->count].tone = *tone;
+  blk->entries[blk->count].time_sec = offset_sec;
+  memcpy(blk->entries[blk->count].tones, tones,
+         sizeof(blk->entries[blk->count].tones));
   blk->entries[blk->count].interp = interp;
   blk->count++;
   return SBX_OK;
+}
+
+static void
+sbx_voice_set_init(SbxToneSpec *tones) {
+  size_t i;
+  if (!tones) return;
+  for (i = 0; i < SBX_MAX_SBG_VOICES; i++) {
+    sbx_default_tone_spec(&tones[i]);
+    tones[i].mode = SBX_TONE_NONE;
+    tones[i].amplitude = 0.0;
+  }
+}
+
+static size_t
+sbx_voice_set_active_count(const SbxToneSpec *tones) {
+  size_t i;
+  size_t count = 0;
+  if (!tones) return 0;
+  for (i = 0; i < SBX_MAX_SBG_VOICES; i++) {
+    if (tones[i].mode != SBX_TONE_NONE && tones[i].amplitude > 0.0)
+      count = i + 1;
+  }
+  return count;
 }
 
 static int
@@ -896,10 +926,21 @@ sbx_lerp(double a, double b, double u) {
 
 static void
 ctx_clear_keyframes(SbxContext *ctx) {
+  size_t i;
   if (!ctx) return;
   if (ctx->kfs) free(ctx->kfs);
+  if (ctx->mv_kfs) free(ctx->mv_kfs);
+  if (ctx->mv_eng) {
+    for (i = 0; i + 1 < ctx->mv_voice_count; i++) {
+      if (ctx->mv_eng[i]) sbx_engine_destroy(ctx->mv_eng[i]);
+    }
+    free(ctx->mv_eng);
+  }
   ctx->kfs = 0;
+  ctx->mv_kfs = 0;
+  ctx->mv_eng = 0;
   ctx->kf_count = 0;
+  ctx->mv_voice_count = 0;
   ctx->kf_loop = 0;
   ctx->kf_seg = 0;
   ctx->kf_duration_sec = 0.0;
@@ -946,6 +987,9 @@ ctx_reset_runtime(SbxContext *ctx) {
   size_t i;
   if (!ctx || !ctx->eng) return;
   sbx_engine_reset(ctx->eng);
+  for (i = 0; i + 1 < ctx->mv_voice_count; i++) {
+    if (ctx->mv_eng[i]) sbx_engine_reset(ctx->mv_eng[i]);
+  }
   for (i = 0; i < ctx->aux_count; i++) {
     if (ctx->aux_eng[i]) sbx_engine_reset(ctx->aux_eng[i]);
   }
@@ -955,6 +999,155 @@ ctx_reset_runtime(SbxContext *ctx) {
   ctx->mix_kf_seg = 0;
   ctx->t_sec = 0.0;
   ctx->kf_seg = 0;
+}
+
+static int
+ctx_activate_keyframes_internal(SbxContext *ctx,
+                                const SbxProgramKeyframe *frames,
+                                size_t frame_count,
+                                const SbxProgramKeyframe *mv_frames,
+                                size_t mv_voice_count,
+                                int loop) {
+  SbxProgramKeyframe *copy = 0;
+  SbxProgramKeyframe *mv_copy = 0;
+  SbxEngine **mv_eng = 0;
+  size_t i, vi;
+  char err[160];
+  int rc;
+
+  if (!ctx || !ctx->eng || !frames || frame_count == 0) return SBX_EINVAL;
+  if (mv_voice_count == 0 || mv_voice_count > SBX_MAX_SBG_VOICES)
+    return SBX_EINVAL;
+  if (mv_voice_count > 1 && !mv_frames) return SBX_EINVAL;
+
+  copy = (SbxProgramKeyframe *)calloc(frame_count, sizeof(*copy));
+  if (!copy) {
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+
+  for (i = 0; i < frame_count; i++) {
+    copy[i] = frames[i];
+    if (!isfinite(copy[i].time_sec) || copy[i].time_sec < 0.0) {
+      free(copy);
+      set_ctx_error(ctx, "keyframe time_sec must be finite and >= 0");
+      return SBX_EINVAL;
+    }
+    if (i > 0 && !(copy[i].time_sec > copy[i - 1].time_sec)) {
+      free(copy);
+      set_ctx_error(ctx, "keyframe time_sec values must be strictly increasing");
+      return SBX_EINVAL;
+    }
+    if (copy[i].interp != SBX_INTERP_LINEAR &&
+        copy[i].interp != SBX_INTERP_STEP) {
+      free(copy);
+      set_ctx_error(ctx, "keyframe interp must be SBX_INTERP_LINEAR or SBX_INTERP_STEP");
+      return SBX_EINVAL;
+    }
+    rc = normalize_tone(&copy[i].tone, err, sizeof(err));
+    if (rc != SBX_OK) {
+      free(copy);
+      set_ctx_error(ctx, err);
+      return rc;
+    }
+  }
+
+  if (mv_voice_count > 1) {
+    mv_copy = (SbxProgramKeyframe *)calloc(mv_voice_count * frame_count, sizeof(*mv_copy));
+    if (!mv_copy) {
+      free(copy);
+      set_ctx_error(ctx, "out of memory");
+      return SBX_ENOMEM;
+    }
+    for (vi = 0; vi < mv_voice_count; vi++) {
+      for (i = 0; i < frame_count; i++) {
+        mv_copy[vi * frame_count + i] = mv_frames[vi * frame_count + i];
+        if (fabs(mv_copy[vi * frame_count + i].time_sec - copy[i].time_sec) > 1e-9) {
+          free(mv_copy);
+          free(copy);
+          set_ctx_error(ctx, "multivoice keyframe lanes must share identical time positions");
+          return SBX_EINVAL;
+        }
+        if (mv_copy[vi * frame_count + i].interp != copy[i].interp) {
+          free(mv_copy);
+          free(copy);
+          set_ctx_error(ctx, "multivoice keyframe lanes must share identical interpolation");
+          return SBX_EINVAL;
+        }
+        rc = normalize_tone(&mv_copy[vi * frame_count + i].tone, err, sizeof(err));
+        if (rc != SBX_OK) {
+          free(mv_copy);
+          free(copy);
+          set_ctx_error(ctx, err);
+          return rc;
+        }
+      }
+    }
+
+    mv_eng = (SbxEngine **)calloc(mv_voice_count - 1, sizeof(*mv_eng));
+    if (!mv_eng) {
+      free(mv_copy);
+      free(copy);
+      set_ctx_error(ctx, "out of memory");
+      return SBX_ENOMEM;
+    }
+    for (vi = 1; vi < mv_voice_count; vi++) {
+      mv_eng[vi - 1] = sbx_engine_create(&ctx->eng->cfg);
+      if (!mv_eng[vi - 1]) {
+        size_t dj;
+        for (dj = 1; dj < vi; dj++) {
+          if (mv_eng[dj - 1]) sbx_engine_destroy(mv_eng[dj - 1]);
+        }
+        free(mv_eng);
+        free(mv_copy);
+        free(copy);
+        set_ctx_error(ctx, "out of memory");
+        return SBX_ENOMEM;
+      }
+    }
+  }
+
+  if (loop && copy[frame_count - 1].time_sec <= 0.0) {
+    if (mv_eng) {
+      for (vi = 1; vi < mv_voice_count; vi++) {
+        if (mv_eng[vi - 1]) sbx_engine_destroy(mv_eng[vi - 1]);
+      }
+      free(mv_eng);
+    }
+    if (mv_copy) free(mv_copy);
+    free(copy);
+    set_ctx_error(ctx, "looped keyframes require final time_sec > 0");
+    return SBX_EINVAL;
+  }
+
+  ctx_clear_keyframes(ctx);
+  ctx->kfs = copy;
+  ctx->mv_kfs = mv_copy;
+  ctx->mv_eng = mv_eng;
+  ctx->kf_count = frame_count;
+  ctx->mv_voice_count = mv_voice_count;
+  ctx->kf_loop = loop ? 1 : 0;
+  ctx->kf_seg = 0;
+  ctx->kf_duration_sec = copy[frame_count - 1].time_sec;
+  ctx->source_mode = SBX_CTX_SRC_KEYFRAMES;
+  ctx->loaded = 1;
+  ctx->t_sec = 0.0;
+
+  rc = engine_apply_tone(ctx->eng, &ctx->kfs[0].tone, 1);
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
+    return rc;
+  }
+  for (vi = 1; vi < mv_voice_count; vi++) {
+    rc = engine_apply_tone(ctx->mv_eng[vi - 1], &SBX_MV_KF(ctx, vi)[0].tone, 1);
+    if (rc != SBX_OK) {
+      set_ctx_error(ctx, sbx_engine_last_error(ctx->mv_eng[vi - 1]));
+      return rc;
+    }
+  }
+
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
 }
 
 static void
@@ -1681,6 +1874,9 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->kf_loop = 0;
   ctx->kf_seg = 0;
   ctx->kf_duration_sec = 0.0;
+  ctx->mv_kfs = 0;
+  ctx->mv_eng = 0;
+  ctx->mv_voice_count = 0;
   ctx->t_sec = 0.0;
   ctx->aux_tones = 0;
   ctx->aux_eng = 0;
@@ -1765,68 +1961,7 @@ sbx_context_load_keyframes(SbxContext *ctx,
                            const SbxProgramKeyframe *frames,
                            size_t frame_count,
                            int loop) {
-  SbxProgramKeyframe *copy = 0;
-  size_t i;
-  char err[160];
-  int rc;
-
-  if (!ctx || !ctx->eng || !frames || frame_count == 0) return SBX_EINVAL;
-  copy = (SbxProgramKeyframe *)calloc(frame_count, sizeof(*copy));
-  if (!copy) {
-    set_ctx_error(ctx, "out of memory");
-    return SBX_ENOMEM;
-  }
-
-  for (i = 0; i < frame_count; i++) {
-    copy[i] = frames[i];
-    if (!isfinite(copy[i].time_sec) || copy[i].time_sec < 0.0) {
-      free(copy);
-      set_ctx_error(ctx, "keyframe time_sec must be finite and >= 0");
-      return SBX_EINVAL;
-    }
-    if (i > 0 && !(copy[i].time_sec > copy[i - 1].time_sec)) {
-      free(copy);
-      set_ctx_error(ctx, "keyframe time_sec values must be strictly increasing");
-      return SBX_EINVAL;
-    }
-    if (copy[i].interp != SBX_INTERP_LINEAR &&
-        copy[i].interp != SBX_INTERP_STEP) {
-      free(copy);
-      set_ctx_error(ctx, "keyframe interp must be SBX_INTERP_LINEAR or SBX_INTERP_STEP");
-      return SBX_EINVAL;
-    }
-    rc = normalize_tone(&copy[i].tone, err, sizeof(err));
-    if (rc != SBX_OK) {
-      free(copy);
-      set_ctx_error(ctx, err);
-      return rc;
-    }
-  }
-
-  if (loop && copy[frame_count - 1].time_sec <= 0.0) {
-    free(copy);
-    set_ctx_error(ctx, "looped keyframes require final time_sec > 0");
-    return SBX_EINVAL;
-  }
-
-  ctx_clear_keyframes(ctx);
-  ctx->kfs = copy;
-  ctx->kf_count = frame_count;
-  ctx->kf_loop = loop ? 1 : 0;
-  ctx->kf_seg = 0;
-  ctx->kf_duration_sec = copy[frame_count - 1].time_sec;
-  ctx->source_mode = SBX_CTX_SRC_KEYFRAMES;
-  ctx->loaded = 1;
-  ctx->t_sec = 0.0;
-
-  rc = engine_apply_tone(ctx->eng, &ctx->kfs[0].tone, 1);
-  if (rc != SBX_OK) {
-    set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
-    return rc;
-  }
-
-  set_ctx_error(ctx, NULL);
-  return SBX_OK;
+  return ctx_activate_keyframes_internal(ctx, frames, frame_count, frames, 1, loop);
 }
 
 int
@@ -2025,7 +2160,9 @@ int
 sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   char *buf = 0, *line = 0, *next = 0;
   size_t line_no = 0;
-  SbxProgramKeyframe *frames = 0;
+  SbxVoiceSetKeyframe *frames = 0;
+  SbxProgramKeyframe *primary = 0;
+  SbxProgramKeyframe *mv_frames = 0;
   size_t count = 0, cap = 0;
   SbxNamedToneDef *defs = 0;
   size_t ndefs = 0, defs_cap = 0;
@@ -2034,6 +2171,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   int active_block_idx = -1;
   double active_block_last_off = -1.0;
   double last_abs_sec = -1.0;
+  size_t max_voice_count = 1;
   int rc = SBX_OK;
 
   if (!ctx || !ctx->eng || !text) return SBX_EINVAL;
@@ -2053,7 +2191,9 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     int expanded_block = 0;
     int is_definition = 0;
     double tsec;
-    SbxToneSpec tone;
+    SbxToneSpec tones[SBX_MAX_SBG_VOICES];
+
+    sbx_voice_set_init(tones);
 
     line_no++;
     next = strchr(line, '\n');
@@ -2087,8 +2227,10 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       char *tone_tok = 0;
       int interp = SBX_INTERP_LINEAR;
       double off_sec = 0.0;
-      SbxToneSpec blk_tone;
+      SbxToneSpec blk_tones[SBX_MAX_SBG_VOICES];
       SbxNamedBlockDef *blk = &blocks[active_block_idx];
+
+      sbx_voice_set_init(blk_tones);
 
       if (strcmp(time_tok, "}") == 0) {
         if (rest && *rest) {
@@ -2228,7 +2370,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
               goto done;
             }
             for (bi = 0; bi < blocks[bidx].count; bi++) {
-              double nested_off = off_sec + blocks[bidx].entries[bi].offset_sec;
+              double nested_off = off_sec + blocks[bidx].entries[bi].time_sec;
               if (active_block_last_off >= 0.0 && nested_off < active_block_last_off) {
                 char emsg[256];
                 snprintf(emsg, sizeof(emsg),
@@ -2238,7 +2380,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                 rc = SBX_EINVAL;
                 goto done;
               }
-              rc = block_append_entry(blk, nested_off, &blocks[bidx].entries[bi].tone,
+              rc = block_append_entry(blk, nested_off, blocks[bidx].entries[bi].tones,
                                       blocks[bidx].entries[bi].interp);
               if (rc != SBX_OK) {
                 set_ctx_error(ctx, "out of memory");
@@ -2249,15 +2391,13 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             }
             appended_nested_block = 1;
           } else if (strcmp(tone_tok, "-") == 0) {
-            sbx_default_tone_spec(&blk_tone);
-            blk_tone.mode = SBX_TONE_NONE;
-            blk_tone.amplitude = 0.0;
+            sbx_voice_set_init(blk_tones);
           } else {
             int didx = named_tone_find(defs, ndefs, tone_tok);
             if (didx >= 0) {
-              blk_tone = defs[didx].tone;
+              memcpy(blk_tones, defs[didx].tones, sizeof(blk_tones));
             } else {
-              rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &blk_tone);
+              rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &blk_tones[0]);
               if (rc != SBX_OK) {
                 char emsg[256];
                 snprintf(emsg, sizeof(emsg),
@@ -2295,7 +2435,9 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         }
 
         if (!appended_nested_block) {
-          rc = block_append_entry(blk, off_sec, &blk_tone, interp);
+          size_t vcount = sbx_voice_set_active_count(blk_tones);
+          if (vcount > max_voice_count) max_voice_count = vcount;
+          rc = block_append_entry(blk, off_sec, blk_tones, interp);
           if (rc != SBX_OK) {
             set_ctx_error(ctx, "out of memory");
             rc = SBX_ENOMEM;
@@ -2404,42 +2546,54 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         goto done;
       }
 
-      tone_tok = r;
-      while (*r && !isspace((unsigned char)*r)) r++;
-      if (*r) {
-        *r++ = 0;
-        r = (char *)skip_ws(r);
-        if (*r) {
-          char emsg[224];
+      {
+        size_t voice_idx = 0;
+        sbx_voice_set_init(tones);
+        while (*r) {
+          char *v_tok = r;
+          while (*r && !isspace((unsigned char)*r)) r++;
+          if (*r) {
+            *r++ = 0;
+            r = (char *)skip_ws(r);
+          }
+          if (voice_idx >= SBX_MAX_SBG_VOICES) {
+            char emsg[224];
+            snprintf(emsg, sizeof(emsg),
+                     "line %lu: named tone-set '%s' exceeds %d voice slots",
+                     (unsigned long)line_no, name, SBX_MAX_SBG_VOICES);
+            set_ctx_error(ctx, emsg);
+            rc = SBX_EINVAL;
+            goto done;
+          }
+          if (strcmp(v_tok, "-") != 0) {
+            rc = parse_tone_spec_with_default_waveform(v_tok, ctx->default_waveform, &tones[voice_idx]);
+            if (rc != SBX_OK) {
+              char emsg[224];
+              snprintf(emsg, sizeof(emsg),
+                       "line %lu: invalid named tone-spec '%s'",
+                       (unsigned long)line_no, v_tok);
+              set_ctx_error(ctx, emsg);
+              rc = SBX_EINVAL;
+              goto done;
+            }
+          }
+          voice_idx++;
+        }
+        if (voice_idx == 0) {
+          char emsg[208];
           snprintf(emsg, sizeof(emsg),
-                   "line %lu: named tone-set '%s' currently supports exactly one tone-spec token",
+                   "line %lu: named tone-set '%s' is missing tone-spec",
                    (unsigned long)line_no, name);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
         }
-      }
-
-      if (strcmp(tone_tok, "-") == 0) {
-        sbx_default_tone_spec(&tone);
-        tone.mode = SBX_TONE_NONE;
-        tone.amplitude = 0.0;
-      } else {
-        rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &tone);
-        if (rc != SBX_OK) {
-          char emsg[224];
-          snprintf(emsg, sizeof(emsg),
-                   "line %lu: invalid named tone-spec '%s'",
-                   (unsigned long)line_no, tone_tok);
-          set_ctx_error(ctx, emsg);
-          rc = SBX_EINVAL;
-          goto done;
-        }
+        if (voice_idx > max_voice_count) max_voice_count = voice_idx;
       }
 
       didx = named_tone_find(defs, ndefs, name);
       if (didx >= 0) {
-        defs[didx].tone = tone;
+        memcpy(defs[didx].tones, tones, sizeof(defs[didx].tones));
       } else {
         if (ndefs == defs_cap) {
           size_t ncap = defs_cap ? (defs_cap * 2) : 8;
@@ -2459,7 +2613,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           rc = SBX_ENOMEM;
           goto done;
         }
-        defs[ndefs].tone = tone;
+        memcpy(defs[ndefs].tones, tones, sizeof(defs[ndefs].tones));
         ndefs++;
       }
       line = next;
@@ -2571,12 +2725,12 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             goto done;
           }
           for (bi = 0; bi < blocks[bidx].count; bi++) {
-            double etim = fmod(tsec + blocks[bidx].entries[bi].offset_sec, day_sec);
+            double etim = fmod(tsec + blocks[bidx].entries[bi].time_sec, day_sec);
             if (etim < 0.0) etim += day_sec;
             if (count == cap) {
               size_t ncap = cap ? (cap * 2) : 8;
-              SbxProgramKeyframe *tmp;
-              tmp = (SbxProgramKeyframe *)realloc(frames, ncap * sizeof(*frames));
+              SbxVoiceSetKeyframe *tmp;
+              tmp = (SbxVoiceSetKeyframe *)realloc(frames, ncap * sizeof(*frames));
               if (!tmp) {
                 set_ctx_error(ctx, "out of memory");
                 rc = SBX_ENOMEM;
@@ -2586,22 +2740,21 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
               cap = ncap;
             }
             frames[count].time_sec = etim;
-            frames[count].tone = blocks[bidx].entries[bi].tone;
+            memcpy(frames[count].tones, blocks[bidx].entries[bi].tones,
+                   sizeof(frames[count].tones));
             frames[count].interp = blocks[bidx].entries[bi].interp;
             count++;
           }
           expanded_block = 1;
         } else {
           if (strcmp(tone_tok, "-") == 0) {
-            sbx_default_tone_spec(&tone);
-            tone.mode = SBX_TONE_NONE;
-            tone.amplitude = 0.0;
+            sbx_voice_set_init(tones);
           } else {
             int didx = named_tone_find(defs, ndefs, tone_tok);
             if (didx >= 0) {
-              tone = defs[didx].tone;
+              memcpy(tones, defs[didx].tones, sizeof(tones));
             } else {
-              rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &tone);
+              rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &tones[0]);
               if (rc != SBX_OK) {
                 char emsg[224];
                 snprintf(emsg, sizeof(emsg),
@@ -2647,8 +2800,8 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
 
     if (count == cap) {
       size_t ncap = cap ? (cap * 2) : 8;
-      SbxProgramKeyframe *tmp;
-      tmp = (SbxProgramKeyframe *)realloc(frames, ncap * sizeof(*frames));
+      SbxVoiceSetKeyframe *tmp;
+      tmp = (SbxVoiceSetKeyframe *)realloc(frames, ncap * sizeof(*frames));
       if (!tmp) {
         set_ctx_error(ctx, "out of memory");
         rc = SBX_ENOMEM;
@@ -2659,8 +2812,12 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     }
 
     frames[count].time_sec = tsec;
-    frames[count].tone = tone;
+    memcpy(frames[count].tones, tones, sizeof(frames[count].tones));
     frames[count].interp = interp;
+    {
+      size_t vcount = sbx_voice_set_active_count(tones);
+      if (vcount > max_voice_count) max_voice_count = vcount;
+    }
     count++;
     line = next;
   }
@@ -2681,7 +2838,42 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     goto done;
   }
 
-  rc = sbx_context_load_keyframes(ctx, frames, count, loop);
+  primary = (SbxProgramKeyframe *)calloc(count, sizeof(*primary));
+  if (!primary) {
+    set_ctx_error(ctx, "out of memory");
+    rc = SBX_ENOMEM;
+    goto done;
+  }
+  if (max_voice_count > 1) {
+    size_t vi;
+    mv_frames = (SbxProgramKeyframe *)calloc(max_voice_count * count, sizeof(*mv_frames));
+    if (!mv_frames) {
+      set_ctx_error(ctx, "out of memory");
+      rc = SBX_ENOMEM;
+      goto done;
+    }
+    for (vi = 0; vi < max_voice_count; vi++) {
+      size_t ki;
+      for (ki = 0; ki < count; ki++) {
+        mv_frames[vi * count + ki].time_sec = frames[ki].time_sec;
+        mv_frames[vi * count + ki].tone = frames[ki].tones[vi];
+        mv_frames[vi * count + ki].interp = frames[ki].interp;
+      }
+    }
+  }
+  {
+    size_t ki;
+    for (ki = 0; ki < count; ki++) {
+      primary[ki].time_sec = frames[ki].time_sec;
+      primary[ki].tone = frames[ki].tones[0];
+      primary[ki].interp = frames[ki].interp;
+    }
+  }
+
+  rc = ctx_activate_keyframes_internal(ctx, primary, count,
+                                       mv_frames ? mv_frames : primary,
+                                       max_voice_count ? max_voice_count : 1,
+                                       loop);
 
 done:
   if (defs) {
@@ -2700,6 +2892,8 @@ done:
     free(blocks);
   }
   if (frames) free(frames);
+  if (primary) free(primary);
+  if (mv_frames) free(mv_frames);
   if (buf) free(buf);
   return rc;
 }
@@ -3327,6 +3521,7 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   for (i = 0; i < frames; i++) {
     float l = 0.0f, r = 0.0f;
     SbxToneSpec tone;
+    size_t vi;
 
     if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
       while (ctx->t_sec >= ctx->kf_duration_sec) {
@@ -3338,6 +3533,15 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
     ctx->eng->tone = tone;
     engine_render_sample(ctx->eng, &l, &r);
+    for (vi = 1; vi < ctx->mv_voice_count; vi++) {
+      float vl = 0.0f, vr = 0.0f;
+      ctx_eval_keyframed_tone_at(SBX_MV_KF(ctx, vi), ctx->kf_count, ctx->t_sec,
+                                 &ctx->kf_seg, &tone);
+      ctx->mv_eng[vi - 1]->tone = tone;
+      engine_render_sample(ctx->mv_eng[vi - 1], &vl, &vr);
+      l += vl;
+      r += vr;
+    }
     if (ctx->aux_count > 0) {
       size_t ai;
       for (ai = 0; ai < ctx->aux_count; ai++) {

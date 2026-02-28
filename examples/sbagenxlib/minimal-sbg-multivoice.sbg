@@ -1,0 +1,15 @@
+# Minimal multivoice named tone-set example for sbagenxlib SBG timing loader.
+#
+# "duo" defines two simultaneous voices. Timeline and block references preserve
+# both voice lanes natively inside sbagenxlib; the public keyframe API still
+# exposes the primary voice (slot 0).
+
+off: -
+duo: 180+0/20 260+0/20
+
+burst: {
+  +00:00 off ==
+  +00:00:01 duo
+}
+
+NOW burst
