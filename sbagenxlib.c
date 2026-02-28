@@ -4256,6 +4256,23 @@ sbx_context_duration_sec(const SbxContext *ctx) {
 }
 
 int
+sbx_context_set_time_sec(SbxContext *ctx, double t_sec) {
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!isfinite(t_sec) || t_sec < 0.0) {
+    set_ctx_error(ctx, "time must be finite and >= 0");
+    return SBX_EINVAL;
+  }
+  if (!ctx->loaded) {
+    set_ctx_error(ctx, "no tone/program loaded");
+    return SBX_ENOTREADY;
+  }
+  ctx_reset_runtime(ctx);
+  ctx->t_sec = t_sec;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
 sbx_context_sample_program_beat(SbxContext *ctx,
                                 double t0_sec,
                                 double t1_sec,

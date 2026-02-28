@@ -576,10 +576,22 @@ Phase 3.79
 - Add direct regression coverage for program-beat sampling, raised-cosine
   mixam sampling, and isochronic single-cycle sampling.
 
+Phase 3.80
+- Add explicit transport/seek support for frontend hosts:
+  - `sbx_context_set_time_sec(...)`
+- Seeking resets internal oscillator/effect phase/state and restarts playback
+  from the requested timeline time. This is the right contract for GUI
+  scrubbing and transport controls because it is deterministic and does not
+  depend on preserving hidden runtime integrator state from earlier playback.
+- Add regression coverage for:
+  - seeking on static-tone contexts,
+  - seeking on loaded keyframe programs,
+  - invalid negative seek rejection.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.79 Slice)
+Current API (Phase 3.80 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -637,6 +649,7 @@ Public header: `sbagenxlib.h`
   - `sbx_context_get_keyframe()`
   - `sbx_context_get_keyframe_voice()`
   - `sbx_context_duration_sec()`
+  - `sbx_context_set_time_sec()`
   - `sbx_context_sample_tones()`
   - `sbx_context_render_f32()`
   - `sbx_context_time_sec()`

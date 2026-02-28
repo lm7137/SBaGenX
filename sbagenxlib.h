@@ -364,6 +364,13 @@ int sbx_context_get_keyframe_voice(const SbxContext *ctx,
 double sbx_context_duration_sec(const SbxContext *ctx);
 
 /*
+ * Set current render clock time in seconds.
+ * This resets internal oscillator/effect phase/state and restarts playback
+ * from the requested timeline time.
+ */
+int sbx_context_set_time_sec(SbxContext *ctx, double t_sec);
+
+/*
  * Sample evaluated tone values over [t0_sec, t1_sec].
  * - sample_count must be >= 1.
  * - out_tones must have sample_count elements.

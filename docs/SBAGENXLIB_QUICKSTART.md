@@ -130,6 +130,15 @@ int rc = sbx_context_sample_tones(ctx, 0.0, 1800.0, 256, tsec, curve);
 
 Use this to drive GUI plots directly from library-evaluated tone values.
 
+If a frontend needs transport/scrubbing, set the context clock explicitly:
+
+```c
+sbx_context_set_time_sec(ctx, 900.0); /* jump to 15:00 */
+```
+
+This resets internal oscillator/effect phase/state and restarts playback from
+that timeline position.
+
 Additional plot-data helpers:
 
 ```c

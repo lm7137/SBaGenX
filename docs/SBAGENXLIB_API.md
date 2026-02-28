@@ -153,8 +153,14 @@ These are designed so front-ends can share parser semantics with CLI code.
 - `sbx_context_set_default_waveform(SbxContext *ctx, int waveform)`
 - `sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec)`
 - `sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames)`
+- `sbx_context_set_time_sec(SbxContext *ctx, double t_sec)`
 - `sbx_context_time_sec(const SbxContext *ctx)`
 - `sbx_context_last_error(const SbxContext *ctx)`
+
+`sbx_context_set_time_sec` is the transport/scrubbing entry point for hosts.
+It resets internal oscillator/effect phase/state and restarts playback from the
+requested timeline time. That gives deterministic behavior for GUI scrubbing
+and preview playback.
 
 5) Keyframes and sequence loading
 
@@ -168,6 +174,7 @@ These are designed so front-ends can share parser semantics with CLI code.
 - `sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out)`
 - `sbx_context_get_keyframe_voice(const SbxContext *ctx, size_t index, size_t voice_index, SbxProgramKeyframe *out)`
 - `sbx_context_duration_sec(const SbxContext *ctx)`
+- `sbx_context_set_time_sec(SbxContext *ctx, double t_sec)`
 - `sbx_context_sample_tones(SbxContext *ctx, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, SbxToneSpec *out_tones)`
 
 `sbx_context_get_keyframe` continues to expose the primary voice lane for

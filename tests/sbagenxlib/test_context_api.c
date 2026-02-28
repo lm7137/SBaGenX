@@ -570,6 +570,12 @@ int main(void) {
 
   if (sbx_context_load_tone_spec(ctx, "200+10/20") != SBX_OK)
     fail("load tone spec failed");
+  if (sbx_context_set_time_sec(ctx, 1.5) != SBX_OK)
+    fail("set time after static tone load failed");
+  if (fabs(sbx_context_time_sec(ctx) - 1.5) > 1e-9)
+    fail("set time getter mismatch for static tone");
+  if (sbx_context_set_time_sec(ctx, -1.0) != SBX_EINVAL)
+    fail("negative set time should fail");
   memset(buf, 0, frames * 2 * sizeof(float));
   if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
     fail("render after load failed");
@@ -635,6 +641,36 @@ int main(void) {
 
   if (sbx_context_load_tone_spec(ctx, "invalid") != SBX_EINVAL)
     fail("invalid tone spec should fail");
+
+  {
+    SbxProgramKeyframe kfs[2];
+    SbxToneSpec tone_at_seek;
+    memset(kfs, 0, sizeof(kfs));
+    sbx_default_tone_spec(&kfs[0].tone);
+    sbx_default_tone_spec(&kfs[1].tone);
+    kfs[0].time_sec = 0.0;
+    kfs[0].tone.carrier_hz = 180.0;
+    kfs[0].tone.beat_hz = 10.0;
+    kfs[0].tone.amplitude = 0.2;
+    kfs[0].interp = SBX_INTERP_LINEAR;
+    kfs[1].time_sec = 10.0;
+    kfs[1].tone.carrier_hz = 220.0;
+    kfs[1].tone.beat_hz = 6.0;
+    kfs[1].tone.amplitude = 0.2;
+    kfs[1].interp = SBX_INTERP_LINEAR;
+    if (sbx_context_load_keyframes(ctx, kfs, 2, 0) != SBX_OK)
+      fail("load keyframes for set time failed");
+    if (sbx_context_set_time_sec(ctx, 5.25) != SBX_OK)
+      fail("set time after keyframe load failed");
+    if (fabs(sbx_context_time_sec(ctx) - 5.25) > 1e-9)
+      fail("set time getter mismatch for keyframes");
+    if (sbx_context_sample_tones(ctx, 5.25, 5.25, 1, NULL, &tone_at_seek) != SBX_OK)
+      fail("sample tones after keyframe set time failed");
+    if (!(tone_at_seek.carrier_hz > 180.0 && tone_at_seek.carrier_hz < 220.0))
+      fail("sampled carrier after keyframe set time is out of expected range");
+    if (!(tone_at_seek.beat_hz > 6.0 && tone_at_seek.beat_hz < 10.0))
+      fail("sampled beat after keyframe set time is out of expected range");
+  }
 
   free(buf);
   sbx_context_destroy(ctx);
