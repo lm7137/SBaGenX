@@ -4316,6 +4316,58 @@ sbx_context_sample_mix_effects(SbxContext *ctx,
   return SBX_OK;
 }
 
+int
+sbx_context_eval_active_tones(SbxContext *ctx,
+                              double t_sec,
+                              SbxToneSpec *out_tones,
+                              size_t out_slots,
+                              size_t *out_count) {
+  size_t i;
+  size_t need;
+  size_t voice_count;
+  size_t seg_saved;
+
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!ctx->loaded) {
+    set_ctx_error(ctx, "no tone/program loaded");
+    return SBX_ENOTREADY;
+  }
+  if (!isfinite(t_sec)) {
+    set_ctx_error(ctx, "evaluation time must be finite");
+    return SBX_EINVAL;
+  }
+
+  voice_count = sbx_context_voice_count(ctx);
+  need = voice_count + ctx->aux_count;
+  if (out_count) *out_count = need;
+  if (!out_tones) {
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (out_slots < need) {
+    set_ctx_error(ctx, "tone output buffer is too small");
+    return SBX_EINVAL;
+  }
+
+  seg_saved = ctx->kf_seg;
+  for (i = 0; i < voice_count; i++) {
+    int rc = sbx_context_sample_tones_voice(ctx, i, t_sec, t_sec, 1, NULL, &out_tones[i]);
+    if (rc != SBX_OK) {
+      if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES)
+        ctx->kf_seg = seg_saved;
+      return rc;
+    }
+  }
+  if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES)
+    ctx->kf_seg = seg_saved;
+
+  for (i = 0; i < ctx->aux_count; i++)
+    out_tones[voice_count + i] = ctx->aux_tones[i];
+
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
 size_t
 sbx_context_keyframe_count(const SbxContext *ctx) {
   if (!ctx || !ctx->kfs) return 0;

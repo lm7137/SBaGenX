@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 12  /* public API contract revision */
+#define SBX_API_VERSION 13  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -368,6 +368,19 @@ int sbx_context_sample_mix_effects(SbxContext *ctx,
                                    SbxMixFxSpec *out_fxv,
                                    size_t out_slots,
                                    size_t *out_count);
+
+/*
+ * Evaluate the effective tone set at one context time.
+ * - Returns keyframed/static voice lanes first, followed by auxiliary tones.
+ * - voice lane count is given by sbx_context_voice_count().
+ * - If out_tones is NULL, out_count may be used to query the required size.
+ * - Does not advance context render time.
+ */
+int sbx_context_eval_active_tones(SbxContext *ctx,
+                                  double t_sec,
+                                  SbxToneSpec *out_tones,
+                                  size_t out_slots,
+                                  size_t *out_count);
 
 /* ----- Introspection/render ----- */
 

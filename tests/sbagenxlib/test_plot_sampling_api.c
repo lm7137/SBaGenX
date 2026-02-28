@@ -28,6 +28,8 @@ main(void) {
   SbxMixFxSpec runtime_fx[2];
   SbxMixFxSpec timed_fx[2];
   SbxMixAmpKeyframe mix_kf[2];
+  SbxToneSpec active[6];
+  SbxToneSpec aux[2];
   double ts[8];
   double hz[8];
   double mix_pct[8];
@@ -122,6 +124,12 @@ main(void) {
   if (rc != SBX_EINVAL) fail("sample_count=0 should fail");
   rc = sbx_context_sample_program_beat(ctx, 0.0, 1.0, 0, ts, hz);
   if (rc != SBX_EINVAL) fail("sample_program_beat sample_count=0 should fail");
+  rc = sbx_context_eval_active_tones(ctx, 0.5, NULL, 0, &fx_count);
+  if (rc != SBX_OK || fx_count != 1)
+    fail("eval_active_tones count query failed for static source");
+  rc = sbx_context_eval_active_tones(ctx, 0.5, active, 6, &fx_count);
+  if (rc != SBX_OK || fx_count != 1 || !near(active[0].carrier_hz, 200.0, 1e-9))
+    fail("eval_active_tones failed for static source");
 
   mix_kf[0].time_sec = 0.0;
   mix_kf[0].amp_pct = 100.0;
@@ -202,10 +210,32 @@ main(void) {
       fail("sample_program_beat_voice mismatch");
     if (!near(sbx_context_time_sec(ctx), 0.0, 1e-12))
       fail("voice sampling must not advance context render time");
+    if (sbx_parse_tone_spec("320+0/10", &aux[0]) != SBX_OK ||
+        sbx_parse_tone_spec("white/5", &aux[1]) != SBX_OK)
+      fail("parse aux tones for active tone eval failed");
+    rc = sbx_context_set_aux_tones(ctx, aux, 2);
+    if (rc != SBX_OK) fail("set_aux_tones failed");
+    rc = sbx_context_eval_active_tones(ctx, 5.0, NULL, 0, &fx_count);
+    if (rc != SBX_OK || fx_count != 4)
+      fail("eval_active_tones count query failed for multivoice source");
+    rc = sbx_context_eval_active_tones(ctx, 5.0, active, 6, &fx_count);
+    if (rc != SBX_OK) fail("eval_active_tones failed");
+    if (fx_count != 4)
+      fail("eval_active_tones count mismatch");
+    if (!near(active[0].carrier_hz, 180.0, 1e-9) || !near(active[0].beat_hz, 5.0, 1e-9))
+      fail("eval_active_tones primary lane mismatch");
+    if (!near(active[1].carrier_hz, 260.0, 1e-9) || !near(active[1].beat_hz, 5.0, 1e-9))
+      fail("eval_active_tones secondary lane mismatch");
+    if (!near(active[2].carrier_hz, 320.0, 1e-9) || !near(active[2].amplitude, 0.10, 1e-9))
+      fail("eval_active_tones first aux mismatch");
+    if (active[3].mode != SBX_TONE_WHITE_NOISE || !near(active[3].amplitude, 0.05, 1e-9))
+      fail("eval_active_tones second aux mismatch");
     rc = sbx_context_sample_tones_voice(ctx, 2, 0.0, 10.0, 3, ts, samples);
     if (rc != SBX_EINVAL) fail("out-of-range sample_tones_voice should fail");
     rc = sbx_context_sample_program_beat_voice(ctx, 2, 0.0, 10.0, 3, ts, hz);
     if (rc != SBX_EINVAL) fail("out-of-range sample_program_beat_voice should fail");
+    rc = sbx_context_set_aux_tones(ctx, NULL, 0);
+    if (rc != SBX_OK) fail("clear aux tones failed");
   }
 
   if (sbx_parse_mix_fx_spec("mixam:1:m=cos:s=0:f=0.45", SBX_WAVE_SINE, &mixam) != SBX_OK)

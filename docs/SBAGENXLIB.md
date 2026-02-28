@@ -628,10 +628,19 @@ Phase 3.83
   “multivoice content can be sampled directly without reconstructing it from
   primary-lane output”.
 
+Phase 3.84
+- Add active-tone snapshot evaluation:
+  - `sbx_context_eval_active_tones()`
+- Return the effective voice lanes at one timeline time, followed by any
+  configured auxiliary tones.
+- This gives frontends a one-call “what is sounding right now?” view without
+  making them manually stitch together primary voice, secondary voice lanes,
+  and aux-tone state.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.83 Slice)
+Current API (Phase 3.84 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -686,6 +695,7 @@ Public header: `sbagenxlib.h`
   - `sbx_context_get_timed_mix_effect_keyframe_info()`
   - `sbx_context_get_timed_mix_effect_slot()`
   - `sbx_context_sample_mix_effects()`
+  - `sbx_context_eval_active_tones()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_voice_count()`
   - `sbx_context_get_keyframe()`
@@ -841,6 +851,10 @@ Notes
   that keyframe introspection. Frontends can now sample secondary voice lanes
   directly instead of sampling only the primary lane and reverse-engineering
   multivoice behavior externally.
+- `sbx_context_eval_active_tones()` is the point-in-time companion: it returns
+  the effective voice lanes first, then auxiliary tones, so GUI/host code can
+  inspect the audible tone set at one instant without reassembling it from
+  separate APIs.
 - `sbx_context_mix_amp_keyframe_count()` /
   `sbx_context_get_mix_amp_keyframe()` expose the explicit native `mix/<amp>`
   timeline loaded from `.sbg`.

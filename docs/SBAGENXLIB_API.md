@@ -217,6 +217,7 @@ casing static tones as “zero lanes”.
 - `sbx_context_get_timed_mix_effect_keyframe_info(...)`
 - `sbx_context_get_timed_mix_effect_slot(...)`
 - `sbx_context_sample_mix_effects(...)`
+- `sbx_context_eval_active_tones(...)`
 - `sbx_context_mix_stream_sample(...)`
 - `sbx_context_configure_runtime(...)`
 
@@ -258,6 +259,7 @@ Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
 - `sbx_context_sample_tones_voice(...)`
 - `sbx_context_sample_program_beat(...)`
 - `sbx_context_sample_program_beat_voice(...)`
+- `sbx_context_eval_active_tones(...)`
 - `sbx_sample_mixam_cycle(...)`
 - `sbx_sample_isochronic_cycle(...)`
 - `sbx_default_iso_envelope_spec(...)`
@@ -278,6 +280,11 @@ runtime adapter. This is the preferred frontend API for beat-vs-time graphs.
 do the same work for one specific voice lane. Voice lane `0` is the primary
 lane; higher indices address secondary lanes loaded from native multivoice
 `.sbg` content.
+
+`sbx_context_eval_active_tones` is the point-time snapshot helper for the same
+surface. It returns the effective voice lanes first, then any configured
+auxiliary tones. Use it when a frontend needs a “current sounding tones” view
+for inspectors, live labels, or non-buffered previews.
 
 `sbx_context_sample_mix_amp` samples the effective `mix/<amp>` profile over a
 time range without advancing render time.
