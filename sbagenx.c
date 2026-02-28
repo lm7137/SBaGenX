@@ -7676,14 +7676,18 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       return 0;
    }
 
-   if (opt_A && !opt_m && !opt_M)
-      error("-A requires a mix input stream; use -m <file> or -M");
-
    if (opt_D) {
       emit_periods_from_sbx_context(ctx, 0);
       sbx_context_destroy(ctx);
       return 1;
    }
+
+   if (sbx_context_has_mix_amp_control(ctx) && !mix_in && !opt_m && !opt_M)
+      warn("mix/<amp> was specified in sequence file but no mix input stream is active");
+   if (sbx_context_has_mix_effects(ctx) && !mix_in && !opt_m && !opt_M)
+      error("sequence file mix effects require a mix input stream (-m / -M)");
+   if (opt_A && !opt_m && !opt_M)
+      error("-A requires a mix input stream; use -m <file> or -M");
 
    // Runtime playback via sbagenxlib context.
    sbx_runtime_clear();
@@ -8665,6 +8669,13 @@ create_libseq(int ac, char **av, int sbg_timing) {
       sbx_context_destroy(ctx);
       return;
    }
+
+   if (sbx_context_has_mix_amp_control(ctx) && !mix_in && !opt_m && !opt_M)
+      warn("mix/<amp> was specified in %s but no mix input stream is active",
+           sbg_timing ? "libsbg input" : "libseq input");
+   if (sbx_context_has_mix_effects(ctx) && !mix_in && !opt_m && !opt_M)
+      error("%s mix effects require a mix input stream (-m / -M)",
+            sbg_timing ? "libsbg input" : "libseq input");
 
    // Runtime playback via sbagenxlib context.
    sbx_runtime_clear();

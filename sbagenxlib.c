@@ -4104,6 +4104,18 @@ sbx_context_mix_amp_at(SbxContext *ctx, double t_sec) {
   return k0->amp_pct + (k1->amp_pct - k0->amp_pct) * u;
 }
 
+int
+sbx_context_has_mix_amp_control(const SbxContext *ctx) {
+  if (!ctx) return 0;
+  return ctx->mix_kf_count > 0 ? 1 : 0;
+}
+
+int
+sbx_context_has_mix_effects(const SbxContext *ctx) {
+  if (!ctx) return 0;
+  return (ctx->mix_fx_count > 0 || ctx->sbg_mix_fx_slots > 0) ? 1 : 0;
+}
+
 size_t
 sbx_context_keyframe_count(const SbxContext *ctx) {
   if (!ctx || !ctx->kfs) return 0;

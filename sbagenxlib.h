@@ -291,6 +291,12 @@ int sbx_context_configure_runtime(SbxContext *ctx,
 /* Evaluate mix amplitude percentage at context time t_sec. */
 double sbx_context_mix_amp_at(SbxContext *ctx, double t_sec);
 
+/* Report whether the loaded/runtime context has explicit mix/<amp> control. */
+int sbx_context_has_mix_amp_control(const SbxContext *ctx);
+
+/* Report whether the loaded/runtime context has active mix-effect content. */
+int sbx_context_has_mix_effects(const SbxContext *ctx);
+
 /* ----- Introspection/render ----- */
 
 /* Number of currently loaded keyframes. */

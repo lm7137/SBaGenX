@@ -258,6 +258,28 @@ int main(void) {
     fail("setting default waveform failed");
 
   {
+    const char *sbg_mix_text =
+        "wash: mix/65 mixbeat:3/25 180+0/15\n"
+        "00:00 wash\n";
+    if (sbx_context_load_sbg_timing_text(ctx, sbg_mix_text, 0) != SBX_OK)
+      fail("sbg mix timing load failed");
+    if (!sbx_context_has_mix_amp_control(ctx))
+      fail("sbg mix timing should expose mix amp control");
+    if (!sbx_context_has_mix_effects(ctx))
+      fail("sbg mix timing should expose mix effects");
+  }
+  {
+    const char *sbg_tone_text =
+        "00:00 180+0/20\n";
+    if (sbx_context_load_sbg_timing_text(ctx, sbg_tone_text, 0) != SBX_OK)
+      fail("sbg tone-only timing load failed");
+    if (sbx_context_has_mix_amp_control(ctx))
+      fail("tone-only sbg timing should not expose mix amp control");
+    if (sbx_context_has_mix_effects(ctx))
+      fail("tone-only sbg timing should not expose mix effects");
+  }
+
+  {
     SbxMixFxSpec fx;
     SbxMixFxSpec fx_out;
     double add_l = 0.0, add_r = 0.0;

@@ -577,6 +577,11 @@ Notes
 - Direct timeline entries and block entries are no longer capped at six
   whitespace tokens; they now scale to the native multivoice/mix-slot
   capacities enforced by `SBX_MAX_SBG_VOICES` and `SBX_MAX_SBG_MIXFX`.
+- Library consumers can now ask whether a loaded context carries explicit
+  mix-level control or mix-effect content via
+  `sbx_context_has_mix_amp_control()` and `sbx_context_has_mix_effects()`.
+  The `sbagenx` CLI uses those hooks so native-loaded `.sbg`/`libsbg`
+  content gets the same mix-stream validation path as the legacy runtime.
 - Native mix effects in `.sbg` require explicit `mix/<amp>` control on the
   same line or in the referenced named tone-set, matching the existing legacy
   expectation that mix effects are anchored to a declared mix stream level.
