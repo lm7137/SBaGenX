@@ -792,8 +792,6 @@ parse_sbg_timeline_time_token(const char *tok,
                               double *out_sec) {
   const char *p;
   double tim = -1.0;
-  double base_abs = -1.0;
-  int have_base_abs = 0;
   double seg = 0.0;
   size_t used = 0;
   const double day_sec = 24.0 * 60.0 * 60.0;
@@ -804,8 +802,6 @@ parse_sbg_timeline_time_token(const char *tok,
 
   if (strncasecmp(p, "NOW", 3) == 0) {
     tim = 0.0;
-    base_abs = 0.0;
-    have_base_abs = 1;
     p += 3;
   }
 
@@ -819,8 +815,7 @@ parse_sbg_timeline_time_token(const char *tok,
           return SBX_EINVAL;
         tim = *inout_last_abs_sec;
       }
-      tim = fmod(tim + seg, day_sec);
-      if (tim < 0.0) tim += day_sec;
+      tim += seg;
       p += used;
       continue;
     }
@@ -829,8 +824,10 @@ parse_sbg_timeline_time_token(const char *tok,
       if (sbx_parse_sbg_clock_token(p, &used, &seg) != SBX_OK)
         return SBX_EINVAL;
       tim = seg;
-      base_abs = seg;
-      have_base_abs = 1;
+      if (*inout_last_abs_sec >= 0.0) {
+        while (tim < *inout_last_abs_sec)
+          tim += day_sec;
+      }
       p += used;
       continue;
     }
@@ -839,7 +836,7 @@ parse_sbg_timeline_time_token(const char *tok,
   }
 
   if (tim < 0.0) return SBX_EINVAL;
-  if (have_base_abs) *inout_last_abs_sec = base_abs;
+  *inout_last_abs_sec = tim;
   *out_sec = tim;
   return SBX_OK;
 }
@@ -3138,7 +3135,6 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
 
       if (block_idx >= 0) {
         size_t bi;
-        const double day_sec = 24.0 * 60.0 * 60.0;
         if (blocks[block_idx].count == 0) {
           char emsg[256];
           snprintf(emsg, sizeof(emsg),
@@ -3151,8 +3147,6 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         }
         for (bi = 0; bi < blocks[block_idx].count; bi++) {
           SbxVoiceSetKeyframe expanded = blocks[block_idx].entries[bi];
-          double etim = fmod(tsec + expanded.time_sec, day_sec);
-          if (etim < 0.0) etim += day_sec;
           if (count == cap) {
             size_t ncap = cap ? (cap * 2) : 8;
             SbxVoiceSetKeyframe *tmp;
@@ -3165,7 +3159,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             frames = tmp;
             cap = ncap;
           }
-          expanded.time_sec = etim;
+          expanded.time_sec = tsec + expanded.time_sec;
           frames[count++] = expanded;
           if (expanded.tone_len > max_voice_count) max_voice_count = expanded.tone_len;
           if (expanded.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = expanded.mix_fx_count;

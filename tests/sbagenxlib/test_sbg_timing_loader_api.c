@@ -71,6 +71,12 @@ main(void) {
       "base: 120+0/30\n"
       "NOW base\n"
       "+00:00:02 base\n";
+  const char *sbg_day_wrap_text =
+      "off: -\n"
+      "base: 180+0/25\n"
+      "23:59:59 off ->\n"
+      "00:00:00 base ->\n"
+      "00:00:02 off\n";
   const char *sbg_multivoice_named_text =
       "solo: 180+0/20\n"
       "duo: 180+0/20 260+0/20\n"
@@ -214,6 +220,15 @@ main(void) {
     fail("NOW-based keyframe time mismatch");
   if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 2.0) > 1e-9)
     fail("relative +HH:MM:SS keyframe time mismatch");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_day_wrap_text, 0);
+  if (rc != SBX_OK) fail("day-wrap sbg timing load failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK || fabs(kf.time_sec - 86399.0) > 1e-9)
+    fail("day-wrap keyframe #0 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 86400.0) > 1e-9)
+    fail("day-wrap keyframe #1 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 2, &kf) != SBX_OK || fabs(kf.time_sec - 86402.0) > 1e-9)
+    fail("day-wrap keyframe #2 time mismatch");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_named_text, 0);
   if (rc != SBX_OK) fail("multivoice named sbg timing load failed");

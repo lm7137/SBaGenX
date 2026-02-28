@@ -497,6 +497,18 @@ Phase 3.72
   `ch-awakened-mind.sbg`, `ch-aspirin.sbg`, and `prog-drop-old-demo.sbg`
   now route through the native sbagenxlib path.
 
+Phase 3.73
+- Add day-wrap semantics to native `.sbg` timing clocks:
+  - plain `HH:MM[:SS]` timeline entries are now lifted into a monotonically
+    increasing absolute timeline,
+  - when a later clock token is numerically earlier than the previous absolute
+    time, it is treated as the next day rather than as an error,
+  - top-level block expansion now keeps absolute time instead of wrapping
+    expanded entries modulo 24 hours.
+- This matches the historical `.sbg` behavior used by overnight and
+  around-midnight example files, and it retires the largest remaining
+  incompatibility bucket in the forced-native corpus.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -916,6 +928,14 @@ Seq Backend Safe-Preamble Bridge Smoke Test (Phase 3.72)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_safe_preamble_subset.sh
+```
+
+Seq Backend Real-Example Corpus Smoke Test (Phase 3.73)
+-------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_real_examples_subset.sh
+tests/sbagenxlib/test_sbg_timing_loader_api.c
 ```
 
 Notes:

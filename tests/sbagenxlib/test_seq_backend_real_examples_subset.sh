@@ -30,6 +30,8 @@ run_one() {
 
 run_one "examples/basics/prog-chakras-1.sbg" "^# voice-lanes: 5$"
 run_one "examples/basics/prog-wave-custom-envelope-demo.sbg" "^0.000000 wave00:200+4/50 linear$"
+run_one "examples/contrib/ghostlab/drop-001.sbg" "^# voice-lanes: 2$"
+run_one "examples/contrib/jim/prog-990102.sbg" "^# voice-lanes: 2$"
 run_one "examples/contrib/jim/prog-test-wave.sbg" "^0.000000 wave00:300+5/50 linear$"
 run_one "examples/focus/wave-01.sbg" "^# voice-lanes: 3$"
 
