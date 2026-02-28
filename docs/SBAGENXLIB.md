@@ -637,10 +637,19 @@ Phase 3.84
   making them manually stitch together primary voice, secondary voice lanes,
   and aux-tone state.
 
+Phase 3.85
+- Add source/transport introspection helpers:
+  - `sbx_context_source_mode()`
+  - `sbx_context_is_looping()`
+- Expose whether the loaded context is empty, static, or keyframed, and
+  whether a keyframed source is configured to loop.
+- This removes another round of frontend guesswork around transport controls,
+  plot semantics, and timeline UI.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.84 Slice)
+Current API (Phase 3.85 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -698,6 +707,8 @@ Public header: `sbagenxlib.h`
   - `sbx_context_eval_active_tones()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_voice_count()`
+  - `sbx_context_source_mode()`
+  - `sbx_context_is_looping()`
   - `sbx_context_get_keyframe()`
   - `sbx_context_get_keyframe_voice()`
   - `sbx_context_duration_sec()`
@@ -855,6 +866,9 @@ Notes
   the effective voice lanes first, then auxiliary tones, so GUI/host code can
   inspect the audible tone set at one instant without reassembling it from
   separate APIs.
+- `sbx_context_source_mode()` / `sbx_context_is_looping()` expose transport
+  semantics directly, so frontends no longer have to infer “is this static or
+  keyframed?” and “will this wrap?” from load path and duration heuristics.
 - `sbx_context_mix_amp_keyframe_count()` /
   `sbx_context_get_mix_amp_keyframe()` expose the explicit native `mix/<amp>`
   timeline loaded from `.sbg`.

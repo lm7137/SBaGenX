@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 13  /* public API contract revision */
+#define SBX_API_VERSION 14  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -51,6 +51,12 @@ typedef enum {
   SBX_INTERP_LINEAR = 0,
   SBX_INTERP_STEP = 1
 } SbxInterpMode;
+
+typedef enum {
+  SBX_SOURCE_NONE = 0,
+  SBX_SOURCE_STATIC = 1,
+  SBX_SOURCE_KEYFRAMES = 2
+} SbxSourceMode;
 
 typedef enum {
   SBX_MIXFX_NONE = 0,
@@ -389,6 +395,12 @@ size_t sbx_context_keyframe_count(const SbxContext *ctx);
 
 /* Number of active voice lanes in the loaded source (1 for static tones). */
 size_t sbx_context_voice_count(const SbxContext *ctx);
+
+/* Source kind currently loaded into the context (SBX_SOURCE_*). */
+int sbx_context_source_mode(const SbxContext *ctx);
+
+/* Whether the current keyframed source is configured to loop. */
+int sbx_context_is_looping(const SbxContext *ctx);
 
 /* Read keyframe by index. */
 int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out);

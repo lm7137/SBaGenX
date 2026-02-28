@@ -18,9 +18,9 @@
 #endif
 
 #define SBX_TAU (2.0 * M_PI)
-#define SBX_CTX_SRC_NONE 0
-#define SBX_CTX_SRC_STATIC 1
-#define SBX_CTX_SRC_KEYFRAMES 2
+#define SBX_CTX_SRC_NONE SBX_SOURCE_NONE
+#define SBX_CTX_SRC_STATIC SBX_SOURCE_STATIC
+#define SBX_CTX_SRC_KEYFRAMES SBX_SOURCE_KEYFRAMES
 #define SBX_MAX_SBG_VOICES 16
 #define SBX_MAX_SBG_MIXFX 8
 #define SBX_CUSTOM_WAVE_COUNT 100
@@ -4382,6 +4382,18 @@ sbx_context_voice_count(const SbxContext *ctx) {
     return 1;
   if (ctx->mv_voice_count == 0) return 1;
   return ctx->mv_voice_count;
+}
+
+int
+sbx_context_source_mode(const SbxContext *ctx) {
+  if (!ctx || !ctx->loaded) return SBX_SOURCE_NONE;
+  return ctx->source_mode;
+}
+
+int
+sbx_context_is_looping(const SbxContext *ctx) {
+  if (!ctx || !ctx->loaded) return 0;
+  return (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES && ctx->kf_loop) ? 1 : 0;
 }
 
 int

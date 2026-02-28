@@ -143,6 +143,8 @@ double lane1_beat_hz[256];
 int rc = sbx_context_sample_tones(ctx, 0.0, 1800.0, 256, tsec, curve);
 int lane_count = (int)sbx_context_voice_count(ctx);
 size_t active_count = 0;
+int source_mode = sbx_context_source_mode(ctx);
+int looped = sbx_context_is_looping(ctx);
 
 if (lane_count > 1) {
   sbx_context_sample_tones_voice(ctx, 1, 0.0, 1800.0, 256, tsec, lane1_curve);
@@ -157,6 +159,8 @@ For multivoice native `.sbg` content, use the `*_voice(...)` variants to sample
 secondary lanes directly instead of reconstructing them from the primary lane.
 Use `sbx_context_eval_active_tones(...)` when you need the current tone set at
 one moment, including auxiliary tones.
+Use `sbx_context_source_mode(...)` / `sbx_context_is_looping(...)` to drive
+transport UI without inferring source semantics from load path.
 
 If a frontend needs transport/scrubbing, set the context clock explicitly:
 

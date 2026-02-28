@@ -252,6 +252,10 @@ int main(void) {
   sbx_default_engine_config(&cfg);
   ctx = sbx_context_create(&cfg);
   if (!ctx) fail("context create failed");
+  if (sbx_context_source_mode(ctx) != SBX_SOURCE_NONE)
+    fail("new context should report source none");
+  if (sbx_context_is_looping(ctx) != 0)
+    fail("new context should not report looping");
   if (sbx_context_set_default_waveform(ctx, 99) != SBX_EINVAL)
     fail("invalid default waveform should fail");
   if (sbx_context_set_default_waveform(ctx, SBX_WAVE_TRIANGLE) != SBX_OK)
@@ -263,6 +267,10 @@ int main(void) {
         "00:00 wash\n";
     if (sbx_context_load_sbg_timing_text(ctx, sbg_mix_text, 0) != SBX_OK)
       fail("sbg mix timing load failed");
+    if (sbx_context_source_mode(ctx) != SBX_SOURCE_KEYFRAMES)
+      fail("sbg timing load should report keyframed source");
+    if (sbx_context_is_looping(ctx) != 0)
+      fail("non-looping sbg timing load should not report looping");
     if (!sbx_context_has_mix_amp_control(ctx))
       fail("sbg mix timing should expose mix amp control");
     if (!sbx_context_has_mix_effects(ctx))
@@ -402,8 +410,16 @@ int main(void) {
     kf[1].interp = SBX_INTERP_STEP;
     if (sbx_context_load_keyframes(ctx, kf, 2, 0) != SBX_OK)
       fail("load keyframes for duration failed");
+    if (sbx_context_source_mode(ctx) != SBX_SOURCE_KEYFRAMES)
+      fail("load keyframes should report keyframed source");
+    if (sbx_context_is_looping(ctx) != 0)
+      fail("non-looping keyframes should not report looping");
     if (fabs(sbx_context_duration_sec(ctx) - 5.0) > 1e-9)
       fail("context duration mismatch");
+    if (sbx_context_load_keyframes(ctx, kf, 2, 1) != SBX_OK)
+      fail("load looped keyframes for loop state failed");
+    if (sbx_context_is_looping(ctx) != 1)
+      fail("looped keyframes should report looping");
   }
   {
     SbxToneSpec t;
@@ -411,6 +427,10 @@ int main(void) {
       fail("parse tone for static duration failed");
     if (sbx_context_set_tone(ctx, &t) != SBX_OK)
       fail("set tone for static duration failed");
+    if (sbx_context_source_mode(ctx) != SBX_SOURCE_STATIC)
+      fail("set tone should report static source");
+    if (sbx_context_is_looping(ctx) != 0)
+      fail("static tone should not report looping");
     if (fabs(sbx_context_duration_sec(ctx)) > 1e-9)
       fail("static tone duration should be zero");
   }

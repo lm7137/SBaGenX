@@ -176,6 +176,8 @@ and preview playback.
 - `sbx_context_load_sbg_timing_file(SbxContext *ctx, const char *path, int loop)`
 - `sbx_context_keyframe_count(const SbxContext *ctx)`
 - `sbx_context_voice_count(const SbxContext *ctx)`
+- `sbx_context_source_mode(const SbxContext *ctx)`
+- `sbx_context_is_looping(const SbxContext *ctx)`
 - `sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out)`
 - `sbx_context_get_keyframe_voice(const SbxContext *ctx, size_t index, size_t voice_index, SbxProgramKeyframe *out)`
 - `sbx_context_duration_sec(const SbxContext *ctx)`
@@ -195,6 +197,15 @@ just keyframe inspection.
 `sbx_context_voice_count` returns `1` for loaded single-voice/static contexts,
 so frontends can treat voice-lane enumeration uniformly instead of special-
 casing static tones as “zero lanes”.
+
+`sbx_context_source_mode` returns one of:
+
+- `SBX_SOURCE_NONE`
+- `SBX_SOURCE_STATIC`
+- `SBX_SOURCE_KEYFRAMES`
+
+Use `sbx_context_is_looping` to decide whether keyframed transport/plotting UI
+should treat the program timeline as wrapping.
 
 6) Runtime extras (aux tones, mix effects, mix amp profile)
 
