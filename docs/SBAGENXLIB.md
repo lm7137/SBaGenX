@@ -481,6 +481,22 @@ Phase 3.71
   `prog-slide-alpha-10.sbg`, whose generated runtime is already backed by
   `sbagenxlib`.
 
+Phase 3.72
+- Harden the direct sequence-file bridge's safe legacy preamble stripping:
+  - treat each candidate preamble line as a real single logical line before
+    handing it to the safe-option parser,
+  - preserve the original buffer after inspection so the remaining native
+    `.sbg` text can still be loaded verbatim,
+  - inspect option-only wrapper files in two passes so non-wrapper files do
+    not execute CLI options speculatively during classification,
+  - cover both split and inline forms such as `-SE`, `-T ...`, and
+    `-SE -m river1.ogg`.
+- This closes a real bridge defect where some historical files with valid
+  leading option lines were being rejected before `sbagenxlib` even saw the
+  native sequence body. Representative examples such as
+  `ch-awakened-mind.sbg`, `ch-aspirin.sbg`, and `prog-drop-old-demo.sbg`
+  now route through the native sbagenxlib path.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -893,6 +909,13 @@ Seq Backend Option-Wrapper Example Smoke Test (Phase 3.71)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_option_wrapper_examples.sh
+```
+
+Seq Backend Safe-Preamble Bridge Smoke Test (Phase 3.72)
+--------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_safe_preamble_subset.sh
 ```
 
 Notes:

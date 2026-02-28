@@ -5070,11 +5070,11 @@ sbx_try_run_option_only_seq_wrapper(const char *fnam) {
    if (rc != SBX_OK)
       return 0;
 
+   /* Pass 1: classify the file without executing options. */
    line= text;
    while (line && *line) {
       char *next= strchr(line, '\n');
       char *trim= line;
-      char saved= 0;
       char *end;
 
       if (next)
@@ -5093,17 +5093,51 @@ sbx_try_run_option_only_seq_wrapper(const char *fnam) {
 	 end= next - 1;
       if (end > line && end[-1] == '\r')
 	 end--;
-      saved= *end;
-      *end= 0;
-      if (sbx_line_contains_seq_mode_option(trim))
-	 saw_mode= 1;
-      handleOptions(trim);
-      *end= saved;
+      {
+	 char saved= *end;
+	 *end= 0;
+	 if (sbx_line_contains_seq_mode_option(trim))
+	    saw_mode= 1;
+	 *end= saved;
+      }
+      line= next;
+   }
+
+   if (!saw_mode) {
+      free(text);
+      return 0;
+   }
+
+   /* Pass 2: execute the wrapper now that it is confirmed to be option-only. */
+   line= text;
+   while (line && *line) {
+      char *next= strchr(line, '\n');
+      char *trim= line;
+      char *end;
+
+      if (next)
+	 next++;
+      while (*trim && isspace((unsigned char)*trim)) trim++;
+      if (!*trim || *trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
+	 line= next;
+	 continue;
+      }
+      end= line + strlen(line);
+      if (next)
+	 end= next - 1;
+      if (end > line && end[-1] == '\r')
+	 end--;
+      {
+	 char saved= *end;
+	 *end= 0;
+	 handleOptions(trim);
+	 *end= saved;
+      }
       line= next;
    }
 
    free(text);
-   return saw_mode ? 1 : 0;
+   return 1;
 }
 
 static int
@@ -5129,44 +5163,51 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 
    line= text;
    while (line && *line) {
-      char *next= strchr(line, '\n');
+      char *line_nl= strchr(line, '\n');
       char *trim;
+      char *line_end;
+      char saved= 0;
+      char *next= 0;
 
-      if (next)
-	 next++;
+      if (line_nl) {
+	 line_end= line_nl;
+	 saved= *line_end;
+	 *line_end= 0;
+	 next= line_nl + 1;
+      } else {
+	 line_end= line + strlen(line);
+      }
+      if (line_end > line && line_end[-1] == '\r')
+	 line_end--;
       trim= line;
       while (*trim && isspace((unsigned char)*trim)) trim++;
       if (!*trim) {
+	 if (saved) *line_nl= saved;
 	 line= next;
 	 continue;
       }
       if (*trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
+	 if (saved) *line_nl= saved;
 	 line= next;
 	 continue;
       }
       if (*trim == '-') {
-	 char saved= 0;
-	 char *end= line + strlen(line);
-	 if (next)
-	    end= next - 1;
-	 if (end > line && end[-1] == '\r')
-	    end--;
-	 saved= *end;
-	 *end= 0;
 	 if (!sbx_parse_safe_seqfile_option_line(trim,
 						 out_S, out_E,
 						 out_have_T, out_T_ms,
 						 out_mix_path)) {
 	    if (*out_mix_path) free(*out_mix_path);
 	    *out_mix_path= 0;
+	    if (saved) *line_nl= saved;
 	    free(text);
 	    return SBX_EINVAL;
 	 }
-	 *end= saved;
-	 while (line < end) *line++= ' ';
+	 memset(line, ' ', (size_t)(line_end - line));
+	 if (saved) *line_nl= saved;
 	 line= next;
 	 continue;
       }
+      if (saved) *line_nl= saved;
       break;
    }
 
