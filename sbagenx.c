@@ -575,6 +575,7 @@ int fast_mult= 0;		// 0 to sync to clock (adjusting as necessary), or else sync 
 				//  output rate, with the multiplier indicated
 S64 byte_count= -1;		// Number of bytes left to output, or -1 if unlimited
 int tty_erase;			// Chars to erase from current line (for ESC[K emulation)
+int sbx_status_history_minute= -1; // Last runtime minute emitted as a newline snapshot
 
 int opt_Q;			// Quiet mode
 int opt_D;
@@ -5533,6 +5534,7 @@ statusSbx(char *err) {
   char *p= buf, *p0, *p1;
   double t_sec;
   int tim_ms;
+  int minute_bucket;
   SbxToneSpec tone;
   char tok[256];
   size_t aux_n;
@@ -5547,6 +5549,7 @@ statusSbx(char *err) {
   tim_ms= (int)(t_sec * 1000.0 + 0.5);
   tim_ms %= H24;
   if (tim_ms < 0) tim_ms += H24;
+  minute_bucket= (int)(t_sec / 60.0);
 
   p0= p;
   *p++= ' '; *p++= ' ';
@@ -5595,6 +5598,13 @@ statusSbx(char *err) {
 #endif
 
   tty_erase= p1-p0;
+  if (minute_bucket >= 1 && minute_bucket > sbx_status_history_minute) {
+    fprintf(stderr, "%s\n", buf);
+    fflush(stderr);
+    tty_erase= 0;
+    sbx_status_history_minute= minute_bucket;
+    return;
+  }
   fprintf(stderr, "%s\r", buf);
   fflush(stderr);
 }
@@ -6604,6 +6614,7 @@ loop() {
     writeWAV();
 
   if (!opt_Q) fprintf(stderr, "\n");
+  sbx_status_history_minute= -1;
   if (!sbx_runtime_active) {
      corrVal(0);		// Get into correct period
      dispCurrPer(stderr);	// Display
