@@ -22,6 +22,7 @@
 #define SBX_CTX_SRC_STATIC 1
 #define SBX_CTX_SRC_KEYFRAMES 2
 #define SBX_MAX_SBG_VOICES 16
+#define SBX_MAX_SBG_MIXFX 8
 #define SBX_CUSTOM_WAVE_COUNT 100
 #define SBX_CUSTOM_WAVE_SAMPLES 4096
 #define SBX_MIXBEAT_HILBERT_TAPS 31
@@ -32,6 +33,9 @@ typedef struct {
   double mixbeat_hist[SBX_MIXBEAT_HILBERT_TAPS];
   int mixbeat_hist_pos;
 } SbxMixFxState;
+
+typedef struct SbxVoiceSetKeyframe SbxVoiceSetKeyframe;
+typedef struct SbxMixFxKeyframe SbxMixFxKeyframe;
 
 struct SbxEngine {
   SbxEngineConfig cfg;
@@ -73,6 +77,11 @@ struct SbxContext {
   size_t aux_buf_cap;
   SbxMixFxState *mix_fx;
   size_t mix_fx_count;
+  SbxMixFxKeyframe *sbg_mix_fx_kf;
+  size_t sbg_mix_fx_kf_count;
+  size_t sbg_mix_fx_slots;
+  size_t sbg_mix_fx_seg;
+  SbxMixFxState *sbg_mix_fx_state;
   SbxMixAmpKeyframe *mix_kf;
   size_t mix_kf_count;
   size_t mix_kf_seg;
@@ -85,6 +94,14 @@ struct SbxContext {
 static void engine_wave_sample(int waveform, double phase, double *out_sample);
 static double sbx_lerp(double a, double b, double u);
 static int snprintf_checked(char *out, size_t out_sz, const char *fmt, ...);
+static int sbx_voice_set_frame_append_tone(SbxVoiceSetKeyframe *frame, const SbxToneSpec *tone);
+static int sbx_voice_set_frame_append_gap(SbxVoiceSetKeyframe *frame);
+static int sbx_voice_set_frame_append_mix_fx(SbxVoiceSetKeyframe *frame, const SbxMixFxSpec *fx);
+static int sbx_voice_set_frame_merge(SbxVoiceSetKeyframe *dst, const SbxVoiceSetKeyframe *src);
+static int ctx_set_sbg_mix_effect_keyframes_internal(SbxContext *ctx,
+                                                     const SbxMixFxKeyframe *kfs,
+                                                     size_t kf_count,
+                                                     size_t slot_count);
 
 static void
 set_last_error(SbxEngine *eng, const char *msg) {
@@ -506,15 +523,20 @@ parse_interp_mode_token(const char *tok, int *out_interp) {
   return SBX_EINVAL;
 }
 
-typedef struct {
+struct SbxVoiceSetKeyframe {
   double time_sec;
   SbxToneSpec tones[SBX_MAX_SBG_VOICES];
+  size_t tone_len;
   int interp;
-} SbxVoiceSetKeyframe;
+  int mix_amp_present;
+  double mix_amp_pct;
+  SbxMixFxSpec mix_fx[SBX_MAX_SBG_MIXFX];
+  size_t mix_fx_count;
+};
 
 typedef struct {
   char *name;
-  SbxToneSpec tones[SBX_MAX_SBG_VOICES];
+  SbxVoiceSetKeyframe frame;
 } SbxNamedToneDef;
 
 typedef struct {
@@ -523,6 +545,13 @@ typedef struct {
   size_t count;
   size_t cap;
 } SbxNamedBlockDef;
+
+struct SbxMixFxKeyframe {
+  double time_sec;
+  int interp;
+  SbxMixFxSpec mix_fx[SBX_MAX_SBG_MIXFX];
+  size_t mix_fx_count;
+};
 
 static int
 is_sbg_transition_token(const char *tok) {
@@ -560,6 +589,61 @@ named_block_find(const SbxNamedBlockDef *defs, size_t ndefs, const char *name) {
 }
 
 static int
+sbx_frame_apply_token(SbxVoiceSetKeyframe *frame,
+                      const char *tok,
+                      int default_waveform,
+                      const SbxNamedToneDef *defs,
+                      size_t ndefs,
+                      int *out_block_idx,
+                      const SbxNamedBlockDef *blocks,
+                      size_t nblocks) {
+  int extra_type = SBX_EXTRA_INVALID;
+  SbxToneSpec tone;
+  SbxMixFxSpec fx;
+  double mix_pct = 0.0;
+  int didx;
+  int bidx;
+  int rc;
+
+  if (!frame || !tok) return SBX_EINVAL;
+  if (out_block_idx) *out_block_idx = -1;
+
+  if (strcmp(tok, "-") == 0)
+    return sbx_voice_set_frame_append_gap(frame);
+
+  didx = named_tone_find(defs, ndefs, tok);
+  if (didx >= 0)
+    return sbx_voice_set_frame_merge(frame, &defs[didx].frame);
+
+  bidx = named_block_find(blocks, nblocks, tok);
+  if (bidx >= 0) {
+    if (out_block_idx) {
+      *out_block_idx = bidx;
+      return SBX_OK;
+    }
+    return SBX_EINVAL;
+  }
+
+  rc = sbx_parse_extra_token(tok, default_waveform, &extra_type, &tone, &fx, &mix_pct);
+  if (rc != SBX_OK) return rc;
+
+  if (extra_type == SBX_EXTRA_TONE)
+    return sbx_voice_set_frame_append_tone(frame, &tone);
+
+  if (extra_type == SBX_EXTRA_MIXAMP) {
+    if (frame->mix_amp_present) return SBX_EINVAL;
+    frame->mix_amp_present = 1;
+    frame->mix_amp_pct = mix_pct;
+    return SBX_OK;
+  }
+
+  if (extra_type == SBX_EXTRA_MIXFX)
+    return sbx_voice_set_frame_append_mix_fx(frame, &fx);
+
+  return SBX_EINVAL;
+}
+
+static int
 parse_sbg_relative_offset_token(const char *tok, double *out_sec) {
   const char *p;
   size_t used = 0;
@@ -583,12 +667,10 @@ parse_sbg_relative_offset_token(const char *tok, double *out_sec) {
 
 static int
 block_append_entry(SbxNamedBlockDef *blk,
-                   double offset_sec,
-                   const SbxToneSpec *tones,
-                   int interp) {
+                   const SbxVoiceSetKeyframe *entry) {
   SbxVoiceSetKeyframe *tmp;
   size_t ncap;
-  if (!blk || !tones) return SBX_EINVAL;
+  if (!blk || !entry) return SBX_EINVAL;
   if (blk->count == blk->cap) {
     ncap = blk->cap ? (blk->cap * 2) : 8;
     tmp = (SbxVoiceSetKeyframe *)realloc(blk->entries, ncap * sizeof(*blk->entries));
@@ -596,10 +678,7 @@ block_append_entry(SbxNamedBlockDef *blk,
     blk->entries = tmp;
     blk->cap = ncap;
   }
-  blk->entries[blk->count].time_sec = offset_sec;
-  memcpy(blk->entries[blk->count].tones, tones,
-         sizeof(blk->entries[blk->count].tones));
-  blk->entries[blk->count].interp = interp;
+  blk->entries[blk->count] = *entry;
   blk->count++;
   return SBX_OK;
 }
@@ -615,16 +694,59 @@ sbx_voice_set_init(SbxToneSpec *tones) {
   }
 }
 
-static size_t
-sbx_voice_set_active_count(const SbxToneSpec *tones) {
+static void
+sbx_voice_set_frame_init(SbxVoiceSetKeyframe *frame) {
+  if (!frame) return;
+  memset(frame, 0, sizeof(*frame));
+  sbx_voice_set_init(frame->tones);
+  frame->interp = SBX_INTERP_LINEAR;
+}
+
+static int
+sbx_voice_set_frame_append_tone(SbxVoiceSetKeyframe *frame, const SbxToneSpec *tone) {
+  if (!frame || !tone) return SBX_EINVAL;
+  if (frame->tone_len >= SBX_MAX_SBG_VOICES) return SBX_EINVAL;
+  frame->tones[frame->tone_len] = *tone;
+  frame->tone_len++;
+  return SBX_OK;
+}
+
+static int
+sbx_voice_set_frame_append_gap(SbxVoiceSetKeyframe *frame) {
+  SbxToneSpec tone;
+  if (!frame) return SBX_EINVAL;
+  sbx_default_tone_spec(&tone);
+  tone.mode = SBX_TONE_NONE;
+  tone.amplitude = 0.0;
+  return sbx_voice_set_frame_append_tone(frame, &tone);
+}
+
+static int
+sbx_voice_set_frame_append_mix_fx(SbxVoiceSetKeyframe *frame, const SbxMixFxSpec *fx) {
+  if (!frame || !fx) return SBX_EINVAL;
+  if (frame->mix_fx_count >= SBX_MAX_SBG_MIXFX) return SBX_EINVAL;
+  frame->mix_fx[frame->mix_fx_count++] = *fx;
+  return SBX_OK;
+}
+
+static int
+sbx_voice_set_frame_merge(SbxVoiceSetKeyframe *dst, const SbxVoiceSetKeyframe *src) {
   size_t i;
-  size_t count = 0;
-  if (!tones) return 0;
-  for (i = 0; i < SBX_MAX_SBG_VOICES; i++) {
-    if (tones[i].mode != SBX_TONE_NONE && tones[i].amplitude > 0.0)
-      count = i + 1;
+  if (!dst || !src) return SBX_EINVAL;
+  if (dst->tone_len + src->tone_len > SBX_MAX_SBG_VOICES) return SBX_EINVAL;
+  if (dst->mix_fx_count + src->mix_fx_count > SBX_MAX_SBG_MIXFX) return SBX_EINVAL;
+  for (i = 0; i < src->tone_len; i++)
+    dst->tones[dst->tone_len + i] = src->tones[i];
+  dst->tone_len += src->tone_len;
+  if (src->mix_amp_present) {
+    if (dst->mix_amp_present) return SBX_EINVAL;
+    dst->mix_amp_present = 1;
+    dst->mix_amp_pct = src->mix_amp_pct;
   }
-  return count;
+  for (i = 0; i < src->mix_fx_count; i++)
+    dst->mix_fx[dst->mix_fx_count + i] = src->mix_fx[i];
+  dst->mix_fx_count += src->mix_fx_count;
+  return SBX_OK;
 }
 
 static int
@@ -1122,6 +1244,18 @@ ctx_clear_mix_effects(SbxContext *ctx) {
 }
 
 static void
+ctx_clear_sbg_mix_effect_keyframes(SbxContext *ctx) {
+  if (!ctx) return;
+  if (ctx->sbg_mix_fx_kf) free(ctx->sbg_mix_fx_kf);
+  if (ctx->sbg_mix_fx_state) free(ctx->sbg_mix_fx_state);
+  ctx->sbg_mix_fx_kf = 0;
+  ctx->sbg_mix_fx_kf_count = 0;
+  ctx->sbg_mix_fx_slots = 0;
+  ctx->sbg_mix_fx_seg = 0;
+  ctx->sbg_mix_fx_state = 0;
+}
+
+static void
 ctx_clear_mix_keyframes(SbxContext *ctx) {
   if (!ctx) return;
   if (ctx->mix_kf) free(ctx->mix_kf);
@@ -1144,6 +1278,11 @@ ctx_reset_runtime(SbxContext *ctx) {
   for (i = 0; i < ctx->mix_fx_count; i++) {
     sbx_mix_fx_reset_state(&ctx->mix_fx[i]);
   }
+  if (ctx->sbg_mix_fx_state) {
+    for (i = 0; i < ctx->sbg_mix_fx_slots; i++)
+      sbx_mix_fx_reset_state(&ctx->sbg_mix_fx_state[i]);
+  }
+  ctx->sbg_mix_fx_seg = 0;
   ctx->mix_kf_seg = 0;
   ctx->t_sec = 0.0;
   ctx->kf_seg = 0;
@@ -2044,6 +2183,11 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->aux_buf_cap = 0;
   ctx->mix_fx = 0;
   ctx->mix_fx_count = 0;
+  ctx->sbg_mix_fx_kf = 0;
+  ctx->sbg_mix_fx_kf_count = 0;
+  ctx->sbg_mix_fx_slots = 0;
+  ctx->sbg_mix_fx_seg = 0;
+  ctx->sbg_mix_fx_state = 0;
   ctx->mix_kf = 0;
   ctx->mix_kf_count = 0;
   ctx->mix_kf_seg = 0;
@@ -2057,6 +2201,7 @@ void
 sbx_context_destroy(SbxContext *ctx) {
   if (!ctx) return;
   ctx_clear_mix_keyframes(ctx);
+  ctx_clear_sbg_mix_effect_keyframes(ctx);
   ctx_clear_mix_effects(ctx);
   ctx_clear_aux_tones(ctx);
   ctx_clear_keyframes(ctx);
@@ -2324,6 +2469,8 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   SbxVoiceSetKeyframe *frames = 0;
   SbxProgramKeyframe *primary = 0;
   SbxProgramKeyframe *mv_frames = 0;
+  SbxMixAmpKeyframe *mix_kfs = 0;
+  SbxMixFxKeyframe *mix_fx_kfs = 0;
   size_t count = 0, cap = 0;
   SbxNamedToneDef *defs = 0;
   size_t ndefs = 0, defs_cap = 0;
@@ -2334,6 +2481,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   double active_block_last_off = -1.0;
   double last_abs_sec = -1.0;
   size_t max_voice_count = 1;
+  size_t max_mix_fx_slots = 0;
   int rc = SBX_OK;
 
   if (!ctx || !ctx->eng || !text) return SBX_EINVAL;
@@ -2348,14 +2496,13 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   while (line && *line) {
     char *p, *q, *rest;
     char *time_tok;
-    char *tone_tok;
     int interp = SBX_INTERP_LINEAR;
     int expanded_block = 0;
     int is_definition = 0;
     double tsec;
-    SbxToneSpec tones[SBX_MAX_SBG_VOICES];
+    SbxVoiceSetKeyframe frame;
 
-    sbx_voice_set_init(tones);
+    sbx_voice_set_frame_init(&frame);
 
     line_no++;
     next = strchr(line, '\n');
@@ -2386,13 +2533,12 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
 
     if (active_block_idx >= 0) {
       char *time_tok = p;
-      char *tone_tok = 0;
       int interp = SBX_INTERP_LINEAR;
       double off_sec = 0.0;
-      SbxToneSpec blk_tones[SBX_MAX_SBG_VOICES];
+      SbxVoiceSetKeyframe blk_frame;
       SbxNamedBlockDef *blk = &blocks[active_block_idx];
 
-      sbx_voice_set_init(blk_tones);
+      sbx_voice_set_frame_init(&blk_frame);
 
       if (strcmp(time_tok, "}") == 0) {
         if (rest && *rest) {
@@ -2445,7 +2591,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         int nt = 0;
         int idx = 0;
         int had_leading_transition = 0;
-        int appended_nested_block = 0;
+        int nested_block_idx = -1;
         char *r = rest;
         while (*r) {
           if (nt >= (int)(sizeof(tokv) / sizeof(tokv[0]))) {
@@ -2490,11 +2636,32 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           goto done;
         }
 
-        tone_tok = tokv[idx++];
-        {
-          int bidx = named_block_find(blocks, nblocks, tone_tok);
+        while (idx < nt) {
+          int bidx = -1;
+          const char *tok = tokv[idx];
+          int interp_tmp;
+          if (parse_interp_mode_token(tok, &interp_tmp) == SBX_OK) {
+            interp = interp_tmp;
+            idx++;
+            continue;
+          }
+          if (is_sbg_transition_token(tok)) {
+            interp = sbg_transition_token_to_interp(tok);
+            idx++;
+            continue;
+          }
+          rc = sbx_frame_apply_token(&blk_frame, tok, ctx->default_waveform,
+                                     defs, ndefs, &bidx, blocks, nblocks);
+          if (rc != SBX_OK) {
+            char emsg[256];
+            snprintf(emsg, sizeof(emsg),
+                     "line %lu: invalid block tone-spec, unknown named tone-set, or unknown nested block '%s'",
+                     (unsigned long)line_no, tok);
+            set_ctx_error(ctx, emsg);
+            rc = SBX_EINVAL;
+            goto done;
+          }
           if (bidx >= 0) {
-            size_t bi;
             if (bidx == active_block_idx) {
               char emsg[256];
               snprintf(emsg, sizeof(emsg),
@@ -2504,107 +2671,86 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
               rc = SBX_EINVAL;
               goto done;
             }
-            if (had_leading_transition) {
+            if (had_leading_transition || idx + 1 < nt ||
+                blk_frame.tone_len > 0 || blk_frame.mix_amp_present || blk_frame.mix_fx_count > 0) {
               char emsg[256];
               snprintf(emsg, sizeof(emsg),
-                       "line %lu: transition tokens are not supported when nesting block '%s' in block '%s'",
-                       (unsigned long)line_no, tone_tok, blk->name ? blk->name : "?");
+                       "line %lu: nested block '%s' must appear alone in block '%s'",
+                       (unsigned long)line_no, tok, blk->name ? blk->name : "?");
               set_ctx_error(ctx, emsg);
               rc = SBX_EINVAL;
               goto done;
             }
-            if (idx < nt) {
-              char emsg[256];
-              snprintf(emsg, sizeof(emsg),
-                       "line %lu: nested block '%s' does not accept trailing tokens in block '%s'",
-                       (unsigned long)line_no, tone_tok, blk->name ? blk->name : "?");
-              set_ctx_error(ctx, emsg);
-              rc = SBX_EINVAL;
-              goto done;
-            }
-            if (blocks[bidx].count == 0) {
-              char emsg[256];
-              snprintf(emsg, sizeof(emsg),
-                       "line %lu: nested block '%s' has no entries",
-                       (unsigned long)line_no, tone_tok);
-              set_ctx_error(ctx, emsg);
-              rc = SBX_EINVAL;
-              goto done;
-            }
-            for (bi = 0; bi < blocks[bidx].count; bi++) {
-              double nested_off = off_sec + blocks[bidx].entries[bi].time_sec;
-              if (active_block_last_off >= 0.0 && nested_off < active_block_last_off) {
-                char emsg[256];
-                snprintf(emsg, sizeof(emsg),
-                         "line %lu: nested expansion in block '%s' is not time-ordered",
-                         (unsigned long)line_no, blk->name ? blk->name : "?");
-                set_ctx_error(ctx, emsg);
-                rc = SBX_EINVAL;
-                goto done;
-              }
-              rc = block_append_entry(blk, nested_off, blocks[bidx].entries[bi].tones,
-                                      blocks[bidx].entries[bi].interp);
-              if (rc != SBX_OK) {
-                set_ctx_error(ctx, "out of memory");
-                rc = SBX_ENOMEM;
-                goto done;
-              }
-              active_block_last_off = nested_off;
-            }
-            appended_nested_block = 1;
-          } else if (strcmp(tone_tok, "-") == 0) {
-            sbx_voice_set_init(blk_tones);
-          } else {
-            int didx = named_tone_find(defs, ndefs, tone_tok);
-            if (didx >= 0) {
-              memcpy(blk_tones, defs[didx].tones, sizeof(blk_tones));
-            } else {
-              rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &blk_tones[0]);
-              if (rc != SBX_OK) {
-                char emsg[256];
-                snprintf(emsg, sizeof(emsg),
-                         "line %lu: invalid block tone-spec, unknown named tone-set, or unknown nested block '%s'",
-                         (unsigned long)line_no, tone_tok);
-                set_ctx_error(ctx, emsg);
-                rc = SBX_EINVAL;
-                goto done;
-              }
-            }
+            nested_block_idx = bidx;
+            idx++;
+            break;
           }
+          idx++;
         }
 
-        while (!appended_nested_block && idx < nt) {
-          int interp_tmp;
-          if (parse_interp_mode_token(tokv[idx], &interp_tmp) == SBX_OK) {
-            interp = interp_tmp;
-            idx++;
-            continue;
-          }
-          if (is_sbg_transition_token(tokv[idx])) {
-            interp = sbg_transition_token_to_interp(tokv[idx]);
-            idx++;
-            continue;
-          }
-          {
+        if (nested_block_idx >= 0) {
+          size_t bi;
+          if (blocks[nested_block_idx].count == 0) {
             char emsg[256];
             snprintf(emsg, sizeof(emsg),
-                     "line %lu: unexpected trailing token '%s' in block '%s'",
-                     (unsigned long)line_no, tokv[idx], blk->name ? blk->name : "?");
+                     "line %lu: nested block '%s' has no entries",
+                     (unsigned long)line_no, tokv[idx - 1]);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
           }
-        }
-
-        if (!appended_nested_block) {
-          size_t vcount = sbx_voice_set_active_count(blk_tones);
-          if (vcount > max_voice_count) max_voice_count = vcount;
-          rc = block_append_entry(blk, off_sec, blk_tones, interp);
+          for (bi = 0; bi < blocks[nested_block_idx].count; bi++) {
+            SbxVoiceSetKeyframe nested_entry = blocks[nested_block_idx].entries[bi];
+            double nested_off = off_sec + nested_entry.time_sec;
+            if (active_block_last_off >= 0.0 && nested_off < active_block_last_off) {
+              char emsg[256];
+              snprintf(emsg, sizeof(emsg),
+                       "line %lu: nested expansion in block '%s' is not time-ordered",
+                       (unsigned long)line_no, blk->name ? blk->name : "?");
+              set_ctx_error(ctx, emsg);
+              rc = SBX_EINVAL;
+              goto done;
+            }
+            nested_entry.time_sec = nested_off;
+            rc = block_append_entry(blk, &nested_entry);
+            if (rc != SBX_OK) {
+              set_ctx_error(ctx, "out of memory");
+              rc = SBX_ENOMEM;
+              goto done;
+            }
+            if (nested_entry.tone_len > max_voice_count) max_voice_count = nested_entry.tone_len;
+            if (nested_entry.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = nested_entry.mix_fx_count;
+            active_block_last_off = nested_off;
+          }
+        } else {
+          if (blk_frame.tone_len == 0 && !blk_frame.mix_amp_present && blk_frame.mix_fx_count == 0) {
+            char emsg[256];
+            snprintf(emsg, sizeof(emsg),
+                     "line %lu: missing tone-spec or named tone-set token in block '%s'",
+                     (unsigned long)line_no, blk->name ? blk->name : "?");
+            set_ctx_error(ctx, emsg);
+            rc = SBX_EINVAL;
+            goto done;
+          }
+          if (blk_frame.mix_fx_count > 0 && !blk_frame.mix_amp_present) {
+            char emsg[256];
+            snprintf(emsg, sizeof(emsg),
+                     "line %lu: mix effects in block '%s' require mix/<amp> on the same line or in the referenced named tone-set",
+                     (unsigned long)line_no, blk->name ? blk->name : "?");
+            set_ctx_error(ctx, emsg);
+            rc = SBX_EINVAL;
+            goto done;
+          }
+          blk_frame.time_sec = off_sec;
+          blk_frame.interp = interp;
+          rc = block_append_entry(blk, &blk_frame);
           if (rc != SBX_OK) {
             set_ctx_error(ctx, "out of memory");
             rc = SBX_ENOMEM;
             goto done;
           }
+          if (blk_frame.tone_len > max_voice_count) max_voice_count = blk_frame.tone_len;
+          if (blk_frame.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = blk_frame.mix_fx_count;
           active_block_last_off = off_sec;
         }
       }
@@ -2769,53 +2915,51 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       }
 
       {
-        size_t voice_idx = 0;
-        sbx_voice_set_init(tones);
         while (*r) {
+          int bdef = -1;
           char *v_tok = r;
           while (*r && !isspace((unsigned char)*r)) r++;
           if (*r) {
             *r++ = 0;
             r = (char *)skip_ws(r);
           }
-          if (voice_idx >= SBX_MAX_SBG_VOICES) {
+          rc = sbx_frame_apply_token(&frame, v_tok, ctx->default_waveform,
+                                     defs, ndefs, &bdef, blocks, nblocks);
+          if (rc != SBX_OK || bdef >= 0) {
             char emsg[224];
             snprintf(emsg, sizeof(emsg),
-                     "line %lu: named tone-set '%s' exceeds %d voice slots",
-                     (unsigned long)line_no, name, SBX_MAX_SBG_VOICES);
+                     "line %lu: invalid named tone-set token '%s'",
+                     (unsigned long)line_no, v_tok);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
           }
-          if (strcmp(v_tok, "-") != 0) {
-            rc = parse_tone_spec_with_default_waveform(v_tok, ctx->default_waveform, &tones[voice_idx]);
-            if (rc != SBX_OK) {
-              char emsg[224];
-              snprintf(emsg, sizeof(emsg),
-                       "line %lu: invalid named tone-spec '%s'",
-                       (unsigned long)line_no, v_tok);
-              set_ctx_error(ctx, emsg);
-              rc = SBX_EINVAL;
-              goto done;
-            }
-          }
-          voice_idx++;
         }
-        if (voice_idx == 0) {
+        if (frame.tone_len == 0 && !frame.mix_amp_present && frame.mix_fx_count == 0) {
           char emsg[208];
           snprintf(emsg, sizeof(emsg),
-                   "line %lu: named tone-set '%s' is missing tone-spec",
+                   "line %lu: named tone-set '%s' is missing content",
                    (unsigned long)line_no, name);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
         }
-        if (voice_idx > max_voice_count) max_voice_count = voice_idx;
+        if (frame.mix_fx_count > 0 && !frame.mix_amp_present) {
+          char emsg[256];
+          snprintf(emsg, sizeof(emsg),
+                   "line %lu: mix effects in named tone-set '%s' require mix/<amp> on the same line or in a referenced named tone-set",
+                   (unsigned long)line_no, name);
+          set_ctx_error(ctx, emsg);
+          rc = SBX_EINVAL;
+          goto done;
+        }
+        if (frame.tone_len > max_voice_count) max_voice_count = frame.tone_len;
+        if (frame.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = frame.mix_fx_count;
       }
 
       didx = named_tone_find(defs, ndefs, name);
       if (didx >= 0) {
-        memcpy(defs[didx].tones, tones, sizeof(defs[didx].tones));
+        defs[didx].frame = frame;
       } else {
         if (ndefs == defs_cap) {
           size_t ncap = defs_cap ? (defs_cap * 2) : 8;
@@ -2835,7 +2979,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           rc = SBX_ENOMEM;
           goto done;
         }
-        memcpy(defs[ndefs].tones, tones, sizeof(defs[ndefs].tones));
+        defs[ndefs].frame = frame;
         ndefs++;
       }
       line = next;
@@ -2869,6 +3013,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       int nt = 0;
       int idx = 0;
       int had_leading_transition = 0;
+      int block_idx = -1;
       char *r = rest;
       while (*r) {
         if (nt >= (int)(sizeof(tokv) / sizeof(tokv[0]))) {
@@ -2913,105 +3058,83 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         goto done;
       }
 
-      tone_tok = tokv[idx++];
-      {
-        int bidx = named_block_find(blocks, nblocks, tone_tok);
+      while (idx < nt) {
+        int interp_tmp;
+        int bidx = -1;
+        const char *tok = tokv[idx];
+        if (parse_interp_mode_token(tok, &interp_tmp) == SBX_OK) {
+          interp = interp_tmp;
+          idx++;
+          continue;
+        }
+        if (is_sbg_transition_token(tok)) {
+          interp = sbg_transition_token_to_interp(tok);
+          idx++;
+          continue;
+        }
+        rc = sbx_frame_apply_token(&frame, tok, ctx->default_waveform,
+                                   defs, ndefs, &bidx, blocks, nblocks);
+        if (rc != SBX_OK) {
+          char emsg[224];
+          snprintf(emsg, sizeof(emsg),
+                   "line %lu: invalid tone-spec or unknown named tone-set '%s'",
+                   (unsigned long)line_no, tok);
+          set_ctx_error(ctx, emsg);
+          rc = SBX_EINVAL;
+          goto done;
+        }
         if (bidx >= 0) {
-          size_t bi;
-          const double day_sec = 24.0 * 60.0 * 60.0;
-          if (had_leading_transition) {
+          if (had_leading_transition || idx + 1 < nt ||
+              frame.tone_len > 0 || frame.mix_amp_present || frame.mix_fx_count > 0) {
             char emsg[256];
             snprintf(emsg, sizeof(emsg),
-                     "line %lu: transition tokens are not supported on block invocations ('%s')",
-                     (unsigned long)line_no, tone_tok);
+                     "line %lu: block invocation '%s' must appear alone",
+                     (unsigned long)line_no, tok);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
           }
-          if (idx < nt) {
-            char emsg[256];
-            snprintf(emsg, sizeof(emsg),
-                     "line %lu: block invocation '%s' does not accept trailing tokens",
-                     (unsigned long)line_no, tone_tok);
-            set_ctx_error(ctx, emsg);
-            rc = SBX_EINVAL;
-            goto done;
-          }
-          if (blocks[bidx].count == 0) {
-            char emsg[256];
-            snprintf(emsg, sizeof(emsg),
-                     "line %lu: block '%s' has no entries",
-                     (unsigned long)line_no, tone_tok);
-            set_ctx_error(ctx, emsg);
-            rc = SBX_EINVAL;
-            goto done;
-          }
-          for (bi = 0; bi < blocks[bidx].count; bi++) {
-            double etim = fmod(tsec + blocks[bidx].entries[bi].time_sec, day_sec);
-            if (etim < 0.0) etim += day_sec;
-            if (count == cap) {
-              size_t ncap = cap ? (cap * 2) : 8;
-              SbxVoiceSetKeyframe *tmp;
-              tmp = (SbxVoiceSetKeyframe *)realloc(frames, ncap * sizeof(*frames));
-              if (!tmp) {
-                set_ctx_error(ctx, "out of memory");
-                rc = SBX_ENOMEM;
-                goto done;
-              }
-              frames = tmp;
-              cap = ncap;
-            }
-            frames[count].time_sec = etim;
-            memcpy(frames[count].tones, blocks[bidx].entries[bi].tones,
-                   sizeof(frames[count].tones));
-            frames[count].interp = blocks[bidx].entries[bi].interp;
-            count++;
-          }
-          expanded_block = 1;
-        } else {
-          if (strcmp(tone_tok, "-") == 0) {
-            sbx_voice_set_init(tones);
-          } else {
-            int didx = named_tone_find(defs, ndefs, tone_tok);
-            if (didx >= 0) {
-              memcpy(tones, defs[didx].tones, sizeof(tones));
-            } else {
-              rc = parse_tone_spec_with_default_waveform(tone_tok, ctx->default_waveform, &tones[0]);
-              if (rc != SBX_OK) {
-                char emsg[224];
-                snprintf(emsg, sizeof(emsg),
-                         "line %lu: invalid tone-spec or unknown named tone-set '%s'",
-                         (unsigned long)line_no, tone_tok);
-                set_ctx_error(ctx, emsg);
-                rc = SBX_EINVAL;
-                goto done;
-              }
-            }
-          }
+          block_idx = bidx;
+          idx++;
+          break;
+        }
+        idx++;
+      }
 
-          while (idx < nt) {
-            int interp_tmp;
-            if (parse_interp_mode_token(tokv[idx], &interp_tmp) == SBX_OK) {
-              interp = interp_tmp;
-              idx++;
-              continue;
-            }
-            if (is_sbg_transition_token(tokv[idx])) {
-              interp = sbg_transition_token_to_interp(tokv[idx]);
-              idx++;
-              continue;
-            }
-            {
-              char emsg[224];
-              snprintf(emsg, sizeof(emsg),
-                       "line %lu: unexpected trailing token '%s'",
-                       (unsigned long)line_no, tokv[idx]);
-              set_ctx_error(ctx, emsg);
-              rc = SBX_EINVAL;
+      if (block_idx >= 0) {
+        size_t bi;
+        const double day_sec = 24.0 * 60.0 * 60.0;
+        if (blocks[block_idx].count == 0) {
+          char emsg[256];
+          snprintf(emsg, sizeof(emsg),
+                   "line %lu: block '%s' has no entries",
+                   (unsigned long)line_no, tokv[idx - 1]);
+          set_ctx_error(ctx, emsg);
+          rc = SBX_EINVAL;
+          goto done;
+        }
+        for (bi = 0; bi < blocks[block_idx].count; bi++) {
+          SbxVoiceSetKeyframe expanded = blocks[block_idx].entries[bi];
+          double etim = fmod(tsec + expanded.time_sec, day_sec);
+          if (etim < 0.0) etim += day_sec;
+          if (count == cap) {
+            size_t ncap = cap ? (cap * 2) : 8;
+            SbxVoiceSetKeyframe *tmp;
+            tmp = (SbxVoiceSetKeyframe *)realloc(frames, ncap * sizeof(*frames));
+            if (!tmp) {
+              set_ctx_error(ctx, "out of memory");
+              rc = SBX_ENOMEM;
               goto done;
             }
+            frames = tmp;
+            cap = ncap;
           }
+          expanded.time_sec = etim;
+          frames[count++] = expanded;
+          if (expanded.tone_len > max_voice_count) max_voice_count = expanded.tone_len;
+          if (expanded.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = expanded.mix_fx_count;
         }
+        expanded_block = 1;
       }
     }
 
@@ -3033,13 +3156,29 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       cap = ncap;
     }
 
-    frames[count].time_sec = tsec;
-    memcpy(frames[count].tones, tones, sizeof(frames[count].tones));
-    frames[count].interp = interp;
-    {
-      size_t vcount = sbx_voice_set_active_count(tones);
-      if (vcount > max_voice_count) max_voice_count = vcount;
+    if (frame.tone_len == 0 && !frame.mix_amp_present && frame.mix_fx_count == 0) {
+      char emsg[192];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: missing tone-spec or named tone-set",
+               (unsigned long)line_no);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
     }
+    if (frame.mix_fx_count > 0 && !frame.mix_amp_present) {
+      char emsg[256];
+      snprintf(emsg, sizeof(emsg),
+               "line %lu: mix effects require mix/<amp> on the same line or in the referenced named tone-set",
+               (unsigned long)line_no);
+      set_ctx_error(ctx, emsg);
+      rc = SBX_EINVAL;
+      goto done;
+    }
+    frame.time_sec = tsec;
+    frame.interp = interp;
+    frames[count] = frame;
+    if (frame.tone_len > max_voice_count) max_voice_count = frame.tone_len;
+    if (frame.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = frame.mix_fx_count;
     count++;
     line = next;
   }
@@ -3058,6 +3197,44 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     set_ctx_error(ctx, "sbg timing text contains no keyframes");
     rc = SBX_EINVAL;
     goto done;
+  }
+
+  {
+    size_t ki;
+    int have_mix = 0;
+    for (ki = 0; ki < count; ki++) {
+      if (frames[ki].mix_amp_present) {
+        have_mix = 1;
+        break;
+      }
+    }
+    if (have_mix) {
+      mix_kfs = (SbxMixAmpKeyframe *)calloc(count, sizeof(*mix_kfs));
+      if (!mix_kfs) {
+        set_ctx_error(ctx, "out of memory");
+        rc = SBX_ENOMEM;
+        goto done;
+      }
+      for (ki = 0; ki < count; ki++) {
+        mix_kfs[ki].time_sec = frames[ki].time_sec;
+        mix_kfs[ki].interp = frames[ki].interp;
+        mix_kfs[ki].amp_pct = frames[ki].mix_amp_present ? frames[ki].mix_amp_pct : 0.0;
+      }
+    }
+    if (max_mix_fx_slots > 0) {
+      mix_fx_kfs = (SbxMixFxKeyframe *)calloc(count, sizeof(*mix_fx_kfs));
+      if (!mix_fx_kfs) {
+        set_ctx_error(ctx, "out of memory");
+        rc = SBX_ENOMEM;
+        goto done;
+      }
+      for (ki = 0; ki < count; ki++) {
+        mix_fx_kfs[ki].time_sec = frames[ki].time_sec;
+        mix_fx_kfs[ki].interp = frames[ki].interp;
+        mix_fx_kfs[ki].mix_fx_count = frames[ki].mix_fx_count;
+        memcpy(mix_fx_kfs[ki].mix_fx, frames[ki].mix_fx, sizeof(mix_fx_kfs[ki].mix_fx));
+      }
+    }
   }
 
   primary = (SbxProgramKeyframe *)calloc(count, sizeof(*primary));
@@ -3097,6 +3274,13 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                                        mv_frames ? mv_frames : primary,
                                        max_voice_count ? max_voice_count : 1,
                                        loop);
+  if (rc != SBX_OK) goto done;
+  rc = sbx_context_set_mix_amp_keyframes(ctx, mix_kfs, mix_kfs ? count : 0,
+                                         mix_kfs ? 0.0 : 100.0);
+  if (rc != SBX_OK) goto done;
+  rc = ctx_set_sbg_mix_effect_keyframes_internal(ctx, mix_fx_kfs,
+                                                 mix_fx_kfs ? count : 0,
+                                                 max_mix_fx_slots);
 
 done:
   if (defs) {
@@ -3117,6 +3301,8 @@ done:
   if (frames) free(frames);
   if (primary) free(primary);
   if (mv_frames) free(mv_frames);
+  if (mix_kfs) free(mix_kfs);
+  if (mix_fx_kfs) free(mix_fx_kfs);
   {
     size_t i;
     for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
@@ -3322,6 +3508,231 @@ sbx_context_get_mix_effect(const SbxContext *ctx, size_t index, SbxMixFxSpec *ou
   return SBX_OK;
 }
 
+static int
+sbx_validate_mix_fx_spec_fields(const SbxMixFxSpec *spec) {
+  if (!spec) return SBX_EINVAL;
+  if (spec->type == SBX_MIXFX_NONE) return SBX_OK;
+  if (spec->type < SBX_MIXFX_NONE || spec->type > SBX_MIXFX_AM) return SBX_EINVAL;
+  if (spec->waveform < SBX_WAVE_SINE || spec->waveform > SBX_WAVE_SAWTOOTH) return SBX_EINVAL;
+  if (!isfinite(spec->carr) || !isfinite(spec->res) ||
+      !isfinite(spec->amp) || spec->amp < 0.0) return SBX_EINVAL;
+  if (spec->type == SBX_MIXFX_AM &&
+      sbx_validate_mixam_fields(spec) != SBX_OK) return SBX_EINVAL;
+  return SBX_OK;
+}
+
+static void
+sbx_mixfx_state_assign_spec(SbxMixFxState *state, const SbxMixFxSpec *spec) {
+  int reset = 0;
+  if (!state || !spec) return;
+  if (state->spec.type != spec->type ||
+      state->spec.waveform != spec->waveform ||
+      (state->spec.type == SBX_MIXFX_AM &&
+       (state->spec.mixam_mode != spec->mixam_mode ||
+        state->spec.mixam_edge_mode != spec->mixam_edge_mode))) {
+    reset = 1;
+  }
+  if (reset) sbx_mix_fx_reset_state(state);
+  state->spec = *spec;
+}
+
+static void
+sbx_default_mix_fx_spec(SbxMixFxSpec *fx) {
+  if (!fx) return;
+  memset(fx, 0, sizeof(*fx));
+  fx->type = SBX_MIXFX_NONE;
+  fx->waveform = SBX_WAVE_SINE;
+}
+
+static void
+sbx_interp_mix_fx_spec(const SbxMixFxSpec *a,
+                       const SbxMixFxSpec *b,
+                       int interp,
+                       double u,
+                       SbxMixFxSpec *out) {
+  if (!out) return;
+  sbx_default_mix_fx_spec(out);
+  if (!a && !b) return;
+  if (!b || interp == SBX_INTERP_STEP || u <= 0.0) {
+    if (a) *out = *a;
+    return;
+  }
+  if (!a) {
+    *out = *b;
+    out->amp *= sbx_dsp_clamp(u, 0.0, 1.0);
+    return;
+  }
+  if (a->type == SBX_MIXFX_NONE && b->type == SBX_MIXFX_NONE) return;
+  if (a->type == SBX_MIXFX_NONE) {
+    *out = *b;
+    out->amp *= sbx_dsp_clamp(u, 0.0, 1.0);
+    return;
+  }
+  if (b->type == SBX_MIXFX_NONE) {
+    *out = *a;
+    out->amp *= sbx_dsp_clamp(1.0 - u, 0.0, 1.0);
+    return;
+  }
+  if (a->type == b->type && a->waveform == b->waveform) {
+    *out = *a;
+    out->carr = sbx_lerp(a->carr, b->carr, u);
+    out->res = sbx_lerp(a->res, b->res, u);
+    out->amp = sbx_lerp(a->amp, b->amp, u);
+    if (a->type == SBX_MIXFX_AM) {
+      out->mixam_bind_program_beat =
+          (a->mixam_bind_program_beat == b->mixam_bind_program_beat) ?
+          a->mixam_bind_program_beat : (u < 0.5 ? a->mixam_bind_program_beat : b->mixam_bind_program_beat);
+      out->mixam_mode =
+          (a->mixam_mode == b->mixam_mode) ? a->mixam_mode : (u < 0.5 ? a->mixam_mode : b->mixam_mode);
+      out->mixam_edge_mode =
+          (a->mixam_edge_mode == b->mixam_edge_mode) ? a->mixam_edge_mode :
+          (u < 0.5 ? a->mixam_edge_mode : b->mixam_edge_mode);
+      out->mixam_start = sbx_lerp(a->mixam_start, b->mixam_start, u);
+      out->mixam_duty = sbx_lerp(a->mixam_duty, b->mixam_duty, u);
+      out->mixam_attack = sbx_lerp(a->mixam_attack, b->mixam_attack, u);
+      out->mixam_release = sbx_lerp(a->mixam_release, b->mixam_release, u);
+      out->mixam_floor = sbx_lerp(a->mixam_floor, b->mixam_floor, u);
+    }
+    return;
+  }
+  if (u < 0.5) {
+    *out = *a;
+    out->amp *= sbx_dsp_clamp(1.0 - (u * 2.0), 0.0, 1.0);
+  } else {
+    *out = *b;
+    out->amp *= sbx_dsp_clamp((u - 0.5) * 2.0, 0.0, 1.0);
+  }
+}
+
+static int
+ctx_set_sbg_mix_effect_keyframes_internal(SbxContext *ctx,
+                                          const SbxMixFxKeyframe *kfs,
+                                          size_t kf_count,
+                                          size_t slot_count) {
+  SbxMixFxKeyframe *copy = 0;
+  SbxMixFxState *states = 0;
+  size_t i, j;
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (kf_count == 0 || slot_count == 0) {
+    ctx_clear_sbg_mix_effect_keyframes(ctx);
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (!kfs) {
+    set_ctx_error(ctx, "sbg mix effect keyframe list is null");
+    return SBX_EINVAL;
+  }
+  if (slot_count > SBX_MAX_SBG_MIXFX) {
+    set_ctx_error(ctx, "too many sbg mix-effect slots");
+    return SBX_EINVAL;
+  }
+  copy = (SbxMixFxKeyframe *)calloc(kf_count, sizeof(*copy));
+  states = (SbxMixFxState *)calloc(slot_count, sizeof(*states));
+  if (!copy || !states) {
+    if (copy) free(copy);
+    if (states) free(states);
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+  for (i = 0; i < kf_count; i++) {
+    copy[i] = kfs[i];
+    if (!isfinite(copy[i].time_sec) || copy[i].time_sec < 0.0) {
+      free(copy);
+      free(states);
+      set_ctx_error(ctx, "sbg mix-effect keyframe time_sec must be finite and >= 0");
+      return SBX_EINVAL;
+    }
+    if (i > 0 && !(copy[i].time_sec > copy[i - 1].time_sec)) {
+      free(copy);
+      free(states);
+      set_ctx_error(ctx, "sbg mix-effect keyframe time_sec values must be strictly increasing");
+      return SBX_EINVAL;
+    }
+    if (copy[i].interp != SBX_INTERP_LINEAR && copy[i].interp != SBX_INTERP_STEP) {
+      free(copy);
+      free(states);
+      set_ctx_error(ctx, "sbg mix-effect keyframe interp must be SBX_INTERP_LINEAR or SBX_INTERP_STEP");
+      return SBX_EINVAL;
+    }
+    if (copy[i].mix_fx_count > slot_count) {
+      free(copy);
+      free(states);
+      set_ctx_error(ctx, "sbg mix-effect keyframe exceeds slot count");
+      return SBX_EINVAL;
+    }
+    for (j = 0; j < copy[i].mix_fx_count; j++) {
+      if (sbx_validate_mix_fx_spec_fields(&copy[i].mix_fx[j]) != SBX_OK) {
+        free(copy);
+        free(states);
+        set_ctx_error(ctx, "invalid sbg mix-effect keyframe spec");
+        return SBX_EINVAL;
+      }
+    }
+    for (; j < SBX_MAX_SBG_MIXFX; j++)
+      sbx_default_mix_fx_spec(&copy[i].mix_fx[j]);
+  }
+  for (i = 0; i < slot_count; i++) {
+    sbx_default_mix_fx_spec(&states[i].spec);
+    sbx_mix_fx_reset_state(&states[i]);
+  }
+  ctx_clear_sbg_mix_effect_keyframes(ctx);
+  ctx->sbg_mix_fx_kf = copy;
+  ctx->sbg_mix_fx_kf_count = kf_count;
+  ctx->sbg_mix_fx_slots = slot_count;
+  ctx->sbg_mix_fx_seg = 0;
+  ctx->sbg_mix_fx_state = states;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+static int
+ctx_eval_sbg_mix_effects(SbxContext *ctx, double t_sec, SbxMixFxSpec *out_fxv, size_t out_slots) {
+  size_t n, i0, i1, slot;
+  SbxMixFxKeyframe *k0;
+  SbxMixFxKeyframe *k1;
+  double t0, t1, u;
+  if (!ctx || !out_fxv) return SBX_EINVAL;
+  if (!ctx->sbg_mix_fx_kf || ctx->sbg_mix_fx_kf_count == 0 || out_slots < ctx->sbg_mix_fx_slots)
+    return SBX_OK;
+  n = ctx->sbg_mix_fx_kf_count;
+  if (n == 1 || t_sec <= ctx->sbg_mix_fx_kf[0].time_sec) {
+    for (slot = 0; slot < ctx->sbg_mix_fx_slots; slot++) {
+      if (slot < ctx->sbg_mix_fx_kf[0].mix_fx_count) out_fxv[slot] = ctx->sbg_mix_fx_kf[0].mix_fx[slot];
+      else sbx_default_mix_fx_spec(&out_fxv[slot]);
+    }
+    return SBX_OK;
+  }
+  if (t_sec >= ctx->sbg_mix_fx_kf[n - 1].time_sec) {
+    for (slot = 0; slot < ctx->sbg_mix_fx_slots; slot++) {
+      if (slot < ctx->sbg_mix_fx_kf[n - 1].mix_fx_count) out_fxv[slot] = ctx->sbg_mix_fx_kf[n - 1].mix_fx[slot];
+      else sbx_default_mix_fx_spec(&out_fxv[slot]);
+    }
+    return SBX_OK;
+  }
+  if (ctx->sbg_mix_fx_seg >= n - 1) ctx->sbg_mix_fx_seg = n - 2;
+  while (ctx->sbg_mix_fx_seg + 1 < n &&
+         t_sec > ctx->sbg_mix_fx_kf[ctx->sbg_mix_fx_seg + 1].time_sec)
+    ctx->sbg_mix_fx_seg++;
+  while (ctx->sbg_mix_fx_seg > 0 &&
+         t_sec < ctx->sbg_mix_fx_kf[ctx->sbg_mix_fx_seg].time_sec)
+    ctx->sbg_mix_fx_seg--;
+  i0 = ctx->sbg_mix_fx_seg;
+  i1 = i0 + 1;
+  if (i1 >= n) i1 = n - 1;
+  k0 = &ctx->sbg_mix_fx_kf[i0];
+  k1 = &ctx->sbg_mix_fx_kf[i1];
+  t0 = k0->time_sec;
+  t1 = k1->time_sec;
+  u = (t1 > t0) ? (t_sec - t0) / (t1 - t0) : 0.0;
+  u = sbx_dsp_clamp(u, 0.0, 1.0);
+  for (slot = 0; slot < ctx->sbg_mix_fx_slots; slot++) {
+    const SbxMixFxSpec *a = (slot < k0->mix_fx_count) ? &k0->mix_fx[slot] : 0;
+    const SbxMixFxSpec *b = (slot < k1->mix_fx_count) ? &k1->mix_fx[slot] : 0;
+    sbx_interp_mix_fx_spec(a, b, k0->interp, u, &out_fxv[slot]);
+  }
+  return SBX_OK;
+}
+
 static double
 sbx_mixam_gain_step(SbxMixFxState *fx, double sr, double res_hz) {
   double p;
@@ -3341,6 +3752,72 @@ sbx_mixam_gain_step(SbxMixFxState *fx, double sr, double res_hz) {
   }
   g = fx->spec.mixam_floor + (1.0 - fx->spec.mixam_floor) * p;
   return sbx_dsp_clamp(g, fx->spec.mixam_floor, 1.0);
+}
+
+static void
+sbx_apply_one_mix_effect(SbxMixFxState *fx,
+                         const SbxMixFxSpec *spec,
+                         double sr,
+                         double mix_l,
+                         double mix_r,
+                         double base_amp,
+                         double *out_add_l,
+                         double *out_add_r) {
+  if (!fx || !spec || !out_add_l || !out_add_r) return;
+  sbx_mixfx_state_assign_spec(fx, spec);
+  switch (fx->spec.type) {
+    case SBX_MIXFX_SPIN: {
+      double wav, val, intensity, amplified, pos, fx_l, fx_r;
+      fx->phase = sbx_dsp_wrap_unit(fx->phase + fx->spec.res / sr);
+      wav = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
+      val = fx->spec.carr * 1.0e-6 * sr * wav;
+      intensity = 0.5 + fx->spec.amp * 3.5;
+      amplified = sbx_dsp_clamp(val * intensity, -128.0, 127.0);
+      pos = fabs(amplified);
+      if (amplified >= 0.0) {
+        fx_l = (mix_l * (128.0 - pos)) / 128.0;
+        fx_r = mix_r + (mix_l * pos) / 128.0;
+      } else {
+        fx_l = mix_l + (mix_r * pos) / 128.0;
+        fx_r = (mix_r * (128.0 - pos)) / 128.0;
+      }
+      *out_add_l += base_amp * fx_l;
+      *out_add_r += base_amp * fx_r;
+      break;
+    }
+    case SBX_MIXFX_PULSE: {
+      double wav, mod_factor = 0.0, effect_intensity, gain;
+      fx->phase = sbx_dsp_wrap_unit(fx->phase + fx->spec.res / sr);
+      wav = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
+      if (wav > 0.3) {
+        mod_factor = (wav - 0.3) / 0.7;
+        mod_factor = sbx_dsp_smoothstep01(mod_factor);
+      }
+      effect_intensity = sbx_dsp_clamp(fx->spec.amp, 0.0, 1.0);
+      gain = (1.0 - effect_intensity) + (effect_intensity * mod_factor);
+      *out_add_l += base_amp * mix_l * gain;
+      *out_add_r += base_amp * mix_r * gain;
+      break;
+    }
+    case SBX_MIXFX_BEAT: {
+      double s, c, mono, q, up, down, effect_intensity, fx_l, fx_r;
+      fx->phase = sbx_dsp_wrap_unit(fx->phase + (fx->spec.res * 0.5) / sr);
+      s = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
+      c = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase + 0.25);
+      mono = 0.5 * (mix_l + mix_r);
+      q = sbx_mixbeat_hilbert_step(fx, mono);
+      up = mono * c - q * s;
+      down = mono * c + q * s;
+      effect_intensity = sbx_dsp_clamp(fx->spec.amp, 0.0, 1.0);
+      fx_l = mix_l * (1.0 - effect_intensity) + down * effect_intensity;
+      fx_r = mix_r * (1.0 - effect_intensity) + up * effect_intensity;
+      *out_add_l += base_amp * fx_l;
+      *out_add_r += base_amp * fx_r;
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 int
@@ -3364,64 +3841,10 @@ sbx_context_apply_mix_effects(SbxContext *ctx,
   }
 
   for (i = 0; i < ctx->mix_fx_count; i++) {
-    SbxMixFxState *fx = &ctx->mix_fx[i];
-    switch (fx->spec.type) {
-      case SBX_MIXFX_SPIN: {
-        double wav, val, intensity, amplified, pos, fx_l, fx_r;
-        fx->phase = sbx_dsp_wrap_unit(fx->phase + fx->spec.res / sr);
-        wav = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
-        val = fx->spec.carr * 1.0e-6 * sr * wav;
-        intensity = 0.5 + fx->spec.amp * 3.5;
-        amplified = val * intensity;
-        amplified = sbx_dsp_clamp(amplified, -128.0, 127.0);
-        pos = fabs(amplified);
-        if (amplified >= 0.0) {
-          fx_l = (mix_l * (128.0 - pos)) / 128.0;
-          fx_r = mix_r + (mix_l * pos) / 128.0;
-        } else {
-          fx_l = mix_l + (mix_r * pos) / 128.0;
-          fx_r = (mix_r * (128.0 - pos)) / 128.0;
-        }
-        *out_add_l += base_amp * fx_l;
-        *out_add_r += base_amp * fx_r;
-        break;
-      }
-      case SBX_MIXFX_PULSE: {
-        double wav, mod_factor = 0.0, effect_intensity, gain;
-        fx->phase = sbx_dsp_wrap_unit(fx->phase + fx->spec.res / sr);
-        wav = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
-        if (wav > 0.3) {
-          mod_factor = (wav - 0.3) / 0.7;
-          mod_factor = sbx_dsp_smoothstep01(mod_factor);
-        }
-        effect_intensity = sbx_dsp_clamp(fx->spec.amp, 0.0, 1.0);
-        gain = (1.0 - effect_intensity) + (effect_intensity * mod_factor);
-        *out_add_l += base_amp * mix_l * gain;
-        *out_add_r += base_amp * mix_r * gain;
-        break;
-      }
-      case SBX_MIXFX_BEAT: {
-        double s, c, mono, q, up, down, effect_intensity, fx_l, fx_r;
-        fx->phase = sbx_dsp_wrap_unit(fx->phase + (fx->spec.res * 0.5) / sr);
-        s = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
-        c = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase + 0.25);
-        mono = 0.5 * (mix_l + mix_r);
-        q = sbx_mixbeat_hilbert_step(fx, mono);
-        up = mono * c - q * s;
-        down = mono * c + q * s;
-        effect_intensity = sbx_dsp_clamp(fx->spec.amp, 0.0, 1.0);
-        fx_l = mix_l * (1.0 - effect_intensity) + down * effect_intensity;
-        fx_r = mix_r * (1.0 - effect_intensity) + up * effect_intensity;
-        *out_add_l += base_amp * fx_l;
-        *out_add_r += base_amp * fx_r;
-        break;
-      }
-      case SBX_MIXFX_AM:
-        /* Pure multiplicative AM is applied in sbx_context_mix_stream_sample(). */
-        break;
-      default:
-        break;
-    }
+    if (ctx->mix_fx[i].spec.type == SBX_MIXFX_AM)
+      continue;
+    sbx_apply_one_mix_effect(&ctx->mix_fx[i], &ctx->mix_fx[i].spec, sr,
+                             mix_l, mix_r, base_amp, out_add_l, out_add_r);
   }
   return SBX_OK;
 }
@@ -3444,6 +3867,7 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
   int have_am = 0;
   int need_program_beat = 0;
   double sr = 0.0;
+  SbxMixFxSpec dyn_fx[SBX_MAX_SBG_MIXFX];
 
   if (!ctx || !out_add_l || !out_add_r) return SBX_EINVAL;
   if (!isfinite(mix_mod_mul)) mix_mod_mul = 1.0;
@@ -3456,14 +3880,18 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
   *out_add_l = mix_l * mix_mul;
   *out_add_r = mix_r * mix_mul;
 
-  if (sbx_context_mix_effect_count(ctx) > 0) {
+  if (sbx_context_mix_effect_count(ctx) > 0 || ctx->sbg_mix_fx_slots > 0) {
     double fx_add_l = 0.0;
     double fx_add_r = 0.0;
-    int rc = sbx_context_apply_mix_effects(ctx, mix_l, mix_r, mix_mul * 0.7,
-                                           &fx_add_l, &fx_add_r);
-    if (rc != SBX_OK) return rc;
-    *out_add_l += fx_add_l;
-    *out_add_r += fx_add_r;
+    if (sbx_context_mix_effect_count(ctx) > 0) {
+      int rc = sbx_context_apply_mix_effects(ctx, mix_l, mix_r, mix_mul * 0.7,
+                                             &fx_add_l, &fx_add_r);
+      if (rc != SBX_OK) return rc;
+      *out_add_l += fx_add_l;
+      *out_add_r += fx_add_r;
+      fx_add_l = 0.0;
+      fx_add_r = 0.0;
+    }
 
     sr = ctx->eng ? ctx->eng->cfg.sample_rate : 0.0;
     if (!(isfinite(sr) && sr > 0.0)) {
@@ -3488,6 +3916,30 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
         if (isfinite(am_res_hz) && am_res_hz > 0.0)
           have_am = 1;
       }
+    }
+    if (ctx->sbg_mix_fx_slots > 0) {
+      int rc = ctx_eval_sbg_mix_effects(ctx, t_sec, dyn_fx, SBX_MAX_SBG_MIXFX);
+      if (rc != SBX_OK) return rc;
+      for (i = 0; i < ctx->sbg_mix_fx_slots; i++) {
+        if (dyn_fx[i].type == SBX_MIXFX_NONE || dyn_fx[i].amp <= 0.0)
+          continue;
+        if (dyn_fx[i].type == SBX_MIXFX_AM) {
+          if (dyn_fx[i].mixam_bind_program_beat && !need_program_beat) {
+            program_beat_hz = ctx_eval_program_beat_hz(ctx, t_sec);
+            need_program_beat = 1;
+          }
+          double am_res_hz = dyn_fx[i].mixam_bind_program_beat ? program_beat_hz : dyn_fx[i].res;
+          sbx_mixfx_state_assign_spec(&ctx->sbg_mix_fx_state[i], &dyn_fx[i]);
+          am_gain *= sbx_mixam_gain_step(&ctx->sbg_mix_fx_state[i], sr, am_res_hz);
+          if (isfinite(am_res_hz) && am_res_hz > 0.0)
+            have_am = 1;
+        } else {
+          sbx_apply_one_mix_effect(&ctx->sbg_mix_fx_state[i], &dyn_fx[i], sr,
+                                   mix_l, mix_r, mix_mul * 0.7, &fx_add_l, &fx_add_r);
+        }
+      }
+      *out_add_l += fx_add_l;
+      *out_add_r += fx_add_r;
     }
     if (have_am) {
       *out_add_l *= am_gain;

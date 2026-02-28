@@ -396,10 +396,19 @@ Phase 3.63
   - render those tones as custom-envelope binaural voices without falling back
     to the legacy parser/runtime.
 
+Phase 3.64
+- Extend native `.sbg` loading with keyframed mix-side tokens:
+  - accept legacy `mix/<amp>` plus `mixspin` / `mixpulse` / `mixbeat` /
+    `mixam` tokens in named tone-sets, timeline entries, and block entries,
+  - allow those tokens to coexist with normal tone tokens on the same native
+    `.sbg` line,
+  - evaluate `mix/<amp>` and mix effects over time inside `sbagenxlib`
+    instead of dropping back to the legacy CLI runtime.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.63 Slice)
+Current API (Phase 3.64 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -512,6 +521,12 @@ SBG timing subset form (Phase 3.4):
     - `<name>: <tone-spec> [<tone-spec> ...]`
     - `<name>: - [<tone-spec> ...]`
     - up to 16 voice slots are preserved in definition order (Phase 3.62)
+    - native `.sbg` named tone-sets may also include:
+      - `mix/<amp>`
+      - `mixspin:<width><spin>/<amp>`
+      - `mixpulse:<pulse>/<amp>`
+      - `mixbeat:<beat>/<amp>`
+      - `mixam:<rate-or-beat>[:params]`
   - legacy waveform definition lines (Phase 3.63):
     - `waveNN: <sample0> <sample1> ...`
     - at least two non-identical floating-point samples are required
@@ -519,6 +534,8 @@ SBG timing subset form (Phase 3.4):
   - timeline entries may reference named tone-sets:
     - `<HH:MM[:SS]> <name>`
     - with optional transition/interp tokens, e.g. `==` / `->` / `step`.
+  - direct timeline and block-entry token lists may mix normal tone tokens
+    with native `mix/<amp>` / mix-effect tokens on the same line (Phase 3.64).
 - Extended timeline time forms (Phase 3.54):
   - `NOW`
   - `NOW+HH:MM[:SS][+HH:MM[:SS]...]`
@@ -544,6 +561,7 @@ SBG timing subset form (Phase 3.4):
   - `examples/sbagenxlib/minimal-sbg-nested-block.sbg`
   - `examples/sbagenxlib/minimal-sbg-multivoice.sbg`
   - `examples/sbagenxlib/minimal-sbg-wave-custom.sbg`
+  - `examples/sbagenxlib/minimal-sbg-mixfx.sbg`
 
 Notes
 -----
@@ -553,9 +571,16 @@ Notes
   built-in preprogram generators (`drop/sigmoid/curve/slide`), and
   compatible direct `seq-file` inputs.
 - Native `.sbg` timing support now includes multivoice named tone-sets,
-  block-preserved voice lanes, and legacy `waveNN` custom-envelope definitions.
-- Remaining work is focused on the other legacy-only voice/effect tokens and
-  broader real-world `.sbg` parity cases that still trigger CLI fallback.
+  block-preserved voice lanes, legacy `waveNN` custom-envelope definitions,
+  and keyframed mix-side tokens (`mix/<amp>`, `mixspin`, `mixpulse`,
+  `mixbeat`, `mixam`).
+- Native mix effects in `.sbg` require explicit `mix/<amp>` control on the
+  same line or in the referenced named tone-set, matching the existing legacy
+  expectation that mix effects are anchored to a declared mix stream level.
+- Once native `.sbg` loading sees any `mix/<amp>` token, frames without an
+  explicit/referenced `mix/<amp>` are treated as mix-off in the native runtime.
+- Remaining work is focused on broader real-world `.sbg` parity validation and
+  the historical edge cases that still require CLI fallback.
 - `sbx_context_get_keyframe()` intentionally exposes the primary voice lane so
   existing frontends/tests keep a stable view while runtime render mixes all
   active multivoice lanes loaded from `.sbg`.

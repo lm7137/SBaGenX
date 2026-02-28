@@ -80,6 +80,15 @@ main(void) {
       "wave00: 0 1 0 0.25\n"
       "base: wave00:180+2/20\n"
       "NOW base\n";
+  const char *sbg_mix_tokens_text =
+      "00:00 mix/70 mixpulse:2/40 180+0/20 ==\n"
+      "00:00:02 -\n";
+  const char *sbg_named_mix_text =
+      "off: -\n"
+      "wash: mix/60 mixbeat:3/25 180+0/15\n"
+      "00:00 off ==\n"
+      "00:00:01 wash ==\n"
+      "00:00:02 off\n";
   const char *sbg_block_text =
       "off: -\n"
       "base: 180+0/35\n"
@@ -111,6 +120,8 @@ main(void) {
       "NOW burst\n";
   const char *tmp_path = "/tmp/sbx_sbg_timing_test.sbg";
   double t_actual, t_expect;
+  double min_mix = 0.0, max_mix = 0.0;
+  size_t i;
 
   sbx_default_engine_config(&cfg);
   cfg.sample_rate = 44100.0;
@@ -236,6 +247,38 @@ main(void) {
     fail("custom wave render failed");
   if (!(abs_sum_window(buf, (size_t)(0.1 * cfg.sample_rate), (size_t)(0.5 * cfg.sample_rate)) > 1e-3))
     fail("custom wave render should produce non-zero energy");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_mix_tokens_text, 0);
+  if (rc != SBX_OK) fail("sbg timing load with direct mix tokens failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("mix-token keyframe retrieval failed");
+  if (fabs(kf.tone.carrier_hz - 180.0) > 1e-6)
+    fail("direct mix-token timing should preserve primary tone");
+  if (fabs(sbx_context_mix_amp_at(ctx, 0.5) - 70.0) > 1e-6)
+    fail("direct mix-token timing should drive mix/<amp> keyframes");
+  min_mix = 1e9;
+  max_mix = -1e9;
+  for (i = 0; i < (size_t)(0.5 * cfg.sample_rate); i++) {
+    double add_l = 0.0, add_r = 0.0;
+    double t = 0.75 + (double)i / cfg.sample_rate;
+    if (sbx_context_mix_stream_sample(ctx, t, 1600, 1600, 1.0, &add_l, &add_r) != SBX_OK)
+      fail("mix stream sample failed for direct mix-token timing");
+    if (add_l < min_mix) min_mix = add_l;
+    if (add_l > max_mix) max_mix = add_l;
+  }
+  if (!((max_mix - min_mix) > 5.0))
+    fail("direct mix-token timing should modulate mix stream over time");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_named_mix_text, 0);
+  if (rc != SBX_OK) fail("named sbg timing load with mix tokens failed");
+  if (fabs(sbx_context_mix_amp_at(ctx, 0.5) - 0.0) > 1e-6)
+    fail("named mix timing should be silent before entry");
+  if (!(sbx_context_mix_amp_at(ctx, 1.2) > 55.0))
+    fail("named mix timing should activate mix amplitude in named set");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, "fx: mixpulse:2/40\n00:00 fx\n", 0);
+  if (rc != SBX_EINVAL)
+    fail("mix effect without mix/<amp> should fail in native sbg timing loader");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_block_text, 0);
   if (rc != SBX_OK) fail("block-definition sbg timing load failed");

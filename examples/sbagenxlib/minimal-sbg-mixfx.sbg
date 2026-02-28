@@ -1,0 +1,6 @@
+off: -
+wash: mix/60 mixpulse:2/35 180+0/15
+
+00:00 off ==
+00:00:01 wash ==
+00:00:02 off
