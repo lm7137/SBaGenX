@@ -389,10 +389,17 @@ Phase 3.62
   - keep the existing public single-keyframe API stable by exposing the primary
     voice in `sbx_context_get_keyframe()` while render mixes every active lane.
 
+Phase 3.63
+- Add native `waveNN` support to `sbagenxlib` `.sbg` loading:
+  - accept legacy waveform definition lines such as `wave00: 0 1 0 ...`,
+  - allow `waveNN:` tone tokens in native `.sbg` timing/name/block parsing,
+  - render those tones as custom-envelope binaural voices without falling back
+    to the legacy parser/runtime.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.62 Slice)
+Current API (Phase 3.63 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -505,6 +512,10 @@ SBG timing subset form (Phase 3.4):
     - `<name>: <tone-spec> [<tone-spec> ...]`
     - `<name>: - [<tone-spec> ...]`
     - up to 16 voice slots are preserved in definition order (Phase 3.62)
+  - legacy waveform definition lines (Phase 3.63):
+    - `waveNN: <sample0> <sample1> ...`
+    - at least two non-identical floating-point samples are required
+    - `waveNN:` tone tokens are rendered as custom-envelope binaural tones
   - timeline entries may reference named tone-sets:
     - `<HH:MM[:SS]> <name>`
     - with optional transition/interp tokens, e.g. `==` / `->` / `step`.
@@ -532,6 +543,7 @@ SBG timing subset form (Phase 3.4):
   - `examples/sbagenxlib/minimal-sbg-block.sbg`
   - `examples/sbagenxlib/minimal-sbg-nested-block.sbg`
   - `examples/sbagenxlib/minimal-sbg-multivoice.sbg`
+  - `examples/sbagenxlib/minimal-sbg-wave-custom.sbg`
 
 Notes
 -----
@@ -540,9 +552,10 @@ Notes
 - `sbagenx` now uses sbagenxlib runtime for `-p libseq`, `-p libsbg`,
   built-in preprogram generators (`drop/sigmoid/curve/slide`), and
   compatible direct `seq-file` inputs.
-- Native `.sbg` timing support now includes multivoice named tone-sets and
-  block-preserved voice lanes, but full parity still requires legacy waveform
-  definitions (`waveNN`) and the remaining legacy-only voice/effect tokens.
+- Native `.sbg` timing support now includes multivoice named tone-sets,
+  block-preserved voice lanes, and legacy `waveNN` custom-envelope definitions.
+- Remaining work is focused on the other legacy-only voice/effect tokens and
+  broader real-world `.sbg` parity cases that still trigger CLI fallback.
 - `sbx_context_get_keyframe()` intentionally exposes the primary voice lane so
   existing frontends/tests keep a stable view while runtime render mixes all
   active multivoice lanes loaded from `.sbg`.

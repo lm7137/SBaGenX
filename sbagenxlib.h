@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 6   /* public API contract revision */
+#define SBX_API_VERSION 7   /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -43,7 +43,8 @@ typedef enum {
   SBX_WAVE_SINE = 0,
   SBX_WAVE_SQUARE = 1,
   SBX_WAVE_TRIANGLE = 2,
-  SBX_WAVE_SAWTOOTH = 3
+  SBX_WAVE_SAWTOOTH = 3,
+  SBX_WAVE_CUSTOM_BASE = 1000 /* context-owned waveNN table: SBX_WAVE_CUSTOM_BASE + [0..99] */
 } SbxWaveform;
 
 typedef enum {
@@ -104,7 +105,7 @@ typedef struct {
   double carrier_hz;
   double beat_hz;
   double amplitude;  /* 0.0 .. 1.0 */
-  int waveform;      /* SBX_WAVE_* */
+  int waveform;      /* SBX_WAVE_* or SBX_WAVE_CUSTOM_BASE + [0..99] for waveNN */
   double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.4) */
 } SbxToneSpec;
 

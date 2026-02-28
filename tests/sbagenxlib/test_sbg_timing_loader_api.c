@@ -76,6 +76,10 @@ main(void) {
       "duo: 180+0/20 260+0/20\n"
       "00:00 solo ==\n"
       "00:00:01 duo\n";
+  const char *sbg_custom_wave_text =
+      "wave00: 0 1 0 0.25\n"
+      "base: wave00:180+2/20\n"
+      "NOW base\n";
   const char *sbg_block_text =
       "off: -\n"
       "base: 180+0/35\n"
@@ -210,6 +214,28 @@ main(void) {
   if (!(abs_sum_window(buf, (size_t)(1.1 * cfg.sample_rate), (size_t)(1.45 * cfg.sample_rate)) >
         abs_sum_window(buf, (size_t)(0.15 * cfg.sample_rate), (size_t)(0.5 * cfg.sample_rate)) * 1.15))
     fail("multivoice named sbg timing should render higher energy after second voice enters");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_wave_text, 0);
+  if (rc != SBX_OK) fail("custom wave sbg timing load failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("custom wave keyframe retrieval failed");
+  if (kf.tone.waveform != SBX_WAVE_CUSTOM_BASE)
+    fail("custom wave keyframe should preserve wave00 prefix");
+  {
+    char spec_buf[128];
+    if (sbx_format_tone_spec(&kf.tone, spec_buf, sizeof(spec_buf)) != SBX_OK)
+      fail("custom wave keyframe format failed");
+    if (strncmp(spec_buf, "wave00:", 7) != 0)
+      fail("custom wave formatted tone should round-trip wave00 prefix");
+  }
+  free(buf);
+  frames = (size_t)(0.6 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (custom wave)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("custom wave render failed");
+  if (!(abs_sum_window(buf, (size_t)(0.1 * cfg.sample_rate), (size_t)(0.5 * cfg.sample_rate)) > 1e-3))
+    fail("custom wave render should produce non-zero energy");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_block_text, 0);
   if (rc != SBX_OK) fail("block-definition sbg timing load failed");

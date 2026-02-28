@@ -1,0 +1,9 @@
+# Minimal custom-envelope waveform example for sbagenxlib SBG timing loader.
+#
+# The wave00 definition is normalized to 0..1 internally and then used as the
+# envelope for a binaural tone referenced via the usual `wave00:` prefix.
+
+wave00: 0 0.4 1 0.4 0
+base: wave00:180+2/20
+
+NOW base
