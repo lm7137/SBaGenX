@@ -4316,6 +4316,68 @@ find_first_iso_voice(Voice *out) {
    return 0;
 }
 
+static int
+find_first_iso_plot_tone(double *out_carr_hz, double *out_pulse_hz,
+			 double *out_amp_pct, int *out_waveform) {
+   if (sbx_runtime_ctx) {
+      size_t kf_n= sbx_context_keyframe_count(sbx_runtime_ctx);
+      size_t voice_n= sbx_context_voice_count(sbx_runtime_ctx);
+      size_t aux_n, i, v;
+      SbxToneSpec tone;
+
+      for (i= 0; i<kf_n; i++) {
+	 for (v= 0; v<voice_n; v++) {
+	    SbxProgramKeyframe kf;
+	    if (SBX_OK == sbx_context_get_keyframe_voice(sbx_runtime_ctx, i, v, &kf) &&
+		kf.tone.mode == SBX_TONE_ISOCHRONIC &&
+		kf.tone.amplitude > 0.0 && fabs(kf.tone.beat_hz) > 0.0) {
+	       if (out_carr_hz) *out_carr_hz= kf.tone.carrier_hz;
+	       if (out_pulse_hz) *out_pulse_hz= fabs(kf.tone.beat_hz);
+	       if (out_amp_pct) *out_amp_pct= 100.0 * kf.tone.amplitude;
+	       if (out_waveform) *out_waveform= kf.tone.waveform;
+	       return 1;
+	    }
+	 }
+      }
+
+      if (SBX_OK == sbx_context_sample_tones(sbx_runtime_ctx, 0.0, 0.0, 1, 0, &tone) &&
+	  tone.mode == SBX_TONE_ISOCHRONIC &&
+	  tone.amplitude > 0.0 && fabs(tone.beat_hz) > 0.0) {
+	 if (out_carr_hz) *out_carr_hz= tone.carrier_hz;
+	 if (out_pulse_hz) *out_pulse_hz= fabs(tone.beat_hz);
+	 if (out_amp_pct) *out_amp_pct= 100.0 * tone.amplitude;
+	 if (out_waveform) *out_waveform= tone.waveform;
+	 return 1;
+      }
+
+      aux_n= sbx_context_aux_tone_count(sbx_runtime_ctx);
+      for (i= 0; i<aux_n; i++) {
+	 if (SBX_OK == sbx_context_get_aux_tone(sbx_runtime_ctx, i, &tone) &&
+	     tone.mode == SBX_TONE_ISOCHRONIC &&
+	     tone.amplitude > 0.0 && fabs(tone.beat_hz) > 0.0) {
+	    if (out_carr_hz) *out_carr_hz= tone.carrier_hz;
+	    if (out_pulse_hz) *out_pulse_hz= fabs(tone.beat_hz);
+	    if (out_amp_pct) *out_amp_pct= 100.0 * tone.amplitude;
+	    if (out_waveform) *out_waveform= tone.waveform;
+	    return 1;
+	 }
+      }
+   }
+
+   {
+      Voice vv;
+      if (find_first_iso_voice(&vv)) {
+	 if (out_carr_hz) *out_carr_hz= vv.carr;
+	 if (out_pulse_hz) *out_pulse_hz= fabs(vv.res);
+	 if (out_amp_pct) *out_amp_pct= AMP_AD(vv.amp);
+	 if (out_waveform) *out_waveform= vv.waveform;
+	 return 1;
+      }
+   }
+
+   return 0;
+}
+
 static void
 write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
 			  double amp_pct, int waveform) {
@@ -4508,10 +4570,11 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
 
 void
 write_iso_cycle_graph_png_from_sequence(void) {
-   Voice vv;
-   if (!find_first_iso_voice(&vv))
+   double carr_hz, pulse_hz, amp_pct;
+   int waveform;
+   if (!find_first_iso_plot_tone(&carr_hz, &pulse_hz, &amp_pct, &waveform))
       error("-P requires at least one isochronic (@) tone in the loaded sequence");
-   write_iso_cycle_graph_png(vv.carr, fabs(vv.res), AMP_AD(vv.amp), vv.waveform);
+   write_iso_cycle_graph_png(carr_hz, pulse_hz, amp_pct, waveform);
 }
 
 static void
