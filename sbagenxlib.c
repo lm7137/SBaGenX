@@ -4138,6 +4138,33 @@ sbx_context_mix_amp_at(SbxContext *ctx, double t_sec) {
   return k0->amp_pct + (k1->amp_pct - k0->amp_pct) * u;
 }
 
+int
+sbx_context_sample_mix_amp(SbxContext *ctx,
+                           double t0_sec,
+                           double t1_sec,
+                           size_t sample_count,
+                           double *out_t_sec,
+                           double *out_amp_pct) {
+  size_t i;
+  size_t seg_saved;
+  if (!ctx || !out_amp_pct || sample_count == 0)
+    return SBX_EINVAL;
+  if (!isfinite(t0_sec) || !isfinite(t1_sec)) {
+    set_ctx_error(ctx, "sampling times must be finite");
+    return SBX_EINVAL;
+  }
+  seg_saved = ctx->mix_kf_seg;
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double ts = sbx_lerp(t0_sec, t1_sec, u);
+    out_amp_pct[i] = sbx_context_mix_amp_at(ctx, ts);
+    if (out_t_sec) out_t_sec[i] = ts;
+  }
+  ctx->mix_kf_seg = seg_saved;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
 size_t
 sbx_context_mix_amp_keyframe_count(const SbxContext *ctx) {
   if (!ctx || !ctx->mix_kf) return 0;
@@ -4207,6 +4234,50 @@ sbx_context_get_timed_mix_effect_slot(const SbxContext *ctx,
     sbx_default_mix_fx_spec(out_fx);
     *out_present = 0;
   }
+  return SBX_OK;
+}
+
+int
+sbx_context_sample_mix_effects(SbxContext *ctx,
+                               double t_sec,
+                               SbxMixFxSpec *out_fxv,
+                               size_t out_slots,
+                               size_t *out_count) {
+  size_t i;
+  size_t need;
+  size_t seg_saved;
+  SbxMixFxSpec dyn_fx[SBX_MAX_SBG_MIXFX];
+
+  if (!ctx) return SBX_EINVAL;
+  if (!isfinite(t_sec)) {
+    set_ctx_error(ctx, "sampling time must be finite");
+    return SBX_EINVAL;
+  }
+
+  need = ctx->mix_fx_count + ctx->sbg_mix_fx_slots;
+  if (out_count) *out_count = need;
+  if (!out_fxv) {
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (out_slots < need) {
+    set_ctx_error(ctx, "mix effect output buffer is too small");
+    return SBX_EINVAL;
+  }
+
+  for (i = 0; i < ctx->mix_fx_count; i++)
+    out_fxv[i] = ctx->mix_fx[i].spec;
+
+  if (ctx->sbg_mix_fx_slots > 0) {
+    seg_saved = ctx->sbg_mix_fx_seg;
+    if (ctx_eval_sbg_mix_effects(ctx, t_sec, dyn_fx, SBX_MAX_SBG_MIXFX) != SBX_OK)
+      return SBX_EINVAL;
+    for (i = 0; i < ctx->sbg_mix_fx_slots; i++)
+      out_fxv[ctx->mix_fx_count + i] = dyn_fx[i];
+    ctx->sbg_mix_fx_seg = seg_saved;
+  }
+
+  set_ctx_error(ctx, NULL);
   return SBX_OK;
 }
 

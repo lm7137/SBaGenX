@@ -143,16 +143,23 @@ Additional plot-data helpers:
 
 ```c
 double beat_hz[256];
+double mix_pct[256];
 double mix_env[256], mix_gain[256];
 double iso_env[256], iso_wave[256];
 SbxToneSpec iso_tone;
 SbxMixFxSpec fx;
+SbxMixFxSpec fx_slots[8];
 SbxIsoEnvelopeSpec iso;
+size_t fx_count = 0;
 
 sbx_context_sample_program_beat(ctx, 0.0, 1800.0, 256, tsec, beat_hz);
+sbx_context_sample_mix_amp(ctx, 0.0, 1800.0, 256, tsec, mix_pct);
 
 sbx_parse_mix_fx_spec("mixam:1:m=cos:s=0:f=0.45", SBX_WAVE_SINE, &fx);
 sbx_sample_mixam_cycle(&fx, 1.0, 256, tsec, mix_env, mix_gain);
+
+sbx_context_sample_mix_effects(ctx, 900.0, NULL, 0, &fx_count);
+sbx_context_sample_mix_effects(ctx, 900.0, fx_slots, 8, &fx_count);
 
 sbx_parse_tone_spec("200@1/100", &iso_tone);
 sbx_default_iso_envelope_spec(&iso);

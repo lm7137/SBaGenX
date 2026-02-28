@@ -24,13 +24,19 @@ main(void) {
   SbxToneSpec iso_tone;
   SbxIsoEnvelopeSpec iso_env;
   SbxMixFxSpec mixam;
+  SbxMixFxSpec fxv[4];
+  SbxMixFxSpec runtime_fx[2];
+  SbxMixFxSpec timed_fx[2];
+  SbxMixAmpKeyframe mix_kf[2];
   double ts[8];
   double hz[8];
+  double mix_pct[8];
   double env[8];
   double gain[8];
   double wave[8];
   double max_env = 0.0;
   size_t i;
+  size_t fx_count = 0;
   int rc;
 
   if (sbx_api_version() != SBX_API_VERSION)
@@ -110,6 +116,60 @@ main(void) {
   if (rc != SBX_EINVAL) fail("sample_count=0 should fail");
   rc = sbx_context_sample_program_beat(ctx, 0.0, 1.0, 0, ts, hz);
   if (rc != SBX_EINVAL) fail("sample_program_beat sample_count=0 should fail");
+
+  mix_kf[0].time_sec = 0.0;
+  mix_kf[0].amp_pct = 100.0;
+  mix_kf[0].interp = SBX_INTERP_LINEAR;
+  mix_kf[1].time_sec = 10.0;
+  mix_kf[1].amp_pct = 60.0;
+  mix_kf[1].interp = SBX_INTERP_LINEAR;
+  rc = sbx_context_set_mix_amp_keyframes(ctx, mix_kf, 2, 100.0);
+  if (rc != SBX_OK) fail("set_mix_amp_keyframes failed");
+  rc = sbx_context_sample_mix_amp(ctx, 0.0, 10.0, 6, ts, mix_pct);
+  if (rc != SBX_OK) fail("sample_mix_amp failed");
+  if (!near(mix_pct[0], 100.0, 1e-9) || !near(mix_pct[5], 60.0, 1e-9))
+    fail("sample_mix_amp endpoints mismatch");
+  if (!near(mix_pct[3], 76.0, 1e-9))
+    fail("sample_mix_amp midpoint mismatch");
+  rc = sbx_context_sample_mix_amp(ctx, 0.0, 1.0, 0, ts, mix_pct);
+  if (rc != SBX_EINVAL) fail("sample_mix_amp sample_count=0 should fail");
+
+  if (sbx_parse_mix_fx_spec("mixbeat:6/0.3", SBX_WAVE_SINE, &runtime_fx[0]) != SBX_OK)
+    fail("parse runtime mixbeat failed");
+  if (sbx_parse_mix_fx_spec("mixam:beat:m=cos:s=0:f=0.45", SBX_WAVE_SINE, &runtime_fx[1]) != SBX_OK)
+    fail("parse runtime mixam failed");
+  rc = sbx_context_set_mix_effects(ctx, runtime_fx, 2);
+  if (rc != SBX_OK) fail("set_mix_effects failed");
+  rc = sbx_context_sample_mix_effects(ctx, 5.0, NULL, 0, &fx_count);
+  if (rc != SBX_OK) fail("sample_mix_effects count query failed");
+  if (fx_count != 2) fail("sample_mix_effects count query mismatch");
+  rc = sbx_context_sample_mix_effects(ctx, 5.0, fxv, 4, &fx_count);
+  if (rc != SBX_OK) fail("sample_mix_effects runtime failed");
+  if (fx_count != 2) fail("sample_mix_effects runtime count mismatch");
+  if (fxv[0].type != SBX_MIXFX_BEAT || fxv[1].type != SBX_MIXFX_AM || !fxv[1].mixam_bind_program_beat)
+    fail("sample_mix_effects runtime content mismatch");
+  rc = sbx_context_set_mix_effects(ctx, NULL, 0);
+  if (rc != SBX_OK) fail("clear runtime mix effects failed");
+
+  if (sbx_parse_mix_fx_spec("mixbeat:4/0.2", SBX_WAVE_SINE, &timed_fx[0]) != SBX_OK)
+    fail("parse timed mixbeat failed");
+  if (sbx_parse_mix_fx_spec("mixpulse:7/0.4", SBX_WAVE_SINE, &timed_fx[1]) != SBX_OK)
+    fail("parse timed mixpulse failed");
+  {
+    const char *sbg =
+      "pad: mix/100 mixbeat:4/20 mixpulse:7/40\n"
+      "00:00 pad\n"
+      "00:10 mix/100\n";
+    rc = sbx_context_load_sbg_timing_text(ctx, sbg, 0);
+    if (rc != SBX_OK) fail("load_sbg_timing_text for mixfx sample failed");
+  }
+  rc = sbx_context_sample_mix_effects(ctx, 5.0, NULL, 0, &fx_count);
+  if (rc != SBX_OK) fail("sample_mix_effects timed count query failed");
+  if (fx_count != 2) fail("sample_mix_effects timed count mismatch");
+  rc = sbx_context_sample_mix_effects(ctx, 5.0, fxv, 4, &fx_count);
+  if (rc != SBX_OK) fail("sample_mix_effects timed failed");
+  if (fxv[0].type != SBX_MIXFX_BEAT || fxv[1].type != SBX_MIXFX_PULSE)
+    fail("sample_mix_effects timed content mismatch");
 
   if (sbx_parse_mix_fx_spec("mixam:1:m=cos:s=0:f=0.45", SBX_WAVE_SINE, &mixam) != SBX_OK)
     fail("parse mixam cosine spec failed");

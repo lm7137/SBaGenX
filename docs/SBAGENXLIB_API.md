@@ -192,6 +192,7 @@ to inspect secondary voice lanes loaded from native multivoice `.sbg` content.
 - `sbx_context_apply_mix_effects(...)`
 - `sbx_context_set_mix_amp_keyframes(...)`
 - `sbx_context_mix_amp_at(...)`
+- `sbx_context_sample_mix_amp(...)`
 - `sbx_context_mix_amp_keyframe_count(...)`
 - `sbx_context_get_mix_amp_keyframe(...)`
 - `sbx_context_has_mix_amp_control(...)`
@@ -200,6 +201,7 @@ to inspect secondary voice lanes loaded from native multivoice `.sbg` content.
 - `sbx_context_timed_mix_effect_slot_count(...)`
 - `sbx_context_get_timed_mix_effect_keyframe_info(...)`
 - `sbx_context_get_timed_mix_effect_slot(...)`
+- `sbx_context_sample_mix_effects(...)`
 - `sbx_context_mix_stream_sample(...)`
 - `sbx_context_configure_runtime(...)`
 
@@ -223,6 +225,18 @@ Those let a frontend inspect the exact `mix/<amp>` timeline and the timed
 mix-effect slots loaded from native `.sbg` content, without reverse-engineering
 them from render output.
 
+`sbx_context_sample_mix_amp(...)` is the range-sampling companion to
+`sbx_context_mix_amp_at(...)`. Use it when a frontend wants a full amplitude
+curve for plotting or inspection.
+
+`sbx_context_sample_mix_effects(...)` evaluates the effective mix-effect chain
+at one timeline time. It returns:
+
+- static runtime mix effects first,
+- then evaluated timed native `.sbg` mix-effect slots.
+
+Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
+
 7) Plot/data sampling support
 
 - `sbx_context_sample_tones(...)`
@@ -242,6 +256,9 @@ provided time range (`[t0_sec, t1_sec]`) into `sample_count` tone samples.
 `sbx_context_sample_program_beat` samples the effective program beat/pulse
 frequency over a time range using the same keyframe evaluation logic as the
 runtime adapter. This is the preferred frontend API for beat-vs-time graphs.
+
+`sbx_context_sample_mix_amp` samples the effective `mix/<amp>` profile over a
+time range without advancing render time.
 
 `sbx_sample_mixam_cycle` samples one cycle of a `mixam` envelope plus the
 derived gain curve (`f + (1-f) * envelope`) for plotting/inspection.

@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 10  /* public API contract revision */
+#define SBX_API_VERSION 11  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -307,6 +307,19 @@ int sbx_context_configure_runtime(SbxContext *ctx,
 /* Evaluate mix amplitude percentage at context time t_sec. */
 double sbx_context_mix_amp_at(SbxContext *ctx, double t_sec);
 
+/*
+ * Sample evaluated mix amplitude percentage over [t0_sec, t1_sec].
+ * - sample_count must be >= 1.
+ * - out_amp_pct must have sample_count elements.
+ * - out_t_sec is optional (may be NULL).
+ */
+int sbx_context_sample_mix_amp(SbxContext *ctx,
+                               double t0_sec,
+                               double t1_sec,
+                               size_t sample_count,
+                               double *out_t_sec,
+                               double *out_amp_pct);
+
 /* Number of explicit mix amplitude keyframes currently loaded. */
 size_t sbx_context_mix_amp_keyframe_count(const SbxContext *ctx);
 
@@ -342,6 +355,19 @@ int sbx_context_get_timed_mix_effect_slot(const SbxContext *ctx,
                                           size_t slot_index,
                                           SbxMixFxSpec *out_fx,
                                           int *out_present);
+
+/*
+ * Evaluate the effective mix-effect chain at one context time.
+ * - Returns static runtime mix effects first, followed by evaluated timed
+ *   native `.sbg` mix-effect slots.
+ * - If out_fxv is NULL, out_count may be used to query the required size.
+ * - Entries with type SBX_MIXFX_NONE represent empty timed slots.
+ */
+int sbx_context_sample_mix_effects(SbxContext *ctx,
+                                   double t_sec,
+                                   SbxMixFxSpec *out_fxv,
+                                   size_t out_slots,
+                                   size_t *out_count);
 
 /* ----- Introspection/render ----- */
 

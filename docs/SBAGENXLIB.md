@@ -588,10 +588,26 @@ Phase 3.80
   - seeking on loaded keyframe programs,
   - invalid negative seek rejection.
 
+Phase 3.81
+- Add frontend-oriented mix-side sampling/introspection helpers:
+  - `sbx_context_sample_mix_amp(...)`
+  - `sbx_context_sample_mix_effects(...)`
+- `sbx_context_sample_mix_amp(...)` gives frontends the exact evaluated
+  `mix/<amp>` curve over a caller-chosen time range without having to loop
+  manually around `sbx_context_mix_amp_at(...)`.
+- `sbx_context_sample_mix_effects(...)` exposes the effective mix-effect chain
+  at one timeline time:
+  - static runtime mix effects first,
+  - then evaluated timed native `.sbg` mix-effect slots.
+- Add regression coverage for:
+  - sampled mix-amp endpoints/interpolation,
+  - static runtime mix-effect evaluation,
+  - evaluated timed `.sbg` mix-effect slots.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.80 Slice)
+Current API (Phase 3.81 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -636,6 +652,7 @@ Public header: `sbagenxlib.h`
   - `sbx_context_set_mix_amp_keyframes()`
   - `sbx_context_configure_runtime()`
   - `sbx_context_mix_amp_at()`
+  - `sbx_context_sample_mix_amp()`
   - `sbx_context_mix_amp_keyframe_count()`
   - `sbx_context_get_mix_amp_keyframe()`
   - `sbx_context_has_mix_amp_control()`
@@ -644,6 +661,7 @@ Public header: `sbagenxlib.h`
   - `sbx_context_timed_mix_effect_slot_count()`
   - `sbx_context_get_timed_mix_effect_keyframe_info()`
   - `sbx_context_get_timed_mix_effect_slot()`
+  - `sbx_context_sample_mix_effects()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_voice_count()`
   - `sbx_context_get_keyframe()`
