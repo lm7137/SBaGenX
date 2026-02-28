@@ -279,6 +279,59 @@ int main(void) {
       fail("tone-only sbg timing should not expose mix effects");
   }
   {
+    const char *sbg_mix_timed_text =
+        "pulse: mix/65 mixbeat:3/25 180+0/15\n"
+        "wash: mix/40 mixbeat:2/30 mixspin:400+4/20 200+0/12\n"
+        "00:00 pulse\n"
+        "00:00:10 wash step\n";
+    SbxMixAmpKeyframe mkf;
+    SbxTimedMixFxKeyframeInfo fx_info;
+    SbxMixFxSpec fx_slot;
+    int present = 0;
+    if (sbx_context_load_sbg_timing_text(ctx, sbg_mix_timed_text, 0) != SBX_OK)
+      fail("timed sbg mix load failed");
+    if (sbx_context_mix_amp_keyframe_count(ctx) != 2)
+      fail("timed sbg mix should expose two mix amp keyframes");
+    if (sbx_context_get_mix_amp_keyframe(ctx, 0, &mkf) != SBX_OK)
+      fail("mix amp keyframe 0 retrieval failed");
+    if (fabs(mkf.time_sec - 0.0) > 1e-9 || fabs(mkf.amp_pct - 65.0) > 1e-9 || mkf.interp != SBX_INTERP_LINEAR)
+      fail("mix amp keyframe 0 mismatch");
+    if (sbx_context_get_mix_amp_keyframe(ctx, 1, &mkf) != SBX_OK)
+      fail("mix amp keyframe 1 retrieval failed");
+    if (fabs(mkf.time_sec - 10.0) > 1e-9 || fabs(mkf.amp_pct - 40.0) > 1e-9 || mkf.interp != SBX_INTERP_STEP)
+      fail("mix amp keyframe 1 mismatch");
+    if (sbx_context_get_mix_amp_keyframe(ctx, 2, &mkf) != SBX_EINVAL)
+      fail("out-of-range mix amp keyframe retrieval should fail");
+    if (sbx_context_timed_mix_effect_keyframe_count(ctx) != 2)
+      fail("timed sbg mix should expose two timed mix-effect keyframes");
+    if (sbx_context_timed_mix_effect_slot_count(ctx) != 2)
+      fail("timed sbg mix should expose two timed mix-effect slots");
+    if (sbx_context_get_timed_mix_effect_keyframe_info(ctx, 0, &fx_info) != SBX_OK)
+      fail("timed mix-effect keyframe info 0 retrieval failed");
+    if (fabs(fx_info.time_sec - 0.0) > 1e-9 || fx_info.interp != SBX_INTERP_LINEAR)
+      fail("timed mix-effect keyframe info 0 mismatch");
+    if (sbx_context_get_timed_mix_effect_keyframe_info(ctx, 1, &fx_info) != SBX_OK)
+      fail("timed mix-effect keyframe info 1 retrieval failed");
+    if (fabs(fx_info.time_sec - 10.0) > 1e-9 || fx_info.interp != SBX_INTERP_STEP)
+      fail("timed mix-effect keyframe info 1 mismatch");
+    if (sbx_context_get_timed_mix_effect_keyframe_info(ctx, 2, &fx_info) != SBX_EINVAL)
+      fail("out-of-range timed mix-effect keyframe info retrieval should fail");
+    if (sbx_context_get_timed_mix_effect_slot(ctx, 0, 0, &fx_slot, &present) != SBX_OK)
+      fail("timed mix-effect slot 0,0 retrieval failed");
+    if (!present || fx_slot.type != SBX_MIXFX_BEAT || fabs(fx_slot.res - 3.0) > 1e-9)
+      fail("timed mix-effect slot 0,0 mismatch");
+    if (sbx_context_get_timed_mix_effect_slot(ctx, 0, 1, &fx_slot, &present) != SBX_OK)
+      fail("timed mix-effect slot 0,1 retrieval failed");
+    if (present || fx_slot.type != SBX_MIXFX_NONE)
+      fail("timed mix-effect slot 0,1 should be empty");
+    if (sbx_context_get_timed_mix_effect_slot(ctx, 1, 1, &fx_slot, &present) != SBX_OK)
+      fail("timed mix-effect slot 1,1 retrieval failed");
+    if (!present || fx_slot.type != SBX_MIXFX_SPIN || fabs(fx_slot.carr - 400.0) > 1e-9 || fabs(fx_slot.res - 4.0) > 1e-9)
+      fail("timed mix-effect slot 1,1 mismatch");
+    if (sbx_context_get_timed_mix_effect_slot(ctx, 1, 2, &fx_slot, &present) != SBX_EINVAL)
+      fail("out-of-range timed mix-effect slot retrieval should fail");
+  }
+  {
     const char *sbg_multivoice_text =
         "duo: 180+0/20 260+0/15\n"
         "00:00 duo\n";

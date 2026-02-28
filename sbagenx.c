@@ -8591,7 +8591,7 @@ is_loop_flag_token(const char *s) {
 
 static void
 emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, const char *extra) {
-   size_t i, n, voice_n;
+   size_t i, n, voice_n, mix_n, mixfx_n, mixfx_slots;
    const char *extra_tail= (extra && *extra) ? extra : "";
 
    n= sbx_context_keyframe_count(ctx);
@@ -8600,10 +8600,17 @@ emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, co
    voice_n= sbx_context_voice_count(ctx);
    if (voice_n == 0)
       voice_n= 1;
+   mix_n= sbx_context_mix_amp_keyframe_count(ctx);
+   mixfx_n= sbx_context_timed_mix_effect_keyframe_count(ctx);
+   mixfx_slots= sbx_context_timed_mix_effect_slot_count(ctx);
 
    printf("# sbagenxlib keyframes (%d)\n", (int)n);
    if (voice_n > 1)
       printf("# voice-lanes: %d\n", (int)voice_n);
+   if (mix_n > 0)
+      printf("# mix-keyframes: %d\n", (int)mix_n);
+   if (mixfx_n > 0)
+      printf("# timed-mixfx-keyframes: %d slots:%d\n", (int)mixfx_n, (int)mixfx_slots);
    if (*extra_tail)
       printf("# extras:%s\n", extra_tail);
    if (loop_requested)
@@ -8628,6 +8635,36 @@ emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, co
 	    error("sbagenxlib keyframe %d lane %d has unsupported tone mode %d",
 		  (int)i, (int)vi, (int)vkf.tone.mode);
 	 printf("#   lane[%d] %.6f %s %s\n", (int)vi, vkf.time_sec, spec, interp);
+      }
+   }
+   for (i= 0; i<mix_n; i++) {
+      SbxMixAmpKeyframe mkf;
+      const char *interp;
+      if (sbx_context_get_mix_amp_keyframe(ctx, i, &mkf) != SBX_OK)
+	 error("sbagenxlib mix keyframe retrieval failed at index %d", (int)i);
+      interp= (mkf.interp == SBX_INTERP_STEP) ? "step" : "linear";
+      printf("#   mix[%d] %.6f mix/%.6f %s\n", (int)i, mkf.time_sec, mkf.amp_pct, interp);
+   }
+   for (i= 0; i<mixfx_n; i++) {
+      SbxTimedMixFxKeyframeInfo info;
+      const char *interp;
+      size_t slot;
+      if (sbx_context_get_timed_mix_effect_keyframe_info(ctx, i, &info) != SBX_OK)
+	 error("sbagenxlib timed mix-effect keyframe retrieval failed at index %d", (int)i);
+      interp= (info.interp == SBX_INTERP_STEP) ? "step" : "linear";
+      for (slot= 0; slot<mixfx_slots; slot++) {
+	 SbxMixFxSpec fx;
+	 int present= 0;
+	 if (sbx_context_get_timed_mix_effect_slot(ctx, i, slot, &fx, &present) != SBX_OK)
+	    error("sbagenxlib timed mix-effect keyframe slot retrieval failed at index %d slot %d",
+		  (int)i, (int)slot);
+	 if (present) {
+	    char tok[256];
+	    if (sbx_format_mix_fx_spec(&fx, tok, sizeof(tok)) != SBX_OK)
+	       error("sbagenxlib timed mix-effect keyframe %d slot %d has unsupported mix effect",
+		     (int)i, (int)slot);
+	    printf("#   mixfx[%d][%d] %.6f %s %s\n", (int)i, (int)slot, info.time_sec, tok, interp);
+	 }
       }
    }
    fflush(stdout);

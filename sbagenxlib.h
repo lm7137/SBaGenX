@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 8   /* public API contract revision */
+#define SBX_API_VERSION 9   /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -87,6 +87,11 @@ typedef struct {
   double amp_pct;
   int interp; /* SBX_INTERP_* */
 } SbxMixAmpKeyframe;
+
+typedef struct {
+  double time_sec;
+  int interp; /* SBX_INTERP_* */
+} SbxTimedMixFxKeyframeInfo;
 
 typedef enum {
   SBX_EXTRA_INVALID = 0,
@@ -291,11 +296,41 @@ int sbx_context_configure_runtime(SbxContext *ctx,
 /* Evaluate mix amplitude percentage at context time t_sec. */
 double sbx_context_mix_amp_at(SbxContext *ctx, double t_sec);
 
+/* Number of explicit mix amplitude keyframes currently loaded. */
+size_t sbx_context_mix_amp_keyframe_count(const SbxContext *ctx);
+
+/* Read explicit mix amplitude keyframe by index. */
+int sbx_context_get_mix_amp_keyframe(const SbxContext *ctx,
+                                     size_t index,
+                                     SbxMixAmpKeyframe *out);
+
 /* Report whether the loaded/runtime context has explicit mix/<amp> control. */
 int sbx_context_has_mix_amp_control(const SbxContext *ctx);
 
 /* Report whether the loaded/runtime context has active mix-effect content. */
 int sbx_context_has_mix_effects(const SbxContext *ctx);
+
+/* Number of timed mix-effect keyframes currently loaded. */
+size_t sbx_context_timed_mix_effect_keyframe_count(const SbxContext *ctx);
+
+/* Number of timed mix-effect slots in each keyframe. */
+size_t sbx_context_timed_mix_effect_slot_count(const SbxContext *ctx);
+
+/* Read timed mix-effect keyframe metadata by index. */
+int sbx_context_get_timed_mix_effect_keyframe_info(const SbxContext *ctx,
+                                                   size_t index,
+                                                   SbxTimedMixFxKeyframeInfo *out);
+
+/*
+ * Read one timed mix-effect slot from a loaded keyframe.
+ * out_present is set to 1 when the slot was explicitly present in that
+ * keyframe, or 0 when the slot is implicitly empty/none.
+ */
+int sbx_context_get_timed_mix_effect_slot(const SbxContext *ctx,
+                                          size_t keyframe_index,
+                                          size_t slot_index,
+                                          SbxMixFxSpec *out_fx,
+                                          int *out_present);
 
 /* ----- Introspection/render ----- */
 

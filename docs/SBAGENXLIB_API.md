@@ -38,6 +38,9 @@ Core Concepts
 - `SbxToneSpec`: canonical tone description across binaural/monaural/isochronic/
   noise/bell/spin modes.
 - `SbxProgramKeyframe`: timestamp + tone + interpolation mode to next keyframe.
+- `SbxMixAmpKeyframe`: explicit `mix/<amp>` timeline point.
+- `SbxTimedMixFxKeyframeInfo`: timestamp/interp metadata for one native timed
+  mix-effect keyframe loaded from `.sbg`.
 
 Status and Errors
 -----------------
@@ -155,8 +158,14 @@ to inspect secondary voice lanes loaded from native multivoice `.sbg` content.
 - `sbx_context_apply_mix_effects(...)`
 - `sbx_context_set_mix_amp_keyframes(...)`
 - `sbx_context_mix_amp_at(...)`
+- `sbx_context_mix_amp_keyframe_count(...)`
+- `sbx_context_get_mix_amp_keyframe(...)`
 - `sbx_context_has_mix_amp_control(...)`
 - `sbx_context_has_mix_effects(...)`
+- `sbx_context_timed_mix_effect_keyframe_count(...)`
+- `sbx_context_timed_mix_effect_slot_count(...)`
+- `sbx_context_get_timed_mix_effect_keyframe_info(...)`
+- `sbx_context_get_timed_mix_effect_slot(...)`
 - `sbx_context_mix_stream_sample(...)`
 - `sbx_context_configure_runtime(...)`
 
@@ -166,6 +175,19 @@ mix effects, and auxiliary tones.
 `sbx_context_has_mix_amp_control` and `sbx_context_has_mix_effects` are useful
 when a frontend has loaded native `.sbg`/`libsbg` content and needs to know
 whether the loaded context depends on an external mix stream.
+
+For deeper native `.sbg` inspection, use:
+
+- `sbx_context_mix_amp_keyframe_count(...)`
+- `sbx_context_get_mix_amp_keyframe(...)`
+- `sbx_context_timed_mix_effect_keyframe_count(...)`
+- `sbx_context_timed_mix_effect_slot_count(...)`
+- `sbx_context_get_timed_mix_effect_keyframe_info(...)`
+- `sbx_context_get_timed_mix_effect_slot(...)`
+
+Those let a frontend inspect the exact `mix/<amp>` timeline and the timed
+mix-effect slots loaded from native `.sbg` content, without reverse-engineering
+them from render output.
 
 7) Plot/data sampling support
 
@@ -218,6 +240,13 @@ Current native `.sbg` notes:
 - native-loaded `.sbg` content may include explicit mix control/effects, and
   frontends can detect that through
   `sbx_context_has_mix_amp_control()` / `sbx_context_has_mix_effects()`,
+- native-loaded `.sbg` mix timelines can also be inspected directly through
+  `sbx_context_mix_amp_keyframe_count()` /
+  `sbx_context_get_mix_amp_keyframe()` and
+  `sbx_context_timed_mix_effect_keyframe_count()` /
+  `sbx_context_timed_mix_effect_slot_count()` /
+  `sbx_context_get_timed_mix_effect_keyframe_info()` /
+  `sbx_context_get_timed_mix_effect_slot()`,
 - native-loaded multivoice `.sbg` content can be inspected lane-by-lane through
   `sbx_context_voice_count()` / `sbx_context_get_keyframe_voice()`.
 

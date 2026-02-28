@@ -432,10 +432,25 @@ Phase 3.67
   for secondary voice lanes, improving observability without breaking the
   existing primary dump line format.
 
+Phase 3.68
+- Add public native mix-timeline introspection:
+  - `sbx_context_mix_amp_keyframe_count()`
+  - `sbx_context_get_mix_amp_keyframe()`
+  - `sbx_context_timed_mix_effect_keyframe_count()`
+  - `sbx_context_timed_mix_effect_slot_count()`
+  - `sbx_context_get_timed_mix_effect_keyframe_info()`
+  - `sbx_context_get_timed_mix_effect_slot()`
+- Expose the actual library-side `mix/<amp>` and timed `mixbeat` /
+  `mixpulse` / `mixspin` / `mixam` timelines loaded from native `.sbg`
+  content instead of forcing frontends to infer them from render behavior.
+- Extend `sbagenx -D` on sbagenxlib-backed paths to emit comment lines for
+  native mix keyframes and timed mix-effect slots, matching the observability
+  approach already used for multivoice lanes.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.67 Slice)
+Current API (Phase 3.68 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -480,8 +495,14 @@ Public header: `sbagenxlib.h`
   - `sbx_context_set_mix_amp_keyframes()`
   - `sbx_context_configure_runtime()`
   - `sbx_context_mix_amp_at()`
+  - `sbx_context_mix_amp_keyframe_count()`
+  - `sbx_context_get_mix_amp_keyframe()`
   - `sbx_context_has_mix_amp_control()`
   - `sbx_context_has_mix_effects()`
+  - `sbx_context_timed_mix_effect_keyframe_count()`
+  - `sbx_context_timed_mix_effect_slot_count()`
+  - `sbx_context_get_timed_mix_effect_keyframe_info()`
+  - `sbx_context_get_timed_mix_effect_slot()`
   - `sbx_context_keyframe_count()`
   - `sbx_context_voice_count()`
   - `sbx_context_get_keyframe()`
@@ -628,6 +649,14 @@ Notes
   active multivoice lanes loaded from `.sbg`.
 - `sbx_context_voice_count()` / `sbx_context_get_keyframe_voice()` expose those
   secondary lanes explicitly for frontends, tests, and richer native dump paths.
+- `sbx_context_mix_amp_keyframe_count()` /
+  `sbx_context_get_mix_amp_keyframe()` expose the explicit native `mix/<amp>`
+  timeline loaded from `.sbg`.
+- `sbx_context_timed_mix_effect_keyframe_count()` /
+  `sbx_context_timed_mix_effect_slot_count()` /
+  `sbx_context_get_timed_mix_effect_keyframe_info()` /
+  `sbx_context_get_timed_mix_effect_slot()` expose the native timed mix-effect
+  slots loaded from `.sbg`, including empty slot detection for sparse frames.
 
 Quick Smoke Test
 ----------------
@@ -802,6 +831,13 @@ Seq Backend Multivoice Dump Smoke Test (Phase 3.67)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_multivoice_dump.sh
+```
+
+Seq Backend Native Mix Dump Smoke Test (Phase 3.68)
+---------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_mix_dump.sh
 ```
 
 Notes:

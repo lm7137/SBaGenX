@@ -4104,6 +4104,22 @@ sbx_context_mix_amp_at(SbxContext *ctx, double t_sec) {
   return k0->amp_pct + (k1->amp_pct - k0->amp_pct) * u;
 }
 
+size_t
+sbx_context_mix_amp_keyframe_count(const SbxContext *ctx) {
+  if (!ctx || !ctx->mix_kf) return 0;
+  return ctx->mix_kf_count;
+}
+
+int
+sbx_context_get_mix_amp_keyframe(const SbxContext *ctx,
+                                 size_t index,
+                                 SbxMixAmpKeyframe *out) {
+  if (!ctx || !out || !ctx->mix_kf) return SBX_EINVAL;
+  if (index >= ctx->mix_kf_count) return SBX_EINVAL;
+  *out = ctx->mix_kf[index];
+  return SBX_OK;
+}
+
 int
 sbx_context_has_mix_amp_control(const SbxContext *ctx) {
   if (!ctx) return 0;
@@ -4114,6 +4130,50 @@ int
 sbx_context_has_mix_effects(const SbxContext *ctx) {
   if (!ctx) return 0;
   return (ctx->mix_fx_count > 0 || ctx->sbg_mix_fx_slots > 0) ? 1 : 0;
+}
+
+size_t
+sbx_context_timed_mix_effect_keyframe_count(const SbxContext *ctx) {
+  if (!ctx || !ctx->sbg_mix_fx_kf) return 0;
+  return ctx->sbg_mix_fx_kf_count;
+}
+
+size_t
+sbx_context_timed_mix_effect_slot_count(const SbxContext *ctx) {
+  if (!ctx || !ctx->sbg_mix_fx_kf) return 0;
+  return ctx->sbg_mix_fx_slots;
+}
+
+int
+sbx_context_get_timed_mix_effect_keyframe_info(const SbxContext *ctx,
+                                               size_t index,
+                                               SbxTimedMixFxKeyframeInfo *out) {
+  if (!ctx || !out || !ctx->sbg_mix_fx_kf) return SBX_EINVAL;
+  if (index >= ctx->sbg_mix_fx_kf_count) return SBX_EINVAL;
+  out->time_sec = ctx->sbg_mix_fx_kf[index].time_sec;
+  out->interp = ctx->sbg_mix_fx_kf[index].interp;
+  return SBX_OK;
+}
+
+int
+sbx_context_get_timed_mix_effect_slot(const SbxContext *ctx,
+                                      size_t keyframe_index,
+                                      size_t slot_index,
+                                      SbxMixFxSpec *out_fx,
+                                      int *out_present) {
+  const SbxMixFxKeyframe *kf;
+  if (!ctx || !out_fx || !out_present || !ctx->sbg_mix_fx_kf) return SBX_EINVAL;
+  if (keyframe_index >= ctx->sbg_mix_fx_kf_count) return SBX_EINVAL;
+  if (slot_index >= ctx->sbg_mix_fx_slots) return SBX_EINVAL;
+  kf = &ctx->sbg_mix_fx_kf[keyframe_index];
+  if (slot_index < kf->mix_fx_count) {
+    *out_fx = kf->mix_fx[slot_index];
+    *out_present = 1;
+  } else {
+    sbx_default_mix_fx_spec(out_fx);
+    *out_present = 0;
+  }
+  return SBX_OK;
 }
 
 size_t
