@@ -278,6 +278,22 @@ int main(void) {
     if (sbx_context_has_mix_effects(ctx))
       fail("tone-only sbg timing should not expose mix effects");
   }
+  {
+    const char *sbg_multivoice_text =
+        "duo: 180+0/20 260+0/15\n"
+        "00:00 duo\n";
+    SbxProgramKeyframe kf_lane;
+    if (sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_text, 0) != SBX_OK)
+      fail("multivoice sbg timing load failed");
+    if (sbx_context_voice_count(ctx) != 2)
+      fail("multivoice sbg timing should expose two voice lanes");
+    if (sbx_context_get_keyframe_voice(ctx, 0, 1, &kf_lane) != SBX_OK)
+      fail("secondary voice retrieval failed");
+    if (fabs(kf_lane.tone.carrier_hz - 260.0) > 1e-9 || fabs(kf_lane.tone.amplitude - 0.15) > 1e-9)
+      fail("secondary voice values mismatch");
+    if (sbx_context_get_keyframe_voice(ctx, 0, 2, &kf_lane) != SBX_EINVAL)
+      fail("out-of-range voice retrieval should fail");
+  }
 
   {
     SbxMixFxSpec fx;

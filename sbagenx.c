@@ -8591,14 +8591,19 @@ is_loop_flag_token(const char *s) {
 
 static void
 emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, const char *extra) {
-   size_t i, n;
+   size_t i, n, voice_n;
    const char *extra_tail= (extra && *extra) ? extra : "";
 
    n= sbx_context_keyframe_count(ctx);
    if (n == 0)
       error("sbagenxlib context does not contain keyframes");
+   voice_n= sbx_context_voice_count(ctx);
+   if (voice_n == 0)
+      voice_n= 1;
 
    printf("# sbagenxlib keyframes (%d)\n", (int)n);
+   if (voice_n > 1)
+      printf("# voice-lanes: %d\n", (int)voice_n);
    if (*extra_tail)
       printf("# extras:%s\n", extra_tail);
    if (loop_requested)
@@ -8607,6 +8612,7 @@ emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, co
       SbxProgramKeyframe kf;
       char spec[256];
       const char *interp;
+      size_t vi;
 
       if (sbx_context_get_keyframe(ctx, i, &kf) != SBX_OK)
 	 error("sbagenxlib keyframe retrieval failed at index %d", (int)i);
@@ -8614,6 +8620,15 @@ emit_periods_from_sbx_context_with_extra(SbxContext *ctx, int loop_requested, co
 	 error("sbagenxlib keyframe %d has unsupported tone mode %d", (int)i, (int)kf.tone.mode);
       interp= (kf.interp == SBX_INTERP_STEP) ? "step" : "linear";
       printf("%.6f %s%s %s\n", kf.time_sec, spec, extra_tail, interp);
+      for (vi= 1; vi<voice_n; vi++) {
+	 SbxProgramKeyframe vkf;
+	 if (sbx_context_get_keyframe_voice(ctx, i, vi, &vkf) != SBX_OK)
+	    error("sbagenxlib keyframe voice retrieval failed at index %d lane %d", (int)i, (int)vi);
+	 if (sbx_format_tone_spec(&vkf.tone, spec, sizeof(spec)) != SBX_OK)
+	    error("sbagenxlib keyframe %d lane %d has unsupported tone mode %d",
+		  (int)i, (int)vi, (int)vkf.tone.mode);
+	 printf("#   lane[%d] %.6f %s %s\n", (int)vi, vkf.time_sec, spec, interp);
+      }
    }
    fflush(stdout);
    exit(0);

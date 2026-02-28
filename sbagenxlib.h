@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 7   /* public API contract revision */
+#define SBX_API_VERSION 8   /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -302,8 +302,17 @@ int sbx_context_has_mix_effects(const SbxContext *ctx);
 /* Number of currently loaded keyframes. */
 size_t sbx_context_keyframe_count(const SbxContext *ctx);
 
+/* Number of active voice lanes in loaded keyframe content. */
+size_t sbx_context_voice_count(const SbxContext *ctx);
+
 /* Read keyframe by index. */
 int sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out);
+
+/* Read a specific voice lane from a loaded keyframe. */
+int sbx_context_get_keyframe_voice(const SbxContext *ctx,
+                                   size_t index,
+                                   size_t voice_index,
+                                   SbxProgramKeyframe *out);
 
 /* Program duration in seconds (0 for static tone sources). */
 double sbx_context_duration_sec(const SbxContext *ctx);

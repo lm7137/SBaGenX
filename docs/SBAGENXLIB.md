@@ -422,10 +422,20 @@ Phase 3.66
 - Add regression coverage for native `sbagenxlib` sequence files that carry
   mix effects but are run without an active mix input stream.
 
+Phase 3.67
+- Add public multivoice keyframe introspection:
+  - `sbx_context_voice_count()`
+  - `sbx_context_get_keyframe_voice()`
+- Keep the existing primary-keyframe API stable while letting frontends inspect
+  secondary voice lanes loaded from native multivoice `.sbg` content.
+- Extend `sbagenx -D` on sbagenxlib-backed paths to emit extra comment lines
+  for secondary voice lanes, improving observability without breaking the
+  existing primary dump line format.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.66 Slice)
+Current API (Phase 3.67 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -473,7 +483,9 @@ Public header: `sbagenxlib.h`
   - `sbx_context_has_mix_amp_control()`
   - `sbx_context_has_mix_effects()`
   - `sbx_context_keyframe_count()`
+  - `sbx_context_voice_count()`
   - `sbx_context_get_keyframe()`
+  - `sbx_context_get_keyframe_voice()`
   - `sbx_context_duration_sec()`
   - `sbx_context_sample_tones()`
   - `sbx_context_render_f32()`
@@ -614,6 +626,8 @@ Notes
 - `sbx_context_get_keyframe()` intentionally exposes the primary voice lane so
   existing frontends/tests keep a stable view while runtime render mixes all
   active multivoice lanes loaded from `.sbg`.
+- `sbx_context_voice_count()` / `sbx_context_get_keyframe_voice()` expose those
+  secondary lanes explicitly for frontends, tests, and richer native dump paths.
 
 Quick Smoke Test
 ----------------
@@ -781,6 +795,13 @@ Seq Backend MixFX-Requires-Mix Smoke Test (Phase 3.66)
 
 ```bash
 tests/sbagenxlib/test_seq_backend_mixfx_requires_mix.sh
+```
+
+Seq Backend Multivoice Dump Smoke Test (Phase 3.67)
+---------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_multivoice_dump.sh
 ```
 
 Notes:

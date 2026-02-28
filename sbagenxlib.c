@@ -4122,11 +4122,34 @@ sbx_context_keyframe_count(const SbxContext *ctx) {
   return ctx->kf_count;
 }
 
+size_t
+sbx_context_voice_count(const SbxContext *ctx) {
+  if (!ctx || !ctx->kfs || ctx->kf_count == 0) return 0;
+  if (ctx->mv_voice_count == 0) return 1;
+  return ctx->mv_voice_count;
+}
+
 int
 sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out) {
   if (!ctx || !out || !ctx->kfs) return SBX_EINVAL;
   if (index >= ctx->kf_count) return SBX_EINVAL;
   *out = ctx->kfs[index];
+  return SBX_OK;
+}
+
+int
+sbx_context_get_keyframe_voice(const SbxContext *ctx,
+                               size_t index,
+                               size_t voice_index,
+                               SbxProgramKeyframe *out) {
+  if (!ctx || !out || !ctx->kfs) return SBX_EINVAL;
+  if (index >= ctx->kf_count) return SBX_EINVAL;
+  if (voice_index >= sbx_context_voice_count(ctx)) return SBX_EINVAL;
+  if (voice_index == 0 || !ctx->mv_kfs) {
+    *out = ctx->kfs[index];
+    return SBX_OK;
+  }
+  *out = SBX_MV_KF(ctx, voice_index)[index];
   return SBX_OK;
 }
 

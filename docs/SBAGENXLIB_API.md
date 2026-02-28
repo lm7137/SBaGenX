@@ -134,9 +134,15 @@ These are designed so front-ends can share parser semantics with CLI code.
 - `sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop)`
 - `sbx_context_load_sbg_timing_file(SbxContext *ctx, const char *path, int loop)`
 - `sbx_context_keyframe_count(const SbxContext *ctx)`
+- `sbx_context_voice_count(const SbxContext *ctx)`
 - `sbx_context_get_keyframe(const SbxContext *ctx, size_t index, SbxProgramKeyframe *out)`
+- `sbx_context_get_keyframe_voice(const SbxContext *ctx, size_t index, size_t voice_index, SbxProgramKeyframe *out)`
 - `sbx_context_duration_sec(const SbxContext *ctx)`
 - `sbx_context_sample_tones(SbxContext *ctx, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, SbxToneSpec *out_tones)`
+
+`sbx_context_get_keyframe` continues to expose the primary voice lane for
+stability. Use `sbx_context_voice_count` plus `sbx_context_get_keyframe_voice`
+to inspect secondary voice lanes loaded from native multivoice `.sbg` content.
 
 6) Runtime extras (aux tones, mix effects, mix amp profile)
 
@@ -211,7 +217,9 @@ Current native `.sbg` notes:
   limits,
 - native-loaded `.sbg` content may include explicit mix control/effects, and
   frontends can detect that through
-  `sbx_context_has_mix_amp_control()` / `sbx_context_has_mix_effects()`.
+  `sbx_context_has_mix_amp_control()` / `sbx_context_has_mix_effects()`,
+- native-loaded multivoice `.sbg` content can be inspected lane-by-lane through
+  `sbx_context_voice_count()` / `sbx_context_get_keyframe_voice()`.
 
 See Also
 --------
