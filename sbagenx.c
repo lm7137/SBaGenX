@@ -403,7 +403,7 @@ help() {
 		  NL "          -K kbps   MP3 bitrate in kbps (8-320, default 192)"
 		  NL "          -J q      MP3 quality (0-9, lower is better, default 2)"
 		  NL "          -X q      MP3 VBR quality (0-9, lower is better; enables VBR)"
-		  NL "          -U q      OGG Vorbis quality (0-10, default library setting)"
+		  NL "          -U q      OGG Vorbis quality (0-10, default 6)"
 		  NL "          -Z level  FLAC compression level (0-12, default library setting)"
 		  NL "          -O        Output raw data to the standard output"
 	  NL "          -W        Output a WAV-format file instead of raw data"
@@ -655,7 +655,7 @@ int opt_mp3_bitrate_set;
 int opt_mp3_quality_set;
 double opt_mp3_vbr_quality= 0.0;	// LAME VBR quality scale 0..9 (lower is better)
 int opt_mp3_vbr_quality_set;
-double opt_ogg_quality= 0.0;	// Vorbis quality scale 0..10
+double opt_ogg_quality= 6.0;	// Vorbis quality scale 0..10
 int opt_ogg_quality_set;
 double opt_flac_compression= 0.0; // FLAC compression level scale 0..12
 int opt_flac_compression_set;
@@ -6136,7 +6136,7 @@ init_snd_encoder(int format) {
 	    output_encoder_name(),
 	    snd_enc.sf_strerror_fn(0));
 
-   if (out_enc_fmt == OUT_ENC_OGG && opt_ogg_quality_set) {
+   if (out_enc_fmt == OUT_ENC_OGG) {
       double q= opt_ogg_quality / 10.0;
       if (snd_enc.sf_command_fn(snd_enc.snd, SFC_SET_VBR_ENCODING_QUALITY, &q, sizeof(q)) <= 0)
 	 error("Failed to set OGG Vorbis quality to %.2f (range 0..10)", opt_ogg_quality);

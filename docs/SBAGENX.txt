@@ -473,7 +473,7 @@ Encoding tuning options:
   -K <kbps>   MP3 bitrate in kbps (8..320, default 192)
   -J <q>      MP3 quality (0..9, lower is better, default 2)
   -X <q>      MP3 VBR quality (0..9, lower is better; enables VBR mode)
-  -U <q>      OGG Vorbis quality (0..10; e.g. 6 is a typical value)
+  -U <q>      OGG Vorbis quality (0..10; default 6)
   -Z <level>  FLAC compression level (0..12; lossless in all cases)
 
 If -X is provided, MP3 variable bitrate mode is used and -K is ignored.
