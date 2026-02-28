@@ -666,6 +666,43 @@ parse_sbg_relative_offset_token(const char *tok, double *out_sec) {
 }
 
 static int
+split_ws_tokens_inplace(char *text, char ***out_tokv, size_t *out_count) {
+  char **tokv = 0;
+  size_t count = 0, cap = 0;
+  char *p;
+
+  if (!text || !out_tokv || !out_count) return SBX_EINVAL;
+
+  p = (char *)skip_ws(text);
+  while (*p) {
+    char **tmp;
+    char *q = p;
+    if (count == cap) {
+      size_t ncap = cap ? (cap * 2) : 8;
+      tmp = (char **)realloc(tokv, ncap * sizeof(*tokv));
+      if (!tmp) {
+        if (tokv) free(tokv);
+        return SBX_ENOMEM;
+      }
+      tokv = tmp;
+      cap = ncap;
+    }
+    tokv[count++] = p;
+    while (*q && !isspace((unsigned char)*q)) q++;
+    if (*q) {
+      *q++ = 0;
+      p = (char *)skip_ws(q);
+    } else {
+      p = q;
+    }
+  }
+
+  *out_tokv = tokv;
+  *out_count = count;
+  return SBX_OK;
+}
+
+static int
 block_append_entry(SbxNamedBlockDef *blk,
                    const SbxVoiceSetKeyframe *entry) {
   SbxVoiceSetKeyframe *tmp;
@@ -2587,28 +2624,20 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       }
 
       {
-        char *tokv[6];
-        int nt = 0;
-        int idx = 0;
+        char **tokv = 0;
+        size_t nt = 0;
+        size_t idx = 0;
         int had_leading_transition = 0;
         int nested_block_idx = -1;
-        char *r = rest;
-        while (*r) {
-          if (nt >= (int)(sizeof(tokv) / sizeof(tokv[0]))) {
-            char emsg[224];
-            snprintf(emsg, sizeof(emsg),
-                     "line %lu: too many tokens in block '%s' entry",
-                     (unsigned long)line_no, blk->name ? blk->name : "?");
-            set_ctx_error(ctx, emsg);
-            rc = SBX_EINVAL;
-            goto done;
-          }
-          tokv[nt++] = r;
-          while (*r && !isspace((unsigned char)*r)) r++;
-          if (*r) {
-            *r++ = 0;
-            r = (char *)skip_ws(r);
-          }
+        rc = split_ws_tokens_inplace(rest, &tokv, &nt);
+        if (rc == SBX_ENOMEM) {
+          set_ctx_error(ctx, "out of memory");
+          goto done;
+        }
+        if (rc != SBX_OK) {
+          set_ctx_error(ctx, "failed tokenizing block entry");
+          rc = SBX_EINVAL;
+          goto done;
         }
 
         if (nt <= 0) {
@@ -2616,6 +2645,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           snprintf(emsg, sizeof(emsg),
                    "line %lu: missing tone-spec or named tone-set token in block '%s'",
                    (unsigned long)line_no, blk->name ? blk->name : "?");
+          if (tokv) free(tokv);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
@@ -2631,6 +2661,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           snprintf(emsg, sizeof(emsg),
                    "line %lu: missing tone-spec or named tone-set after transition token in block '%s'",
                    (unsigned long)line_no, blk->name ? blk->name : "?");
+          if (tokv) free(tokv);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
@@ -2657,6 +2688,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             snprintf(emsg, sizeof(emsg),
                      "line %lu: invalid block tone-spec, unknown named tone-set, or unknown nested block '%s'",
                      (unsigned long)line_no, tok);
+            if (tokv) free(tokv);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
@@ -2667,6 +2699,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
               snprintf(emsg, sizeof(emsg),
                        "line %lu: block '%s' cannot reference itself",
                        (unsigned long)line_no, blk->name ? blk->name : "?");
+              if (tokv) free(tokv);
               set_ctx_error(ctx, emsg);
               rc = SBX_EINVAL;
               goto done;
@@ -2677,6 +2710,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
               snprintf(emsg, sizeof(emsg),
                        "line %lu: nested block '%s' must appear alone in block '%s'",
                        (unsigned long)line_no, tok, blk->name ? blk->name : "?");
+              if (tokv) free(tokv);
               set_ctx_error(ctx, emsg);
               rc = SBX_EINVAL;
               goto done;
@@ -2695,6 +2729,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             snprintf(emsg, sizeof(emsg),
                      "line %lu: nested block '%s' has no entries",
                      (unsigned long)line_no, tokv[idx - 1]);
+            if (tokv) free(tokv);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
@@ -2707,6 +2742,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
               snprintf(emsg, sizeof(emsg),
                        "line %lu: nested expansion in block '%s' is not time-ordered",
                        (unsigned long)line_no, blk->name ? blk->name : "?");
+              if (tokv) free(tokv);
               set_ctx_error(ctx, emsg);
               rc = SBX_EINVAL;
               goto done;
@@ -2728,6 +2764,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             snprintf(emsg, sizeof(emsg),
                      "line %lu: missing tone-spec or named tone-set token in block '%s'",
                      (unsigned long)line_no, blk->name ? blk->name : "?");
+            if (tokv) free(tokv);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
@@ -2737,6 +2774,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             snprintf(emsg, sizeof(emsg),
                      "line %lu: mix effects in block '%s' require mix/<amp> on the same line or in the referenced named tone-set",
                      (unsigned long)line_no, blk->name ? blk->name : "?");
+            if (tokv) free(tokv);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
@@ -2753,6 +2791,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           if (blk_frame.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = blk_frame.mix_fx_count;
           active_block_last_off = off_sec;
         }
+        if (tokv) free(tokv);
       }
 
       line = next;
@@ -3009,28 +3048,20 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     }
 
     {
-      char *tokv[6];
-      int nt = 0;
-      int idx = 0;
+      char **tokv = 0;
+      size_t nt = 0;
+      size_t idx = 0;
       int had_leading_transition = 0;
       int block_idx = -1;
-      char *r = rest;
-      while (*r) {
-        if (nt >= (int)(sizeof(tokv) / sizeof(tokv[0]))) {
-          char emsg[224];
-          snprintf(emsg, sizeof(emsg),
-                   "line %lu: too many tokens in SBG timing entry",
-                   (unsigned long)line_no);
-          set_ctx_error(ctx, emsg);
-          rc = SBX_EINVAL;
-          goto done;
-        }
-        tokv[nt++] = r;
-        while (*r && !isspace((unsigned char)*r)) r++;
-        if (*r) {
-          *r++ = 0;
-          r = (char *)skip_ws(r);
-        }
+      rc = split_ws_tokens_inplace(rest, &tokv, &nt);
+      if (rc == SBX_ENOMEM) {
+        set_ctx_error(ctx, "out of memory");
+        goto done;
+      }
+      if (rc != SBX_OK) {
+        set_ctx_error(ctx, "failed tokenizing SBG timing entry");
+        rc = SBX_EINVAL;
+        goto done;
       }
 
       if (nt <= 0) {
@@ -3038,6 +3069,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         snprintf(emsg, sizeof(emsg),
                  "line %lu: missing tone-spec or named tone-set token",
                  (unsigned long)line_no);
+        if (tokv) free(tokv);
         set_ctx_error(ctx, emsg);
         rc = SBX_EINVAL;
         goto done;
@@ -3053,6 +3085,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         snprintf(emsg, sizeof(emsg),
                  "line %lu: missing tone-spec or named tone-set after transition token",
                  (unsigned long)line_no);
+        if (tokv) free(tokv);
         set_ctx_error(ctx, emsg);
         rc = SBX_EINVAL;
         goto done;
@@ -3079,6 +3112,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           snprintf(emsg, sizeof(emsg),
                    "line %lu: invalid tone-spec or unknown named tone-set '%s'",
                    (unsigned long)line_no, tok);
+          if (tokv) free(tokv);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
@@ -3090,6 +3124,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             snprintf(emsg, sizeof(emsg),
                      "line %lu: block invocation '%s' must appear alone",
                      (unsigned long)line_no, tok);
+            if (tokv) free(tokv);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
             goto done;
@@ -3109,6 +3144,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           snprintf(emsg, sizeof(emsg),
                    "line %lu: block '%s' has no entries",
                    (unsigned long)line_no, tokv[idx - 1]);
+          if (tokv) free(tokv);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
@@ -3136,6 +3172,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         }
         expanded_block = 1;
       }
+      if (tokv) free(tokv);
     }
 
     if (expanded_block) {

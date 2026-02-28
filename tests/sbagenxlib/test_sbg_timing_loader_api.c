@@ -118,6 +118,13 @@ main(void) {
       "  +00:00:01 duo\n"
       "}\n"
       "NOW burst\n";
+  const char *sbg_many_direct_tokens_text =
+      "00:00 120+0/12 140+0/12 160+0/12 180+0/12 200+0/12 220+0/12 240+0/12\n";
+  const char *sbg_many_block_tokens_text =
+      "burst: {\n"
+      "  +00:00 120+0/12 140+0/12 160+0/12 180+0/12 200+0/12 220+0/12 240+0/12\n"
+      "}\n"
+      "NOW burst\n";
   const char *tmp_path = "/tmp/sbx_sbg_timing_test.sbg";
   double t_actual, t_expect;
   double min_mix = 0.0, max_mix = 0.0;
@@ -327,6 +334,35 @@ main(void) {
     fail("multivoice block should be silent in initial off segment");
   if (!(abs_sum_window(buf, (size_t)(1.1 * cfg.sample_rate), (size_t)(1.45 * cfg.sample_rate)) > 1e-3))
     fail("multivoice block should render energy in active duo segment");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_many_direct_tokens_text, 0);
+  if (rc != SBX_OK)
+    fail("direct multivoice timing line should allow more than six tokens");
+  if (sbx_context_keyframe_count(ctx) != 1)
+    fail("direct multivoice timing line should produce one keyframe");
+  free(buf);
+  frames = (size_t)(0.3 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (many direct tokens)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("direct multivoice timing render failed");
+  if (!(abs_sum_window(buf, (size_t)(0.02 * cfg.sample_rate), (size_t)(0.25 * cfg.sample_rate)) > 1e-3))
+    fail("direct multivoice timing render should produce non-zero energy");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_many_block_tokens_text, 0);
+  if (rc != SBX_OK)
+    fail("block entry should allow more than six tokens");
+  if (sbx_context_keyframe_count(ctx) != 1)
+    fail("block multivoice expansion should produce one keyframe");
+  free(buf);
+  frames = (size_t)(0.3 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (many block tokens)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("block multivoice timing render failed");
+  if (!(abs_sum_window(buf, (size_t)(0.02 * cfg.sample_rate), (size_t)(0.25 * cfg.sample_rate)) > 1e-3))
+    fail("block multivoice timing render should produce non-zero energy");
+
   rc = sbx_context_load_sbg_timing_text(ctx, "self: {\n+00:00 self\n}\nNOW self\n", 0);
   if (rc != SBX_EINVAL)
     fail("self-referential nested block should fail");

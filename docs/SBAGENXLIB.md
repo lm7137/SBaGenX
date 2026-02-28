@@ -574,6 +574,9 @@ Notes
   block-preserved voice lanes, legacy `waveNN` custom-envelope definitions,
   and keyframed mix-side tokens (`mix/<amp>`, `mixspin`, `mixpulse`,
   `mixbeat`, `mixam`).
+- Direct timeline entries and block entries are no longer capped at six
+  whitespace tokens; they now scale to the native multivoice/mix-slot
+  capacities enforced by `SBX_MAX_SBG_VOICES` and `SBX_MAX_SBG_MIXFX`.
 - Native mix effects in `.sbg` require explicit `mix/<amp>` control on the
   same line or in the referenced named tone-set, matching the existing legacy
   expectation that mix effects are anchored to a declared mix stream level.
