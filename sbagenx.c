@@ -4919,6 +4919,184 @@ scanOptions(int *acp, char ***avp) {
    return rv;
 }
 
+static int
+sbx_read_text_file_alloc_cli(const char *path, char **out_text) {
+   FILE *fp;
+   long len;
+   char *buf;
+   size_t got;
+
+   if (!path || !out_text)
+      return SBX_EINVAL;
+   *out_text= 0;
+   fp= fopen(path, "rb");
+   if (!fp)
+      return SBX_EINVAL;
+   if (0 != fseek(fp, 0, SEEK_END)) {
+      fclose(fp);
+      return SBX_EINVAL;
+   }
+   len= ftell(fp);
+   if (len < 0) {
+      fclose(fp);
+      return SBX_EINVAL;
+   }
+   if (0 != fseek(fp, 0, SEEK_SET)) {
+      fclose(fp);
+      return SBX_EINVAL;
+   }
+   buf= (char *)malloc((size_t)len + 1);
+   if (!buf) {
+      fclose(fp);
+      return SBX_ENOMEM;
+   }
+   got= fread(buf, 1, (size_t)len, fp);
+   fclose(fp);
+   if (got != (size_t)len) {
+      free(buf);
+      return SBX_EINVAL;
+   }
+   buf[len]= 0;
+   *out_text= buf;
+   return SBX_OK;
+}
+
+static int
+sbx_parse_safe_seqfile_option_line(const char *line,
+				   int *out_S, int *out_E,
+				   int *out_have_T, int *out_T_ms,
+				   char **out_mix_path) {
+   char *dup, *argv[64], *p;
+   int argc= 0, i;
+
+   if (!line || !out_S || !out_E || !out_have_T || !out_T_ms || !out_mix_path)
+      return 0;
+   dup= StrDup((char *)line);
+   p= dup;
+   while (*p) {
+      if (argc >= (int)(sizeof(argv) / sizeof(argv[0]))) {
+	 free(dup);
+	 return 0;
+      }
+      while (isspace((unsigned char)*p)) p++;
+      if (!*p) break;
+      argv[argc++]= p;
+      while (*p && !isspace((unsigned char)*p)) p++;
+      if (*p) *p++= 0;
+   }
+
+   for (i= 0; i<argc; i++) {
+      char *tok= argv[i];
+      size_t a;
+      if (tok[0] != '-' || !tok[1]) {
+	 free(dup);
+	 return 0;
+      }
+      for (a= 1; tok[a]; a++) {
+	 switch (tok[a]) {
+	  case 'S':
+	     *out_S= 1;
+	     break;
+	  case 'E':
+	     *out_E= 1;
+	     break;
+	  case 'T':
+	     if (tok[a+1] || i+1 >= argc || 0 == readTime(argv[i+1], out_T_ms)) {
+		free(dup);
+		return 0;
+	     }
+	     *out_have_T= 1;
+	     i++;
+	     a= strlen(tok) - 1;
+	     break;
+	  case 'm':
+	     if (tok[a+1] || i+1 >= argc) {
+		free(dup);
+		return 0;
+	     }
+	     if (!*out_mix_path)
+		*out_mix_path= StrDup(argv[i+1]);
+	     i++;
+	     a= strlen(tok) - 1;
+	     break;
+	  default:
+	     free(dup);
+	     return 0;
+	 }
+      }
+   }
+   free(dup);
+   return 1;
+}
+
+static int
+sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
+				 int *out_S, int *out_E,
+				 int *out_have_T, int *out_T_ms,
+				 char **out_mix_path) {
+   char *text, *line;
+   int rc;
+
+   if (!out_text || !out_S || !out_E || !out_have_T || !out_T_ms || !out_mix_path)
+      return SBX_EINVAL;
+   *out_text= 0;
+   *out_S= 0;
+   *out_E= 0;
+   *out_have_T= 0;
+   *out_T_ms= -1;
+   *out_mix_path= 0;
+
+   rc= sbx_read_text_file_alloc_cli(fnam, &text);
+   if (rc != SBX_OK)
+      return rc;
+
+   line= text;
+   while (line && *line) {
+      char *next= strchr(line, '\n');
+      char *trim;
+
+      if (next)
+	 next++;
+      trim= line;
+      while (*trim && isspace((unsigned char)*trim)) trim++;
+      if (!*trim) {
+	 line= next;
+	 continue;
+      }
+      if (*trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
+	 line= next;
+	 continue;
+      }
+      if (*trim == '-') {
+	 char saved= 0;
+	 char *end= line + strlen(line);
+	 if (next)
+	    end= next - 1;
+	 if (end > line && end[-1] == '\r')
+	    end--;
+	 saved= *end;
+	 *end= 0;
+	 if (!sbx_parse_safe_seqfile_option_line(trim,
+						 out_S, out_E,
+						 out_have_T, out_T_ms,
+						 out_mix_path)) {
+	    if (*out_mix_path) free(*out_mix_path);
+	    *out_mix_path= 0;
+	    free(text);
+	    return SBX_EINVAL;
+	 }
+	 *end= saved;
+	 while (line < end) *line++= ' ';
+	 line= next;
+	 continue;
+      }
+      break;
+   }
+
+   *out_text= text;
+   return SBX_OK;
+}
+
 //
 //	Handle an option string, breaking it into an (argc/argv) list
 //	for scanOptions.
@@ -7650,6 +7828,9 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    SbxEngineConfig cfg;
    SbxContext *ctx;
    int rc;
+   char *seq_text= 0;
+   char *safe_mix_path= 0;
+   int safe_S= 0, safe_E= 0, safe_have_T= 0, safe_T_ms= -1;
 
    if (ac != 1 || !av)
       return 0;
@@ -7657,28 +7838,52 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (!fnam || 0 == strcmp(fnam, "-"))
       return 0;
 
+   rc= sbx_prepare_seqfile_runtime_text(fnam, &seq_text,
+					&safe_S, &safe_E,
+					&safe_have_T, &safe_T_ms,
+					&safe_mix_path);
+   if (rc == SBX_ENOMEM)
+      error("Out of memory preparing sequence file for sbagenxlib runtime");
+   if (rc != SBX_OK)
+      return 0;
+
    sbx_default_engine_config(&cfg);
    cfg.sample_rate= (double)out_rate;
    cfg.channels= 2;
    ctx= sbx_context_create(&cfg);
    if (!ctx)
-      return 0;
+      goto fail;
    if (sbx_context_set_default_waveform(ctx, opt_w) != SBX_OK) {
       sbx_context_destroy(ctx);
-      return 0;
+      goto fail;
    }
 
-   rc= sbx_context_load_sbg_timing_file(ctx, fnam, 0);
+   rc= sbx_context_load_sbg_timing_text(ctx, seq_text, 0);
    if (rc != SBX_OK)
-      rc= sbx_context_load_sequence_file(ctx, fnam, 0);
+      rc= sbx_context_load_sequence_text(ctx, seq_text, 0);
    if (rc != SBX_OK) {
       sbx_context_destroy(ctx);
-      return 0;
+      goto fail;
    }
+
+   if (safe_S) {
+      opt_S= 1;
+      if (!fast_mult) fast_mult= 1;
+   }
+   if (safe_E)
+      opt_E= 1;
+   if (safe_have_T && opt_T == -1) {
+      opt_T= safe_T_ms;
+      if (!fast_mult) fast_mult= 1;
+   }
+   if (safe_mix_path && !opt_m)
+      opt_m= StrDup(safe_mix_path);
 
    if (opt_D) {
       emit_periods_from_sbx_context(ctx, 0);
       sbx_context_destroy(ctx);
+      free(seq_text);
+      if (safe_mix_path) free(safe_mix_path);
       return 1;
    }
 
@@ -7696,7 +7901,14 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    sbx_runtime_total_sec= sbx_context_duration_sec(ctx);
    if (!opt_Q)
       warn("Using sbagenxlib runtime for sequence file subset: %s", fnam);
+   free(seq_text);
+   if (safe_mix_path) free(safe_mix_path);
    return 1;
+
+fail:
+   if (seq_text) free(seq_text);
+   if (safe_mix_path) free(safe_mix_path);
+   return 0;
 }
 
 static int

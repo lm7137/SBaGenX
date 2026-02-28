@@ -447,6 +447,19 @@ Phase 3.68
   native mix keyframes and timed mix-effect slots, matching the observability
   approach already used for multivoice lanes.
 
+Phase 3.69
+- Extend the direct sequence-file sbagenxlib bridge with a safe legacy option
+  preamble subset:
+  - accept leading `-S`, `-E`, `-SE`, `-T <time>`, and `-m <file>` lines
+    before native `.sbg` content,
+  - strip those lines before handing the remaining sequence text to
+    `sbagenxlib`,
+  - apply their runtime meaning in the CLI bridge only after native loading
+    succeeds.
+- This keeps file-level execution controls (`-SE`, `-T`, mix input selection)
+  in the frontend layer while letting many historical `.sbg` examples route
+  through the library without falling back to the legacy parser.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
@@ -840,12 +853,22 @@ Seq Backend Native Mix Dump Smoke Test (Phase 3.68)
 tests/sbagenxlib/test_seq_backend_mix_dump.sh
 ```
 
+Seq Backend Safe-Preamble Bridge Smoke Test (Phase 3.69)
+--------------------------------------------------------
+
+```bash
+tests/sbagenxlib/test_seq_backend_safe_preamble_subset.sh
+```
+
 Notes:
 
 - `libseq` reads the Phase 3.3 line format: `<time> <tone-spec> [interp]`.
 - `libsbg` reads the Phase 3.4+ timing subset (including named tone-sets,
   `NOW`/relative timeline forms, and block definitions/invocations).
 - Optional trailing `loop` token is accepted by both bridge commands.
+- Direct `seq-file` inputs routed through sbagenxlib now also accept a safe
+  legacy file preamble subset (`-S`, `-E`, `-SE`, `-T`, `-m`) before the first
+  native sequence line.
 - `-D` now prints sbagenxlib keyframes directly (`time tone-spec interp`).
 - Built-in programs (`drop/sigmoid/curve/slide`) now generate keyframes and
   render via sbagenxlib runtime in normal playback mode.
