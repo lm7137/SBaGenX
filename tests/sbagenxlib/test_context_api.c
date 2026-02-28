@@ -141,6 +141,11 @@ int main(void) {
   }
   {
     SbxMixFxSpec fx;
+    if (sbx_parse_mix_fx_spec("mixam:8", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("mixam default parse failed");
+    if (fx.type != SBX_MIXFX_AM || fx.mixam_mode != SBX_MIXAM_MODE_COS ||
+        fabs(fx.mixam_start - 0.0) > 1e-9 || fabs(fx.mixam_floor - 0.45) > 1e-9)
+      fail("mixam default parse value mismatch");
     if (sbx_parse_mix_fx_spec("mixam:8:s=0:d=0.5:a=0.1:r=0.1:e=3:f=0.25",
                               SBX_WAVE_SINE, &fx) != SBX_OK)
       fail("mixam parse failed");

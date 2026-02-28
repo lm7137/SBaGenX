@@ -276,8 +276,8 @@ sbx_mixam_set_defaults(SbxMixFxSpec *fx) {
   fx->mixam_attack = 0.5;
   fx->mixam_release = 0.5;
   fx->mixam_edge_mode = 3;
-  fx->mixam_floor = 0.0;
-  fx->mixam_mode = SBX_MIXAM_MODE_PULSE;
+  fx->mixam_floor = 0.45;
+  fx->mixam_mode = SBX_MIXAM_MODE_COS;
   fx->mixam_bind_program_beat = 0;
 }
 
@@ -304,6 +304,8 @@ sbx_validate_mixam_fields(const SbxMixFxSpec *fx) {
 static int
 sbx_parse_mixam_params(const char *params, SbxMixFxSpec *fx) {
   const char *p = params;
+  int saw_mode = 0;
+  int saw_pulse_shape = 0;
   if (!fx) return SBX_EINVAL;
   if (!p) return SBX_OK;
 
@@ -331,6 +333,7 @@ sbx_parse_mixam_params(const char *params, SbxMixFxSpec *fx) {
         fx->mixam_mode = SBX_MIXAM_MODE_COS;
       else
         return SBX_EINVAL;
+      saw_mode = 1;
       end = (char *)(p + mlen);
     } else {
       val = strtod(p, &end);
@@ -338,14 +341,15 @@ sbx_parse_mixam_params(const char *params, SbxMixFxSpec *fx) {
 
       switch (key) {
         case 's': fx->mixam_start = val; break;
-        case 'd': fx->mixam_duty = val; break;
-        case 'a': fx->mixam_attack = val; break;
-        case 'r': fx->mixam_release = val; break;
+        case 'd': fx->mixam_duty = val; saw_pulse_shape = 1; break;
+        case 'a': fx->mixam_attack = val; saw_pulse_shape = 1; break;
+        case 'r': fx->mixam_release = val; saw_pulse_shape = 1; break;
         case 'f': fx->mixam_floor = val; break;
         case 'e': {
           int mode = (int)val;
           if (fabs(val - (double)mode) > 1e-9) return SBX_EINVAL;
           fx->mixam_edge_mode = mode;
+          saw_pulse_shape = 1;
           break;
         }
         default:
@@ -357,6 +361,9 @@ sbx_parse_mixam_params(const char *params, SbxMixFxSpec *fx) {
     if (*p == 0) break;
     if (*p != ':') return SBX_EINVAL;
   }
+
+  if (!saw_mode && saw_pulse_shape)
+    fx->mixam_mode = SBX_MIXAM_MODE_PULSE;
 
   return sbx_validate_mixam_fields(fx);
 }

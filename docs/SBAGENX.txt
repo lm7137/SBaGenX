@@ -1784,7 +1784,8 @@ follows:
   -H [spec] Customize mixam envelope globally.
               Optional spec: m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>
               Order does not matter. Omitted parameters use defaults.
-              Defaults: m=pulse, s=0, d=0.5, a=0.5, r=0.5, e=3, f=0.
+              Defaults: m=cos, s=0, d=0.5, a=0.5, r=0.5, e=3, f=0.45.
+              Compatibility: if d/a/r/e are supplied without m=..., pulse mode is implied.
               In m=cos mode, d/a/r/e are ignored (continuous raised-cosine AM).
               Constraint: in m=pulse mode, a+r <= 1.
               e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
@@ -2048,13 +2049,14 @@ pulses, while sine:mixpulse:8/60 creates smoother pulsing variations.
 The mixam effect applies true multiplicative amplitude modulation to the mix
 stream: out(t)=mix(t)*mix_mul*g(t). The gain envelope g(t) is bounded in
 [f,1] and is configured by:
-  m envelope model: pulse (default) or cos (raised-cosine continuous AM)
+  m envelope model: cos (default, raised-cosine continuous AM) or pulse
   s phase offset in cycle (default 0)
   d duty in cycle (default 0.5)
   a attack share of ON window (default 0.5)
   r release share of ON window (default 0.5)
   e edge mode: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep (default 3)
-  f floor gain (default 0)
+  f floor gain (default 0.45)
+If d/a/r/e are supplied without m=..., pulse mode is implied for compatibility.
 Constraint: in m=pulse mode, a+r must be <=1. Examples:
   -H s=0:d=0.5:a=0.1:r=0.1:e=3:f=0.25
   -H m=cos:s=0:f=0.45

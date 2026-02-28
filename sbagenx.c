@@ -430,7 +430,8 @@ help() {
 	  NL "          -H [spec] Customize global mixam envelope for mixam:<pulse|beat>"
 	  NL "                      spec is m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>"
 	  NL "                      order-independent; omitted params use defaults"
-	  NL "                      defaults m=pulse:s=0:d=0.5:a=0.5:r=0.5:e=3:f=0"
+	  NL "                      defaults m=cos:s=0:d=0.5:a=0.5:r=0.5:e=3:f=0.45"
+	  NL "                      if d/a/r/e are set without m=..., pulse mode is implied"
 	  NL "                      in m=cos mode, d/a/r/e are ignored; s/f apply"
 	  NL
 	  NL "          -R rate   Select rate in Hz that frequency changes are recalculated"
@@ -609,13 +610,13 @@ double opt_I_a= 0.5;		// Attack as fraction of ON window
 double opt_I_r= 0.5;		// Release as fraction of ON window
 int opt_I_e= 2;			// Edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
 int opt_H;			// Enable global mixam envelope override
-int opt_H_m= SBX_MIXAM_MODE_PULSE;	// mixam model: 0 pulse, 1 raised-cosine
+int opt_H_m= SBX_MIXAM_MODE_COS;	// mixam model: 0 pulse, 1 raised-cosine
 double opt_H_s= 0.0;		// mixam start-cycle (phase offset)
 double opt_H_d= 0.5;		// mixam duty
 double opt_H_a= 0.5;		// mixam attack share
 double opt_H_r= 0.5;		// mixam release share
 int opt_H_e= 3;			// mixam edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
-double opt_H_f= 0.0;		// mixam floor gain
+double opt_H_f= 0.45;		// mixam floor gain
 char *waveform_name[] = {"sine", "square", "triangle", "sawtooth"}; // To be used for messages
 
 FILE *mix_in;			// Input stream for mix sound data, or 0
@@ -2413,6 +2414,8 @@ parse_mixam_env_option_spec(const char *spec) {
    char tmp[256];
    char *p, *q, *q2;
    long edge;
+   int saw_mode= 0;
+   int saw_pulse_shape= 0;
    if (!spec || !*spec) return;
    if (strlen(spec) >= sizeof(tmp))
       error("-H spec is too long");
@@ -2440,6 +2443,7 @@ parse_mixam_env_option_spec(const char *spec) {
 		opt_H_m= SBX_MIXAM_MODE_COS;
 	     else
 		error("-H parameter m must be 'pulse' or 'cos'");
+	     saw_mode= 1;
 	  }
 	  p= q;
 	  break;
@@ -2453,18 +2457,21 @@ parse_mixam_env_option_spec(const char *spec) {
 	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  opt_H_d= strtod(p, &q);
 	  if (q == p) error("-H parameter d requires a numeric value");
+	  saw_pulse_shape= 1;
 	  p= q;
 	  break;
        case 'a':
 	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  opt_H_a= strtod(p, &q);
 	  if (q == p) error("-H parameter a requires a numeric value");
+	  saw_pulse_shape= 1;
 	  p= q;
 	  break;
        case 'r':
 	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
 	  opt_H_r= strtod(p, &q);
 	  if (q == p) error("-H parameter r requires a numeric value");
+	  saw_pulse_shape= 1;
 	  p= q;
 	  break;
        case 'e':
@@ -2476,6 +2483,7 @@ parse_mixam_env_option_spec(const char *spec) {
 	  if (*q2 && *q2 != ':')
 	     error("-H parameter e must be an integer in range 0..3");
 	  opt_H_e= (int)edge;
+	  saw_pulse_shape= 1;
 	  p= q;
 	  break;
        case 'f':
@@ -2491,6 +2499,9 @@ parse_mixam_env_option_spec(const char *spec) {
       if (*p == ':') p++;
       else if (*p) error("-H expects colon-separated parameters");
    }
+
+   if (!saw_mode && saw_pulse_shape)
+      opt_H_m= SBX_MIXAM_MODE_PULSE;
 
    if (opt_H_s < 0.0 || opt_H_s > 1.0)
       error("-H parameter s must be in range [0,1]");
