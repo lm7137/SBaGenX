@@ -9005,10 +9005,6 @@ readPreProg(int ac, char **av) {
    if (0 == strcmp(av[0], "drop")) {
       if (!opt_E && opt_L < 0) {
 	 opt_E= 1;
-	 if (!opt_Q) {
-	    fprintf(stderr, "*** No explicit output length was given for -p drop; enabling -E automatically ***\n");
-	    fprintf(stderr, "(built-in program will stop at its programmed end time)\n\n");
-	 }
       }
       if (opt_G || (opt_P && !opt_H))
 	 opt_P_drop= 1;
@@ -9021,10 +9017,6 @@ readPreProg(int ac, char **av) {
    if (0 == strcmp(av[0], "curve")) {
       if (!opt_E && opt_L < 0) {
 	 opt_E= 1;
-	 if (!opt_Q) {
-	    fprintf(stderr, "*** No explicit output length was given for -p curve; enabling -E automatically ***\n");
-	    fprintf(stderr, "(built-in program will stop at its programmed end time)\n\n");
-	 }
       }
       if (opt_G || (opt_P && !opt_H))
 	 opt_P_curve= 1;
@@ -9055,10 +9047,6 @@ readPreProg(int ac, char **av) {
    if (0 == strcmp(av[0], "slide")) {
       if (!opt_E && opt_L < 0) {
 	 opt_E= 1;
-	 if (!opt_Q) {
-	    fprintf(stderr, "*** No explicit output length was given for -p slide; enabling -E automatically ***\n");
-	    fprintf(stderr, "(built-in program will stop at its programmed end time)\n\n");
-	 }
       }
       if (opt_G)
 	 error("-G is not supported with -p slide");
@@ -9073,10 +9061,6 @@ readPreProg(int ac, char **av) {
    if (0 == strcmp(av[0], "sigmoid")) {
       if (!opt_E && opt_L < 0) {
 	 opt_E= 1;
-	 if (!opt_Q) {
-	    fprintf(stderr, "*** No explicit output length was given for -p sigmoid; enabling -E automatically ***\n");
-	    fprintf(stderr, "(built-in program will stop at its programmed end time)\n\n");
-	 }
       }
       if (opt_G || (opt_P && !opt_H))
 	 opt_P_sigmoid= 1;

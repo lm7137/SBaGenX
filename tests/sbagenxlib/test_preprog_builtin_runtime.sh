@@ -58,10 +58,10 @@ timeout 5 "$BIN" -q 600 -p slide t0.1 200+10/1 >"$tmpdir/slide.txt" 2>&1 || {
   exit 1
 }
 
-grep -q "enabling -E automatically" "$tmpdir/slide.txt" || {
-  echo "FAIL: built-in slide session did not advertise automatic end enable" >&2
+if grep -q "enabling -E automatically" "$tmpdir/slide.txt"; then
+  echo "FAIL: built-in slide session should auto-stop silently by default" >&2
   exit 1
-}
+fi
 grep -q "Sequence duration" "$tmpdir/slide.txt" || {
   echo "FAIL: built-in slide session did not report finite duration" >&2
   exit 1
