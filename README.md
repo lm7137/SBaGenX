@@ -7,6 +7,8 @@ SBaGenX is a command-line brainwave generator for creating binaural beats, monau
 > **SBaGenX is a fork of SBaGen+, continuing development of the original SBaGen lineage.**
 > Full credit is due, first and foremost, to the father of SBaGen, Jim Peters, and also to the creator of the SBaGen+ fork, Ruan Klein, who added isochronic beats as well as making numerous enhancements.
 
+> **Beta releases:** The `v3.0.0-beta.*` pre-releases are now close to production-ready and are recommended for most users who want the latest functionality. If reliability is paramount, use the latest non-beta release instead. On GitHub, these builds are listed under **Pre-releases** on the [releases page](https://github.com/lm7137/SBaGenX/releases).
+
 ## Table of Contents
 
 - [About This Project](#about-this-project)
@@ -98,6 +100,12 @@ This fork introduces substantial functional changes beyond maintenance:
 
 Download assets from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
 
+If you want the newest `sbagenxlib` work and the latest runtime/plotting
+improvements, use the current **`v3.0.0-beta.*` pre-release** from the same
+page. Those betas are recommended for most users; only prefer the non-beta
+release line if maximum reliability is more important than getting the newest
+features.
+
 ### Try SBaGenX in 60 Seconds
 
 #### Windows
@@ -159,7 +167,13 @@ At present, there is no officially published SBaGenX runtime container image for
 
 ### Download Pre-built Binaries
 
-Current release asset:
+Recommended download path:
+
+- For most users: use the current **`v3.0.0-beta.*` pre-release** from the
+  [GitHub releases page](https://github.com/lm7137/SBaGenX/releases)
+- For conservative installs: use the latest non-beta release from the same page
+
+Current stable release asset:
 
 - Windows installer: [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/download/v2.0.0/sbagenx-windows-setup.exe)
 - SHA256: `16B9CE7F3F4F00BA674D184B0C1448D35B59E107F2DCEB41B4B760509544EA88`
