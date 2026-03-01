@@ -377,6 +377,8 @@ help() {
 	  NL "                     or \"curve path/to/file.sbgf 00ls:l=0.2:h=0\""
 	  NL "                     or \"libseq file.sbxseq [loop]\""
 	  NL "                     or \"libsbg file.sbg [loop]\""
+	  NL "                     Built-in programs stop automatically at their programmed"
+	  NL "                     end time unless -L overrides the output length."
 	  NL "          -q mult   Quick.  Run through quickly (real time x 'mult') from the"
 	  NL "                     start time, rather than wait for real time to pass"
 	  NL
@@ -8998,6 +9000,13 @@ readPreProg(int ac, char **av) {
    
    // Handle 'drop'
    if (0 == strcmp(av[0], "drop")) {
+      if (!opt_E && opt_L < 0) {
+	 opt_E= 1;
+	 if (!opt_Q) {
+	    fprintf(stderr, "*** No explicit output length was given for -p drop; enabling -E automatically ***\n");
+	    fprintf(stderr, "(built-in program will stop at its programmed end time)\n\n");
+	 }
+      }
       if (opt_G || (opt_P && !opt_H))
 	 opt_P_drop= 1;
       ac--; av++;
@@ -9007,6 +9016,13 @@ readPreProg(int ac, char **av) {
 
    // Handle 'curve'
    if (0 == strcmp(av[0], "curve")) {
+      if (!opt_E && opt_L < 0) {
+	 opt_E= 1;
+	 if (!opt_Q) {
+	    fprintf(stderr, "*** No explicit output length was given for -p curve; enabling -E automatically ***\n");
+	    fprintf(stderr, "(built-in program will stop at its programmed end time)\n\n");
+	 }
+      }
       if (opt_G || (opt_P && !opt_H))
 	 opt_P_curve= 1;
       ac--; av++;
@@ -9034,6 +9050,13 @@ readPreProg(int ac, char **av) {
 
    // Handle 'slide'
    if (0 == strcmp(av[0], "slide")) {
+      if (!opt_E && opt_L < 0) {
+	 opt_E= 1;
+	 if (!opt_Q) {
+	    fprintf(stderr, "*** No explicit output length was given for -p slide; enabling -E automatically ***\n");
+	    fprintf(stderr, "(built-in program will stop at its programmed end time)\n\n");
+	 }
+      }
       if (opt_G)
 	 error("-G is not supported with -p slide");
       if (opt_A && !opt_Q)
@@ -9045,6 +9068,13 @@ readPreProg(int ac, char **av) {
 
    // Handle 'sigmoid'
    if (0 == strcmp(av[0], "sigmoid")) {
+      if (!opt_E && opt_L < 0) {
+	 opt_E= 1;
+	 if (!opt_Q) {
+	    fprintf(stderr, "*** No explicit output length was given for -p sigmoid; enabling -E automatically ***\n");
+	    fprintf(stderr, "(built-in program will stop at its programmed end time)\n\n");
+	 }
+      }
       if (opt_G || (opt_P && !opt_H))
 	 opt_P_sigmoid= 1;
       ac--; av++;
@@ -9667,10 +9697,8 @@ create_drop(int ac, char **av) {
 
 #undef BAD
       
-   n_step= 1 + (len0-1) / steplen;	// Round up
+   n_step= 1 + (len0-1) / steplen;	// Round up sample count only
    if (n_step < 2) n_step= 2;
-   len0= n_step * steplen;
-   if (!slide) len1= (1 + (len1-1) / steplen) * steplen;
 
    // Sort out carriers
    len= islong ? len0 + len1 : len0;
@@ -9961,10 +9989,8 @@ create_sigmoid(int ac, char **av) {
    // Tidy timings
    if (len0 < 60)
       error("Sigmoid drop-time must be at least 1 minute");
-   n_step= 1 + (len0-1) / steplen;	// Round up
+   n_step= 1 + (len0-1) / steplen;	// Round up sample count only
    if (n_step < 2) n_step= 2;
-   len0= n_step * steplen;
-   if (!slide) len1= (1 + (len1-1) / steplen) * steplen;
 
    // Sort out carriers and sigmoid coefficients
    len= islong ? len0 + len1 : len0;
@@ -10288,10 +10314,8 @@ create_curve(int ac, char **av) {
 
 #undef BAD
 
-   n_step= 1 + (len0-1) / steplen;	// Round up
+   n_step= 1 + (len0-1) / steplen;	// Round up sample count only
    if (n_step < 2) n_step= 2;
-   len0= n_step * steplen;
-   if (!slide) len1= (1 + (len1-1) / steplen) * steplen;
 
    len= islong ? len0 + len1 : len0;
    c0= carr + 5.0;

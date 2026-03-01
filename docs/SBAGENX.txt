@@ -1057,10 +1057,16 @@ hold, and optional 5 minute wake-up.  It might be used as follows:
   sbagen -m river2.ogg -p drop t40,10,5 20ds+^/2 mix/98
 
 This way you can create -p drop sessions of whatever length you wish.
-Note that lengths are rounded to the nearest minute, and may also be
-rounded further if necessary if the session is based on 3-minute
-steps.  Also note that you must include the lengths for all three
-parts even if you are not using '+' or '^' for a hold or wake-up part.
+Built-in `-p` programs are finite by default and stop automatically at
+their programmed end time.  You only need `-L` if you want to force a
+different output length.
+
+Also note that lengths are accepted in whole minutes only, and that
+you must include the lengths for all three parts even if you are not
+using `+` or `^` for a hold or wake-up part.  In stepped (`k`) mode,
+the internal checkpoints still follow the normal 1-minute or 3-minute
+grid, but the overall programmed runtime is not extended to match that
+grid.
 
 
 2.7: The 'slide' sequences
@@ -1097,6 +1103,10 @@ drop for working through all the combinations.
 The sessions are 30 minutes long by default.  If you want a longer
 session, you can add 't<duration>' after the 'slide', for example "-p
 slide t60 200+6/1" for a 60 minute session.
+
+Built-in `-p` programs are finite by default and stop automatically at
+their programmed end time.  You only need `-L` if you want to force a
+different output length.
 
 With sign `M`, `-p slide` uses:
 
@@ -1396,8 +1406,11 @@ and optional 5-minute wake-up (if `^` is used).  Example:
 
   sbagenx -m river2.ogg -p sigmoid t40,10,5 20ds+^/2:l=0.125:h=0 mix/98
 
-As with `-p drop`, lengths are whole-minute based and may be rounded
-further depending on step mode.
+As with `-p drop`, built-in `-p` programs are finite by default and
+stop automatically at their programmed end time.  Lengths are
+whole-minute based.  In stepped (`k`) mode, the internal checkpoints
+still follow the normal grid, but the overall programmed runtime is
+not extended to match that grid.
 
 
 2.11: The 'curve' sequences
@@ -1408,6 +1421,9 @@ syntax, read section 3 first, then return here.
 
 `-p curve` lets you drive built-in sessions from expressions stored in
 an external function file.  The file extension is `.sbgf` (required).
+Like the other built-in `-p` programs, these sessions are finite by
+default and stop automatically at their programmed end time unless
+`-L` overrides the output length.
 
 Usage:
 
