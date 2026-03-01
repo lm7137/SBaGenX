@@ -1,0 +1,40 @@
+{
+  "private": true,
+  "name": "theia-ide-sbagenx-studio-ext",
+  "version": "1.69.0",
+  "description": "SBaGenX Studio shell extension for Eclipse Theia",
+  "dependencies": {
+    "@theia/core": "1.69.0",
+    "@theia/editor": "1.69.0",
+    "@theia/filesystem": "1.69.0",
+    "inversify": "^6.0.1"
+  },
+  "devDependencies": {
+    "rimraf": "^2.7.1",
+    "typescript": "^4.5.5"
+  },
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/sbagenx-studio-frontend-module",
+      "backend": "lib/node/sbagenx-studio-backend-module"
+    }
+  ],
+  "keywords": [
+    "theia-extension",
+    "sbagenx"
+  ],
+  "license": "MIT",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "scripts": {
+    "clean": "rimraf lib *.tsbuildinfo",
+    "build": "tsc -b",
+    "lint": "eslint --ext js,jsx,ts,tsx src",
+    "lint:fix": "eslint --ext js,jsx,ts,tsx src --fix"
+  },
+  "peerDependencies": {
+    "react": "^16.8.0"
+  }
+}

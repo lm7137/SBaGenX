@@ -3,6 +3,9 @@ build
 dist
 libs/*.a
 sbagenx-*
+!studio/overlay/theia-extensions/sbagenx-studio/
+!studio/overlay/theia-extensions/sbagenx-studio/**
+!studio/tools/sbagenx-studio-engine.c
 *.exe
 *.sbg
 *.wav
@@ -15,3 +18,5 @@ sbagenx-*
 docs/api/
 
 !/examples/**/*.sbg
+
+studio/bin/
