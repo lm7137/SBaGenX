@@ -2065,6 +2065,23 @@ pulses, while sine:mixpulse:8/60 creates smoother pulsing variations.
 The mixam effect applies true multiplicative amplitude modulation to the mix
 stream: out(t)=mix(t)*mix_mul*g(t). The gain envelope g(t) is bounded in
 [f,1] and is configured by:
+
+Rationale: `mixam` was introduced to support broadband amplitude
+modulation directly on the mix stream.  The motivation is that
+broadband AM appears to have the strongest clinical support for
+entraining very low frequencies, especially in the delta and
+sub-delta ranges, whereas the evidence for binaural, monaural and
+isochronic methods is weaker at those lowest frequencies.  `mixam`
+therefore provides a way to keep the ambience or noise content of a
+mix track while driving it with an explicit low-frequency envelope
+instead of relying on a separate carrier-based beat signal.
+
+This is especially relevant for `mixam:beat` used with a built-in `-p`
+program: the programmed beat/pulse trajectory can still be followed
+over time, but it is applied as broadband amplitude modulation of the
+mix rather than as an additional binaural, monaural or isochronic
+tone.
+
   m envelope model: cos (default, raised-cosine continuous AM) or pulse
   s phase offset in cycle (default 0)
   d duty in cycle (default 0.5)
