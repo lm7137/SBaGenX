@@ -868,9 +868,9 @@ lots of practice.
 
 Usage: 
 
-  -p drop <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>] <tone-specs> ...
+  -p drop <signed-level|N><target-spec>[s|k][+][^][@|M][/<amp>][:S=<val>] <tone-specs> ...
   -G -p drop [t<drop>,<hold>,<wake>]
-      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]
+      <signed-level|N><target-spec>[s|k][+][^][@|M][/<amp>][:S=<val>]
 
 Examples:
 
@@ -921,14 +921,29 @@ through levels, waiting for each to become 'boring' before moving on.
 Later deep levels require headphones that can reproduce really low
 bass frequencies, ideally down to 10Hz or lower.
 
-The letter a-l (or A-L if you prefer) selects the depth of the beat
-frequencies.  Beat/Pulse frequencies default to a 10Hz start, then drop
-exponentially to a target.  You can override the start value with
-`:S=<val>` in Hz.  Targets for letters A-L are: 4.4, 3.7, 3.1, 2.5,
-2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3.  Using A, you never get down
-to delta frequencies.  The deeper beats (i.e. later letters) are
-supposed to be better, so long as you really are entraining to them.
-Like the carriers, this is something to build up over time.
+The target spec selects the beat/pulse endpoint.  Beat/pulse frequencies
+default to a 10Hz start, then drop exponentially to the selected target.
+You can override the start value with `:S=<val>` in Hz.
+
+Target-spec forms:
+  a ... l         base targets from the table below
+  +a ... +l       same as the positive form above
+  a.x ... l.x     interpolate fractionally toward the next deeper letter
+  -a ... -l       mirror the positive scale upward around `a = 4.4Hz`
+  -a.x ... -l.x   same mirrored rule, with fractional interpolation
+
+Examples:
+  a    = 4.4Hz
+  a.5  = midpoint between a and b = 4.05Hz
+  l.5  = midpoint between l=0.3 and synthetic next target 0.2 = 0.25Hz
+  -a   = 4.4Hz
+  -b   = 5.1Hz
+
+The base letter targets are: 4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9,
+0.7, 0.5, 0.4, 0.3.  Using `a`, you never get down to delta frequencies.
+The deeper beats (i.e. later letters) are supposed to be better, so long
+as you really are entraining to them.  Like the carriers, this is
+something to build up over time.
 
 Reference (lowest beat/pulse target by letter):
   +--------+-----+-----+-----+-----+-----+-----+
@@ -940,6 +955,17 @@ Reference (lowest beat/pulse target by letter):
   +--------+-----+-----+-----+-----+-----+-----+
   | Hz     | 1.2 | 0.9 | 0.7 | 0.5 | 0.4 | 0.3 |
   +--------+-----+-----+-----+-----+-----+-----+
+
+Reference (mirrored negative target by letter):
+  +--------+------+------+------+------+------+------+
+  | Letter | -a   | -b   | -c   | -d   | -e   | -f   |
+  +--------+------+------+------+------+------+------+
+  | Hz     | 4.4  | 5.1  | 5.7  | 6.3  | 6.8  | 7.3  |
+  +--------+------+------+------+------+------+------+
+  | Letter | -g   | -h   | -i   | -j   | -k   | -l   |
+  +--------+------+------+------+------+------+------+
+  | Hz     | 7.6  | 7.9  | 8.1  | 8.3  | 8.4  | 8.5  |
+  +--------+------+------+------+------+------+------+
 
 You have three options regarding how the frequencies change during the
 session.  By default (00d+) the frequencies go down in steps, changing
@@ -975,7 +1001,7 @@ The optional '/<amp>' on the end lets you change the amplitude of the
 waves if necessary (e.g. 00ds+/2).  By default, the level is set to 1.
 
 Adding `@` switches `-p drop` from binaural beat mode to isochronic
-pulse mode.  In that case, the same depth letter and timing rules apply
+pulse mode.  In that case, the same target-spec and timing rules apply
 to pulse frequency instead of binaural beat frequency.
 
 Example:
@@ -990,7 +1016,7 @@ in the drop spec.  In monaural mode, `-p drop` uses two tones per step:
 
 Each ear receives both tones (instead of the usual left/right split
 used for binaural beats).  `@` and monaural mode are mutually exclusive.
-The same depth letter and timing rules apply to monaural frequency
+The same target-spec and timing rules apply to monaural frequency
 instead of binaural beat frequency.
 
 Mix modulation parameters (via `-A`):
@@ -1115,7 +1141,7 @@ With sign `M`, `-p slide` uses:
 
 Each ear receives both tones.  `@` and monaural mode are mutually
 exclusive.
-The same depth letter and timing rules apply to monaural frequency
+The same beat and timing rules apply to monaural frequency
 instead of binaural beat frequency.
 
 Another point is that the lower frequencies will probably not be
@@ -1257,9 +1283,9 @@ cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
 Usage:
 
   -p sigmoid [t<drop>,<hold>,<wake>]
-      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>] <tone-specs> ...
+      <signed-level|N><target-spec>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>] <tone-specs> ...
   -G -p sigmoid [t<drop>,<hold>,<wake>]
-      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]
+      <signed-level|N><target-spec>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]
 
 Examples:
 
@@ -1294,9 +1320,12 @@ an extra hold drop of:
 
 Beat/pulse depth behavior:
 
-The letter `a-l` selects the same target beat/pulse values used by
-`-p drop` (from 4.4 down to 0.3).  The beat/pulse always starts at
-10Hz and moves to the selected target over the drop period.
+The target spec selects the same beat/pulse endpoint used by `-p drop`.
+Base letters `a-l` map from 4.4 down to 0.3, fractional forms (for
+example `a.5`) interpolate toward the next deeper target, and negative
+forms (for example `-b`) mirror the same spacing upward around
+`a = 4.4Hz`.  The beat/pulse always starts at 10Hz unless overridden by
+`:S=<value>`, then moves to the selected target over the drop period.
 
 Reference (lowest beat/pulse target by letter):
   +--------+-----+-----+-----+-----+-----+-----+
@@ -1308,6 +1337,17 @@ Reference (lowest beat/pulse target by letter):
   +--------+-----+-----+-----+-----+-----+-----+
   | Hz     | 1.2 | 0.9 | 0.7 | 0.5 | 0.4 | 0.3 |
   +--------+-----+-----+-----+-----+-----+-----+
+
+Reference (mirrored negative target by letter):
+  +--------+------+------+------+------+------+------+
+  | Letter | -a   | -b   | -c   | -d   | -e   | -f   |
+  +--------+------+------+------+------+------+------+
+  | Hz     | 4.4  | 5.1  | 5.7  | 6.3  | 6.8  | 7.3  |
+  +--------+------+------+------+------+------+------+
+  | Letter | -g   | -h   | -i   | -j   | -k   | -l   |
+  +--------+------+------+------+------+------+------+
+  | Hz     | 7.6  | 7.9  | 8.1  | 8.3  | 8.4  | 8.5  |
+  +--------+------+------+------+------+------+------+
 
 Sigmoid shape parameters:
 
@@ -1330,7 +1370,7 @@ Where:
 
 Boundary conditions:
   f(0) = S (default 10.0, configurable via :S=<value>)
-  f(D) = target from depth letter (a-l)
+  f(D) = target from target spec
 
 `a` and `b` are solved automatically from those boundary conditions.
 
@@ -1355,7 +1395,7 @@ With `M` in the spec, `-p sigmoid` uses:
 
 Each ear receives both tones.  `@` and monaural mode are mutually
 exclusive.
-The same depth letter and timing rules apply to monaural frequency
+The same target-spec and timing rules apply to monaural frequency
 instead of binaural beat frequency.
 
 Mix modulation parameters (via `-A`):
@@ -1428,7 +1468,7 @@ default and stop automatically at their programmed end time unless
 Usage:
 
   -p curve <curve-file.sbgf> [t<drop>,<hold>,<wake>]
-      <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:name=value ...]
+      <signed-level|N><target-spec>[s|k][+][^][@|M][/<amp>][:S=<val>][:name=value ...]
       <tone-specs> ...
 
 In `<curve-spec>`, `:S=<val>` sets the start beat/pulse frequency in Hz
@@ -1461,7 +1501,7 @@ The level/depth/time modifiers are interpreted the same way as in
 
   - Signed level selects starting carrier baseline.
   - `N` mutes generated program tones but keeps beat/pulse trajectory active.
-  - Letter `a-l` selects target beat/pulse endpoint (`b1`).
+  - Target spec selects target beat/pulse endpoint (`b1`).
   - `s` = continuous runtime curve evaluation.
   - `k` or default = stepped checkpoints sampled from the expression.
   - `+`, `^`, `@`, `M`, `/amp` behave as in other built-in programs.
@@ -1528,7 +1568,7 @@ Expression variables available at runtime:
   T    total main time in minutes (drop + hold)
   U    wake-time in minutes
   b0   start beat/pulse frequency in Hz (normally 10.0)
-  b1   target beat/pulse frequency in Hz (from depth letter)
+  b1   target beat/pulse frequency in Hz (from target spec)
   c0   start carrier frequency in Hz
   c1   end carrier frequency in Hz (after drop/hold)
   a0   base beat/iso/mono amplitude in % (0..100, from /amp in curve spec)
@@ -2373,7 +2413,7 @@ Where:
 
 Boundary conditions:
   f(0) = S (default 10.0)
-  f(D) = target from depth letter (a-l), same targets as `-p drop`
+  f(D) = target from target spec, same target rules as `-p drop`
 
 `a` and `b` are solved automatically from those boundary conditions:
   a = (f(D) - f(0)) /

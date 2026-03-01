@@ -271,17 +271,17 @@ void init_output_encoder();
 void output_encoder_write(short *pcm, int frames);
 void finish_output_encoder();
 void write_sigmoid_graph_png(const char *fmt, double level,
-			     char depth_ch, int len0, int len1, int len2,
+			     const char *target_tok, int len0, int len1, int len2,
 			     double beat_start, double beat_target,
 			     double sig_l, double sig_h,
 			     double sig_a, double sig_b);
 void write_drop_graph_png(const char *fmt, double level,
-			  char depth_ch, int len0, int len1, int len2,
+			  const char *target_tok, int len0, int len1, int len2,
 			  double beat_start, double beat_target,
 			  int slide, int n_step, int steplen,
 			  int isisochronic, int ismono);
 void write_curve_graph_png(const char *fmt, double level,
-			   char depth_ch, int len0, int len1, int len2,
+			   const char *target_tok, int len0, int len1, int len2,
 			   int slide, int n_step, int steplen,
 			   int isisochronic, int ismono,
 			   double beat_start, double beat_target);
@@ -3512,7 +3512,7 @@ drop_mode_label(int mode_kind) {
 
 void
 write_drop_graph_png(const char *fmt, double level,
-		     char depth_ch, int len0, int len1, int len2,
+		     const char *target_tok, int len0, int len1, int len2,
 		     double beat_start, double beat_target,
 		     int slide, int n_step, int steplen,
 		     int isisochronic, int ismono) {
@@ -3532,10 +3532,10 @@ write_drop_graph_png(const char *fmt, double level,
    int tick_scale= 2 * ss;
    int param_scale= (3 * ss) / 2;
    int prev_x= -1, prev_y= -1;
-   char fmt_tok[256], lvl_tok[64];
+   char fmt_tok[256], lvl_tok[64], depth_tok[64];
    char tick_txt[64];
    char ptxt1[256], ptxt2[256];
-   char fname[512];
+   char fname[1024];
    char mode_ch, curve_ch;
    int mode_kind= ismono ? 2 : (isisochronic ? 1 : 0);
    const char *mode_label= drop_mode_label(mode_kind);
@@ -3551,11 +3551,12 @@ write_drop_graph_png(const char *fmt, double level,
 
    sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
    double_to_token(level, lvl_tok, sizeof(lvl_tok));
+   sanitize_filename_token(target_tok ? target_tok : "a", depth_tok, sizeof(depth_tok));
    mode_ch= ismono ? 'm' : (isisochronic ? 'p' : 'b');
    curve_ch= slide ? 's' : 'k';
    snprintf(fname, sizeof(fname),
-	    "drop_%s_L%s_d%c_t%d_%d_%d_%c%c.png",
-	    fmt_tok, lvl_tok, tolower((unsigned char)depth_ch),
+	    "drop_%s_L%s_d%s_t%d_%d_%d_%c%c.png",
+	    fmt_tok, lvl_tok, depth_tok,
 	    len0/60, len1/60, len2/60, mode_ch, curve_ch);
 
    if (try_external_drop_graph_png(fname, len0, beat_start, beat_target,
@@ -3707,7 +3708,7 @@ write_drop_graph_png(const char *fmt, double level,
 
 void
 write_curve_graph_png(const char *fmt, double level,
-		      char depth_ch, int len0, int len1, int len2,
+		      const char *target_tok, int len0, int len1, int len2,
 		      int slide, int n_step, int steplen,
 		      int isisochronic, int ismono,
 		      double beat_start, double beat_target) {
@@ -3727,10 +3728,10 @@ write_curve_graph_png(const char *fmt, double level,
    int tick_scale= 2 * ss;
    int param_scale= (3 * ss) / 2;
    int prev_x= -1, prev_y= -1;
-   char fmt_tok[256], lvl_tok[64];
+   char fmt_tok[256], lvl_tok[64], depth_tok[64];
    char tick_txt[64];
    char ptxt1[256], ptxt2[256];
-   char fname[512];
+   char fname[1024];
    char mode_ch, curve_ch;
    int mode_kind= ismono ? 2 : (isisochronic ? 1 : 0);
    const char *mode_label= drop_mode_label(mode_kind);
@@ -3769,11 +3770,12 @@ write_curve_graph_png(const char *fmt, double level,
 
    sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
    double_to_token(level, lvl_tok, sizeof(lvl_tok));
+   sanitize_filename_token(target_tok ? target_tok : "a", depth_tok, sizeof(depth_tok));
    mode_ch= ismono ? 'm' : (isisochronic ? 'p' : 'b');
    curve_ch= slide ? 's' : 'k';
    snprintf(fname, sizeof(fname),
-	    "curve_%s_L%s_d%c_t%d_%d_%d_%c%c.png",
-	    fmt_tok, lvl_tok, tolower((unsigned char)depth_ch),
+	    "curve_%s_L%s_d%s_t%d_%d_%d_%c%c.png",
+	    fmt_tok, lvl_tok, depth_tok,
 	    len0/60, len1/60, len2/60, mode_ch, curve_ch);
 
    sample_file[0]= 0;
@@ -3936,7 +3938,7 @@ write_curve_graph_png(const char *fmt, double level,
 
 void
 write_sigmoid_graph_png(const char *fmt, double level,
-			char depth_ch, int len0, int len1, int len2,
+			const char *target_tok, int len0, int len1, int len2,
 			double beat_start, double beat_target,
 			double sig_l, double sig_h,
 			double sig_a, double sig_b) {
@@ -3956,10 +3958,10 @@ write_sigmoid_graph_png(const char *fmt, double level,
    int tick_scale= 2 * ss;
    int param_scale= (3 * ss) / 2;
    int prev_x= -1, prev_y= -1;
-   char fmt_tok[256], lvl_tok[64], l_tok[64], h_tok[64];
+   char fmt_tok[256], lvl_tok[64], l_tok[64], h_tok[64], depth_tok[64];
    char tick_txt[64];
    char ptxt1[256], ptxt2[256];
-   char fname[512];
+   char fname[1024];
    const char *x_label= "TIME MIN";
    const char *y_label= "FREQ HZ";
 
@@ -3970,9 +3972,10 @@ write_sigmoid_graph_png(const char *fmt, double level,
    double_to_token(level, lvl_tok, sizeof(lvl_tok));
    double_to_token(sig_l, l_tok, sizeof(l_tok));
    double_to_token(sig_h, h_tok, sizeof(h_tok));
+   sanitize_filename_token(target_tok ? target_tok : "a", depth_tok, sizeof(depth_tok));
    snprintf(fname, sizeof(fname),
-	    "sigmoid_%s_L%s_d%c_t%d_%d_%d_l%s_h%s.png",
-	    fmt_tok, lvl_tok, tolower((unsigned char)depth_ch),
+	    "sigmoid_%s_L%s_d%s_t%d_%d_%d_l%s_h%s.png",
+	    fmt_tok, lvl_tok, depth_tok,
 	    len0/60, len1/60, len2/60, l_tok, h_tok);
 
    if (try_external_sigmoid_graph_png(fname, len0, beat_start, beat_target, sig_l, sig_h, sig_a, sig_b)) {
@@ -9557,6 +9560,65 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
    tone->duty_cycle= opt_I ? opt_I_d : 0.4;
 }
 
+static const double sbx_prog_target_vals[]= {
+   4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
+};
+
+static int
+sbx_parse_prog_target_spec(const char *p, const char **endp,
+			   double *target_hz,
+			   char *target_tok, size_t target_tok_sz) {
+   int neg= 0;
+   int idx;
+   double frac= 0.0;
+   double pos_val, next_val;
+   const char *s= p;
+   const char *q;
+
+   if (!s || !*s)
+      return 0;
+
+   if (*s == '+' || *s == '-') {
+      neg= (*s == '-');
+      s++;
+   }
+
+   if (!isalpha((unsigned char)*s))
+      return 0;
+   idx= tolower((unsigned char)*s) - 'a';
+   if (idx < 0 || idx >= (int)(sizeof(sbx_prog_target_vals) / sizeof(sbx_prog_target_vals[0])))
+      return 0;
+   s++;
+
+   if (*s == '.') {
+      q= s;
+      frac= strtod(s, (char **)&s);
+      if (s == q || frac < 0.0 || frac >= 1.0)
+	 return 0;
+   }
+
+   pos_val= sbx_prog_target_vals[idx];
+   next_val= (idx + 1 < (int)(sizeof(sbx_prog_target_vals) / sizeof(sbx_prog_target_vals[0])))
+      ? sbx_prog_target_vals[idx + 1]
+      : 0.2;
+   pos_val= pos_val + frac * (next_val - pos_val);
+   if (neg)
+      pos_val= 2.0 * sbx_prog_target_vals[0] - pos_val;
+
+   if (target_hz)
+      *target_hz= pos_val;
+   if (target_tok && target_tok_sz > 0) {
+      size_t n= (size_t)(s - p);
+      if (n >= target_tok_sz)
+	 n= target_tok_sz - 1;
+      memcpy(target_tok, p, n);
+      target_tok[n]= 0;
+   }
+   if (endp)
+      *endp= s;
+   return 1;
+}
+
 //
 //	Error for bad p-drop args
 //
@@ -9564,9 +9626,10 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
 void 
 bad_drop() {
    error("Bad arguments: expecting -p drop [<time-spec>] <drop-spec> [<tone-specs...>]"
-	 NL "<drop-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>]"
+	 NL "<drop-spec> is <signed-level|N><target-spec>[s|k][+][^][@|M][/<amp>][:S=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "<target-spec> is [+-]<a-l>[.<digits>] (e.g. a, a.5, -b, -l.5)"
 	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
@@ -9596,9 +9659,7 @@ create_drop(int ac, char **av) {
    double carr, amp, c0, c2;
    double beat_target, beat_start= 10.0;
    double beat[40];
-   static double beat_targets[]= { 
-      4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
-   };
+   char target_tok[32];
    char extra[256];
    SbxRuntimeExtraSpec extra_spec;
    int len, len0= 1800, len1= 1800, len2= 180;
@@ -9639,9 +9700,12 @@ create_drop(int ac, char **av) {
       if (p == fmt || carr < 0) BAD;
    }
 
-   a= tolower(*p) - 'a'; p++;
-   if (a < 0 || a >= sizeof(beat_targets) / sizeof(beat_targets[0])) BAD;
-   beat_target= beat_targets[a];
+   {
+      const char *target_end= 0;
+      if (!sbx_parse_prog_target_spec(p, &target_end, &beat_target,
+				      target_tok, sizeof(target_tok))) BAD;
+      p= (char *)target_end;
+   }
 
    slide= 0;
    steplen= 180;
@@ -9720,7 +9784,7 @@ create_drop(int ac, char **av) {
 
    if (opt_G || opt_P_drop) {
       opt_P_drop= 1;
-      write_drop_graph_png(fmt, (200.0 - carr) / 2.0, (char)('a' + a),
+      write_drop_graph_png(fmt, (200.0 - carr) / 2.0, target_tok,
 			   len0, len1, len2,
 			   beat_start, beat_target,
 			   slide, n_step, steplen,
@@ -9837,9 +9901,10 @@ create_drop(int ac, char **av) {
 void
 bad_sigmoid() {
    error("Bad arguments: expecting -p sigmoid [<time-spec>] <sigmoid-spec> [<tone-specs...>]"
-	 NL "<sigmoid-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]"
+	 NL "<sigmoid-spec> is <signed-level|N><target-spec>[s|k][+][^][@|M][/<amp>][:l=<val>][:h=<val>][:S=<val>]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "<target-spec> is [+-]<a-l>[.<digits>] (e.g. a, a.5, -b, -l.5)"
 	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (the default is equivalent to 't30,30,3')."
@@ -9859,7 +9924,6 @@ void
 create_sigmoid(int ac, char **av) {
    char *fmt;
    char *p, *q;
-   char depth_ch;
    int a;
    int mute_prog_tone= 0;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
@@ -9868,9 +9932,7 @@ create_sigmoid(int ac, char **av) {
    double carr, amp, c0, c2;
    double beat_target, beat_start= 10.0;
    double beat[40];
-   static double beat_targets[]= {
-      4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
-   };
+   char target_tok[32];
    char extra[256];
    SbxRuntimeExtraSpec extra_spec;
    int len, len0= 1800, len1= 1800, len2= 180;
@@ -9915,10 +9977,12 @@ create_sigmoid(int ac, char **av) {
       if (p == fmt || carr < 0) BAD;
    }
 
-   depth_ch= tolower((unsigned char)*p);
-   a= depth_ch - 'a'; p++;
-   if (a < 0 || a >= sizeof(beat_targets) / sizeof(beat_targets[0])) BAD;
-   beat_target= beat_targets[a];
+   {
+      const char *target_end= 0;
+      if (!sbx_parse_prog_target_spec(p, &target_end, &beat_target,
+				      target_tok, sizeof(target_tok))) BAD;
+      p= (char *)target_end;
+   }
 
    slide= 0;
    steplen= 180;
@@ -10019,7 +10083,7 @@ create_sigmoid(int ac, char **av) {
    }
 
    if (opt_G || opt_P_sigmoid) {
-      write_sigmoid_graph_png(fmt, level, depth_ch, len0, len1, len2,
+      write_sigmoid_graph_png(fmt, level, target_tok, len0, len1, len2,
 			      beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
       return;
    }
@@ -10146,9 +10210,10 @@ bad_curve() {
 	 NL "  mixamp = <expression>, and piecewise variants of carrier/amp/mixamp,"
 	 NL "  param <name> = <value>[m|s],"
 	 NL "  solve <u1>,<u2>,... : <lhs1>=<rhs1> ; <lhs2>=<rhs2> ; ..."
-	 NL "<curve-spec> is <signed-level|N><a-l>[s|k][+][^][@|M][/<amp>][:S=<val>][:<name>=<value>...]"
+	 NL "<curve-spec> is <signed-level|N><target-spec>[s|k][+][^][@|M][/<amp>][:S=<val>][:<name>=<value>...]"
 	 NL "<signed-level> is <digit><digit>[.<digit>...] or"
 	 NL "  -<digit><digit>[.<digit>...] (e.g. 00, 34.5, -01)"
+	 NL "<target-spec> is [+-]<a-l>[.<digits>] (e.g. a, a.5, -b, -l.5)"
 	 NL "  N mutes generated program tones (useful with mixam:beat)"
 	 NL "The optional <time-spec> is t<drop-time>,<hold-time>,<wake-time>, all times"
 	 NL "  in minutes (default is equivalent to 't30,30,3')."
@@ -10167,7 +10232,6 @@ create_curve(int ac, char **av) {
    char *curve_file;
    char *fmt;
    char *p, *q;
-   char depth_ch;
    int a;
    int mute_prog_tone= 0;
    int slide, n_step, islong, wakeup, isisochronic, ismono;
@@ -10191,9 +10255,7 @@ create_curve(int ac, char **av) {
    int have_amp_curve= 0, have_mixamp_curve= 0;
    char extra[256];
    SbxRuntimeExtraSpec extra_spec;
-   static double beat_targets[]= {
-      4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
-   };
+   char target_tok[32];
 
 #define BAD bad_curve()
 
@@ -10239,10 +10301,12 @@ create_curve(int ac, char **av) {
       if (p == fmt || carr < 0) BAD;
    }
 
-   depth_ch= tolower((unsigned char)*p);
-   a= depth_ch - 'a'; p++;
-   if (a < 0 || a >= sizeof(beat_targets) / sizeof(beat_targets[0])) BAD;
-   beat_target= beat_targets[a];
+   {
+      const char *target_end= 0;
+      if (!sbx_parse_prog_target_spec(p, &target_end, &beat_target,
+				      target_tok, sizeof(target_tok))) BAD;
+      p= (char *)target_end;
+   }
 
    slide= 0;
    steplen= 180;
@@ -10364,7 +10428,7 @@ create_curve(int ac, char **av) {
 
    if (opt_G || opt_P_curve) {
       opt_P_curve= 1;
-      write_curve_graph_png(fmt, level, depth_ch,
+      write_curve_graph_png(fmt, level, target_tok,
 			    len0, len1, len2,
 			    slide, n_step, steplen,
 			    isisochronic, ismono,
