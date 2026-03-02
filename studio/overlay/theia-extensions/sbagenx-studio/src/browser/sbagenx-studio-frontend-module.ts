@@ -8,6 +8,7 @@
  ********************************************************************************/
 
 import '../../src/browser/style/index.css';
+import './sbagenx-studio-language';
 
 import { bindViewContribution, FrontendApplicationContribution, RemoteConnectionProvider, ServiceConnectionProvider, WidgetFactory } from '@theia/core/lib/browser';
 import { ContainerModule } from '@theia/core/shared/inversify';
