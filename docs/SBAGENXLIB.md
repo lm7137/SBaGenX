@@ -646,10 +646,32 @@ Phase 3.85
 - This removes another round of frontend guesswork around transport controls,
   plot semantics, and timeline UI.
 
+Phase 3.86
+- Move `.sbgf` parsing, solve, prepare, and evaluation into `sbagenxlib`:
+  - `sbx_default_curve_eval_config()`
+  - `sbx_curve_create()` / `sbx_curve_destroy()` / `sbx_curve_reset()`
+  - `sbx_curve_load_text()` / `sbx_curve_load_file()`
+  - `sbx_curve_set_param()`
+  - `sbx_curve_prepare()`
+  - `sbx_curve_eval()`
+  - `sbx_curve_get_info()`
+  - `sbx_curve_param_count()` / `sbx_curve_get_param()`
+  - `sbx_curve_source_name()` / `sbx_curve_last_error()`
+- Rewire CLI `-p curve` so `.sbgf` files are no longer parsed/evaluated by a
+  private CLI copy of the curve machinery.
+- Preserve existing `.sbgf` semantics:
+  - case-sensitive parameter names,
+  - optional `m`/`s` parameter units with minutes as the canonical unit,
+  - piecewise `<=` / `>=`,
+  - solve blocks and helper functions.
+- Add regression coverage for both:
+  - direct library curve API usage,
+  - CLI `-p curve` smoke through the extracted library path.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.85 Slice)
+Current API (Phase 3.86 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -666,6 +688,17 @@ Public header: `sbagenxlib.h`
   - `sbx_format_tone_spec()`
   - `sbx_engine_set_tone()`
   - `sbx_engine_render_f32()`
+- Curve program API:
+  - `sbx_default_curve_eval_config()`
+  - `sbx_curve_create()` / `sbx_curve_destroy()` / `sbx_curve_reset()`
+  - `sbx_curve_load_text()` / `sbx_curve_load_file()`
+  - `sbx_curve_set_param()`
+  - `sbx_curve_prepare()`
+  - `sbx_curve_eval()`
+  - `sbx_curve_get_info()`
+  - `sbx_curve_param_count()` / `sbx_curve_get_param()`
+  - `sbx_curve_source_name()`
+  - `sbx_curve_last_error()`
 - Context + load API:
   - `sbx_parse_tone_spec()`
   - `sbx_parse_tone_spec_ex()`
@@ -1158,6 +1191,15 @@ External Shared Consumer Smoke Test (Phase 3.82)
 tests/sbagenxlib/test_dist_shared_library_artifacts.sh
 tests/sbagenxlib/test_pkgconfig_uninstalled_shared_consumer.sh
 tests/sbagenxlib/test_shared_consumer_manual.sh
+```
+
+Curve API Smoke Test (Phase 3.86)
+---------------------------------
+
+```bash
+gcc -O2 -I. tests/sbagenxlib/test_curve_api.c sbagenxlib.c -lm -o /tmp/test_curve_api
+/tmp/test_curve_api
+tests/sbagenxlib/test_preprog_curve_library.sh
 ```
 
 Notes:

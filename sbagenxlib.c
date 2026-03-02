@@ -1,7 +1,9 @@
 #include "sbagenxlib.h"
 #include "sbagenxlib_dsp.h"
+#include "libs/tinyexpr.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -26,6 +28,13 @@
 #define SBX_CUSTOM_WAVE_COUNT 100
 #define SBX_CUSTOM_WAVE_SAMPLES 4096
 #define SBX_MIXBEAT_HILBERT_TAPS 31
+#define SBX_CURVE_MAX_PARAMS 32
+#define SBX_CURVE_MAX_PIECES 64
+#define SBX_CURVE_NAME_MAX 64
+#define SBX_CURVE_EXPR_MAX 1024
+#define SBX_CURVE_FILE_MAX 1024
+#define SBX_CURVE_MAX_SOLVE_UNK 8
+#define SBX_CURVE_MAX_SOLVE_EQ SBX_CURVE_MAX_SOLVE_UNK
 
 typedef struct {
   SbxMixFxSpec spec;
@@ -88,6 +97,62 @@ struct SbxContext {
   double mix_default_amp_pct;
   double *custom_waves[SBX_CUSTOM_WAVE_COUNT];
 };
+
+struct SbxCurveProgram {
+  char last_error[256];
+  int loaded;
+  int prepared;
+  char src_file[SBX_CURVE_FILE_MAX];
+  char beat_expr_src[SBX_CURVE_EXPR_MAX];
+  char carrier_expr_src[SBX_CURVE_EXPR_MAX];
+  char amp_expr_src[SBX_CURVE_EXPR_MAX];
+  char mixamp_expr_src[SBX_CURVE_EXPR_MAX];
+  int has_carrier_expr;
+  int has_amp_expr;
+  int has_mixamp_expr;
+  int beat_piece_count;
+  int carrier_piece_count;
+  int amp_piece_count;
+  int mixamp_piece_count;
+  char beat_piece_cond_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  char beat_piece_expr_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  char carrier_piece_cond_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  char carrier_piece_expr_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  char amp_piece_cond_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  char amp_piece_expr_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  char mixamp_piece_cond_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  char mixamp_piece_expr_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  int has_solve;
+  int solve_unknown_count;
+  int solve_eq_count;
+  char solve_unknown_names[SBX_CURVE_MAX_SOLVE_UNK][SBX_CURVE_NAME_MAX];
+  int solve_unknown_param_idx[SBX_CURVE_MAX_SOLVE_UNK];
+  char solve_eq_lhs_src[SBX_CURVE_MAX_SOLVE_EQ][SBX_CURVE_EXPR_MAX];
+  char solve_eq_rhs_src[SBX_CURVE_MAX_SOLVE_EQ][SBX_CURVE_EXPR_MAX];
+  int param_count;
+  char param_names[SBX_CURVE_MAX_PARAMS][SBX_CURVE_NAME_MAX];
+  double param_values[SBX_CURVE_MAX_PARAMS];
+  te_expr *beat_expr;
+  te_expr *carrier_expr;
+  te_expr *amp_expr;
+  te_expr *mixamp_expr;
+  te_expr *beat_piece_cond[SBX_CURVE_MAX_PIECES];
+  te_expr *beat_piece_expr[SBX_CURVE_MAX_PIECES];
+  te_expr *carrier_piece_cond[SBX_CURVE_MAX_PIECES];
+  te_expr *carrier_piece_expr[SBX_CURVE_MAX_PIECES];
+  te_expr *amp_piece_cond[SBX_CURVE_MAX_PIECES];
+  te_expr *amp_piece_expr[SBX_CURVE_MAX_PIECES];
+  te_expr *mixamp_piece_cond[SBX_CURVE_MAX_PIECES];
+  te_expr *mixamp_piece_expr[SBX_CURVE_MAX_PIECES];
+  double ev_t, ev_m;
+  double ev_D, ev_H, ev_T, ev_U;
+  double ev_b0, ev_b1, ev_c0, ev_c1;
+  double ev_a0, ev_m0;
+  SbxCurveEvalConfig cfg;
+};
+
+#define TE_POW_FROM_RIGHT 0
+#include "libs/tinyexpr.c"
 
 #define SBX_MV_KF(ctx, voice_idx) ((ctx)->mv_kfs + ((voice_idx) * (ctx)->kf_count))
 
@@ -2170,6 +2235,8 @@ sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec) {
   spec->release = 0.15;
   spec->edge_mode = 2;
 }
+
+#include "sbagenxlib_curve_impl.h"
 
 SbxEngine *
 sbx_engine_create(const SbxEngineConfig *cfg_in) {
