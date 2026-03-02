@@ -47,7 +47,7 @@ export class SbagenxStudioEngineServiceImpl implements SbagenxStudioEngineServic
     }
 
     protected backendForFileType(fileType: 'sbg' | 'sbgf' | 'unknown'): SbagenxStudioBackendKind {
-        return fileType === 'sbgf' ? 'sbagenx-curve-parser' : 'sbagenxlib';
+        return 'sbagenxlib';
     }
 
     protected async ensureEngineBinary(): Promise<string> {
@@ -63,9 +63,9 @@ export class SbagenxStudioEngineServiceImpl implements SbagenxStudioEngineServic
         const binaryPath = path.join(repoRoot, 'studio', 'bin', 'sbagenx-studio-engine');
         const sources = [
             path.join(repoRoot, 'studio', 'tools', 'sbagenx-studio-engine.c'),
-            path.join(repoRoot, 'sbagenx.c'),
             path.join(repoRoot, 'sbagenxlib.c'),
             path.join(repoRoot, 'sbagenxlib.h'),
+            path.join(repoRoot, 'sbagenxlib_curve_impl.h'),
             scriptPath
         ];
         if (!fs.existsSync(binaryPath) || this.isStale(binaryPath, sources)) {

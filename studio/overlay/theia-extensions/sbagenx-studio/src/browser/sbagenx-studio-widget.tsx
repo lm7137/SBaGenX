@@ -50,7 +50,7 @@ export class SbagenxStudioWidget extends ReactWidget {
                 <div>
                     <p className='sbagenx-studio-kicker'>SBaGenX IDE</p>
                     <h2>Studio</h2>
-                    <p className='sbagenx-studio-subtitle'>Open `.sbg` or `.sbgf` files, inspect their structure, validate `.sbg` files through `sbagenxlib`, and validate `.sbgf` files through the embedded curve parser used by the CLI.</p>
+                    <p className='sbagenx-studio-subtitle'>Open `.sbg` or `.sbgf` files, inspect their structure, and validate both formats through `sbagenxlib`.</p>
                 </div>
                 <div className='sbagenx-studio-actions'>
                     <button className='theia-button main' onClick={() => this.openSession()}>Open Session File</button>

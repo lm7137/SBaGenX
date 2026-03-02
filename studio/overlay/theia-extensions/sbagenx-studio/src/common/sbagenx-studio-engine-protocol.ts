@@ -11,7 +11,7 @@ export const SBAGENX_STUDIO_ENGINE_PATH = '/services/sbagenx-studio/engine';
 export const SbagenxStudioEngineService = Symbol('SbagenxStudioEngineService');
 
 export type SbagenxStudioValidationStatus = 'ok' | 'error' | 'unsupported';
-export type SbagenxStudioBackendKind = 'sbagenxlib' | 'sbagenx-curve-parser';
+export type SbagenxStudioBackendKind = 'sbagenxlib';
 
 export interface SbagenxStudioInspectionResult {
     status: SbagenxStudioValidationStatus;

@@ -4,11 +4,6 @@
 
 #include "sbagenxlib.h"
 
-#define T_POSIX
-#define main sbxstudio_embedded_main
-#include "sbagenx.c"
-#undef main
-
 static void json_print_string(const char *s) {
   const unsigned char *p = (const unsigned char *)(s ? s : "");
   putchar('"');
@@ -58,54 +53,65 @@ static void print_result_prefix(const char *status, const char *backend, const c
 }
 
 static void inspect_sbgf_file(const char *path) {
-  int ok;
-  int param_count;
-  int has_solve;
-  int has_carr;
-  int has_amp;
-  int has_mixamp;
-  int beat_pieces;
-  int carr_pieces;
-  int amp_pieces;
-  int mixamp_pieces;
+  SbxCurveProgram *curve;
+  SbxCurveEvalConfig cfg;
+  SbxCurveInfo info;
+  int status;
 
-  opt_Q = 1;
-  clear_func_curve();
-  load_curve_file(path);
-  ok = setup_custom_func_curve(0, 1, 0,
-                               205.0, 200.0, 1800.0,
-                               10.0, 2.5, 1800.0,
-                               30.0, 60.0, 3.0,
-                               1.0, 100.0);
-  if (!ok)
-    error("Unable to validate curve expressions in %s", path);
+  curve = sbx_curve_create();
+  if (!curve) {
+    print_result_prefix("error", "sbagenxlib", "sbgf");
+    fputs(",\"message\":", stdout);
+    json_print_string("Failed to create sbagenxlib curve program");
+    fputs(",\"version\":", stdout);
+    json_print_string(sbx_version());
+    printf(",\"apiVersion\":%d}\n", sbx_api_version());
+    return;
+  }
 
-  param_count = func_curve.param_count;
-  has_solve = func_curve.have_solve;
-  has_carr = func_curve.have_carr_expr || func_curve.carr_piece_count > 0;
-  has_amp = func_curve.have_amp_expr || func_curve.amp_piece_count > 0;
-  has_mixamp = func_curve.have_mixamp_expr || func_curve.mixamp_piece_count > 0;
-  beat_pieces = func_curve.beat_piece_count;
-  carr_pieces = func_curve.carr_piece_count;
-  amp_pieces = func_curve.amp_piece_count;
-  mixamp_pieces = func_curve.mixamp_piece_count;
+  status = sbx_curve_load_file(curve, path);
+  if (status == SBX_OK) {
+    sbx_default_curve_eval_config(&cfg);
+    status = sbx_curve_prepare(curve, &cfg);
+  }
+  if (status != SBX_OK) {
+    print_result_prefix("error", "sbagenxlib", "sbgf");
+    fputs(",\"message\":", stdout);
+    json_print_string(sbx_curve_last_error(curve));
+    fputs(",\"version\":", stdout);
+    json_print_string(sbx_version());
+    printf(",\"apiVersion\":%d}\n", sbx_api_version());
+    sbx_curve_destroy(curve);
+    return;
+  }
 
-  clear_func_curve();
+  status = sbx_curve_get_info(curve, &info);
+  if (status != SBX_OK) {
+    print_result_prefix("error", "sbagenxlib", "sbgf");
+    fputs(",\"message\":", stdout);
+    json_print_string("Failed to inspect loaded curve metadata");
+    fputs(",\"version\":", stdout);
+    json_print_string(sbx_version());
+    printf(",\"apiVersion\":%d}\n", sbx_api_version());
+    sbx_curve_destroy(curve);
+    return;
+  }
 
-  print_result_prefix("ok", "sbagenx-curve-parser", "sbgf");
+  print_result_prefix("ok", "sbagenxlib", "sbgf");
   fputs(",\"version\":", stdout);
-  json_print_string(VERSION);
+  json_print_string(sbx_version());
   printf(",\"apiVersion\":%d", sbx_api_version());
-  printf(",\"parameterCount\":%d", param_count);
-  printf(",\"hasSolve\":%s", has_solve ? "true" : "false");
-  printf(",\"hasCarrierExpr\":%s", has_carr ? "true" : "false");
-  printf(",\"hasAmpExpr\":%s", has_amp ? "true" : "false");
-  printf(",\"hasMixAmpExpr\":%s", has_mixamp ? "true" : "false");
-  printf(",\"beatPieceCount\":%d", beat_pieces);
-  printf(",\"carrierPieceCount\":%d", carr_pieces);
-  printf(",\"ampPieceCount\":%d", amp_pieces);
-  printf(",\"mixAmpPieceCount\":%d", mixamp_pieces);
+  printf(",\"parameterCount\":%lu", (unsigned long)info.parameter_count);
+  printf(",\"hasSolve\":%s", info.has_solve ? "true" : "false");
+  printf(",\"hasCarrierExpr\":%s", info.has_carrier_expr ? "true" : "false");
+  printf(",\"hasAmpExpr\":%s", info.has_amp_expr ? "true" : "false");
+  printf(",\"hasMixAmpExpr\":%s", info.has_mixamp_expr ? "true" : "false");
+  printf(",\"beatPieceCount\":%lu", (unsigned long)info.beat_piece_count);
+  printf(",\"carrierPieceCount\":%lu", (unsigned long)info.carrier_piece_count);
+  printf(",\"ampPieceCount\":%lu", (unsigned long)info.amp_piece_count);
+  printf(",\"mixAmpPieceCount\":%lu", (unsigned long)info.mixamp_piece_count);
   fputs("}\n", stdout);
+  sbx_curve_destroy(curve);
 }
 
 int main(int argc, char **argv) {
