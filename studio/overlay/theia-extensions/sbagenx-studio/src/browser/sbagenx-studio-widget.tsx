@@ -50,7 +50,7 @@ export class SbagenxStudioWidget extends ReactWidget {
                 <div>
                     <p className='sbagenx-studio-kicker'>SBaGenX IDE</p>
                     <h2>Studio</h2>
-                    <p className='sbagenx-studio-subtitle'>Open `.sbg` or `.sbgf` files, inspect their structure, and validate `.sbg` timing files directly through `sbagenxlib`.</p>
+                    <p className='sbagenx-studio-subtitle'>Open `.sbg` or `.sbgf` files, inspect their structure, validate `.sbg` files through `sbagenxlib`, and validate `.sbgf` files through the embedded curve parser used by the CLI.</p>
                 </div>
                 <div className='sbagenx-studio-actions'>
                     <button className='theia-button main' onClick={() => this.openSession()}>Open Session File</button>
@@ -93,9 +93,18 @@ export class SbagenxStudioWidget extends ReactWidget {
                             <Metric label='Looping' value={formatBool(validation.looping)} />
                             <Metric label='Mix amp control' value={formatBool(validation.hasMixAmpControl)} />
                             <Metric label='Mix effects' value={formatBool(validation.hasMixEffects)} />
+                            <Metric label='Parameters' value={validation.parameterCount ?? 'n/a'} />
+                            <Metric label='Solve block' value={formatBool(validation.hasSolve)} />
+                            <Metric label='Carrier expr' value={formatBool(validation.hasCarrierExpr)} />
+                            <Metric label='Amp expr' value={formatBool(validation.hasAmpExpr)} />
+                            <Metric label='Mixamp expr' value={formatBool(validation.hasMixAmpExpr)} />
+                            <Metric label='Beat pieces' value={validation.beatPieceCount ?? 'n/a'} />
+                            <Metric label='Carrier pieces' value={validation.carrierPieceCount ?? 'n/a'} />
+                            <Metric label='Amp pieces' value={validation.ampPieceCount ?? 'n/a'} />
+                            <Metric label='Mixamp pieces' value={validation.mixAmpPieceCount ?? 'n/a'} />
                         </div>
                         {validation.message && <p className='sbagenx-studio-note'>{validation.message}</p>}
-                        {validation.version && <p className='sbagenx-studio-note dim'>sbagenxlib {validation.version}</p>}
+                        {validation.version && <p className='sbagenx-studio-note dim'>{validation.backend} {validation.version}</p>}
                     </>}
                 </section>
 

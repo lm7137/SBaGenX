@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { injectable } from '@theia/core/shared/inversify';
-import { SbagenxStudioEngineService, SbagenxStudioInspectionResult } from '../common/sbagenx-studio-engine-protocol';
+import { SbagenxStudioBackendKind, SbagenxStudioEngineService, SbagenxStudioInspectionResult } from '../common/sbagenx-studio-engine-protocol';
 
 @injectable()
 export class SbagenxStudioEngineServiceImpl implements SbagenxStudioEngineService {
@@ -20,9 +20,34 @@ export class SbagenxStudioEngineServiceImpl implements SbagenxStudioEngineServic
 
     async inspectFile(filePath: string): Promise<SbagenxStudioInspectionResult> {
         const enginePath = await this.ensureEngineBinary();
-        const stdout = await this.execFile(enginePath, [filePath]);
-        const result = JSON.parse(stdout) as SbagenxStudioInspectionResult;
-        return result;
+        const fileType = this.detectFileType(filePath);
+        const backend = this.backendForFileType(fileType);
+        try {
+            const stdout = await this.execFile(enginePath, [filePath]);
+            return JSON.parse(stdout) as SbagenxStudioInspectionResult;
+        } catch (error) {
+            return {
+                status: 'error',
+                backend,
+                fileType,
+                message: error instanceof Error ? error.message : String(error)
+            };
+        }
+    }
+
+    protected detectFileType(filePath: string): 'sbg' | 'sbgf' | 'unknown' {
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === '.sbg') {
+            return 'sbg';
+        }
+        if (ext === '.sbgf') {
+            return 'sbgf';
+        }
+        return 'unknown';
+    }
+
+    protected backendForFileType(fileType: 'sbg' | 'sbgf' | 'unknown'): SbagenxStudioBackendKind {
+        return fileType === 'sbgf' ? 'sbagenx-curve-parser' : 'sbagenxlib';
     }
 
     protected async ensureEngineBinary(): Promise<string> {
@@ -38,6 +63,7 @@ export class SbagenxStudioEngineServiceImpl implements SbagenxStudioEngineServic
         const binaryPath = path.join(repoRoot, 'studio', 'bin', 'sbagenx-studio-engine');
         const sources = [
             path.join(repoRoot, 'studio', 'tools', 'sbagenx-studio-engine.c'),
+            path.join(repoRoot, 'sbagenx.c'),
             path.join(repoRoot, 'sbagenxlib.c'),
             path.join(repoRoot, 'sbagenxlib.h'),
             scriptPath

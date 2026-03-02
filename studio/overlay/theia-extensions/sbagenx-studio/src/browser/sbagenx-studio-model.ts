@@ -92,7 +92,7 @@ export class SbagenxStudioModel {
             const content = await this.fileService.read(uri);
             const text = content.value.toString();
             this._summary = this.summarize(uri, text, text.length);
-            this._validation = await this.inspectWithEngine(uri);
+            this._validation = await this.engineService.inspectFile(uri.path.fsPath());
         } catch (error) {
             this._summary = undefined;
             this._validation = undefined;
@@ -109,20 +109,6 @@ export class SbagenxStudioModel {
         this._error = undefined;
         this._validation = undefined;
         this.onDidChangeEmitter.fire();
-    }
-
-    protected async inspectWithEngine(uri: URI): Promise<SbagenxStudioInspectionResult> {
-        const fileType = uri.path.ext.toLowerCase() === '.sbgf' ? 'sbgf' : 'sbg';
-        try {
-            return await this.engineService.inspectFile(uri.path.fsPath());
-        } catch (error) {
-            return {
-                status: 'error',
-                backend: 'sbagenxlib',
-                fileType,
-                message: error instanceof Error ? error.message : String(error)
-            };
-        }
     }
 
     protected summarize(uri: URI, text: string, byteSize: number): SbagenxStudioSummary {

@@ -4,6 +4,11 @@
 
 #include "sbagenxlib.h"
 
+#define T_POSIX
+#define main sbxstudio_embedded_main
+#include "sbagenx.c"
+#undef main
+
 static void json_print_string(const char *s) {
   const unsigned char *p = (const unsigned char *)(s ? s : "");
   putchar('"');
@@ -43,11 +48,64 @@ static const char *detect_file_type(const char *path) {
   return "unknown";
 }
 
-static void print_result_prefix(const char *status, const char *file_type) {
+static void print_result_prefix(const char *status, const char *backend, const char *file_type) {
   fputs("{\"status\":", stdout);
   json_print_string(status);
-  fputs(",\"backend\":\"sbagenxlib\",\"fileType\":", stdout);
+  fputs(",\"backend\":", stdout);
+  json_print_string(backend);
+  fputs(",\"fileType\":", stdout);
   json_print_string(file_type);
+}
+
+static void inspect_sbgf_file(const char *path) {
+  int ok;
+  int param_count;
+  int has_solve;
+  int has_carr;
+  int has_amp;
+  int has_mixamp;
+  int beat_pieces;
+  int carr_pieces;
+  int amp_pieces;
+  int mixamp_pieces;
+
+  opt_Q = 1;
+  clear_func_curve();
+  load_curve_file(path);
+  ok = setup_custom_func_curve(0, 1, 0,
+                               205.0, 200.0, 1800.0,
+                               10.0, 2.5, 1800.0,
+                               30.0, 60.0, 3.0,
+                               1.0, 100.0);
+  if (!ok)
+    error("Unable to validate curve expressions in %s", path);
+
+  param_count = func_curve.param_count;
+  has_solve = func_curve.have_solve;
+  has_carr = func_curve.have_carr_expr || func_curve.carr_piece_count > 0;
+  has_amp = func_curve.have_amp_expr || func_curve.amp_piece_count > 0;
+  has_mixamp = func_curve.have_mixamp_expr || func_curve.mixamp_piece_count > 0;
+  beat_pieces = func_curve.beat_piece_count;
+  carr_pieces = func_curve.carr_piece_count;
+  amp_pieces = func_curve.amp_piece_count;
+  mixamp_pieces = func_curve.mixamp_piece_count;
+
+  clear_func_curve();
+
+  print_result_prefix("ok", "sbagenx-curve-parser", "sbgf");
+  fputs(",\"version\":", stdout);
+  json_print_string(VERSION);
+  printf(",\"apiVersion\":%d", sbx_api_version());
+  printf(",\"parameterCount\":%d", param_count);
+  printf(",\"hasSolve\":%s", has_solve ? "true" : "false");
+  printf(",\"hasCarrierExpr\":%s", has_carr ? "true" : "false");
+  printf(",\"hasAmpExpr\":%s", has_amp ? "true" : "false");
+  printf(",\"hasMixAmpExpr\":%s", has_mixamp ? "true" : "false");
+  printf(",\"beatPieceCount\":%d", beat_pieces);
+  printf(",\"carrierPieceCount\":%d", carr_pieces);
+  printf(",\"ampPieceCount\":%d", amp_pieces);
+  printf(",\"mixAmpPieceCount\":%d", mixamp_pieces);
+  fputs("}\n", stdout);
 }
 
 int main(int argc, char **argv) {
@@ -65,18 +123,13 @@ int main(int argc, char **argv) {
   file_type = detect_file_type(path);
 
   if (strcmp(file_type, "sbgf") == 0) {
-    print_result_prefix("unsupported", file_type);
-    fputs(",\"message\":", stdout);
-    json_print_string("Direct sbagenxlib validation for .sbgf is not implemented on this GUI branch yet.");
-    fputs(",\"version\":", stdout);
-    json_print_string(sbx_version());
-    printf(",\"apiVersion\":%d}\n", sbx_api_version());
+    inspect_sbgf_file(path);
     return 0;
   }
 
   ctx = sbx_context_create(NULL);
   if (!ctx) {
-    print_result_prefix("error", file_type);
+    print_result_prefix("error", "sbagenxlib", file_type);
     fputs(",\"message\":", stdout);
     json_print_string("Failed to create sbagenxlib context");
     fputs("}\n", stdout);
@@ -85,7 +138,7 @@ int main(int argc, char **argv) {
 
   status = sbx_context_load_sbg_timing_file(ctx, path, 0);
   if (status != SBX_OK) {
-    print_result_prefix("error", file_type);
+    print_result_prefix("error", "sbagenxlib", file_type);
     fputs(",\"message\":", stdout);
     json_print_string(sbx_context_last_error(ctx));
     fputs(",\"version\":", stdout);
@@ -95,7 +148,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  print_result_prefix("ok", file_type);
+  print_result_prefix("ok", "sbagenxlib", file_type);
   fputs(",\"version\":", stdout);
   json_print_string(sbx_version());
   printf(",\"apiVersion\":%d", sbx_api_version());

@@ -11,10 +11,11 @@ export const SBAGENX_STUDIO_ENGINE_PATH = '/services/sbagenx-studio/engine';
 export const SbagenxStudioEngineService = Symbol('SbagenxStudioEngineService');
 
 export type SbagenxStudioValidationStatus = 'ok' | 'error' | 'unsupported';
+export type SbagenxStudioBackendKind = 'sbagenxlib' | 'sbagenx-curve-parser';
 
 export interface SbagenxStudioInspectionResult {
     status: SbagenxStudioValidationStatus;
-    backend: 'sbagenxlib';
+    backend: SbagenxStudioBackendKind;
     fileType: 'sbg' | 'sbgf' | 'unknown';
     message?: string;
     version?: string;
@@ -26,6 +27,15 @@ export interface SbagenxStudioInspectionResult {
     looping?: boolean;
     hasMixAmpControl?: boolean;
     hasMixEffects?: boolean;
+    parameterCount?: number;
+    hasSolve?: boolean;
+    hasCarrierExpr?: boolean;
+    hasAmpExpr?: boolean;
+    hasMixAmpExpr?: boolean;
+    beatPieceCount?: number;
+    carrierPieceCount?: number;
+    ampPieceCount?: number;
+    mixAmpPieceCount?: number;
 }
 
 export interface SbagenxStudioEngineService {
