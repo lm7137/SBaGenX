@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 14  /* public API contract revision */
+#define SBX_API_VERSION 15  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -136,6 +136,40 @@ typedef struct {
 
 typedef struct SbxEngine SbxEngine;
 typedef struct SbxContext SbxContext;
+typedef struct SbxCurveProgram SbxCurveProgram;
+
+typedef struct {
+  double carrier_start_hz;
+  double carrier_end_hz;
+  double carrier_span_sec;
+  double beat_start_hz;
+  double beat_target_hz;
+  double beat_span_sec;
+  double hold_min;
+  double total_min;
+  double wake_min;
+  double beat_amp0_pct;
+  double mix_amp0_pct;
+} SbxCurveEvalConfig;
+
+typedef struct {
+  double beat_hz;
+  double carrier_hz;
+  double beat_amp_pct;
+  double mix_amp_pct;
+} SbxCurveEvalPoint;
+
+typedef struct {
+  size_t parameter_count;
+  int has_solve;
+  int has_carrier_expr;
+  int has_amp_expr;
+  int has_mixamp_expr;
+  size_t beat_piece_count;
+  size_t carrier_piece_count;
+  size_t amp_piece_count;
+  size_t mixamp_piece_count;
+} SbxCurveInfo;
 
 /* ----- Version and status ----- */
 
@@ -158,6 +192,9 @@ void sbx_default_tone_spec(SbxToneSpec *tone);
 
 /* Fill spec with library-default isochronic envelope values. */
 void sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec);
+
+/* Fill cfg with default `.sbgf` evaluation environment values. */
+void sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg);
 
 /* ----- Engine API ----- */
 
@@ -208,6 +245,38 @@ int sbx_parse_extra_token(const char *tok,
 
 /* Format tone as canonical token string. */
 int sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz);
+
+/* ----- Curve program API (.sbgf) ----- */
+
+/* Create/destroy reusable `.sbgf` curve program object. */
+SbxCurveProgram *sbx_curve_create(void);
+void sbx_curve_destroy(SbxCurveProgram *curve);
+
+/* Reset loaded/compiled state on an existing curve object. */
+void sbx_curve_reset(SbxCurveProgram *curve);
+
+/* Load `.sbgf` text/file into curve object. */
+int sbx_curve_load_text(SbxCurveProgram *curve, const char *text, const char *source_name);
+int sbx_curve_load_file(SbxCurveProgram *curve, const char *path);
+
+/* Override/add one parameter value before preparation. */
+int sbx_curve_set_param(SbxCurveProgram *curve, const char *name, double value);
+
+/* Compile/prepare loaded curve expressions for evaluation. */
+int sbx_curve_prepare(SbxCurveProgram *curve, const SbxCurveEvalConfig *cfg);
+
+/* Evaluate prepared curve at timeline position t_sec. */
+int sbx_curve_eval(SbxCurveProgram *curve, double t_sec, SbxCurveEvalPoint *out_point);
+
+/* Curve introspection. */
+int sbx_curve_get_info(const SbxCurveProgram *curve, SbxCurveInfo *out_info);
+size_t sbx_curve_param_count(const SbxCurveProgram *curve);
+int sbx_curve_get_param(const SbxCurveProgram *curve,
+                        size_t index,
+                        const char **out_name,
+                        double *out_value);
+const char *sbx_curve_source_name(const SbxCurveProgram *curve);
+const char *sbx_curve_last_error(const SbxCurveProgram *curve);
 
 /* ----- Context lifecycle/load/render ----- */
 

@@ -131,6 +131,57 @@ Minimal Sequence File Load
 int rc = sbx_context_load_sequence_file(ctx, "examples/sbagenxlib/minimal-keyframes.sbxseq", 0);
 ```
 
+Minimal `.sbgf` Curve Program Example
+-------------------------------------
+
+```c
+SbxCurveProgram *curve;
+SbxCurveEvalConfig ccfg;
+SbxCurveEvalPoint pt;
+int rc;
+
+curve = sbx_curve_create();
+if (!curve) return 4;
+
+rc = sbx_curve_load_file(curve, "examples/basics/curve-sigmoid-like.sbgf");
+if (rc != SBX_OK) {
+  fprintf(stderr, "curve load failed: %s\n", sbx_curve_last_error(curve));
+  sbx_curve_destroy(curve);
+  return 5;
+}
+
+sbx_curve_set_param(curve, "l", 0.2);
+sbx_curve_set_param(curve, "h", 0.0);
+
+sbx_default_curve_eval_config(&ccfg);
+ccfg.carrier_start_hz = 205.0;
+ccfg.carrier_end_hz = 200.0;
+ccfg.carrier_span_sec = 1800.0;
+ccfg.beat_start_hz = 10.0;
+ccfg.beat_target_hz = 2.5;
+ccfg.beat_span_sec = 1800.0;
+ccfg.hold_min = 30.0;
+ccfg.total_min = 60.0;
+
+rc = sbx_curve_prepare(curve, &ccfg);
+if (rc != SBX_OK) {
+  fprintf(stderr, "curve prepare failed: %s\n", sbx_curve_last_error(curve));
+  sbx_curve_destroy(curve);
+  return 6;
+}
+
+rc = sbx_curve_eval(curve, 900.0, &pt); /* midpoint of drop */
+if (rc != SBX_OK) {
+  fprintf(stderr, "curve eval failed: %s\n", sbx_curve_last_error(curve));
+  sbx_curve_destroy(curve);
+  return 7;
+}
+
+printf("beat=%g carrier=%g amp=%g mixamp=%g\n",
+       pt.beat_hz, pt.carrier_hz, pt.beat_amp_pct, pt.mix_amp_pct);
+sbx_curve_destroy(curve);
+```
+
 Minimal Plot-Sampling Example
 -----------------------------
 

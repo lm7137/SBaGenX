@@ -8,6 +8,7 @@ Scope
 -----
 
 - Core engine creation and float rendering.
+- Dedicated `.sbgf` curve program loading, solving, and evaluation.
 - Context API for tone loading, keyframes, sequence loading, and runtime extras.
 - Parser/formatter helpers used by front-ends.
 
@@ -65,6 +66,8 @@ Core Concepts
 -------------
 
 - `SbxEngine`: low-level stateless-ish renderer configured with one active tone.
+- `SbxCurveProgram`: library-owned `.sbgf` curve object that can be loaded,
+  parameterized, prepared, and sampled without going through the CLI.
 - `SbxContext`: higher-level runtime object with load state (tone, keyframes,
   sequence data, aux tones, mix effects, mix amplitude profile, clock).
 - `SbxToneSpec`: canonical tone description across binaural/monaural/isochronic/
@@ -137,7 +140,40 @@ API Groups
 
 `sbx_engine_render_f32` writes interleaved stereo floats to `out`.
 
-3) Parser/formatter helpers
+3) Curve program API
+
+- `sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg)`
+- `sbx_curve_create(void)`
+- `sbx_curve_destroy(SbxCurveProgram *curve)`
+- `sbx_curve_reset(SbxCurveProgram *curve)`
+- `sbx_curve_load_text(SbxCurveProgram *curve, const char *text, const char *source_name)`
+- `sbx_curve_load_file(SbxCurveProgram *curve, const char *path)`
+- `sbx_curve_set_param(SbxCurveProgram *curve, const char *name, double value)`
+- `sbx_curve_prepare(SbxCurveProgram *curve, const SbxCurveEvalConfig *cfg)`
+- `sbx_curve_eval(SbxCurveProgram *curve, double t_sec, SbxCurveEvalPoint *out_point)`
+- `sbx_curve_get_info(const SbxCurveProgram *curve, SbxCurveInfo *out_info)`
+- `sbx_curve_param_count(const SbxCurveProgram *curve)`
+- `sbx_curve_get_param(const SbxCurveProgram *curve, size_t index, const char **out_name, double *out_value)`
+- `sbx_curve_source_name(const SbxCurveProgram *curve)`
+- `sbx_curve_last_error(const SbxCurveProgram *curve)`
+
+This is the library-owned `.sbgf` surface used by both the CLI `-p curve`
+path and future IDE/GUI tooling.
+
+Typical flow:
+
+1. `sbx_curve_create`
+2. `sbx_curve_load_file` or `sbx_curve_load_text`
+3. optional `sbx_curve_set_param`
+4. fill `SbxCurveEvalConfig` with `sbx_default_curve_eval_config`
+5. `sbx_curve_prepare`
+6. `sbx_curve_eval` over the desired time range
+
+`sbx_curve_get_info`, `sbx_curve_param_count`, and `sbx_curve_get_param`
+exist so hosts can build inspectors/parameter UIs without reparsing `.sbgf`
+syntax themselves.
+
+4) Parser/formatter helpers
 
 - `sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone)`
 - `sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *out_tone)`
@@ -149,7 +185,7 @@ API Groups
 
 These are designed so front-ends can share parser semantics with CLI code.
 
-4) Context lifecycle and basic load/render
+5) Context lifecycle and basic load/render
 
 - `sbx_context_create(const SbxEngineConfig *cfg)`
 - `sbx_context_destroy(SbxContext *ctx)`
@@ -167,7 +203,7 @@ It resets internal oscillator/effect phase/state and restarts playback from the
 requested timeline time. That gives deterministic behavior for GUI scrubbing
 and preview playback.
 
-5) Keyframes and sequence loading
+6) Keyframes and sequence loading
 
 - `sbx_context_load_keyframes(SbxContext *ctx, const SbxProgramKeyframe *frames, size_t frame_count, int loop)`
 - `sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop)`
@@ -207,7 +243,7 @@ casing static tones as “zero lanes”.
 Use `sbx_context_is_looping` to decide whether keyframed transport/plotting UI
 should treat the program timeline as wrapping.
 
-6) Runtime extras (aux tones, mix effects, mix amp profile)
+7) Runtime extras (aux tones, mix effects, mix amp profile)
 
 - `sbx_context_set_aux_tones(...)`
 - `sbx_context_aux_tone_count(...)`
@@ -264,7 +300,7 @@ at one timeline time. It returns:
 
 Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
 
-7) Plot/data sampling support
+8) Plot/data sampling support
 
 - `sbx_context_sample_tones(...)`
 - `sbx_context_sample_tones_voice(...)`

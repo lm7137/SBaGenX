@@ -180,7 +180,6 @@
 #include "libs/sndfile.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "libs/stb_image_write.h"
-#include "libs/tinyexpr.h"
 #include "sbagenxlib.h"
 #include "sbagenxlib_dsp.h"
 
@@ -322,16 +321,6 @@ static void emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested);
 #endif
 #ifdef FLAC_DECODE
 #include "flacdec.c"
-#endif
-
-// Tiny expression parser/evaluator used for .sbgf custom curves.
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Warray-bounds"
-#endif
-#include "libs/tinyexpr.c"
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
 #endif
 
 #ifdef WIN_AUDIO
@@ -720,12 +709,8 @@ typedef struct {
 Mp3EncState mp3_enc;
 
 #define CURVE_MAX_PARAMS 32
-#define CURVE_MAX_PIECES 64
 #define CURVE_NAME_MAX 64
-#define CURVE_EXPR_MAX 1024
 #define CURVE_FILE_MAX 1024
-#define CURVE_MAX_SOLVE_UNK 8
-#define CURVE_MAX_SOLVE_EQ CURVE_MAX_SOLVE_UNK
 
 typedef struct {
    int active;			// Function-driven modulation enabled?
@@ -747,51 +732,14 @@ typedef struct {
    double beat_amp0_pct;	// Base beat/iso/mono amplitude (%)
    double mix_amp0_pct;	// Base mix amplitude (%) from mix/<amp>
    char src_file[CURVE_FILE_MAX];	// Source .sbgf file for mode 3
-   char beat_expr_src[CURVE_EXPR_MAX];
-   char carr_expr_src[CURVE_EXPR_MAX];
-   char amp_expr_src[CURVE_EXPR_MAX];
-   char mixamp_expr_src[CURVE_EXPR_MAX];
    int have_carr_expr;
    int have_amp_expr;
    int have_mixamp_expr;
-   int beat_piece_count;
-   int carr_piece_count;
-   int amp_piece_count;
-   int mixamp_piece_count;
-   char beat_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
-   char beat_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
-   char carr_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
-   char carr_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
-   char amp_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
-   char amp_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
-   char mixamp_piece_cond_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
-   char mixamp_piece_expr_src[CURVE_MAX_PIECES][CURVE_EXPR_MAX];
-   int have_solve;
-   int solve_unknown_count;
-   int solve_eq_count;
-   char solve_unknown_names[CURVE_MAX_SOLVE_UNK][CURVE_NAME_MAX];
-   int solve_unknown_param_idx[CURVE_MAX_SOLVE_UNK];
-   char solve_eq_lhs_src[CURVE_MAX_SOLVE_EQ][CURVE_EXPR_MAX];
-   char solve_eq_rhs_src[CURVE_MAX_SOLVE_EQ][CURVE_EXPR_MAX];
    int param_count;
    char param_names[CURVE_MAX_PARAMS][CURVE_NAME_MAX];
    double param_values[CURVE_MAX_PARAMS];
-   te_expr *beat_expr;
-   te_expr *carr_expr;
-   te_expr *amp_expr;
-   te_expr *mixamp_expr;
-   te_expr *beat_piece_cond[CURVE_MAX_PIECES];
-   te_expr *beat_piece_expr[CURVE_MAX_PIECES];
-   te_expr *carr_piece_cond[CURVE_MAX_PIECES];
-   te_expr *carr_piece_expr[CURVE_MAX_PIECES];
-   te_expr *amp_piece_cond[CURVE_MAX_PIECES];
-   te_expr *amp_piece_expr[CURVE_MAX_PIECES];
-   te_expr *mixamp_piece_cond[CURVE_MAX_PIECES];
-   te_expr *mixamp_piece_expr[CURVE_MAX_PIECES];
-   double ev_t, ev_m;		// Runtime variables for expression evaluation
-   double ev_D, ev_H, ev_T, ev_U;
-   double ev_b0, ev_b1, ev_c0, ev_c1;
-   double ev_a0, ev_m0;
+   SbxCurveProgram *prog;	// Library-owned .sbgf program
+   SbxCurveEvalConfig cfg;	// Prepared runtime evaluation config
 } FuncCurve;
 FuncCurve func_curve;		// Runtime function curve for pre-programmed sequences
 
@@ -1073,11 +1021,6 @@ curve_name_char(int c, int first) {
 }
 
 static int
-curve_name_eq(const char *a, const char *b) {
-   return strcmp(a, b) == 0;
-}
-
-static int
 curve_name_ieq(const char *a, const char *b) {
    while (*a && *b) {
       if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
@@ -1087,724 +1030,82 @@ curve_name_ieq(const char *a, const char *b) {
    return !*a && !*b;
 }
 
-static char *
-curve_trim(char *s) {
-   char *e;
-   while (*s && isspace((unsigned char)*s)) s++;
-   if (!*s) return s;
-   e= s + strlen(s);
-   while (e > s && isspace((unsigned char)e[-1])) e--;
-   *e= 0;
-   return s;
-}
-
 static int
 curve_has_sbgf_ext(const char *path) {
    const char *dot= strrchr(path, '.');
    return dot && curve_name_ieq(dot, ".sbgf");
 }
 
-static int
-curve_name_reserved(const char *name) {
-   static const char *reserved[]= {
-      "t", "m", "D", "H", "T", "U",
-      "b0", "b1", "c0", "c1", "a0", "m0",
-      "amp", "mixamp", "beat", "carrier",
-      "solve",
-      "pi", "e",
-      "ifelse", "step", "clamp", "lerp", "ramp",
-      "smoothstep", "smootherstep",
-      "between", "pulse", "lt", "le", "gt", "ge", "eq", "ne",
-      "seg", "min2", "max2",
-      0
-   };
-   int i;
-   for (i= 0; reserved[i]; i++)
-      if (curve_name_eq(name, reserved[i])) return 1;
-   return 0;
+static void
+curve_report_error(SbxCurveProgram *curve, const char *fallback) {
+   const char *msg= curve ? sbx_curve_last_error(curve) : 0;
+   if (msg && *msg) error("%s", msg);
+   error("%s", fallback);
 }
 
-static int
-curve_param_index(const char *name) {
-   int i;
-   for (i= 0; i<func_curve.param_count; i++)
-      if (curve_name_eq(name, func_curve.param_names[i])) return i;
-   return -1;
+static void
+curve_refresh_metadata(void) {
+   SbxCurveInfo info;
+   size_t i, n;
+
+   func_curve.src_file[0]= 0;
+   func_curve.have_carr_expr= 0;
+   func_curve.have_amp_expr= 0;
+   func_curve.have_mixamp_expr= 0;
+   func_curve.param_count= 0;
+   memset(func_curve.param_names, 0, sizeof(func_curve.param_names));
+   memset(func_curve.param_values, 0, sizeof(func_curve.param_values));
+
+   if (!func_curve.prog) return;
+
+   strncpy(func_curve.src_file, sbx_curve_source_name(func_curve.prog), sizeof(func_curve.src_file)-1);
+   func_curve.src_file[sizeof(func_curve.src_file)-1]= 0;
+
+   if (sbx_curve_get_info(func_curve.prog, &info) == SBX_OK) {
+      func_curve.have_carr_expr= info.has_carrier_expr || info.carrier_piece_count > 0;
+      func_curve.have_amp_expr= info.has_amp_expr || info.amp_piece_count > 0;
+      func_curve.have_mixamp_expr= info.has_mixamp_expr || info.mixamp_piece_count > 0;
+   }
+
+   n= sbx_curve_param_count(func_curve.prog);
+   if (n > CURVE_MAX_PARAMS)
+      error("Too many .sbgf parameters in %s (max %d)", func_curve.src_file, CURVE_MAX_PARAMS);
+   func_curve.param_count= (int)n;
+   for (i= 0; i<n; i++) {
+      const char *name= 0;
+      double value= 0.0;
+      if (sbx_curve_get_param(func_curve.prog, i, &name, &value) != SBX_OK || !name)
+	 curve_report_error(func_curve.prog, "Unable to inspect .sbgf parameters");
+      strncpy(func_curve.param_names[i], name, CURVE_NAME_MAX-1);
+      func_curve.param_names[i][CURVE_NAME_MAX-1]= 0;
+      func_curve.param_values[i]= value;
+   }
 }
 
 static void
 curve_set_param_value(const char *name, double value, int allow_new) {
-   int idx= curve_param_index(name);
-   if (idx < 0) {
-      if (!allow_new)
-	 error("Unknown .sbgf parameter override: %s", name);
-      if (func_curve.param_count >= CURVE_MAX_PARAMS)
-	 error("Too many .sbgf parameters (max %d)", CURVE_MAX_PARAMS);
-      if (curve_name_reserved(name))
-	 error("Parameter name '%s' is reserved in .sbgf", name);
-      idx= func_curve.param_count++;
-      strncpy(func_curve.param_names[idx], name, CURVE_NAME_MAX-1);
-      func_curve.param_names[idx][CURVE_NAME_MAX-1]= 0;
-   }
-   func_curve.param_values[idx]= value;
-}
-
-static double curve_fn_ifelse(double cond, double a, double b) {
-   return cond != 0.0 ? a : b;
-}
-
-static double curve_fn_step(double x) {
-   return x >= 0.0 ? 1.0 : 0.0;
-}
-
-static double curve_fn_clamp(double x, double lo, double hi) {
-   double t;
-   if (lo > hi) { t= lo; lo= hi; hi= t; }
-   return sbx_dsp_clamp(x, lo, hi);
-}
-
-static double curve_fn_lerp(double a, double b, double u) {
-   return a + (b-a) * u;
-}
-
-static double curve_fn_ramp(double x, double x0, double x1) {
-   if (x0 == x1) return x >= x1 ? 1.0 : 0.0;
-   return curve_fn_clamp((x-x0)/(x1-x0), 0.0, 1.0);
-}
-
-static double curve_fn_smoothstep(double edge0, double edge1, double x) {
-   double u= curve_fn_ramp(x, edge0, edge1);
-   return sbx_dsp_smoothstep01(u);
-}
-
-static double curve_fn_smootherstep(double edge0, double edge1, double x) {
-   double u= curve_fn_ramp(x, edge0, edge1);
-   return sbx_dsp_smootherstep01(u);
-}
-
-static double curve_fn_between(double x, double a, double b) {
-   if (a > b) { double t= a; a= b; b= t; }
-   return (x >= a && x <= b) ? 1.0 : 0.0;
-}
-
-static double curve_fn_pulse(double x, double start, double end) {
-   return curve_fn_between(x, start, end);
-}
-
-static double curve_fn_lt(double a, double b) {
-   return a < b ? 1.0 : 0.0;
-}
-
-static double curve_fn_le(double a, double b) {
-   return a <= b ? 1.0 : 0.0;
-}
-
-static double curve_fn_gt(double a, double b) {
-   return a > b ? 1.0 : 0.0;
-}
-
-static double curve_fn_ge(double a, double b) {
-   return a >= b ? 1.0 : 0.0;
-}
-
-static double curve_fn_eq(double a, double b) {
-   return a == b ? 1.0 : 0.0;
-}
-
-static double curve_fn_ne(double a, double b) {
-   return a != b ? 1.0 : 0.0;
-}
-
-static double curve_fn_seg(double x, double x0, double x1, double y0, double y1) {
-   if (x <= x0) return y0;
-   if (x >= x1) return y1;
-   if (x1 == x0) return y1;
-   return y0 + (y1-y0) * (x-x0) / (x1-x0);
-}
-
-static double curve_fn_min2(double a, double b) {
-   return a < b ? a : b;
-}
-
-static double curve_fn_max2(double a, double b) {
-   return a > b ? a : b;
-}
-
-static void
-curve_parse_param_line(char *line, int lno, const char *path) {
-   char name[CURVE_NAME_MAX];
-   char *p= line;
-   char *q;
-   char *endp;
-   double v;
-   double mult= 1.0;
-   int i= 0;
-
-   while (*p && isspace((unsigned char)*p)) p++;
-   if (!*p) error("%s:%d: expecting parameter name after 'param'", path, lno);
-   if (!curve_name_char((unsigned char)*p, 1))
-      error("%s:%d: bad parameter name near '%s'", path, lno, p);
-   while (*p && curve_name_char((unsigned char)*p, i == 0)) {
-      if (i >= CURVE_NAME_MAX-1)
-	 error("%s:%d: parameter name too long", path, lno);
-      name[i++]= *p++;
-   }
-   name[i]= 0;
-
-   while (*p && isspace((unsigned char)*p)) p++;
-   if (*p != '=')
-      error("%s:%d: expected '=' after parameter name '%s'", path, lno, name);
-   p++;
-   while (*p && isspace((unsigned char)*p)) p++;
-   if (!*p)
-      error("%s:%d: parameter '%s' needs a numeric value", path, lno, name);
-
-   v= strtod(p, &endp);
-   if (endp == p)
-      error("%s:%d: parameter '%s' requires a numeric value (optional unit suffix: m or s)",
-	    path, lno, name);
-   q= endp;
-   while (*q && isspace((unsigned char)*q)) q++;
-   if (*q) {
-      if ((q[0] == 'm' || q[0] == 'M') && q[1] == 0) {
-	 mult= 1.0;		// Canonical unit is minutes
-      } else if ((q[0] == 's' || q[0] == 'S') && q[1] == 0) {
-	 mult= 1.0/60.0;	// Convert seconds -> minutes
-      } else {
-	 error("%s:%d: trailing text after parameter '%s' value: %s"
-	       NL "       (expected optional unit suffix 'm' or 's')",
-	       path, lno, name, q);
-      }
-   }
-
-   curve_set_param_value(name, v * mult, 1);
-}
-
-static void
-curve_parse_expr_line(char *p, int lno, const char *path,
-		      const char *kind, char *dst, int dsz) {
-   char *eq= strchr(p, '=');
-   char *expr;
-   if (!eq)
-      error("%s:%d: %s line must be '<name> = <expression>'", path, lno, kind);
-   expr= curve_trim(eq + 1);
-   if (!*expr)
-      error("%s:%d: empty expression for '%s'", path, lno, kind);
-   if ((int)strlen(expr) >= dsz)
-      error("%s:%d: expression for '%s' is too long", path, lno, kind);
-   strcpy(dst, expr);
-}
-
-static int
-curve_parse_piece_line(char *s, int lno, const char *path,
-		       const char *kind, int klen,
-		       char cond_store[][CURVE_EXPR_MAX],
-		       char expr_store[][CURVE_EXPR_MAX],
-		       int *piece_count) {
-   char *p, *eq, *rhs, *expr;
-   const char *fn= 0;
-   int idx;
-
-   if (strncmp(s, kind, klen) != 0) return 0;
-   p= s + klen;
-   while (*p && isspace((unsigned char)*p)) p++;
-
-   if (*p == '<') {
-      p++;
-      fn= (*p == '=') ? (p++, "le") : "lt";
-   } else if (*p == '>') {
-      p++;
-      fn= (*p == '=') ? (p++, "ge") : "gt";
-   } else {
-      return 0;
-   }
-
-   while (*p && isspace((unsigned char)*p)) p++;
-   eq= strchr(p, '=');
-   if (!eq)
-      error("%s:%d: %s piecewise line must be '%s<expr = <expression>'",
-	    path, lno, kind, kind);
-
-   *eq= 0;
-   rhs= curve_trim(p);
-   expr= curve_trim(eq + 1);
-   if (!*rhs)
-      error("%s:%d: missing threshold expression in %s piecewise line", path, lno, kind);
-   if (!*expr)
-      error("%s:%d: empty expression in %s piecewise line", path, lno, kind);
-   if (*piece_count >= CURVE_MAX_PIECES)
-      error("%s:%d: too many %s piecewise lines (max %d)", path, lno, kind, CURVE_MAX_PIECES);
-
-   idx= (*piece_count)++;
-   if (snprintf(cond_store[idx], CURVE_EXPR_MAX, "%s(m,%s)", fn, rhs) >= CURVE_EXPR_MAX)
-      error("%s:%d: %s piecewise condition is too long", path, lno, kind);
-   if ((int)strlen(expr) >= CURVE_EXPR_MAX)
-      error("%s:%d: %s piecewise expression is too long", path, lno, kind);
-   strcpy(expr_store[idx], expr);
-
-   return 1;
-}
-
-static void
-curve_parse_solve_line(char *line, int lno, const char *path) {
-   char *p= line;
-   char *colon;
-   char *eqs;
-   int nunk= 0, neq= 0;
-
-   if (func_curve.have_solve)
-      error("%s:%d: only one 'solve ...' line is supported per .sbgf file", path, lno);
-
-   while (*p && isspace((unsigned char)*p)) p++;
-   if (!*p)
-      error("%s:%d: solve line requires unknown names and equations", path, lno);
-
-   colon= strchr(p, ':');
-   if (!colon)
-      error("%s:%d: solve line must use ':' between unknown names and equations", path, lno);
-   *colon= 0;
-   p= curve_trim(p);
-   eqs= curve_trim(colon + 1);
-   if (!*p)
-      error("%s:%d: solve line is missing unknown names before ':'", path, lno);
-   if (!*eqs)
-      error("%s:%d: solve line is missing equations after ':'", path, lno);
-
-   while (*p) {
-      char name[CURVE_NAME_MAX];
-      int i= 0, a;
-
-      while (*p && isspace((unsigned char)*p)) p++;
-      if (!*p) break;
-      if (!curve_name_char((unsigned char)*p, 1))
-	 error("%s:%d: bad solve unknown name near '%s'", path, lno, p);
-      while (*p && curve_name_char((unsigned char)*p, i == 0)) {
-	 if (i >= CURVE_NAME_MAX-1)
-	    error("%s:%d: solve unknown name is too long", path, lno);
-	 name[i++]= *p++;
-      }
-      name[i]= 0;
-      for (a= 0; a<nunk; a++)
-	 if (curve_name_eq(name, func_curve.solve_unknown_names[a]))
-	    error("%s:%d: duplicate solve unknown '%s'", path, lno, name);
-      if (curve_name_reserved(name))
-	 error("%s:%d: solve unknown '%s' uses a reserved name", path, lno, name);
-      if (nunk >= CURVE_MAX_SOLVE_UNK)
-	 error("%s:%d: too many solve unknowns (max %d)", path, lno, CURVE_MAX_SOLVE_UNK);
-      strcpy(func_curve.solve_unknown_names[nunk], name);
-      nunk++;
-      if (curve_param_index(name) < 0)
-	 curve_set_param_value(name, 0.0, 1);
-
-      while (*p && isspace((unsigned char)*p)) p++;
-      if (!*p) break;
-      if (*p != ',')
-	 error("%s:%d: expected ',' between solve unknown names near '%s'", path, lno, p);
-      p++;
-   }
-
-   while (*eqs) {
-      char *semi= strchr(eqs, ';');
-      char *seg;
-      char *eq;
-      char *lhs;
-      char *rhs;
-
-      if (semi) *semi= 0;
-      seg= curve_trim(eqs);
-      if (*seg) {
-	 if (neq >= CURVE_MAX_SOLVE_EQ)
-	    error("%s:%d: too many solve equations (max %d)", path, lno, CURVE_MAX_SOLVE_EQ);
-	 eq= strchr(seg, '=');
-	 if (!eq)
-	    error("%s:%d: solve equation #%d must contain '='", path, lno, neq+1);
-	 *eq= 0;
-	 lhs= curve_trim(seg);
-	 rhs= curve_trim(eq + 1);
-	 if (!*lhs || !*rhs)
-	    error("%s:%d: solve equation #%d must have both lhs and rhs expressions", path, lno, neq+1);
-	 if ((int)strlen(lhs) >= CURVE_EXPR_MAX || (int)strlen(rhs) >= CURVE_EXPR_MAX)
-	    error("%s:%d: solve equation #%d is too long", path, lno, neq+1);
-	 strcpy(func_curve.solve_eq_lhs_src[neq], lhs);
-	 strcpy(func_curve.solve_eq_rhs_src[neq], rhs);
-	 neq++;
-      }
-      if (!semi) break;
-      eqs= semi + 1;
-   }
-
-   if (nunk <= 0)
-      error("%s:%d: solve line must declare at least one unknown", path, lno);
-   if (neq <= 0)
-      error("%s:%d: solve line must include at least one equation", path, lno);
-   if (neq != nunk)
-      error("%s:%d: solve currently requires a square system (#equations == #unknowns)"
-	    NL "       unknowns=%d equations=%d",
-	    path, lno, nunk, neq);
-
-   func_curve.have_solve= 1;
-   func_curve.solve_unknown_count= nunk;
-   func_curve.solve_eq_count= neq;
-}
-
-static double
-curve_vec_norm_inf(int n, const double *v) {
-   int i;
-   double m= 0.0;
-   for (i= 0; i<n; i++) {
-      double a= fabs(v[i]);
-      if (a > m) m= a;
-   }
-   return m;
-}
-
-static int
-curve_linear_solve(int n,
-		   double a[CURVE_MAX_SOLVE_UNK][CURVE_MAX_SOLVE_UNK],
-		   double b[CURVE_MAX_SOLVE_UNK],
-		   double x[CURVE_MAX_SOLVE_UNK]) {
-   int i, j, k;
-   for (i= 0; i<n; i++) {
-      int piv= i;
-      double pivv= fabs(a[i][i]);
-      for (j= i+1; j<n; j++) {
-	 double v= fabs(a[j][i]);
-	 if (v > pivv) { pivv= v; piv= j; }
-      }
-      if (pivv < 1e-14) return 0;
-      if (piv != i) {
-	 double tb= b[i];
-	 b[i]= b[piv];
-	 b[piv]= tb;
-	 for (k= i; k<n; k++) {
-	    double ta= a[i][k];
-	    a[i][k]= a[piv][k];
-	    a[piv][k]= ta;
-	 }
-      }
-      for (j= i+1; j<n; j++) {
-	 double f= a[j][i] / a[i][i];
-	 if (f == 0.0) continue;
-	 a[j][i]= 0.0;
-	 for (k= i+1; k<n; k++)
-	    a[j][k]-= f * a[i][k];
-	 b[j]-= f * b[i];
-      }
-   }
-   for (i= n-1; i>=0; i--) {
-      double s= b[i];
-      for (j= i+1; j<n; j++)
-	 s-= a[i][j] * x[j];
-      if (fabs(a[i][i]) < 1e-14) return 0;
-      x[i]= s / a[i][i];
-   }
-   return 1;
-}
-
-static void
-curve_set_unknown_vector(int n, const double *x) {
-   int i;
-   for (i= 0; i<n; i++) {
-      int idx= func_curve.solve_unknown_param_idx[i];
-      if (idx >= 0 && idx < func_curve.param_count)
-	 func_curve.param_values[idx]= x[i];
-   }
-}
-
-static int
-curve_eval_solve_residuals(int n, te_expr **lhs, te_expr **rhs, double *resid) {
-   int i;
-   for (i= 0; i<n; i++) {
-      double lv= te_eval(lhs[i]);
-      double rv= te_eval(rhs[i]);
-      if (!isfinite(lv) || !isfinite(rv)) return 0;
-      resid[i]= lv - rv;
-   }
-   return 1;
-}
-
-static void
-curve_apply_solve(te_variable *vars, int vcnt) {
-   te_expr *lhs[CURVE_MAX_SOLVE_EQ];
-   te_expr *rhs[CURVE_MAX_SOLVE_EQ];
-   double x[CURVE_MAX_SOLVE_UNK];
-   double r0[CURVE_MAX_SOLVE_EQ];
-   double r1[CURVE_MAX_SOLVE_EQ];
-   double r2[CURVE_MAX_SOLVE_EQ];
-   double jac[CURVE_MAX_SOLVE_UNK][CURVE_MAX_SOLVE_UNK];
-   int n, i, j, iter, ok= 0;
-   double best= 0.0;
-   int err= 0;
-
-   if (!func_curve.have_solve) return;
-   n= func_curve.solve_unknown_count;
-   if (n <= 0 || n > CURVE_MAX_SOLVE_UNK)
-      error("%s: internal solve setup error (unknown count=%d)", func_curve.src_file, n);
-   if (func_curve.solve_eq_count != n)
-      error("%s: solve requires equal equation/unknown counts", func_curve.src_file);
-
-   memset(lhs, 0, sizeof(lhs));
-   memset(rhs, 0, sizeof(rhs));
-
-   for (i= 0; i<n; i++) {
-      int idx= curve_param_index(func_curve.solve_unknown_names[i]);
-      if (idx < 0)
-	 error("%s: solve unknown '%s' is not a defined parameter",
-	       func_curve.src_file, func_curve.solve_unknown_names[i]);
-      func_curve.solve_unknown_param_idx[i]= idx;
-      x[i]= func_curve.param_values[idx];
-   }
-   curve_set_unknown_vector(n, x);
-
-   for (i= 0; i<n; i++) {
-      err= 0;
-      lhs[i]= te_compile(func_curve.solve_eq_lhs_src[i], vars, vcnt, &err);
-      if (!lhs[i])
-	 error("%s: solve equation #%d lhs failed near column %d",
-	       func_curve.src_file, i+1, err);
-      err= 0;
-      rhs[i]= te_compile(func_curve.solve_eq_rhs_src[i], vars, vcnt, &err);
-      if (!rhs[i])
-	 error("%s: solve equation #%d rhs failed near column %d",
-	       func_curve.src_file, i+1, err);
-   }
-
-   for (iter= 0; iter<40; iter++) {
-      double step[CURVE_MAX_SOLVE_UNK];
-      double anorm;
-      double snorm;
-      int accepted= 0;
-      double alpha;
-
-      curve_set_unknown_vector(n, x);
-      if (!curve_eval_solve_residuals(n, lhs, rhs, r0))
-	 error("%s: solve evaluation failed at iteration %d (non-finite residual)",
-	       func_curve.src_file, iter+1);
-      best= curve_vec_norm_inf(n, r0);
-      if (best < 1e-9) { ok= 1; break; }
-
-      for (j= 0; j<n; j++) {
-	 double xj= x[j];
-	 double h= 1e-6 * (fabs(xj) + 1.0);
-	 double xph= xj + h;
-	 double xmh= xj - h;
-	 int good_plus= 0, good_minus= 0;
-
-	 x[j]= xph;
-	 curve_set_unknown_vector(n, x);
-	 good_plus= curve_eval_solve_residuals(n, lhs, rhs, r1);
-
-	 x[j]= xmh;
-	 curve_set_unknown_vector(n, x);
-	 good_minus= curve_eval_solve_residuals(n, lhs, rhs, r2);
-
-	 x[j]= xj;
-	 curve_set_unknown_vector(n, x);
-
-	 if (good_plus && good_minus) {
-	    for (i= 0; i<n; i++)
-	       jac[i][j]= (r1[i] - r2[i]) / (2.0 * h);
-	 } else if (good_plus) {
-	    for (i= 0; i<n; i++)
-	       jac[i][j]= (r1[i] - r0[i]) / h;
-	 } else {
-	    error("%s: solve Jacobian failed for unknown '%s' at iteration %d",
-		  func_curve.src_file, func_curve.solve_unknown_names[j], iter+1);
-	 }
-      }
-
-      {
-	 double a[CURVE_MAX_SOLVE_UNK][CURVE_MAX_SOLVE_UNK];
-	 double b[CURVE_MAX_SOLVE_UNK];
-	 for (i= 0; i<n; i++) {
-	    for (j= 0; j<n; j++)
-	       a[i][j]= jac[i][j];
-	    b[i]= -r0[i];
-	    step[i]= 0.0;
-	 }
-	 if (!curve_linear_solve(n, a, b, step))
-	    error("%s: solve Jacobian is singular/ill-conditioned at iteration %d",
-		  func_curve.src_file, iter+1);
-      }
-
-      snorm= curve_vec_norm_inf(n, step);
-      alpha= 1.0;
-      for (i= 0; i<12; i++) {
-	 double trial[CURVE_MAX_SOLVE_UNK];
-	 double trial_norm;
-	 for (j= 0; j<n; j++)
-	    trial[j]= x[j] + alpha * step[j];
-	 curve_set_unknown_vector(n, trial);
-	 if (!curve_eval_solve_residuals(n, lhs, rhs, r1)) {
-	    alpha *= 0.5;
-	    continue;
-	 }
-	 trial_norm= curve_vec_norm_inf(n, r1);
-	 if (trial_norm < best || trial_norm < 1e-9) {
-	    for (j= 0; j<n; j++)
-	       x[j]= trial[j];
-	    best= trial_norm;
-	    accepted= 1;
-	    break;
-	 }
-	 alpha *= 0.5;
-      }
-      if (!accepted) {
-	 if (snorm < 1e-12 && best < 1e-7) {
-	    ok= 1;
-	    break;
-	 }
-	 error("%s: solve failed to find a descent step at iteration %d"
-	       NL "       try better initial guesses (param values) or a different model",
-	       func_curve.src_file, iter+1);
-      }
-      anorm= alpha * snorm;
-      if (best < 1e-9 || anorm < 1e-12) {
-	 ok= 1;
-	 break;
-      }
-   }
-
-   if (!ok)
-      error("%s: solve did not converge after 40 iterations", func_curve.src_file);
-
-   curve_set_unknown_vector(n, x);
-   if (!opt_Q) {
-      fprintf(stderr, " Solved constants:");
-      for (i= 0; i<n; i++)
-	 fprintf(stderr, " %s=%g", func_curve.solve_unknown_names[i], x[i]);
-      fprintf(stderr, "\n");
-   }
-
-   for (i= 0; i<n; i++) {
-      if (lhs[i]) te_free(lhs[i]);
-      if (rhs[i]) te_free(rhs[i]);
-   }
+   int rc;
+   (void)allow_new;
+   if (!func_curve.prog)
+      error("No .sbgf curve is loaded");
+   rc= sbx_curve_set_param(func_curve.prog, name, value);
+   if (rc != SBX_OK)
+      curve_report_error(func_curve.prog, "Failed to override .sbgf parameter");
+   curve_refresh_metadata();
 }
 
 static void
 load_curve_file(const char *path) {
-   FILE *fp;
-   char line[4096];
-   int lno= 0;
-   int have_beat= 0;
-
    if (!curve_has_sbgf_ext(path))
       error("Curve file must use .sbgf extension: %s", path);
-
-   fp= fopen(path, "r");
-   if (!fp)
-      error("Cannot open curve file: %s (%s)", path, strerror(errno));
-
-   strncpy(func_curve.src_file, path, sizeof(func_curve.src_file)-1);
-   func_curve.src_file[sizeof(func_curve.src_file)-1]= 0;
-   func_curve.beat_expr_src[0]= 0;
-   func_curve.carr_expr_src[0]= 0;
-   func_curve.amp_expr_src[0]= 0;
-   func_curve.mixamp_expr_src[0]= 0;
-   func_curve.have_carr_expr= 0;
-   func_curve.have_amp_expr= 0;
-   func_curve.have_mixamp_expr= 0;
-   func_curve.beat_piece_count= 0;
-   func_curve.carr_piece_count= 0;
-   func_curve.amp_piece_count= 0;
-   func_curve.mixamp_piece_count= 0;
-   func_curve.have_solve= 0;
-   func_curve.solve_unknown_count= 0;
-   func_curve.solve_eq_count= 0;
-   func_curve.param_count= 0;
-
-   while (fgets(line, sizeof(line), fp)) {
-      char *s;
-      lno++;
-      if (strchr(line, '\n')) *strchr(line, '\n')= 0;
-      if (strchr(line, '\r')) *strchr(line, '\r')= 0;
-      s= curve_trim(line);
-      if (!*s || *s == '#' || *s == ';') continue;
-      if (s[0] == '/' && s[1] == '/') continue;
-
-      if (!strncmp(s, "param", 5) && isspace((unsigned char)s[5])) {
-	 curve_parse_param_line(s + 5, lno, path);
-	 continue;
-      }
-      if (!strncmp(s, "solve", 5) && isspace((unsigned char)s[5])) {
-	 curve_parse_solve_line(s + 5, lno, path);
-	 continue;
-      }
-      if (!strncmp(s, "beat", 4) &&
-	  (isspace((unsigned char)s[4]) || s[4] == '=' || s[4] == '<' || s[4] == '>')) {
-	 if (curve_parse_piece_line(s, lno, path, "beat", 4,
-				    func_curve.beat_piece_cond_src,
-				    func_curve.beat_piece_expr_src,
-				    &func_curve.beat_piece_count)) {
-	    if (func_curve.beat_expr_src[0])
-	       error("%s:%d: cannot mix 'beat = ...' with piecewise beat<... lines", path, lno);
-	    have_beat= 1;
-	    continue;
-	 }
-	 if (func_curve.beat_piece_count > 0)
-	    error("%s:%d: cannot mix piecewise beat<... lines with 'beat = ...'", path, lno);
-	 curve_parse_expr_line(s, lno, path, "beat", func_curve.beat_expr_src, sizeof(func_curve.beat_expr_src));
-	 have_beat= 1;
-	 continue;
-      }
-      if (!strncmp(s, "carrier", 7) &&
-	  (isspace((unsigned char)s[7]) || s[7] == '=' || s[7] == '<' || s[7] == '>')) {
-	 if (curve_parse_piece_line(s, lno, path, "carrier", 7,
-				    func_curve.carr_piece_cond_src,
-				    func_curve.carr_piece_expr_src,
-				    &func_curve.carr_piece_count)) {
-	    if (func_curve.have_carr_expr)
-	       error("%s:%d: cannot mix 'carrier = ...' with piecewise carrier<... lines", path, lno);
-	    continue;
-	 }
-	 if (func_curve.carr_piece_count > 0)
-	    error("%s:%d: cannot mix piecewise carrier<... lines with 'carrier = ...'", path, lno);
-	 curve_parse_expr_line(s, lno, path, "carrier", func_curve.carr_expr_src, sizeof(func_curve.carr_expr_src));
-	 func_curve.have_carr_expr= 1;
-	 continue;
-      }
-      if (!strncmp(s, "amp", 3) &&
-	  (isspace((unsigned char)s[3]) || s[3] == '=' || s[3] == '<' || s[3] == '>')) {
-	 if (curve_parse_piece_line(s, lno, path, "amp", 3,
-				    func_curve.amp_piece_cond_src,
-				    func_curve.amp_piece_expr_src,
-				    &func_curve.amp_piece_count)) {
-	    if (func_curve.have_amp_expr)
-	       error("%s:%d: cannot mix 'amp = ...' with piecewise amp<... lines", path, lno);
-	    continue;
-	 }
-	 if (func_curve.amp_piece_count > 0)
-	    error("%s:%d: cannot mix piecewise amp<... lines with 'amp = ...'", path, lno);
-	 curve_parse_expr_line(s, lno, path, "amp", func_curve.amp_expr_src, sizeof(func_curve.amp_expr_src));
-	 func_curve.have_amp_expr= 1;
-	 continue;
-      }
-      if (!strncmp(s, "mixamp", 6) &&
-	  (isspace((unsigned char)s[6]) || s[6] == '=' || s[6] == '<' || s[6] == '>')) {
-	 if (curve_parse_piece_line(s, lno, path, "mixamp", 6,
-				    func_curve.mixamp_piece_cond_src,
-				    func_curve.mixamp_piece_expr_src,
-				    &func_curve.mixamp_piece_count)) {
-	    if (func_curve.have_mixamp_expr)
-	       error("%s:%d: cannot mix 'mixamp = ...' with piecewise mixamp<... lines", path, lno);
-	    continue;
-	 }
-	 if (func_curve.mixamp_piece_count > 0)
-	    error("%s:%d: cannot mix piecewise mixamp<... lines with 'mixamp = ...'", path, lno);
-	 curve_parse_expr_line(s, lno, path, "mixamp", func_curve.mixamp_expr_src, sizeof(func_curve.mixamp_expr_src));
-	 func_curve.have_mixamp_expr= 1;
-	 continue;
-      }
-
-      error("%s:%d: unknown line in .sbgf (expected 'param', 'solve', 'beat', 'beat<...>',"
-	    " 'carrier', 'carrier<...>', 'amp', 'amp<...>', 'mixamp', or 'mixamp<...>'): %s",
-	    path, lno, s);
+   if (!func_curve.prog) {
+      func_curve.prog= sbx_curve_create();
+      if (!func_curve.prog)
+	 error("Out of memory creating .sbgf curve program");
    }
-   fclose(fp);
-
-   if (!have_beat)
-      error("%s: missing required beat definition in .sbgf (use 'beat = ...' or piecewise beat<... lines)", path);
+   if (sbx_curve_load_file(func_curve.prog, path) != SBX_OK)
+      curve_report_error(func_curve.prog, "Failed to load .sbgf curve");
+   curve_refresh_metadata();
 }
 
 static int
@@ -1813,47 +1114,24 @@ setup_custom_func_curve(int chan, int typ, int start_ms,
 			double beat0, double beat1, double beat_span_s,
 			double hold_min, double total_min, double wake_min,
 			double beat_amp0_pct, double mix_amp0_pct) {
-   te_variable vars[CURVE_MAX_PARAMS + 40];
-   int vcnt= 0, err= 0, i;
+   if (carr_span_s <= 0 || beat_span_s <= 0 || !func_curve.prog)
+      return 0;
 
-   if (carr_span_s <= 0 || beat_span_s <= 0) return 0;
-   if (!func_curve.beat_expr_src[0] && func_curve.beat_piece_count == 0) return 0;
+   sbx_default_curve_eval_config(&func_curve.cfg);
+   func_curve.cfg.carrier_start_hz= carr0;
+   func_curve.cfg.carrier_end_hz= carr1;
+   func_curve.cfg.carrier_span_sec= carr_span_s;
+   func_curve.cfg.beat_start_hz= beat0;
+   func_curve.cfg.beat_target_hz= beat1;
+   func_curve.cfg.beat_span_sec= beat_span_s;
+   func_curve.cfg.hold_min= hold_min;
+   func_curve.cfg.total_min= total_min;
+   func_curve.cfg.wake_min= wake_min;
+   func_curve.cfg.beat_amp0_pct= beat_amp0_pct;
+   func_curve.cfg.mix_amp0_pct= mix_amp0_pct;
 
-#define ADD_VAR(name_, ptr_) do { \
-      vars[vcnt].name= (name_); \
-      vars[vcnt].address= (ptr_); \
-      vars[vcnt].type= TE_VARIABLE; \
-      vars[vcnt].context= 0; \
-      vcnt++; \
-   } while (0)
-#define ADD_FN1(name_, fn_) do { \
-      vars[vcnt].name= (name_); \
-      vars[vcnt].address= (const void*)(fn_); \
-      vars[vcnt].type= TE_FUNCTION1 | TE_FLAG_PURE; \
-      vars[vcnt].context= 0; \
-      vcnt++; \
-   } while (0)
-#define ADD_FN2(name_, fn_) do { \
-      vars[vcnt].name= (name_); \
-      vars[vcnt].address= (const void*)(fn_); \
-      vars[vcnt].type= TE_FUNCTION2 | TE_FLAG_PURE; \
-      vars[vcnt].context= 0; \
-      vcnt++; \
-   } while (0)
-#define ADD_FN3(name_, fn_) do { \
-      vars[vcnt].name= (name_); \
-      vars[vcnt].address= (const void*)(fn_); \
-      vars[vcnt].type= TE_FUNCTION3 | TE_FLAG_PURE; \
-      vars[vcnt].context= 0; \
-      vcnt++; \
-   } while (0)
-#define ADD_FN5(name_, fn_) do { \
-      vars[vcnt].name= (name_); \
-      vars[vcnt].address= (const void*)(fn_); \
-      vars[vcnt].type= TE_FUNCTION5 | TE_FLAG_PURE; \
-      vars[vcnt].context= 0; \
-      vcnt++; \
-   } while (0)
+   if (sbx_curve_prepare(func_curve.prog, &func_curve.cfg) != SBX_OK)
+      curve_report_error(func_curve.prog, "Failed to prepare .sbgf curve");
 
    func_curve.active= 1;
    func_curve.mode= 3;
@@ -1871,130 +1149,8 @@ setup_custom_func_curve(int chan, int typ, int start_ms,
    func_curve.beat_span_s= beat_span_s;
    func_curve.beat_amp0_pct= beat_amp0_pct;
    func_curve.mix_amp0_pct= mix_amp0_pct;
-   func_curve.ev_D= beat_span_s / 60.0;
-   func_curve.ev_H= hold_min;
-   func_curve.ev_T= total_min;
-   func_curve.ev_U= wake_min;
-   func_curve.ev_b0= beat0;
-   func_curve.ev_b1= beat1;
-   func_curve.ev_c0= carr0;
-   func_curve.ev_c1= carr1;
-   func_curve.ev_a0= beat_amp0_pct;
-   func_curve.ev_m0= mix_amp0_pct;
 
-   ADD_VAR("t", &func_curve.ev_t);
-   ADD_VAR("m", &func_curve.ev_m);
-   ADD_VAR("D", &func_curve.ev_D);
-   ADD_VAR("H", &func_curve.ev_H);
-   ADD_VAR("T", &func_curve.ev_T);
-   ADD_VAR("U", &func_curve.ev_U);
-   ADD_VAR("b0", &func_curve.ev_b0);
-   ADD_VAR("b1", &func_curve.ev_b1);
-   ADD_VAR("c0", &func_curve.ev_c0);
-   ADD_VAR("c1", &func_curve.ev_c1);
-   ADD_VAR("a0", &func_curve.ev_a0);
-   ADD_VAR("m0", &func_curve.ev_m0);
-
-   ADD_FN3("ifelse", curve_fn_ifelse);
-   ADD_FN1("step", curve_fn_step);
-   ADD_FN3("clamp", curve_fn_clamp);
-   ADD_FN3("lerp", curve_fn_lerp);
-   ADD_FN3("ramp", curve_fn_ramp);
-   ADD_FN3("smoothstep", curve_fn_smoothstep);
-   ADD_FN3("smootherstep", curve_fn_smootherstep);
-   ADD_FN3("between", curve_fn_between);
-   ADD_FN3("pulse", curve_fn_pulse);
-   ADD_FN2("lt", curve_fn_lt);
-   ADD_FN2("le", curve_fn_le);
-   ADD_FN2("gt", curve_fn_gt);
-   ADD_FN2("ge", curve_fn_ge);
-   ADD_FN2("eq", curve_fn_eq);
-   ADD_FN2("ne", curve_fn_ne);
-   ADD_FN5("seg", curve_fn_seg);
-   ADD_FN2("min2", curve_fn_min2);
-   ADD_FN2("max2", curve_fn_max2);
-
-   for (i= 0; i<func_curve.param_count; i++)
-      ADD_VAR(func_curve.param_names[i], &func_curve.param_values[i]);
-
-   curve_apply_solve(vars, vcnt);
-
-   if (func_curve.beat_piece_count > 0) {
-      for (i= 0; i<func_curve.beat_piece_count; i++) {
-	 err= 0;
-	 func_curve.beat_piece_cond[i]= te_compile(func_curve.beat_piece_cond_src[i], vars, vcnt, &err);
-	 if (!func_curve.beat_piece_cond[i])
-	    error("%s: error in beat piece condition #%d near column %d", func_curve.src_file, i+1, err);
-	 err= 0;
-	 func_curve.beat_piece_expr[i]= te_compile(func_curve.beat_piece_expr_src[i], vars, vcnt, &err);
-	 if (!func_curve.beat_piece_expr[i])
-	    error("%s: error in beat piece expression #%d near column %d", func_curve.src_file, i+1, err);
-      }
-   } else {
-      func_curve.beat_expr= te_compile(func_curve.beat_expr_src, vars, vcnt, &err);
-      if (!func_curve.beat_expr)
-	 error("%s: error in beat expression near column %d", func_curve.src_file, err);
-   }
-
-   if (func_curve.carr_piece_count > 0) {
-      for (i= 0; i<func_curve.carr_piece_count; i++) {
-	 err= 0;
-	 func_curve.carr_piece_cond[i]= te_compile(func_curve.carr_piece_cond_src[i], vars, vcnt, &err);
-	 if (!func_curve.carr_piece_cond[i])
-	    error("%s: error in carrier piece condition #%d near column %d", func_curve.src_file, i+1, err);
-	 err= 0;
-	 func_curve.carr_piece_expr[i]= te_compile(func_curve.carr_piece_expr_src[i], vars, vcnt, &err);
-	 if (!func_curve.carr_piece_expr[i])
-	    error("%s: error in carrier piece expression #%d near column %d", func_curve.src_file, i+1, err);
-      }
-   } else if (func_curve.have_carr_expr) {
-      err= 0;
-      func_curve.carr_expr= te_compile(func_curve.carr_expr_src, vars, vcnt, &err);
-      if (!func_curve.carr_expr)
-	 error("%s: error in carrier expression near column %d", func_curve.src_file, err);
-   }
-
-   if (func_curve.amp_piece_count > 0) {
-      for (i= 0; i<func_curve.amp_piece_count; i++) {
-	 err= 0;
-	 func_curve.amp_piece_cond[i]= te_compile(func_curve.amp_piece_cond_src[i], vars, vcnt, &err);
-	 if (!func_curve.amp_piece_cond[i])
-	    error("%s: error in amp piece condition #%d near column %d", func_curve.src_file, i+1, err);
-	 err= 0;
-	 func_curve.amp_piece_expr[i]= te_compile(func_curve.amp_piece_expr_src[i], vars, vcnt, &err);
-	 if (!func_curve.amp_piece_expr[i])
-	    error("%s: error in amp piece expression #%d near column %d", func_curve.src_file, i+1, err);
-      }
-   } else if (func_curve.have_amp_expr) {
-      err= 0;
-      func_curve.amp_expr= te_compile(func_curve.amp_expr_src, vars, vcnt, &err);
-      if (!func_curve.amp_expr)
-	 error("%s: error in amp expression near column %d", func_curve.src_file, err);
-   }
-
-   if (func_curve.mixamp_piece_count > 0) {
-      for (i= 0; i<func_curve.mixamp_piece_count; i++) {
-	 err= 0;
-	 func_curve.mixamp_piece_cond[i]= te_compile(func_curve.mixamp_piece_cond_src[i], vars, vcnt, &err);
-	 if (!func_curve.mixamp_piece_cond[i])
-	    error("%s: error in mixamp piece condition #%d near column %d", func_curve.src_file, i+1, err);
-	 err= 0;
-	 func_curve.mixamp_piece_expr[i]= te_compile(func_curve.mixamp_piece_expr_src[i], vars, vcnt, &err);
-	 if (!func_curve.mixamp_piece_expr[i])
-	    error("%s: error in mixamp piece expression #%d near column %d", func_curve.src_file, i+1, err);
-      }
-   } else if (func_curve.have_mixamp_expr) {
-      err= 0;
-      func_curve.mixamp_expr= te_compile(func_curve.mixamp_expr_src, vars, vcnt, &err);
-      if (!func_curve.mixamp_expr)
-	 error("%s: error in mixamp expression near column %d", func_curve.src_file, err);
-   }
-
-#undef ADD_VAR
-#undef ADD_FN1
-#undef ADD_FN2
-#undef ADD_FN3
-#undef ADD_FN5
+   curve_refresh_metadata();
    return 1;
 }
 
@@ -2002,110 +1158,16 @@ static int
 eval_custom_curve_point(double pos_s,
 			double *beat_out, double *carr_out,
 			double *amp_pct_out, double *mixamp_pct_out) {
-   int i, matched;
-   double condv;
-   double beat, carr, amp_pct, mixamp_pct;
-   double t= pos_s;
-   if (!func_curve.beat_expr && func_curve.beat_piece_count == 0) return 0;
-   if (t < 0.0) t= 0.0;
-   if (t > func_curve.carr_span_s) t= func_curve.carr_span_s;
-   func_curve.ev_t= t;
-   func_curve.ev_m= t / 60.0;
+   SbxCurveEvalPoint pt;
 
-   if (func_curve.beat_piece_count > 0) {
-      matched= 0;
-      for (i= 0; i<func_curve.beat_piece_count; i++) {
-	 if (!func_curve.beat_piece_cond[i] || !func_curve.beat_piece_expr[i]) return 0;
-	 condv= te_eval(func_curve.beat_piece_cond[i]);
-	 if (!isfinite(condv)) return 0;
-	 if (condv != 0.0) {
-	    beat= te_eval(func_curve.beat_piece_expr[i]);
-	    matched= 1;
-	    break;
-	 }
-      }
-      if (!matched)
-	 beat= te_eval(func_curve.beat_piece_expr[func_curve.beat_piece_count-1]);
-   } else {
-      beat= te_eval(func_curve.beat_expr);
-   }
-   if (!isfinite(beat)) return 0;
+   if (!func_curve.prog) return 0;
+   if (sbx_curve_eval(func_curve.prog, pos_s, &pt) != SBX_OK)
+      return 0;
 
-   if (func_curve.carr_piece_count > 0) {
-      matched= 0;
-      for (i= 0; i<func_curve.carr_piece_count; i++) {
-	 if (!func_curve.carr_piece_cond[i] || !func_curve.carr_piece_expr[i]) return 0;
-	 condv= te_eval(func_curve.carr_piece_cond[i]);
-	 if (!isfinite(condv)) return 0;
-	 if (condv != 0.0) {
-	    carr= te_eval(func_curve.carr_piece_expr[i]);
-	    matched= 1;
-	    break;
-	 }
-      }
-      if (!matched)
-	 carr= te_eval(func_curve.carr_piece_expr[func_curve.carr_piece_count-1]);
-      if (!isfinite(carr))
-	 carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) *
-	      (func_curve.carr_span_s > 0.0 ? (t / func_curve.carr_span_s) : 0.0);
-   } else if (func_curve.have_carr_expr && func_curve.carr_expr) {
-      carr= te_eval(func_curve.carr_expr);
-      if (!isfinite(carr))
-	 carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) *
-	      (func_curve.carr_span_s > 0.0 ? (t / func_curve.carr_span_s) : 0.0);
-   } else {
-      carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) *
-	   (func_curve.carr_span_s > 0.0 ? (t / func_curve.carr_span_s) : 0.0);
-   }
-
-   amp_pct= func_curve.beat_amp0_pct;
-   if (func_curve.amp_piece_count > 0) {
-      matched= 0;
-      for (i= 0; i<func_curve.amp_piece_count; i++) {
-	 if (!func_curve.amp_piece_cond[i] || !func_curve.amp_piece_expr[i]) return 0;
-	 condv= te_eval(func_curve.amp_piece_cond[i]);
-	 if (!isfinite(condv)) return 0;
-	 if (condv != 0.0) {
-	    amp_pct= te_eval(func_curve.amp_piece_expr[i]);
-	    matched= 1;
-	    break;
-	 }
-      }
-      if (!matched)
-	 amp_pct= te_eval(func_curve.amp_piece_expr[func_curve.amp_piece_count-1]);
-   } else if (func_curve.have_amp_expr && func_curve.amp_expr) {
-      amp_pct= te_eval(func_curve.amp_expr);
-   }
-   if (!isfinite(amp_pct))
-      amp_pct= func_curve.beat_amp0_pct;
-   if (amp_pct < 0.0) amp_pct= 0.0;
-
-   mixamp_pct= func_curve.mix_amp0_pct;
-   if (func_curve.mixamp_piece_count > 0) {
-      matched= 0;
-      for (i= 0; i<func_curve.mixamp_piece_count; i++) {
-	 if (!func_curve.mixamp_piece_cond[i] || !func_curve.mixamp_piece_expr[i]) return 0;
-	 condv= te_eval(func_curve.mixamp_piece_cond[i]);
-	 if (!isfinite(condv)) return 0;
-	 if (condv != 0.0) {
-	    mixamp_pct= te_eval(func_curve.mixamp_piece_expr[i]);
-	    matched= 1;
-	    break;
-	 }
-      }
-      if (!matched)
-	 mixamp_pct= te_eval(func_curve.mixamp_piece_expr[func_curve.mixamp_piece_count-1]);
-   } else if (func_curve.have_mixamp_expr && func_curve.mixamp_expr) {
-      mixamp_pct= te_eval(func_curve.mixamp_expr);
-   }
-   if (!isfinite(mixamp_pct))
-      mixamp_pct= func_curve.mix_amp0_pct;
-   if (mixamp_pct < 0.0) mixamp_pct= 0.0;
-
-   *beat_out= beat;
-   *carr_out= carr;
-   if (amp_pct_out) *amp_pct_out= amp_pct;
-   if (mixamp_pct_out) *mixamp_pct_out= mixamp_pct;
+   if (beat_out) *beat_out= pt.beat_hz;
+   if (carr_out) *carr_out= pt.carrier_hz;
+   if (amp_pct_out) *amp_pct_out= pt.beat_amp_pct;
+   if (mixamp_pct_out) *mixamp_pct_out= pt.mix_amp_pct;
    return 1;
 }
 
@@ -2146,57 +1208,8 @@ curve_find_mix_amp_in_extra(const char *extra, double *amp_out) {
 // Clear any runtime function-driven curve override.
 static void
 clear_func_curve() {
-   int i;
-   if (func_curve.beat_expr) {
-      te_free(func_curve.beat_expr);
-      func_curve.beat_expr= 0;
-   }
-   if (func_curve.carr_expr) {
-      te_free(func_curve.carr_expr);
-      func_curve.carr_expr= 0;
-   }
-   if (func_curve.amp_expr) {
-      te_free(func_curve.amp_expr);
-      func_curve.amp_expr= 0;
-   }
-   if (func_curve.mixamp_expr) {
-      te_free(func_curve.mixamp_expr);
-      func_curve.mixamp_expr= 0;
-   }
-   for (i= 0; i<CURVE_MAX_PIECES; i++) {
-      if (func_curve.beat_piece_cond[i]) {
-	 te_free(func_curve.beat_piece_cond[i]);
-	 func_curve.beat_piece_cond[i]= 0;
-      }
-      if (func_curve.beat_piece_expr[i]) {
-	 te_free(func_curve.beat_piece_expr[i]);
-	 func_curve.beat_piece_expr[i]= 0;
-      }
-      if (func_curve.carr_piece_cond[i]) {
-	 te_free(func_curve.carr_piece_cond[i]);
-	 func_curve.carr_piece_cond[i]= 0;
-      }
-      if (func_curve.carr_piece_expr[i]) {
-	 te_free(func_curve.carr_piece_expr[i]);
-	 func_curve.carr_piece_expr[i]= 0;
-      }
-      if (func_curve.amp_piece_cond[i]) {
-	 te_free(func_curve.amp_piece_cond[i]);
-	 func_curve.amp_piece_cond[i]= 0;
-      }
-      if (func_curve.amp_piece_expr[i]) {
-	 te_free(func_curve.amp_piece_expr[i]);
-	 func_curve.amp_piece_expr[i]= 0;
-      }
-      if (func_curve.mixamp_piece_cond[i]) {
-	 te_free(func_curve.mixamp_piece_cond[i]);
-	 func_curve.mixamp_piece_cond[i]= 0;
-      }
-      if (func_curve.mixamp_piece_expr[i]) {
-	 te_free(func_curve.mixamp_piece_expr[i]);
-	 func_curve.mixamp_piece_expr[i]= 0;
-      }
-   }
+   if (func_curve.prog)
+      sbx_curve_destroy(func_curve.prog);
    memset(&func_curve, 0, sizeof(func_curve));
    func_curve.chan2= -1;
 }
@@ -2590,8 +1603,8 @@ apply_func_curve(int now_ms, int chan, Voice *vv) {
    carr_s= pos_s;
    if (carr_s > func_curve.carr_span_s) carr_s= func_curve.carr_span_s;
 
-   have_amp_curve= func_curve.have_amp_expr || func_curve.amp_piece_count > 0;
-   have_mixamp_curve= func_curve.have_mixamp_expr || func_curve.mixamp_piece_count > 0;
+   have_amp_curve= func_curve.have_amp_expr;
+   have_mixamp_curve= func_curve.have_mixamp_expr;
 
    if (func_curve.mode == 3) {
       if (!eval_custom_curve_point(pos_s, &beat, &carr, &amp_pct, &mixamp_pct))
@@ -10388,8 +9401,8 @@ create_curve(int ac, char **av) {
    if (ismono)
       setup_func_curve_monaural_pair(0, 1);
 
-   have_amp_curve= func_curve.have_amp_expr || func_curve.amp_piece_count > 0;
-   have_mixamp_curve= func_curve.have_mixamp_expr || func_curve.mixamp_piece_count > 0;
+   have_amp_curve= func_curve.have_amp_expr;
+   have_mixamp_curve= func_curve.have_mixamp_expr;
 
    for (a= 0; a<n_step; a++) {
       double tim= a * len0 / (double)(n_step-1);
