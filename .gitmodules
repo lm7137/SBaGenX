@@ -1,3 +1,3 @@
 [submodule "studio/theia-ide"]
 	path = studio/theia-ide
-	url = https://github.com/eclipse-theia/theia-ide
+	url = git@github.com:lm7137/SBaGenX-theia-ide.git
