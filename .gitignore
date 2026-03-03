@@ -21,3 +21,4 @@ docs/api/
 !/examples/**/*.sbg
 
 studio/bin/
+studio/.build-studio.stamp

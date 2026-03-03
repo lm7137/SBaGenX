@@ -12,6 +12,7 @@ import { CommonMenus } from '@theia/core/lib/browser/common-frontend-contributio
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { FrontendApplication } from '@theia/core/lib/browser/frontend-application';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
+import { OpenerService, open } from '@theia/core/lib/browser';
 import { Command, CommandRegistry } from '@theia/core/lib/common/command';
 import { MenuModelRegistry } from '@theia/core/lib/common/menu';
 import { inject, injectable } from '@theia/core/shared/inversify';
@@ -38,6 +39,9 @@ export class SbagenxStudioContribution extends AbstractViewContribution<SbagenxS
 
     @inject(EditorManager)
     protected readonly editorManager: EditorManager;
+
+    @inject(OpenerService)
+    protected readonly openerService: OpenerService;
 
     @inject(MessageService)
     protected readonly messageService: MessageService;
@@ -110,7 +114,7 @@ export class SbagenxStudioContribution extends AbstractViewContribution<SbagenxS
             this.messageService.warn('SBaGenX Studio currently supports .sbg and .sbgf files.');
             return;
         }
-        await this.editorManager.open(uri);
+        await open(this.openerService, uri, { activate: true, reveal: true });
         await this.model.load(uri);
         await this.openView({ activate: true, reveal: true });
     }

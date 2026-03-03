@@ -2,8 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STAMP_FILE="$ROOT_DIR/studio/.build-studio.stamp"
 cd "$ROOT_DIR"
 ./studio/apply-theia-overlay.sh
 cd studio/theia-ide
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 yarn build:dev
+mkdir -p "$(dirname "$STAMP_FILE")"
+touch "$STAMP_FILE"
