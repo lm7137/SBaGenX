@@ -279,6 +279,8 @@ should treat the program timeline as wrapping.
 - `sbx_context_get_timed_mix_effect_slot(...)`
 - `sbx_context_sample_mix_effects(...)`
 - `sbx_context_eval_active_tones(...)`
+- `sbx_context_set_telemetry_callback(...)`
+- `sbx_context_get_runtime_telemetry(...)`
 - `sbx_context_mix_stream_sample(...)`
 - `sbx_context_configure_runtime(...)`
 
@@ -346,6 +348,11 @@ lane; higher indices address secondary lanes loaded from native multivoice
 surface. It returns the effective voice lanes first, then any configured
 auxiliary tones. Use it when a frontend needs a “current sounding tones” view
 for inspectors, live labels, or non-buffered previews.
+
+`sbx_context_set_telemetry_callback` registers an optional callback that emits
+one `SbxRuntimeTelemetry` snapshot per `sbx_context_render_f32` call. Use
+`sbx_context_get_runtime_telemetry` for pull-style snapshots at the current
+context time when callbacks are not desired.
 
 `sbx_context_sample_mix_amp` samples the effective `mix/<amp>` profile over a
 time range without advancing render time.

@@ -101,6 +101,10 @@ struct SbxContext {
   size_t mix_kf_seg;
   double mix_default_amp_pct;
   double *custom_waves[SBX_CUSTOM_WAVE_COUNT];
+  SbxTelemetryCallback telemetry_cb;
+  void *telemetry_user;
+  SbxRuntimeTelemetry telemetry_last;
+  int telemetry_valid;
 };
 
 struct SbxCurveProgram {
@@ -1428,6 +1432,7 @@ ctx_reset_runtime(SbxContext *ctx) {
   ctx->mix_kf_seg = 0;
   ctx->t_sec = 0.0;
   ctx->kf_seg = 0;
+  ctx->telemetry_valid = 0;
 }
 
 static int
@@ -1759,6 +1764,69 @@ ctx_eval_program_beat_hz_voice(SbxContext *ctx, size_t voice_index, double t_sec
   if (!isfinite(tone.beat_hz)) return 0.0;
   if (tone.beat_hz <= 0.0) return fabs(tone.beat_hz);
   return tone.beat_hz;
+}
+
+static int
+ctx_collect_runtime_telemetry(SbxContext *ctx,
+                              double t_sec,
+                              const SbxToneSpec *tone_hint,
+                              SbxRuntimeTelemetry *out) {
+  SbxToneSpec tone;
+  size_t seg;
+  if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
+  if (!ctx->loaded) return SBX_ENOTREADY;
+
+  if (tone_hint) {
+    tone = *tone_hint;
+  } else {
+    switch (ctx->source_mode) {
+      case SBX_CTX_SRC_STATIC:
+        tone = ctx->eng->tone;
+        break;
+      case SBX_CTX_SRC_CURVE:
+        if (ctx_eval_curve_tone(ctx, t_sec, &tone) != SBX_OK) {
+          sbx_default_tone_spec(&tone);
+          tone.mode = SBX_TONE_NONE;
+        }
+        break;
+      case SBX_CTX_SRC_KEYFRAMES:
+        seg = ctx->kf_seg;
+        if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+          t_sec = fmod(t_sec, ctx->kf_duration_sec);
+          if (t_sec < 0.0) t_sec += ctx->kf_duration_sec;
+        }
+        ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, t_sec, &seg, &tone);
+        break;
+      default:
+        sbx_default_tone_spec(&tone);
+        tone.mode = SBX_TONE_NONE;
+        break;
+    }
+  }
+
+  memset(out, 0, sizeof(*out));
+  out->time_sec = t_sec;
+  out->source_mode = ctx->source_mode;
+  out->primary_tone = tone;
+  out->program_beat_hz = tone.beat_hz;
+  out->program_carrier_hz = tone.carrier_hz;
+  out->mix_amp_pct = sbx_context_mix_amp_at(ctx, t_sec);
+  out->voice_count = sbx_context_voice_count(ctx);
+  out->aux_tone_count = ctx->aux_count;
+  out->mix_effect_count = ctx->mix_fx_count + ctx->sbg_mix_fx_slots;
+  return SBX_OK;
+}
+
+static void
+ctx_emit_telemetry(SbxContext *ctx, double t_sec, const SbxToneSpec *tone_hint) {
+  SbxRuntimeTelemetry telem;
+  if (!ctx) return;
+  if (ctx_collect_runtime_telemetry(ctx, t_sec, tone_hint, &telem) != SBX_OK)
+    return;
+  ctx->telemetry_last = telem;
+  ctx->telemetry_valid = 1;
+  if (ctx->telemetry_cb)
+    ctx->telemetry_cb(&ctx->telemetry_last, ctx->telemetry_user);
 }
 
 const char *
@@ -2437,6 +2505,10 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->mix_kf_count = 0;
   ctx->mix_kf_seg = 0;
   ctx->mix_default_amp_pct = 100.0;
+  ctx->telemetry_cb = 0;
+  ctx->telemetry_user = 0;
+  memset(&ctx->telemetry_last, 0, sizeof(ctx->telemetry_last));
+  ctx->telemetry_valid = 0;
   ctx_sync_custom_waves(ctx);
   set_ctx_error(ctx, NULL);
   return ctx;
@@ -4611,6 +4683,34 @@ sbx_context_eval_active_tones(SbxContext *ctx,
   return SBX_OK;
 }
 
+int
+sbx_context_set_telemetry_callback(SbxContext *ctx,
+                                   SbxTelemetryCallback cb,
+                                   void *user) {
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  ctx->telemetry_cb = cb;
+  ctx->telemetry_user = user;
+  if (!cb) {
+    ctx->telemetry_valid = 0;
+    return SBX_OK;
+  }
+  ctx_emit_telemetry(ctx, ctx->t_sec, 0);
+  return SBX_OK;
+}
+
+int
+sbx_context_get_runtime_telemetry(SbxContext *ctx, SbxRuntimeTelemetry *out) {
+  int rc;
+  if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
+  rc = ctx_collect_runtime_telemetry(ctx, ctx->t_sec, 0, out);
+  if (rc == SBX_OK) {
+    ctx->telemetry_last = *out;
+    ctx->telemetry_valid = 1;
+    set_ctx_error(ctx, NULL);
+  }
+  return rc;
+}
+
 size_t
 sbx_context_keyframe_count(const SbxContext *ctx) {
   if (!ctx || !ctx->kfs) return 0;
@@ -4916,6 +5016,9 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   int rc;
   size_t i;
   double sr;
+  double t0_sec;
+  SbxToneSpec first_tone;
+  int have_first_tone = 0;
   if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
   if (!ctx->loaded) {
     set_ctx_error(ctx, "no tone/program loaded");
@@ -4923,6 +5026,7 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   }
 
   if (ctx->source_mode == SBX_CTX_SRC_STATIC) {
+    t0_sec = ctx->t_sec;
     rc = sbx_engine_render_f32(ctx->eng, out, frames);
     if (rc != SBX_OK) {
       set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
@@ -4954,6 +5058,7 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     sr = ctx->eng->cfg.sample_rate;
     if (isfinite(sr) && sr > 0.0)
       ctx->t_sec += (double)frames / sr;
+    ctx_emit_telemetry(ctx, t0_sec, &ctx->eng->tone);
     return SBX_OK;
   }
 
@@ -4973,6 +5078,8 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     float l = 0.0f, r = 0.0f;
     SbxToneSpec tone;
     size_t vi;
+    if (i == 0)
+      t0_sec = ctx->t_sec;
 
     if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES &&
         ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
@@ -4987,6 +5094,10 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
       if (rc != SBX_OK) return rc;
     } else {
       ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
+    }
+    if (!have_first_tone) {
+      first_tone = tone;
+      have_first_tone = 1;
     }
     ctx->eng->tone = tone;
     engine_render_sample(ctx->eng, &l, &r);
@@ -5012,6 +5123,9 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     out[i * 2 + 1] = r;
     ctx->t_sec += 1.0 / sr;
   }
+
+  if (have_first_tone)
+    ctx_emit_telemetry(ctx, t0_sec, &first_tone);
 
   return SBX_OK;
 }

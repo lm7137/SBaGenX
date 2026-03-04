@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 16  /* public API contract revision */
+#define SBX_API_VERSION 17  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -180,6 +180,20 @@ typedef struct {
   double duration_sec;
   int loop;
 } SbxCurveSourceConfig;
+
+typedef struct {
+  double time_sec;            /* context timeline time at snapshot */
+  int source_mode;            /* SBX_SOURCE_* */
+  SbxToneSpec primary_tone;   /* evaluated primary tone at time_sec */
+  double program_beat_hz;     /* convenience mirror of primary_tone.beat_hz */
+  double program_carrier_hz;  /* convenience mirror of primary_tone.carrier_hz */
+  double mix_amp_pct;         /* evaluated mix amp profile at time_sec */
+  size_t voice_count;         /* active keyframed/static voice lanes */
+  size_t aux_tone_count;      /* configured auxiliary overlay tones */
+  size_t mix_effect_count;    /* configured static + timed mix-effect slots */
+} SbxRuntimeTelemetry;
+
+typedef void (*SbxTelemetryCallback)(const SbxRuntimeTelemetry *telem, void *user);
 
 /* ----- Version and status ----- */
 
@@ -477,6 +491,18 @@ int sbx_context_eval_active_tones(SbxContext *ctx,
                                   SbxToneSpec *out_tones,
                                   size_t out_slots,
                                   size_t *out_count);
+
+/*
+ * Runtime telemetry:
+ * - Register callback to receive one snapshot per sbx_context_render_f32 call.
+ * - Pass NULL callback to disable.
+ */
+int sbx_context_set_telemetry_callback(SbxContext *ctx,
+                                       SbxTelemetryCallback cb,
+                                       void *user);
+
+/* Retrieve a runtime telemetry snapshot at the current context time. */
+int sbx_context_get_runtime_telemetry(SbxContext *ctx, SbxRuntimeTelemetry *out);
 
 /* ----- Introspection/render ----- */
 
