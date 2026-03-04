@@ -152,7 +152,20 @@ struct SbxCurveProgram {
 };
 
 #define TE_POW_FROM_RIGHT 0
+/*
+ * Vendored tinyexpr uses variable-sized AST node allocation that triggers
+ * GCC/MinGW -Warray-bounds false positives under optimization. Keep warning
+ * suppression tightly scoped to the third-party include so the rest of
+ * sbagenxlib still builds warning-clean.
+ */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
 #include "libs/tinyexpr.c"
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #define SBX_MV_KF(ctx, voice_idx) ((ctx)->mv_kfs + ((voice_idx) * (ctx)->kf_count))
 
