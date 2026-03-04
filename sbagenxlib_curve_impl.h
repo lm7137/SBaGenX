@@ -782,8 +782,11 @@ sbx_curve_load_text(SbxCurveProgram *curve, const char *text, const char *source
   else
     snprintf(curve->src_file, sizeof(curve->src_file), "<memory>.sbgf");
 
-  if (!curve_has_sbgf_ext(curve->src_file))
-    return curve_fail(curve, "Curve source must use .sbgf extension: %s", curve->src_file);
+  if (!curve_has_sbgf_ext(curve->src_file)) {
+    int is_virtual_source = (curve->src_file[0] == '<' && strchr(curve->src_file, '>') != 0);
+    if (!is_virtual_source)
+      return curve_fail(curve, "Curve source must use .sbgf extension: %s", curve->src_file);
+  }
 
   buf = strdup(text);
   if (!buf)
