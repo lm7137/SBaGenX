@@ -1494,7 +1494,9 @@ Examples:
   sbagenx -G -p curve examples/basics/curve-sigmoid-like.sbgf \
     00ls:l=0.2:h=0
   sbagenx -G -p curve examples/basics/curve-expfit-solve-demo.sbgf \
-    00ls:l=-0.15
+    00ls:l=0.15
+  sbagenx -G -p curve examples/basics/curve-3unk-double-exp-solve-demo.sbgf \
+    00ls:l=0.06:k=0.20:s0=0
 
 The level/depth/time modifiers are interpreted the same way as in
 `-p drop`/`-p sigmoid`:
@@ -1587,6 +1589,14 @@ Helper functions (implemented in C):
   between(x,a,b), pulse(x,start,end), seg(x,x0,x1,y0,y1)
   lt(a,b), le(a,b), gt(a,b), ge(a,b), eq(a,b), ne(a,b)
   min2(a,b), max2(a,b)
+
+Logarithm convention in `.sbgf` expressions:
+
+  ln(x)   natural logarithm (base e)
+  log(x)  base-10 logarithm
+
+If you are pairing with `exp(...)` (for example in solved exponential
+curves), use `ln(...)`.
 
 Quick reference:
 
@@ -1708,7 +1718,7 @@ Common `solve` errors:
 
 Valid minimal example:
 
-  solve A,C : A*exp(l*0)+C=b0 ; A*exp(l*D)+C=b1
+  solve A,C : A*exp(-l*0)+C=b0 ; A*exp(-l*D)+C=b1
 
 Parameter unit suffixes:
   - `m` means minutes
@@ -1748,10 +1758,22 @@ The same example in seconds:
 
 Example `.sbgf` using auto-solved constants:
 
-  # Target model: beat(m) = A*exp(l*m) + C
-  param l = -0.15
-  solve A,C : A*exp(l*0)+C=b0 ; A*exp(l*D)+C=b1
-  beat = A*exp(l*m) + C
+  # Target model: beat(m) = A*exp(-l*m) + C
+  param l = 0.15
+  solve A,C : A*exp(-l*0)+C=b0 ; A*exp(-l*D)+C=b1
+  beat = A*exp(-l*m) + C
+  carrier = c0 + (c1-c0) * ramp(m,0,T)
+
+Example `.sbgf` with 3 unknowns solved:
+
+  # Target model: beat(m) = A*exp(-l*m) + B*exp(-k*m) + C
+  # Constraints:
+  #   beat(0)=b0, beat(D)=b1, beat'(0)=s0
+  param l = 0.06
+  param k = 0.20
+  param s0 = 0
+  solve A,B,C : A+B+C=b0 ; A*exp(-l*D)+B*exp(-k*D)+C=b1 ; -l*A-k*B=s0
+  beat = A*exp(-l*m) + B*exp(-k*m) + C
   carrier = c0 + (c1-c0) * ramp(m,0,T)
 
 
