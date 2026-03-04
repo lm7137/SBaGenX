@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 15  /* public API contract revision */
+#define SBX_API_VERSION 16  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -55,7 +55,8 @@ typedef enum {
 typedef enum {
   SBX_SOURCE_NONE = 0,
   SBX_SOURCE_STATIC = 1,
-  SBX_SOURCE_KEYFRAMES = 2
+  SBX_SOURCE_KEYFRAMES = 2,
+  SBX_SOURCE_CURVE = 3
 } SbxSourceMode;
 
 typedef enum {
@@ -171,6 +172,15 @@ typedef struct {
   size_t mixamp_piece_count;
 } SbxCurveInfo;
 
+typedef struct {
+  SbxToneMode mode;
+  int waveform;
+  double duty_cycle;
+  double amplitude;
+  double duration_sec;
+  int loop;
+} SbxCurveSourceConfig;
+
 /* ----- Version and status ----- */
 
 /* Runtime library version string (human-readable). */
@@ -195,6 +205,9 @@ void sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec);
 
 /* Fill cfg with default `.sbgf` evaluation environment values. */
 void sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg);
+
+/* Fill cfg with default curve-backed context source settings. */
+void sbx_default_curve_source_config(SbxCurveSourceConfig *cfg);
 
 /* ----- Engine API ----- */
 
@@ -297,6 +310,14 @@ int sbx_context_set_default_waveform(SbxContext *ctx, int waveform);
 
 /* Parse and load single tone token onto context. */
 int sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec);
+
+/*
+ * Load a prepared curve program as an exact runtime source.
+ * On success the context takes ownership of `curve`.
+ */
+int sbx_context_load_curve_program(SbxContext *ctx,
+                                   SbxCurveProgram *curve,
+                                   const SbxCurveSourceConfig *cfg);
 
 /* Load keyframed program (strictly increasing time_sec). */
 int sbx_context_load_keyframes(SbxContext *ctx,

@@ -182,6 +182,48 @@ printf("beat=%g carrier=%g amp=%g mixamp=%g\n",
 sbx_curve_destroy(curve);
 ```
 
+Minimal Curve-Backed Context Example
+------------------------------------
+
+```c
+SbxCurveProgram *curve;
+SbxCurveEvalConfig ccfg;
+SbxCurveSourceConfig scfg;
+int rc;
+
+curve = sbx_curve_create();
+sbx_curve_load_file(curve, "examples/basics/curve-sigmoid-like.sbgf");
+
+sbx_default_curve_eval_config(&ccfg);
+ccfg.carrier_start_hz = 205.0;
+ccfg.carrier_end_hz = 200.0;
+ccfg.carrier_span_sec = 1800.0;
+ccfg.beat_start_hz = 10.0;
+ccfg.beat_target_hz = 2.5;
+ccfg.beat_span_sec = 1800.0;
+ccfg.hold_min = 30.0;
+ccfg.total_min = 60.0;
+ccfg.wake_min = 3.0;
+sbx_curve_prepare(curve, &ccfg);
+
+sbx_default_curve_source_config(&scfg);
+scfg.mode = SBX_TONE_BINAURAL;
+scfg.waveform = SBX_WAVE_SINE;
+scfg.duration_sec = 63.0 * 60.0 + 10.0; /* drop + hold + wake + fade */
+
+rc = sbx_context_load_curve_program(ctx, curve, &scfg);
+if (rc != SBX_OK) {
+  fprintf(stderr, "curve context load failed: %s\n", sbx_context_last_error(ctx));
+  sbx_curve_destroy(curve); /* only if load failed */
+  return 8;
+}
+curve = NULL; /* ownership transferred to ctx on success */
+```
+
+Use this path when you want exact sample-time evaluation of a prepared `.sbgf`
+inside the normal context render loop, rather than flattening it into keyframes
+first.
+
 Minimal Plot-Sampling Example
 -----------------------------
 

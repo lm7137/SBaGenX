@@ -14,6 +14,17 @@ sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg) {
   cfg->mix_amp0_pct = 100.0;
 }
 
+void
+sbx_default_curve_source_config(SbxCurveSourceConfig *cfg) {
+  if (!cfg) return;
+  cfg->mode = SBX_TONE_BINAURAL;
+  cfg->waveform = SBX_WAVE_SINE;
+  cfg->duty_cycle = 0.4;
+  cfg->amplitude = 1.0;
+  cfg->duration_sec = 0.0;
+  cfg->loop = 0;
+}
+
 static int
 curve_name_char(int c, int first) {
   return isalpha(c) || c == '_' || (!first && (isdigit(c) || c == '.'));
