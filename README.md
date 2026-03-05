@@ -7,7 +7,7 @@ SBaGenX is a command-line brainwave generator for creating binaural beats, monau
 > **SBaGenX is a fork of SBaGen+, continuing development of the original SBaGen lineage.**
 > Full credit is due, first and foremost, to the father of SBaGen, Jim Peters, and also to the creator of the SBaGen+ fork, Ruan Klein, who added isochronic beats as well as making numerous enhancements.
 
-> **Beta releases:** The `v3.0.0-beta.*` pre-releases are now close to production-ready and are recommended for most users who want the latest functionality. If reliability is paramount, use the latest non-beta release instead. On GitHub, these builds are listed under **Pre-releases** on the [releases page](https://github.com/lm7137/SBaGenX/releases).
+> Use the latest stable release from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
 
 ## Table of Contents
 
@@ -100,11 +100,8 @@ This fork introduces substantial functional changes beyond maintenance:
 
 Download assets from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
 
-If you want the newest `sbagenxlib` work and the latest runtime/plotting
-improvements, use the current **`v3.0.0-beta.*` pre-release** from the same
-page. Those betas are recommended for most users; only prefer the non-beta
-release line if maximum reliability is more important than getting the newest
-features.
+Use the latest stable release from the same page for current `sbagenxlib`
+features and runtime/plotting improvements.
 
 ### Try SBaGenX in 60 Seconds
 
@@ -129,9 +126,9 @@ features.
 #### Ubuntu (amd64)
 
 ```bash
-wget -O sbagenx_2.1.0-1_amd64.deb \
-  https://github.com/lm7137/SBaGenX/releases/download/v2.1.0/sbagenx_2.1.0-1_amd64.deb
-sudo apt install ./sbagenx_2.1.0-1_amd64.deb
+wget -O sbagenx_3.0.3-1_amd64.deb \
+  https://github.com/lm7137/SBaGenX/releases/download/v3.0.3/sbagenx_3.0.3-1_amd64.deb
+sudo apt install ./sbagenx_3.0.3-1_amd64.deb
 sbagenx -h
 ```
 
@@ -169,21 +166,22 @@ At present, there is no officially published SBaGenX runtime container image for
 
 Recommended download path:
 
-- For most users: use the current **`v3.0.0-beta.*` pre-release** from the
+- Use the latest stable release from the
   [GitHub releases page](https://github.com/lm7137/SBaGenX/releases)
-- For conservative installs: use the latest non-beta release from the same page
 
-Current stable release asset:
+Current stable release assets (`v3.0.3`):
 
-- Windows installer: [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/download/v2.0.0/sbagenx-windows-setup.exe)
-- SHA256: `16B9CE7F3F4F00BA674D184B0C1448D35B59E107F2DCEB41B4B760509544EA88`
+- Windows installer: [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/download/v3.0.3/sbagenx-windows-setup.exe)
+- Windows SHA256: `15d91995ef26100d9ccf8c0e6f456db9866589f702f7d3480f35d35020dcd96d`
+- Ubuntu package: [sbagenx_3.0.3-1_amd64.deb](https://github.com/lm7137/SBaGenX/releases/download/v3.0.3/sbagenx_3.0.3-1_amd64.deb)
+- Ubuntu SHA256: `c90f413dc1debe5e9152794e2238eb535f8b92d1f497bf6233943d74d84028d0`
 
   **Important**: Always verify the SHA256 checksum of downloaded binaries against those listed on the [releases page](https://github.com/lm7137/SBaGenX/releases) to ensure file integrity and security.
 
 ### Installing on Linux
 
-Pre-built Linux binaries are not currently published for `v2.0.0`.
-Build from source instead:
+Pre-built Ubuntu (`amd64`) packages are published on releases.
+For other Linux distributions/architectures, build from source:
 
 ```bash
 bash linux-build-libs.sh
@@ -207,7 +205,7 @@ sudo apt install ./dist/sbagenx_*_amd64.deb
 
 ### Installing on macOS
 
-Pre-built macOS installer assets are not currently published for `v2.0.0`.
+Pre-built macOS installer assets are not currently published.
 Build on macOS instead:
 
 ```bash
