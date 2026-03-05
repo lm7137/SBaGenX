@@ -35,6 +35,26 @@ export class SbagenxStudioEngineServiceImpl implements SbagenxStudioEngineServic
         }
     }
 
+    async inspectText(fileType: 'sbg' | 'sbgf', text: string, sourceName?: string): Promise<SbagenxStudioInspectionResult> {
+        const enginePath = await this.ensureEngineBinary();
+        const backend = this.backendForFileType(fileType);
+        const args = ['--stdin', '--type', fileType];
+        if (sourceName) {
+            args.push('--source', sourceName);
+        }
+        try {
+            const stdout = await this.execFile(enginePath, args, { stdin: text });
+            return JSON.parse(stdout) as SbagenxStudioInspectionResult;
+        } catch (error) {
+            return {
+                status: 'error',
+                backend,
+                fileType,
+                message: error instanceof Error ? error.message : String(error)
+            };
+        }
+    }
+
     protected detectFileType(filePath: string): 'sbg' | 'sbgf' | 'unknown' {
         const ext = path.extname(filePath).toLowerCase();
         if (ext === '.sbg') {
@@ -93,15 +113,19 @@ export class SbagenxStudioEngineServiceImpl implements SbagenxStudioEngineServic
         }
     }
 
-    protected execFile(command: string, args: string[], options?: { cwd?: string }): Promise<string> {
+    protected execFile(command: string, args: string[], options?: { cwd?: string; stdin?: string }): Promise<string> {
         return new Promise((resolve, reject) => {
-            execFile(command, args, { cwd: options?.cwd, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+            const child = execFile(command, args, { cwd: options?.cwd, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
                 if (error) {
                     reject(new Error(stderr.trim() || error.message));
                     return;
                 }
                 resolve(stdout.trim());
             });
+            if (options?.stdin !== undefined && child.stdin) {
+                child.stdin.write(options.stdin);
+                child.stdin.end();
+            }
         });
     }
 }

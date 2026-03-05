@@ -40,4 +40,5 @@ export interface SbagenxStudioInspectionResult {
 
 export interface SbagenxStudioEngineService {
     inspectFile(filePath: string): Promise<SbagenxStudioInspectionResult>;
+    inspectText(fileType: 'sbg' | 'sbgf', text: string, sourceName?: string): Promise<SbagenxStudioInspectionResult>;
 }

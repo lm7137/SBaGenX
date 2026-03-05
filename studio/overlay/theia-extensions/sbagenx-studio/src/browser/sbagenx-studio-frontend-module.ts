@@ -8,13 +8,13 @@
  ********************************************************************************/
 
 import '../../src/browser/style/index.css';
+import './sbagenx-studio-language';
 
-import { bindViewContribution, FrontendApplicationContribution, OpenHandler, RemoteConnectionProvider, ServiceConnectionProvider, WidgetFactory } from '@theia/core/lib/browser';
+import { bindViewContribution, FrontendApplicationContribution, RemoteConnectionProvider, ServiceConnectionProvider, WidgetFactory } from '@theia/core/lib/browser';
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { SbagenxStudioEngineService, SBAGENX_STUDIO_ENGINE_PATH } from '../common/sbagenx-studio-engine-protocol';
 import { SbagenxStudioContribution } from './sbagenx-studio-contribution';
 import { SbagenxStudioModel } from './sbagenx-studio-model';
-import { SbagenxStudioOpenHandler } from './sbagenx-studio-open-handler';
 import { SbagenxStudioWidget } from './sbagenx-studio-widget';
 
 export default new ContainerModule(bind => {
@@ -24,9 +24,6 @@ export default new ContainerModule(bind => {
     }).inSingletonScope();
 
     bind(SbagenxStudioModel).toSelf().inSingletonScope();
-
-    bind(SbagenxStudioOpenHandler).toSelf().inSingletonScope();
-    bind(OpenHandler).toService(SbagenxStudioOpenHandler);
 
     bind(SbagenxStudioWidget).toSelf();
     bind(WidgetFactory).toDynamicValue(({ container }) => ({

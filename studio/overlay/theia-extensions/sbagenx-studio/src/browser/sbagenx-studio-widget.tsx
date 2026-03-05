@@ -12,6 +12,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandRegistry } from '@theia/core/lib/common/command';
 import { nls } from '@theia/core/lib/common/nls';
+import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { SbagenxStudioInspectionResult } from '../common/sbagenx-studio-engine-protocol';
 import { SbagenxStudioModel } from './sbagenx-studio-model';
 import { SbagenxStudioCommands } from './sbagenx-studio-contribution';
@@ -27,6 +28,9 @@ export class SbagenxStudioWidget extends ReactWidget {
 
     @inject(CommandRegistry)
     protected readonly commands: CommandRegistry;
+
+    @inject(EditorManager)
+    protected readonly editorManager: EditorManager;
 
     @postConstruct()
     protected init(): void {
@@ -149,7 +153,13 @@ export class SbagenxStudioWidget extends ReactWidget {
     protected refresh(): void {
         const uri = this.model.summary?.uri;
         if (uri) {
-            this.model.load(uri).catch(() => undefined);
+            const currentEditor = this.editorManager.currentEditor;
+            const currentUri = currentEditor?.getResourceUri();
+            if (currentUri && currentUri.toString() === uri.toString()) {
+                this.model.load(uri, currentEditor?.editor.document.getText()).catch(() => undefined);
+            } else {
+                this.model.load(uri).catch(() => undefined);
+            }
         }
     }
 }

@@ -7,6 +7,10 @@ THEIA_DIR="$ROOT_DIR/studio/theia-ide"
 TARGET_EXT_DIR="$THEIA_DIR/theia-extensions/sbagenx-studio"
 needs_rebuild=0
 
+if [[ ! -f "$THEIA_DIR/package.json" ]]; then
+  git -C "$ROOT_DIR" submodule update --init --recursive studio/theia-ide
+fi
+
 is_newer_than_stamp() {
   local path="$1"
   [[ -e "$path" ]] && [[ ! -e "$STAMP_FILE" || "$path" -nt "$STAMP_FILE" ]]

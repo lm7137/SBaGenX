@@ -79,7 +79,7 @@ export class SbagenxStudioModel {
         return ext === '.sbg' || ext === '.sbgf';
     }
 
-    async load(uri: URI): Promise<void> {
+    async load(uri: URI, textOverride?: string): Promise<void> {
         if (!this.canHandle(uri)) {
             this.clear();
             return;
@@ -89,10 +89,10 @@ export class SbagenxStudioModel {
         this._validation = undefined;
         this.onDidChangeEmitter.fire();
         try {
-            const content = await this.fileService.read(uri);
-            const text = content.value.toString();
+            const text = textOverride ?? (await this.fileService.read(uri)).value.toString();
+            const fileType = uri.path.ext.toLowerCase() === '.sbgf' ? 'sbgf' : 'sbg';
             this._summary = this.summarize(uri, text, text.length);
-            this._validation = await this.engineService.inspectFile(uri.path.fsPath());
+            this._validation = await this.engineService.inspectText(fileType, text, uri.path.base);
         } catch (error) {
             this._summary = undefined;
             this._validation = undefined;
