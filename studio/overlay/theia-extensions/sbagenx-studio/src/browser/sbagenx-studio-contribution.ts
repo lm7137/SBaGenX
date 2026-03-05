@@ -16,9 +16,11 @@ import { Command, CommandRegistry } from '@theia/core/lib/common/command';
 import { MenuModelRegistry } from '@theia/core/lib/common/menu';
 import { DisposableCollection } from '@theia/core/lib/common/disposable';
 import { inject, injectable } from '@theia/core/shared/inversify';
+import { DiagnosticSeverity } from '@theia/core/shared/vscode-languageserver-protocol';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog/file-dialog-service';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { MessageService } from '@theia/core/lib/common/message-service';
+import { ProblemManager } from '@theia/markers/lib/browser/problem/problem-manager';
 import { SbagenxStudioModel } from './sbagenx-studio-model';
 import { SbagenxStudioWidget } from './sbagenx-studio-widget';
 
@@ -35,6 +37,8 @@ export namespace SbagenxStudioCommands {
 export class SbagenxStudioContribution extends AbstractViewContribution<SbagenxStudioWidget> implements FrontendApplicationContribution {
     protected readonly toDisposeOnEditorChange = new DisposableCollection();
     protected contentValidationTimer: number | undefined;
+    protected readonly markerOwner = 'sbagenx-studio';
+    protected lastMarkerUri: URI | undefined;
 
 
     @inject(FileDialogService)
@@ -45,6 +49,9 @@ export class SbagenxStudioContribution extends AbstractViewContribution<SbagenxS
 
     @inject(MessageService)
     protected readonly messageService: MessageService;
+
+    @inject(ProblemManager)
+    protected readonly problemManager: ProblemManager;
 
     @inject(SbagenxStudioModel)
     protected readonly model: SbagenxStudioModel;
@@ -80,6 +87,7 @@ export class SbagenxStudioContribution extends AbstractViewContribution<SbagenxS
         this.editorManager.onCurrentEditorChanged(editor => {
             this.bindCurrentEditor(editor);
         });
+        this.model.onDidChange(() => this.syncMarkers());
 
         this.bindCurrentEditor(this.editorManager.currentEditor);
     }
@@ -133,6 +141,7 @@ export class SbagenxStudioContribution extends AbstractViewContribution<SbagenxS
         const uri = editor?.getResourceUri();
         if (!this.model.canHandle(uri)) {
             this.model.clear();
+            this.syncMarkers();
             return;
         }
         this.model.load(uri, editor?.editor.document.getText()).catch(error => this.reportLoadFailure(error));
@@ -151,5 +160,38 @@ export class SbagenxStudioContribution extends AbstractViewContribution<SbagenxS
         if (listener) {
             this.toDisposeOnEditorChange.push(listener);
         }
+    }
+
+    protected syncMarkers(): void {
+        const summaryUri = this.model.summary?.uri;
+        const currentUri = this.editorManager.currentEditor?.getResourceUri();
+        const targetUri = this.model.canHandle(summaryUri) ? summaryUri : (this.model.canHandle(currentUri) ? currentUri : undefined);
+        const failureMessage = this.model.error || (this.model.validation?.status === 'error' ? this.model.validation.message : undefined);
+
+        if (this.lastMarkerUri && (!targetUri || this.lastMarkerUri.toString() !== targetUri.toString())) {
+            this.problemManager.setMarkers(this.lastMarkerUri, this.markerOwner, []);
+            this.lastMarkerUri = undefined;
+        }
+        if (!targetUri) {
+            return;
+        }
+        if (!failureMessage) {
+            this.problemManager.setMarkers(targetUri, this.markerOwner, []);
+            this.lastMarkerUri = targetUri;
+            return;
+        }
+
+        const lineMatch = /line\s+(\d+)\s*:/i.exec(failureMessage);
+        const lineZeroBased = lineMatch ? Math.max(0, parseInt(lineMatch[1], 10) - 1) : 0;
+        this.problemManager.setMarkers(targetUri, this.markerOwner, [{
+            severity: DiagnosticSeverity.Error,
+            message: failureMessage,
+            source: 'sbagenxlib',
+            range: {
+                start: { line: lineZeroBased, character: 0 },
+                end: { line: lineZeroBased, character: 1 }
+            }
+        }]);
+        this.lastMarkerUri = targetUri;
     }
 }

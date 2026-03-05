@@ -104,7 +104,6 @@ export class SbagenxStudioModel {
             if (requestId !== this.requestSeq) {
                 return;
             }
-            this._summary = undefined;
             this._validation = undefined;
             this._error = error instanceof Error ? error.message : String(error);
         } finally {
