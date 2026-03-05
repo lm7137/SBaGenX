@@ -20,7 +20,7 @@ export interface SbagenxStudioInspectionResult {
     message?: string;
     version?: string;
     apiVersion?: number;
-    sourceMode?: 'none' | 'static' | 'keyframes' | 'unknown';
+    sourceMode?: 'none' | 'static' | 'keyframes' | 'curve' | 'unknown';
     voiceCount?: number;
     keyframeCount?: number;
     durationSec?: number;

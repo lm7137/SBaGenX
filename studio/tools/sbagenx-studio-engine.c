@@ -31,6 +31,7 @@ static const char *source_mode_name(int mode) {
   case SBX_SOURCE_NONE: return "none";
   case SBX_SOURCE_STATIC: return "static";
   case SBX_SOURCE_KEYFRAMES: return "keyframes";
+  case SBX_SOURCE_CURVE: return "curve";
   default: return "unknown";
   }
 }
@@ -55,7 +56,10 @@ static void print_result_prefix(const char *status, const char *backend, const c
 static void inspect_sbgf_file(const char *path) {
   SbxCurveProgram *curve;
   SbxCurveEvalConfig cfg;
+  SbxCurveSourceConfig src_cfg;
   SbxCurveInfo info;
+  SbxContext *ctx = NULL;
+  int curve_owned_by_ctx = 0;
   int status;
 
   curve = sbx_curve_create();
@@ -97,10 +101,48 @@ static void inspect_sbgf_file(const char *path) {
     return;
   }
 
+  ctx = sbx_context_create(NULL);
+  if (!ctx) {
+    print_result_prefix("error", "sbagenxlib", "sbgf");
+    fputs(",\"message\":", stdout);
+    json_print_string("Failed to create sbagenxlib context");
+    fputs(",\"version\":", stdout);
+    json_print_string(sbx_version());
+    printf(",\"apiVersion\":%d}\n", sbx_api_version());
+    sbx_curve_destroy(curve);
+    return;
+  }
+
+  sbx_default_curve_source_config(&src_cfg);
+  src_cfg.duration_sec = (cfg.total_min > 0.0) ? (cfg.total_min * 60.0) : cfg.beat_span_sec;
+  if (!(src_cfg.duration_sec > 0.0))
+    src_cfg.duration_sec = 1800.0;
+  status = sbx_context_load_curve_program(ctx, curve, &src_cfg);
+  if (status != SBX_OK) {
+    print_result_prefix("error", "sbagenxlib", "sbgf");
+    fputs(",\"message\":", stdout);
+    json_print_string(sbx_context_last_error(ctx));
+    fputs(",\"version\":", stdout);
+    json_print_string(sbx_version());
+    printf(",\"apiVersion\":%d}\n", sbx_api_version());
+    sbx_context_destroy(ctx);
+    sbx_curve_destroy(curve);
+    return;
+  }
+  curve_owned_by_ctx = 1;
+
   print_result_prefix("ok", "sbagenxlib", "sbgf");
   fputs(",\"version\":", stdout);
   json_print_string(sbx_version());
   printf(",\"apiVersion\":%d", sbx_api_version());
+  fputs(",\"sourceMode\":", stdout);
+  json_print_string(source_mode_name(sbx_context_source_mode(ctx)));
+  printf(",\"voiceCount\":%lu", (unsigned long)sbx_context_voice_count(ctx));
+  printf(",\"keyframeCount\":%lu", (unsigned long)sbx_context_keyframe_count(ctx));
+  printf(",\"durationSec\":%.6f", sbx_context_duration_sec(ctx));
+  printf(",\"looping\":%s", sbx_context_is_looping(ctx) ? "true" : "false");
+  printf(",\"hasMixAmpControl\":%s", sbx_context_has_mix_amp_control(ctx) ? "true" : "false");
+  printf(",\"hasMixEffects\":%s", sbx_context_has_mix_effects(ctx) ? "true" : "false");
   printf(",\"parameterCount\":%lu", (unsigned long)info.parameter_count);
   printf(",\"hasSolve\":%s", info.has_solve ? "true" : "false");
   printf(",\"hasCarrierExpr\":%s", info.has_carrier_expr ? "true" : "false");
@@ -111,7 +153,11 @@ static void inspect_sbgf_file(const char *path) {
   printf(",\"ampPieceCount\":%lu", (unsigned long)info.amp_piece_count);
   printf(",\"mixAmpPieceCount\":%lu", (unsigned long)info.mixamp_piece_count);
   fputs("}\n", stdout);
-  sbx_curve_destroy(curve);
+  if (curve_owned_by_ctx) sbx_context_destroy(ctx);
+  else {
+    sbx_context_destroy(ctx);
+    sbx_curve_destroy(curve);
+  }
 }
 
 int main(int argc, char **argv) {
