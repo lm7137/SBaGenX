@@ -5016,9 +5016,10 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   int rc;
   size_t i;
   double sr;
-  double t0_sec;
+  double t0_sec = 0.0;
   SbxToneSpec first_tone;
   int have_first_tone = 0;
+  memset(&first_tone, 0, sizeof(first_tone));
   if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
   if (!ctx->loaded) {
     set_ctx_error(ctx, "no tone/program loaded");
@@ -5074,12 +5075,11 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     return SBX_ENOTREADY;
   }
 
+  t0_sec = ctx->t_sec;
   for (i = 0; i < frames; i++) {
     float l = 0.0f, r = 0.0f;
     SbxToneSpec tone;
     size_t vi;
-    if (i == 0)
-      t0_sec = ctx->t_sec;
 
     if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES &&
         ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
