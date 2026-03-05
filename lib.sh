@@ -150,6 +150,37 @@ check_required_tools() {
     done
 }
 
+download_verified_targz() {
+    local out_path="$1"
+    shift
+
+    if [ -z "$out_path" ] || [ $# -eq 0 ]; then
+        error "download_verified_targz requires an output path and at least one URL"
+        return 1
+    fi
+
+    local tmp_path="${out_path}.part"
+    rm -f "$tmp_path"
+
+    local url
+    for url in "$@"; do
+        info "Downloading: $url"
+        if curl -fL -sS --retry 5 --retry-delay 2 --retry-max-time 180 -o "$tmp_path" "$url"; then
+            if tar -tzf "$tmp_path" >/dev/null 2>&1; then
+                mv -f "$tmp_path" "$out_path"
+                return 0
+            else
+                warning "Downloaded file from '$url' is not a valid .tar.gz archive"
+            fi
+        else
+            warning "Download attempt failed for '$url'"
+        fi
+    done
+
+    rm -f "$tmp_path"
+    return 1
+}
+
 copy_or_skip() {
     local src_dir="$1"
     local dest_dir="$2"
