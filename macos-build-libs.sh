@@ -45,11 +45,18 @@ if [ ! -f "libogg-$LIBOGG_VERSION.tar.gz" ]; then
     check_error "Failed to extract libogg"
 fi
 section_header "Downloading libvorbisidec (Tremor)..."
-if [ ! -f "libvorbisidec_$LIBVORBISIDEC_VERSION.orig.tar.gz" ]; then
-    curl -L -o "libvorbisidec_$LIBVORBISIDEC_VERSION.orig.tar.gz" -s "https://launchpadlibrarian.net/35151187/libvorbisidec_$LIBVORBISIDEC_VERSION.orig.tar.gz" > /dev/null
+LIBVORBISIDEC_TARBALL="libvorbisidec_$LIBVORBISIDEC_VERSION.orig.tar.gz"
+if [ ! -f "$LIBVORBISIDEC_TARBALL" ] || ! tar -tzf "$LIBVORBISIDEC_TARBALL" >/dev/null 2>&1; then
+    if [ -f "$LIBVORBISIDEC_TARBALL" ]; then
+        warning "Existing $LIBVORBISIDEC_TARBALL is invalid; re-downloading..."
+        rm -f "$LIBVORBISIDEC_TARBALL"
+    fi
+    download_verified_targz "$LIBVORBISIDEC_TARBALL" \
+        "https://launchpadlibrarian.net/35151187/libvorbisidec_$LIBVORBISIDEC_VERSION.orig.tar.gz" \
+        "https://launchpad.net/ubuntu/+archive/primary/+files/libvorbisidec_$LIBVORBISIDEC_VERSION.orig.tar.gz"
     check_error "Failed to download libvorbisidec"
     info "Extracting libvorbisidec..."
-    tar -xzf "libvorbisidec_$LIBVORBISIDEC_VERSION.orig.tar.gz" > /dev/null
+    tar -xzf "$LIBVORBISIDEC_TARBALL" > /dev/null
     check_error "Failed to extract libvorbisidec"
     mv "libvorbisidec-$LIBVORBISIDEC_VERSION" "libvorbisidec_$LIBVORBISIDEC_VERSION"
 fi

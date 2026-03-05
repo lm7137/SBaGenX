@@ -23,6 +23,7 @@
 #define SBX_CTX_SRC_NONE SBX_SOURCE_NONE
 #define SBX_CTX_SRC_STATIC SBX_SOURCE_STATIC
 #define SBX_CTX_SRC_KEYFRAMES SBX_SOURCE_KEYFRAMES
+#define SBX_CTX_SRC_CURVE SBX_SOURCE_CURVE
 #define SBX_MAX_SBG_VOICES 16
 #define SBX_MAX_SBG_MIXFX 8
 #define SBX_CUSTOM_WAVE_COUNT 100
@@ -78,6 +79,10 @@ struct SbxContext {
   SbxProgramKeyframe *mv_kfs; /* optional multivoice keyframes: [voice][kf] */
   SbxEngine **mv_eng;         /* engines for voices 1..mv_voice_count-1 */
   size_t mv_voice_count;      /* number of active voice lanes in mv_kfs */
+  SbxCurveProgram *curve_prog;
+  SbxToneSpec curve_tone;
+  double curve_duration_sec;
+  int curve_loop;
   double t_sec;
   SbxToneSpec *aux_tones;
   SbxEngine **aux_eng;
@@ -96,6 +101,10 @@ struct SbxContext {
   size_t mix_kf_seg;
   double mix_default_amp_pct;
   double *custom_waves[SBX_CUSTOM_WAVE_COUNT];
+  SbxTelemetryCallback telemetry_cb;
+  void *telemetry_user;
+  SbxRuntimeTelemetry telemetry_last;
+  int telemetry_valid;
 };
 
 struct SbxCurveProgram {
@@ -152,7 +161,20 @@ struct SbxCurveProgram {
 };
 
 #define TE_POW_FROM_RIGHT 0
+/*
+ * Vendored tinyexpr uses variable-sized AST node allocation that triggers
+ * GCC/MinGW -Warray-bounds false positives under optimization. Keep warning
+ * suppression tightly scoped to the third-party include so the rest of
+ * sbagenxlib still builds warning-clean.
+ */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
 #include "libs/tinyexpr.c"
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #define SBX_MV_KF(ctx, voice_idx) ((ctx)->mv_kfs + ((voice_idx) * (ctx)->kf_count))
 
@@ -1331,6 +1353,16 @@ ctx_clear_keyframes(SbxContext *ctx) {
 }
 
 static void
+ctx_clear_curve_source(SbxContext *ctx) {
+  if (!ctx) return;
+  if (ctx->curve_prog) sbx_curve_destroy(ctx->curve_prog);
+  ctx->curve_prog = 0;
+  memset(&ctx->curve_tone, 0, sizeof(ctx->curve_tone));
+  ctx->curve_duration_sec = 0.0;
+  ctx->curve_loop = 0;
+}
+
+static void
 ctx_clear_aux_tones(SbxContext *ctx) {
   size_t i;
   if (!ctx) return;
@@ -1400,6 +1432,7 @@ ctx_reset_runtime(SbxContext *ctx) {
   ctx->mix_kf_seg = 0;
   ctx->t_sec = 0.0;
   ctx->kf_seg = 0;
+  ctx->telemetry_valid = 0;
 }
 
 static int
@@ -1523,6 +1556,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
   }
 
   ctx_clear_keyframes(ctx);
+  ctx_clear_curve_source(ctx);
   ctx->kfs = copy;
   ctx->mv_kfs = mv_copy;
   ctx->mv_eng = mv_eng;
@@ -1549,6 +1583,50 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
   }
 
   set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+static int
+ctx_eval_curve_point(SbxContext *ctx, double t_sec, SbxCurveEvalPoint *out) {
+  double eval_t = t_sec;
+  int rc;
+  if (!ctx || !ctx->curve_prog || !out) return SBX_EINVAL;
+  if (!isfinite(eval_t)) return SBX_EINVAL;
+  if (ctx->curve_loop && ctx->curve_duration_sec > 0.0) {
+    eval_t = fmod(eval_t, ctx->curve_duration_sec);
+    if (eval_t < 0.0) eval_t += ctx->curve_duration_sec;
+  }
+  rc = sbx_curve_eval(ctx->curve_prog, eval_t, out);
+  if (rc != SBX_OK)
+    set_ctx_error(ctx, sbx_curve_last_error(ctx->curve_prog));
+  return rc;
+}
+
+static int
+ctx_eval_curve_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
+  SbxCurveEvalPoint pt;
+  SbxToneSpec tone;
+  char err[160];
+  int rc;
+
+  if (!ctx || !out) return SBX_EINVAL;
+  rc = ctx_eval_curve_point(ctx, t_sec, &pt);
+  if (rc != SBX_OK) return rc;
+
+  tone = ctx->curve_tone;
+  tone.carrier_hz = pt.carrier_hz;
+  tone.beat_hz = pt.beat_hz;
+  tone.amplitude = ctx->curve_tone.amplitude * (pt.beat_amp_pct / 100.0);
+  if (tone.mode == SBX_TONE_MONAURAL || tone.mode == SBX_TONE_ISOCHRONIC)
+    tone.beat_hz = fabs(tone.beat_hz);
+
+  rc = normalize_tone(&tone, err, sizeof(err));
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, err);
+    return rc;
+  }
+
+  *out = tone;
   return SBX_OK;
 }
 
@@ -1671,6 +1749,10 @@ ctx_eval_program_beat_hz_voice(SbxContext *ctx, size_t voice_index, double t_sec
       ctx_eval_keyframed_tone_at(kfs, ctx->kf_count, eval_t, &seg, &tone);
       break;
     }
+    case SBX_CTX_SRC_CURVE:
+      if (voice_index != 0 || ctx_eval_curve_tone(ctx, t_sec, &tone) != SBX_OK)
+        return 0.0;
+      break;
     case SBX_CTX_SRC_STATIC:
       if (voice_index != 0) return 0.0;
       tone = ctx->eng->tone;
@@ -1682,6 +1764,69 @@ ctx_eval_program_beat_hz_voice(SbxContext *ctx, size_t voice_index, double t_sec
   if (!isfinite(tone.beat_hz)) return 0.0;
   if (tone.beat_hz <= 0.0) return fabs(tone.beat_hz);
   return tone.beat_hz;
+}
+
+static int
+ctx_collect_runtime_telemetry(SbxContext *ctx,
+                              double t_sec,
+                              const SbxToneSpec *tone_hint,
+                              SbxRuntimeTelemetry *out) {
+  SbxToneSpec tone;
+  size_t seg;
+  if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
+  if (!ctx->loaded) return SBX_ENOTREADY;
+
+  if (tone_hint) {
+    tone = *tone_hint;
+  } else {
+    switch (ctx->source_mode) {
+      case SBX_CTX_SRC_STATIC:
+        tone = ctx->eng->tone;
+        break;
+      case SBX_CTX_SRC_CURVE:
+        if (ctx_eval_curve_tone(ctx, t_sec, &tone) != SBX_OK) {
+          sbx_default_tone_spec(&tone);
+          tone.mode = SBX_TONE_NONE;
+        }
+        break;
+      case SBX_CTX_SRC_KEYFRAMES:
+        seg = ctx->kf_seg;
+        if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+          t_sec = fmod(t_sec, ctx->kf_duration_sec);
+          if (t_sec < 0.0) t_sec += ctx->kf_duration_sec;
+        }
+        ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, t_sec, &seg, &tone);
+        break;
+      default:
+        sbx_default_tone_spec(&tone);
+        tone.mode = SBX_TONE_NONE;
+        break;
+    }
+  }
+
+  memset(out, 0, sizeof(*out));
+  out->time_sec = t_sec;
+  out->source_mode = ctx->source_mode;
+  out->primary_tone = tone;
+  out->program_beat_hz = tone.beat_hz;
+  out->program_carrier_hz = tone.carrier_hz;
+  out->mix_amp_pct = sbx_context_mix_amp_at(ctx, t_sec);
+  out->voice_count = sbx_context_voice_count(ctx);
+  out->aux_tone_count = ctx->aux_count;
+  out->mix_effect_count = ctx->mix_fx_count + ctx->sbg_mix_fx_slots;
+  return SBX_OK;
+}
+
+static void
+ctx_emit_telemetry(SbxContext *ctx, double t_sec, const SbxToneSpec *tone_hint) {
+  SbxRuntimeTelemetry telem;
+  if (!ctx) return;
+  if (ctx_collect_runtime_telemetry(ctx, t_sec, tone_hint, &telem) != SBX_OK)
+    return;
+  ctx->telemetry_last = telem;
+  ctx->telemetry_valid = 1;
+  if (ctx->telemetry_cb)
+    ctx->telemetry_cb(&ctx->telemetry_last, ctx->telemetry_user);
 }
 
 const char *
@@ -2339,6 +2484,10 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->mv_kfs = 0;
   ctx->mv_eng = 0;
   ctx->mv_voice_count = 0;
+  memset(&ctx->curve_tone, 0, sizeof(ctx->curve_tone));
+  ctx->curve_prog = 0;
+  ctx->curve_duration_sec = 0.0;
+  ctx->curve_loop = 0;
   ctx->t_sec = 0.0;
   ctx->aux_tones = 0;
   ctx->aux_eng = 0;
@@ -2356,6 +2505,10 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->mix_kf_count = 0;
   ctx->mix_kf_seg = 0;
   ctx->mix_default_amp_pct = 100.0;
+  ctx->telemetry_cb = 0;
+  ctx->telemetry_user = 0;
+  memset(&ctx->telemetry_last, 0, sizeof(ctx->telemetry_last));
+  ctx->telemetry_valid = 0;
   ctx_sync_custom_waves(ctx);
   set_ctx_error(ctx, NULL);
   return ctx;
@@ -2369,6 +2522,7 @@ sbx_context_destroy(SbxContext *ctx) {
   ctx_clear_mix_effects(ctx);
   ctx_clear_aux_tones(ctx);
   ctx_clear_keyframes(ctx);
+  ctx_clear_curve_source(ctx);
   ctx_clear_custom_waves(ctx);
   sbx_engine_destroy(ctx->eng);
   free(ctx);
@@ -2392,6 +2546,7 @@ sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone) {
     return rc;
   }
   ctx_clear_keyframes(ctx);
+  ctx_clear_curve_source(ctx);
   ctx->source_mode = SBX_CTX_SRC_STATIC;
   ctx->loaded = 1;
   ctx->t_sec = 0.0;
@@ -2424,6 +2579,89 @@ sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec) {
     return rc;
   }
   return sbx_context_set_tone(ctx, &tone);
+}
+
+int
+sbx_context_load_curve_program(SbxContext *ctx,
+                               SbxCurveProgram *curve,
+                               const SbxCurveSourceConfig *cfg) {
+  SbxCurveSourceConfig local_cfg;
+  SbxToneSpec tone;
+  SbxCurveEvalPoint pt;
+  char err[160];
+  int rc;
+
+  if (!ctx || !ctx->eng || !curve) return SBX_EINVAL;
+
+  sbx_default_curve_source_config(&local_cfg);
+  if (cfg) local_cfg = *cfg;
+  if (!curve->prepared) {
+    set_ctx_error(ctx, "curve program must be prepared before loading into context");
+    return SBX_EINVAL;
+  }
+  if (!(local_cfg.duration_sec > 0.0) || !isfinite(local_cfg.duration_sec)) {
+    set_ctx_error(ctx, "curve source duration_sec must be finite and > 0");
+    return SBX_EINVAL;
+  }
+  if (local_cfg.waveform < SBX_WAVE_SINE || local_cfg.waveform > SBX_WAVE_SAWTOOTH) {
+    set_ctx_error(ctx, "curve source waveform must be SBX_WAVE_*");
+    return SBX_EINVAL;
+  }
+  if (local_cfg.mode != SBX_TONE_BINAURAL &&
+      local_cfg.mode != SBX_TONE_MONAURAL &&
+      local_cfg.mode != SBX_TONE_ISOCHRONIC) {
+    set_ctx_error(ctx, "curve source mode must be binaural, monaural, or isochronic");
+    return SBX_EINVAL;
+  }
+  if (!isfinite(local_cfg.amplitude) || local_cfg.amplitude < 0.0) {
+    set_ctx_error(ctx, "curve source amplitude must be finite and >= 0");
+    return SBX_EINVAL;
+  }
+  if (!isfinite(local_cfg.duty_cycle) || local_cfg.duty_cycle < 0.0 || local_cfg.duty_cycle > 1.0) {
+    set_ctx_error(ctx, "curve source duty_cycle must be in [0,1]");
+    return SBX_EINVAL;
+  }
+
+  sbx_default_tone_spec(&tone);
+  tone.mode = local_cfg.mode;
+  tone.waveform = local_cfg.waveform;
+  tone.duty_cycle = local_cfg.duty_cycle;
+  tone.amplitude = local_cfg.amplitude;
+
+  rc = sbx_curve_eval(curve, 0.0, &pt);
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, sbx_curve_last_error(curve));
+    return rc;
+  }
+  tone.carrier_hz = pt.carrier_hz;
+  tone.beat_hz = pt.beat_hz;
+  tone.amplitude = tone.amplitude * (pt.beat_amp_pct / 100.0);
+  if (tone.mode == SBX_TONE_MONAURAL || tone.mode == SBX_TONE_ISOCHRONIC)
+    tone.beat_hz = fabs(tone.beat_hz);
+
+  rc = normalize_tone(&tone, err, sizeof(err));
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, err);
+    return rc;
+  }
+  rc = engine_apply_tone(ctx->eng, &tone, 1);
+  if (rc != SBX_OK) {
+    set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
+    return rc;
+  }
+
+  ctx_clear_keyframes(ctx);
+  ctx_clear_curve_source(ctx);
+  ctx->curve_prog = curve;
+  tone.amplitude = local_cfg.amplitude;
+  ctx->curve_tone = tone;
+  ctx->curve_duration_sec = local_cfg.duration_sec;
+  ctx->curve_loop = local_cfg.loop ? 1 : 0;
+  ctx->source_mode = SBX_CTX_SRC_CURVE;
+  ctx->loaded = 1;
+  ctx->t_sec = 0.0;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
 }
 
 int
@@ -4209,10 +4447,16 @@ sbx_context_mix_amp_at(SbxContext *ctx, double t_sec) {
   size_t n, i0, i1;
   double t0, t1, u;
   SbxMixAmpKeyframe *k0, *k1;
+  SbxCurveEvalPoint pt;
 
   if (!ctx) return 100.0;
   n = ctx->mix_kf_count;
-  if (!ctx->mix_kf || n == 0) return ctx->mix_default_amp_pct;
+  if (!ctx->mix_kf || n == 0) {
+    if (ctx->source_mode == SBX_CTX_SRC_CURVE && ctx->curve_prog &&
+        ctx_eval_curve_point(ctx, t_sec, &pt) == SBX_OK)
+      return pt.mix_amp_pct;
+    return ctx->mix_default_amp_pct;
+  }
   if (n == 1 || t_sec <= ctx->mix_kf[0].time_sec) return ctx->mix_kf[0].amp_pct;
   if (t_sec >= ctx->mix_kf[n - 1].time_sec) return ctx->mix_kf[n - 1].amp_pct;
 
@@ -4286,7 +4530,11 @@ sbx_context_get_mix_amp_keyframe(const SbxContext *ctx,
 int
 sbx_context_has_mix_amp_control(const SbxContext *ctx) {
   if (!ctx) return 0;
-  return ctx->mix_kf_count > 0 ? 1 : 0;
+  if (ctx->mix_kf_count > 0) return 1;
+  if (ctx->source_mode == SBX_CTX_SRC_CURVE && ctx->curve_prog &&
+      ctx->curve_prog->has_mixamp_expr)
+    return 1;
+  return 0;
 }
 
 int
@@ -4435,6 +4683,34 @@ sbx_context_eval_active_tones(SbxContext *ctx,
   return SBX_OK;
 }
 
+int
+sbx_context_set_telemetry_callback(SbxContext *ctx,
+                                   SbxTelemetryCallback cb,
+                                   void *user) {
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  ctx->telemetry_cb = cb;
+  ctx->telemetry_user = user;
+  if (!cb) {
+    ctx->telemetry_valid = 0;
+    return SBX_OK;
+  }
+  ctx_emit_telemetry(ctx, ctx->t_sec, 0);
+  return SBX_OK;
+}
+
+int
+sbx_context_get_runtime_telemetry(SbxContext *ctx, SbxRuntimeTelemetry *out) {
+  int rc;
+  if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
+  rc = ctx_collect_runtime_telemetry(ctx, ctx->t_sec, 0, out);
+  if (rc == SBX_OK) {
+    ctx->telemetry_last = *out;
+    ctx->telemetry_valid = 1;
+    set_ctx_error(ctx, NULL);
+  }
+  return rc;
+}
+
 size_t
 sbx_context_keyframe_count(const SbxContext *ctx) {
   if (!ctx || !ctx->kfs) return 0;
@@ -4460,7 +4736,9 @@ sbx_context_source_mode(const SbxContext *ctx) {
 int
 sbx_context_is_looping(const SbxContext *ctx) {
   if (!ctx || !ctx->loaded) return 0;
-  return (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES && ctx->kf_loop) ? 1 : 0;
+  if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES && ctx->kf_loop) return 1;
+  if (ctx->source_mode == SBX_CTX_SRC_CURVE && ctx->curve_loop) return 1;
+  return 0;
 }
 
 int
@@ -4489,10 +4767,13 @@ sbx_context_get_keyframe_voice(const SbxContext *ctx,
 
 double
 sbx_context_duration_sec(const SbxContext *ctx) {
-  if (!ctx || ctx->source_mode != SBX_CTX_SRC_KEYFRAMES ||
-      !ctx->kfs || ctx->kf_count == 0)
-    return 0.0;
-  return ctx->kf_duration_sec;
+  if (!ctx) return 0.0;
+  if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES &&
+      ctx->kfs && ctx->kf_count > 0)
+    return ctx->kf_duration_sec;
+  if (ctx->source_mode == SBX_CTX_SRC_CURVE && ctx->curve_prog)
+    return ctx->curve_duration_sec;
+  return 0.0;
 }
 
 int
@@ -4595,7 +4876,7 @@ sbx_context_sample_tones_voice(SbxContext *ctx,
     return SBX_EINVAL;
   }
 
-  if (ctx->source_mode != SBX_CTX_SRC_KEYFRAMES) {
+  if (ctx->source_mode == SBX_CTX_SRC_STATIC) {
     if (voice_index != 0) {
       set_ctx_error(ctx, "voice index is out of range");
       return SBX_EINVAL;
@@ -4604,6 +4885,22 @@ sbx_context_sample_tones_voice(SbxContext *ctx,
       double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
       double ts = sbx_lerp(t0_sec, t1_sec, u);
       out_tones[i] = ctx->eng->tone;
+      if (out_t_sec) out_t_sec[i] = ts;
+    }
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+
+  if (ctx->source_mode == SBX_CTX_SRC_CURVE) {
+    if (voice_index != 0) {
+      set_ctx_error(ctx, "voice index is out of range");
+      return SBX_EINVAL;
+    }
+    for (i = 0; i < sample_count; i++) {
+      double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+      double ts = sbx_lerp(t0_sec, t1_sec, u);
+      if (ctx_eval_curve_tone(ctx, ts, &out_tones[i]) != SBX_OK)
+        return SBX_EINVAL;
       if (out_t_sec) out_t_sec[i] = ts;
     }
     set_ctx_error(ctx, NULL);
@@ -4719,13 +5016,17 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   int rc;
   size_t i;
   double sr;
+  double t0_sec;
+  SbxToneSpec first_tone;
+  int have_first_tone = 0;
   if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
   if (!ctx->loaded) {
     set_ctx_error(ctx, "no tone/program loaded");
     return SBX_ENOTREADY;
   }
 
-  if (ctx->source_mode != SBX_CTX_SRC_KEYFRAMES) {
+  if (ctx->source_mode == SBX_CTX_SRC_STATIC) {
+    t0_sec = ctx->t_sec;
     rc = sbx_engine_render_f32(ctx->eng, out, frames);
     if (rc != SBX_OK) {
       set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
@@ -4757,10 +5058,12 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     sr = ctx->eng->cfg.sample_rate;
     if (isfinite(sr) && sr > 0.0)
       ctx->t_sec += (double)frames / sr;
+    ctx_emit_telemetry(ctx, t0_sec, &ctx->eng->tone);
     return SBX_OK;
   }
 
-  if (!ctx->kfs || ctx->kf_count == 0) {
+  if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES &&
+      (!ctx->kfs || ctx->kf_count == 0)) {
     set_ctx_error(ctx, "no keyframes loaded");
     return SBX_ENOTREADY;
   }
@@ -4775,15 +5078,27 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     float l = 0.0f, r = 0.0f;
     SbxToneSpec tone;
     size_t vi;
+    if (i == 0)
+      t0_sec = ctx->t_sec;
 
-    if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+    if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES &&
+        ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
       while (ctx->t_sec >= ctx->kf_duration_sec) {
         ctx->t_sec -= ctx->kf_duration_sec;
         ctx->kf_seg = 0;
       }
     }
 
-    ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
+    if (ctx->source_mode == SBX_CTX_SRC_CURVE) {
+      rc = ctx_eval_curve_tone(ctx, ctx->t_sec, &tone);
+      if (rc != SBX_OK) return rc;
+    } else {
+      ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
+    }
+    if (!have_first_tone) {
+      first_tone = tone;
+      have_first_tone = 1;
+    }
     ctx->eng->tone = tone;
     engine_render_sample(ctx->eng, &l, &r);
     for (vi = 1; vi < ctx->mv_voice_count; vi++) {
@@ -4808,6 +5123,9 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     out[i * 2 + 1] = r;
     ctx->t_sec += 1.0 / sr;
   }
+
+  if (have_first_tone)
+    ctx_emit_telemetry(ctx, t0_sec, &first_tone);
 
   return SBX_OK;
 }

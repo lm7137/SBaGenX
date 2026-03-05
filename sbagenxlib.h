@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 15  /* public API contract revision */
+#define SBX_API_VERSION 17  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -55,7 +55,8 @@ typedef enum {
 typedef enum {
   SBX_SOURCE_NONE = 0,
   SBX_SOURCE_STATIC = 1,
-  SBX_SOURCE_KEYFRAMES = 2
+  SBX_SOURCE_KEYFRAMES = 2,
+  SBX_SOURCE_CURVE = 3
 } SbxSourceMode;
 
 typedef enum {
@@ -171,6 +172,29 @@ typedef struct {
   size_t mixamp_piece_count;
 } SbxCurveInfo;
 
+typedef struct {
+  SbxToneMode mode;
+  int waveform;
+  double duty_cycle;
+  double amplitude;
+  double duration_sec;
+  int loop;
+} SbxCurveSourceConfig;
+
+typedef struct {
+  double time_sec;            /* context timeline time at snapshot */
+  int source_mode;            /* SBX_SOURCE_* */
+  SbxToneSpec primary_tone;   /* evaluated primary tone at time_sec */
+  double program_beat_hz;     /* convenience mirror of primary_tone.beat_hz */
+  double program_carrier_hz;  /* convenience mirror of primary_tone.carrier_hz */
+  double mix_amp_pct;         /* evaluated mix amp profile at time_sec */
+  size_t voice_count;         /* active keyframed/static voice lanes */
+  size_t aux_tone_count;      /* configured auxiliary overlay tones */
+  size_t mix_effect_count;    /* configured static + timed mix-effect slots */
+} SbxRuntimeTelemetry;
+
+typedef void (*SbxTelemetryCallback)(const SbxRuntimeTelemetry *telem, void *user);
+
 /* ----- Version and status ----- */
 
 /* Runtime library version string (human-readable). */
@@ -195,6 +219,9 @@ void sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec);
 
 /* Fill cfg with default `.sbgf` evaluation environment values. */
 void sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg);
+
+/* Fill cfg with default curve-backed context source settings. */
+void sbx_default_curve_source_config(SbxCurveSourceConfig *cfg);
 
 /* ----- Engine API ----- */
 
@@ -297,6 +324,14 @@ int sbx_context_set_default_waveform(SbxContext *ctx, int waveform);
 
 /* Parse and load single tone token onto context. */
 int sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec);
+
+/*
+ * Load a prepared curve program as an exact runtime source.
+ * On success the context takes ownership of `curve`.
+ */
+int sbx_context_load_curve_program(SbxContext *ctx,
+                                   SbxCurveProgram *curve,
+                                   const SbxCurveSourceConfig *cfg);
 
 /* Load keyframed program (strictly increasing time_sec). */
 int sbx_context_load_keyframes(SbxContext *ctx,
@@ -456,6 +491,18 @@ int sbx_context_eval_active_tones(SbxContext *ctx,
                                   SbxToneSpec *out_tones,
                                   size_t out_slots,
                                   size_t *out_count);
+
+/*
+ * Runtime telemetry:
+ * - Register callback to receive one snapshot per sbx_context_render_f32 call.
+ * - Pass NULL callback to disable.
+ */
+int sbx_context_set_telemetry_callback(SbxContext *ctx,
+                                       SbxTelemetryCallback cb,
+                                       void *user);
+
+/* Retrieve a runtime telemetry snapshot at the current context time. */
+int sbx_context_get_runtime_telemetry(SbxContext *ctx, SbxRuntimeTelemetry *out);
 
 /* ----- Introspection/render ----- */
 

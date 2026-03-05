@@ -1,0 +1,24 @@
+# SBaGenX custom curve example (.sbgf)
+# Three-unknown solve demo:
+#
+#   beat(m) = A*exp(-l*m) + B*exp(-k*m) + C
+#
+# Unknowns A/B/C are solved from three boundary constraints:
+#   1) beat(0) = b0
+#   2) beat(D) = b1
+#   3) beat'(0) = s0   (Hz/min, default 0 for a gentle start)
+#
+# Usage examples:
+#   sbagenx -G -p curve examples/basics/curve-3unk-double-exp-solve-demo.sbgf \
+#     00ls:l=0.06:k=0.20:s0=0
+#   sbagenx -G -p curve examples/basics/curve-3unk-double-exp-solve-demo.sbgf \
+#     00ls:l=0.08:k=0.30:s0=-0.3
+
+param l = 0.06
+param k = 0.20
+param s0 = 0
+
+solve A,B,C : A+B+C=b0 ; A*exp(-l*D)+B*exp(-k*D)+C=b1 ; -l*A-k*B=s0
+
+beat = A*exp(-l*m) + B*exp(-k*m) + C
+carrier = c0 + (c1-c0) * ramp(m,0,T)

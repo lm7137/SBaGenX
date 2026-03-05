@@ -255,6 +255,7 @@ double mix_mod_multiplier(int now_ms);
 void normalizeAmplitude(Voice *voices, int numChannels, const char *line, int lineNum);
 void printSequenceDuration();
 void checkMixInSequence(); // Check if mix/<amp> is specified
+void emit_dry_run_report(int mode_flag, int ac, char **av);
 void create_noise_spin_effect(
   int typ,
   int amp,
@@ -424,6 +425,8 @@ help() {
 	  NL "                      defaults m=cos:s=0:d=0.5:a=0.5:r=0.5:e=3:f=0.45"
 	  NL "                      if d/a/r/e are set without m=..., pulse mode is implied"
 	  NL "                      in m=cos mode, d/a/r/e are ignored; s/f apply"
+	  NL "          --dry-run  Parse/build runtime plan only, then exit (no audio)"
+	  NL "          --explain  Like --dry-run, plus detailed keyframe/tone summary"
 	  NL
 	  NL "          -R rate   Select rate in Hz that frequency changes are recalculated"
 	  NL "                     (for file/pipe output only, default is 10Hz)"
@@ -456,6 +459,7 @@ usage() {
 		NL "Usage: sbagenx [options] seq-file ..."
 		NL "       sbagenx [options] -i tone-specs ..."
 		NL "       sbagenx [options] -p pre-programmed-sequence-specs ..."
+		NL "       sbagenx --dry-run [options] ..."
 		NL
 		NL "SBaGenX is a fork of SBaGen+, which is a fork of the original SBaGen."
 		NL "Use inline 'M' (where '@' is used) for monaural beats."
@@ -575,6 +579,8 @@ int opt_P;			// Cycle plot flag (-P)
 int opt_P_sigmoid;		// Program graph requested for -p sigmoid
 int opt_P_drop;		// Program graph requested for -p drop
 int opt_P_curve;		// Program graph requested for -p curve
+int opt_dry_run;		// Parse/build plan only; do not render audio/plots
+int opt_explain;		// Extended dry-run details
 int opt_M, opt_S, opt_E;
 char *opt_o, *opt_m;
 int opt_O;
@@ -3661,7 +3667,9 @@ main(int argc, char **argv) {
    } else if (rv == 'p') {
       // Pre-programmed sequence
       readPreProg(argc, argv);
-      if (opt_G || opt_P_sigmoid || opt_P_drop || opt_P_curve || (opt_P && opt_H)) return 0;
+      if (!opt_dry_run &&
+	  (opt_G || opt_P_sigmoid || opt_P_drop || opt_P_curve || (opt_P && opt_H)))
+	 return 0;
    } else {
       // Sequenced mode -- sequence may include options, so options
       // are not settled until below this point
@@ -3669,6 +3677,11 @@ main(int argc, char **argv) {
 	 error("-G is only supported with -p drop/-p sigmoid/-p curve");
       if (argc < 1) usage();
       readSeq(argc, argv);
+   }
+
+   if (opt_dry_run) {
+      emit_dry_run_report(rv, argc, argv);
+      return 0;
    }
 
    init_sin_table();
@@ -3808,6 +3821,24 @@ scanOptions(int *acp, char ***avp) {
 
    // Scan options
    while (argc > 0 && argv[0][0] == '-' && argv[0][1]) {
+      if (0 == strcmp(argv[0], "--dry-run")) {
+	 opt_dry_run= 1;
+	 argv++;
+	 argc--;
+	 continue;
+      }
+      if (0 == strcmp(argv[0], "--explain")) {
+	 opt_dry_run= 1;
+	 opt_explain= 1;
+	 argv++;
+	 argc--;
+	 continue;
+      }
+      if (0 == strcmp(argv[0], "--")) {
+	 argv++;
+	 argc--;
+	 break;
+      }
       char opt, *p= 1 + *argv++; argc--;
       while ((opt= *p++)) {
 	 // Check options that are available on both
@@ -4625,6 +4656,161 @@ statusSbx(char *err) {
   }
   fprintf(stderr, "%s\r", buf);
   fflush(stderr);
+}
+
+static const char *
+sbx_source_mode_name(int mode) {
+   switch (mode) {
+    case SBX_SOURCE_STATIC: return "static tone";
+    case SBX_SOURCE_KEYFRAMES: return "keyframed sequence";
+    case SBX_SOURCE_CURVE: return "curve-driven program";
+    default: return "unknown";
+   }
+}
+
+static void
+format_hms_from_seconds(double sec, char *out, size_t out_sz) {
+   int t;
+   if (!out || out_sz == 0) return;
+   if (!isfinite(sec) || sec < 0.0) sec= 0.0;
+   t= (int)(sec + 0.5);
+   snprintf(out, out_sz, "%02d:%02d:%02d", t/3600, (t/60)%60, t%60);
+}
+
+void
+emit_dry_run_report(int mode_flag, int ac, char **av) {
+   int i;
+   int have_duration= 0;
+   double duration_sec= 0.0;
+   char dur_txt[32];
+
+   printf("=== SBaGenX dry-run summary ===\n");
+   printf("Render: disabled (--dry-run)\n");
+
+   if (mode_flag == 'i')
+      printf("Mode: immediate tones (-i)\n");
+   else if (mode_flag == 'p')
+      printf("Mode: built-in program (-p)\n");
+   else
+      printf("Mode: sequence files\n");
+
+   if (mode_flag == 'p' && ac > 0 && av && av[0])
+      printf("Program: %s\n", av[0]);
+   if (mode_flag == 0 && ac > 0 && av) {
+      printf("Inputs:");
+      for (i= 0; i<ac; i++) printf(" %s", av[i]);
+      printf("\n");
+   }
+
+   printf("Backend: %s\n", sbx_runtime_active ? "sbagenxlib" : "legacy");
+   printf("Sample rate: %d Hz\n", out_rate);
+   printf("Param refresh (-R): %d Hz\n", out_prate);
+   printf("Fade interval (-F): %d ms\n", fade_int);
+   if (opt_o) printf("Output path (-o): %s\n", opt_o);
+   if (opt_W) printf("Output format flag: WAV (-W)\n");
+   if (opt_O) printf("Output format flag: raw stream (-O)\n");
+   if (opt_m) printf("Mix input (-m): %s\n", opt_m);
+   if (opt_M) printf("Mix input (-M): stdin\n");
+   if (opt_A) printf("Mix modulation (-A): enabled\n");
+   if (opt_I) printf("Iso envelope override (-I): enabled\n");
+   if (opt_H) printf("Mixam envelope override (-H): enabled\n");
+
+   if (sbx_runtime_active && sbx_runtime_ctx) {
+      int src_mode= sbx_context_source_mode(sbx_runtime_ctx);
+      size_t kf_n= sbx_context_keyframe_count(sbx_runtime_ctx);
+      size_t voice_n= sbx_context_voice_count(sbx_runtime_ctx);
+      size_t aux_n= sbx_context_aux_tone_count(sbx_runtime_ctx);
+      size_t fx_n= sbx_context_mix_effect_count(sbx_runtime_ctx);
+      size_t mix_kf_n= sbx_context_mix_amp_keyframe_count(sbx_runtime_ctx);
+      duration_sec= sbx_runtime_total_sec;
+      if (!(duration_sec > 0.0))
+	 duration_sec= sbx_context_duration_sec(sbx_runtime_ctx);
+      if (duration_sec > 0.0)
+	 have_duration= 1;
+      printf("Source mode: %s\n", sbx_source_mode_name(src_mode));
+      printf("Voices: %lu  Aux tones: %lu  Runtime mix effects: %lu\n",
+	     (unsigned long)voice_n, (unsigned long)aux_n, (unsigned long)fx_n);
+      printf("Keyframes: %lu  Mix-amp keyframes: %lu\n",
+	     (unsigned long)kf_n, (unsigned long)mix_kf_n);
+      if (opt_explain) {
+	 size_t show= kf_n;
+	 if (show > 20) show= 20;
+	 if (kf_n > 0) {
+	    size_t ki, vi;
+	    printf("Keyframe summary (showing %lu/%lu):\n",
+		   (unsigned long)show, (unsigned long)kf_n);
+	    for (ki= 0; ki<show; ki++) {
+	       SbxProgramKeyframe kf;
+	       if (SBX_OK != sbx_context_get_keyframe(sbx_runtime_ctx, ki, &kf))
+		  continue;
+	       printf("  t=%7.3fs interp=%s\n",
+		      kf.time_sec,
+		      (kf.interp == SBX_INTERP_STEP) ? "step" : "linear");
+	       for (vi= 0; vi<voice_n; vi++) {
+		  SbxProgramKeyframe lane;
+		  char tok[256];
+		  if (SBX_OK != sbx_context_get_keyframe_voice(sbx_runtime_ctx, ki, vi, &lane))
+		     continue;
+		  if (SBX_OK == sbx_format_tone_spec(&lane.tone, tok, sizeof(tok)))
+		     printf("    v%lu: %s\n", (unsigned long)vi, tok);
+	       }
+	    }
+	    if (kf_n > show)
+	       printf("  ... (%lu more keyframes)\n", (unsigned long)(kf_n - show));
+	 } else {
+	    SbxToneSpec tone;
+	    char tok[256];
+	    if (SBX_OK == sbx_context_sample_tones(sbx_runtime_ctx, 0.0, 0.0, 1, 0, &tone) &&
+		SBX_OK == sbx_format_tone_spec(&tone, tok, sizeof(tok)))
+	       printf("Primary tone at t=0: %s\n", tok);
+	 }
+      }
+   } else {
+      if (fast_tim0 >= 0 && fast_tim1 >= 0) {
+	 int duration_ms= t_per0(fast_tim0, fast_tim1);
+	 duration_sec= duration_ms * 0.001;
+	 have_duration= 1;
+      }
+      if (per) {
+	 int nper= 0;
+	 Period *pp= per;
+	 do { nper++; pp= pp->nxt; } while (pp && pp != per && nper < 1000000);
+	 printf("Legacy period count: %d\n", nper);
+	 if (opt_explain) {
+	    int shown= 0;
+	    pp= per;
+	    printf("Legacy period heads (up to 12):\n");
+	    do {
+	       char t0[32], t1[32];
+	       sprintTime(t0, pp->tim);
+	       sprintTime(t1, pp->nxt ? pp->nxt->tim : pp->tim);
+	       printf("  %s -> %s\n", t0, t1);
+	       shown++;
+	       pp= pp->nxt;
+	    } while (pp && pp != per && shown < 12);
+	    if (pp && pp != per)
+	       printf("  ...\n");
+	 }
+      }
+   }
+
+   if (have_duration) {
+      format_hms_from_seconds(duration_sec, dur_txt, sizeof(dur_txt));
+      printf("Duration: %s (%.3fs)\n", dur_txt, duration_sec);
+   } else {
+      printf("Duration: unbounded/streaming\n");
+   }
+
+   if (opt_L >= 0)
+      printf("Manual output length (-L): %d ms\n", opt_L);
+   if (opt_T >= 0)
+      printf("Start-time override (-T): %d ms\n", opt_T);
+   if (opt_E)
+      printf("Auto-stop (-E): enabled\n");
+   if (fast_mult > 0)
+      printf("Fast mode (-q/-S): %dx\n", fast_mult);
+
+   printf("=== End dry-run summary ===\n");
 }
 
 void 				// Display current period details
@@ -8002,7 +8188,7 @@ readPreProg(int ac, char **av) {
    if (opt_A && !opt_m && !opt_M)
       error("-A requires a mix input stream; use -m <file> or -M");
 
-   if (opt_P && !opt_G && opt_H) {
+   if (!opt_dry_run && opt_P && !opt_G && opt_H) {
       write_mixam_cycle_graph_png();
       return;
    }
@@ -8395,9 +8581,142 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
 				     mkf, mkf_n, mix_amp_pct,
 				     mix_fx, mix_fx_count,
 				     aux_tones, aux_count);
+  if (rc != SBX_OK)
+      error("Failed to configure sbagenxlib runtime extras: %s",
+	    sbx_context_last_error(sbx_runtime_ctx));
+}
+
+static void
+sbx_runtime_activate_from_curve_program(SbxCurveProgram **curvep,
+					int isisochronic, int ismono,
+					double duration_sec,
+					double mix_amp_pct,
+					const SbxToneSpec *aux_tones, size_t aux_count,
+					const SbxMixFxSpec *mix_fx, size_t mix_fx_count,
+					const SbxMixAmpKeyframe *mkf, size_t mkf_n) {
+   SbxEngineConfig cfg;
+   SbxCurveSourceConfig csrc;
+   int rc;
+
+   if (!curvep || !*curvep)
+      error("internal error: empty sbagenxlib runtime curve program");
+
+   sbx_runtime_clear();
+
+   sbx_default_engine_config(&cfg);
+   cfg.sample_rate= (double)out_rate;
+   cfg.channels= 2;
+   sbx_runtime_ctx= sbx_context_create(&cfg);
+   if (!sbx_runtime_ctx)
+      error("Failed to create sbagenxlib runtime context");
+
+   sbx_default_curve_source_config(&csrc);
+   csrc.mode= isisochronic ? SBX_TONE_ISOCHRONIC : (ismono ? SBX_TONE_MONAURAL : SBX_TONE_BINAURAL);
+   csrc.waveform= opt_w;
+   csrc.duty_cycle= opt_I ? opt_I_d : 0.4;
+   csrc.amplitude= 1.0;
+   csrc.duration_sec= duration_sec;
+   csrc.loop= 0;
+
+   rc= sbx_context_load_curve_program(sbx_runtime_ctx, *curvep, &csrc);
+   if (rc != SBX_OK)
+      error("Failed to load sbagenxlib runtime curve: %s",
+	    sbx_context_last_error(sbx_runtime_ctx));
+   *curvep= 0;
+
+   sbx_runtime_active= 1;
+   sbx_runtime_total_sec= duration_sec;
+   rc= sbx_context_configure_runtime(sbx_runtime_ctx,
+				     mkf, mkf_n, mix_amp_pct,
+				     mix_fx, mix_fx_count,
+				     aux_tones, aux_count);
    if (rc != SBX_OK)
       error("Failed to configure sbagenxlib runtime extras: %s",
 	    sbx_context_last_error(sbx_runtime_ctx));
+}
+
+static SbxCurveProgram *
+sbx_build_drop_curve_program(double c0, double c1,
+			     double beat_start, double beat_target,
+			     double drop_sec, double hold_sec, double wake_sec,
+			     double amp_pct) {
+   SbxCurveProgram *curve;
+   SbxCurveEvalConfig cfg;
+   char text[2048];
+
+   curve= sbx_curve_create();
+   if (!curve)
+      error("Out of memory creating built-in drop curve");
+
+   sbx_default_curve_eval_config(&cfg);
+   cfg.carrier_start_hz= c0;
+   cfg.carrier_end_hz= c1;
+   cfg.carrier_span_sec= drop_sec + hold_sec;
+   cfg.beat_start_hz= beat_start;
+   cfg.beat_target_hz= beat_target;
+   cfg.beat_span_sec= drop_sec;
+   cfg.hold_min= hold_sec / 60.0;
+   cfg.total_min= (drop_sec + hold_sec) / 60.0;
+   cfg.wake_min= wake_sec / 60.0;
+   cfg.beat_amp0_pct= amp_pct;
+   cfg.mix_amp0_pct= 100.0;
+
+   snprintf(text, sizeof(text),
+	    "beat = ifelse(lt(m,D), b0*exp(ln(b1/b0)*(m/D)), "
+	    "ifelse(gt(U,0), ifelse(lt(m,T), b1, seg(m,T,T+U,b1,b0)), b1))\n"
+	    "carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), "
+	    "ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))\n"
+	    "amp = ifelse(lt(t,(T+U)*60), a0, "
+	    "ifelse(lt(t,(T+U)*60+10), a0*(1-ramp(t,(T+U)*60,(T+U)*60+10)), 0))\n");
+   if (sbx_curve_load_text(curve, text, "<built-in-drop>") != SBX_OK ||
+       sbx_curve_prepare(curve, &cfg) != SBX_OK)
+      curve_report_error(curve, "Failed to prepare built-in drop curve");
+   return curve;
+}
+
+static SbxCurveProgram *
+sbx_build_sigmoid_curve_program(double c0, double c1,
+				double beat_start, double beat_target,
+				double drop_sec, double hold_sec, double wake_sec,
+				double amp_pct,
+				double sig_l, double sig_h, double sig_a, double sig_b) {
+   SbxCurveProgram *curve;
+   SbxCurveEvalConfig cfg;
+   char text[4096];
+
+   curve= sbx_curve_create();
+   if (!curve)
+      error("Out of memory creating built-in sigmoid curve");
+
+   sbx_default_curve_eval_config(&cfg);
+   cfg.carrier_start_hz= c0;
+   cfg.carrier_end_hz= c1;
+   cfg.carrier_span_sec= drop_sec + hold_sec;
+   cfg.beat_start_hz= beat_start;
+   cfg.beat_target_hz= beat_target;
+   cfg.beat_span_sec= drop_sec;
+   cfg.hold_min= hold_sec / 60.0;
+   cfg.total_min= (drop_sec + hold_sec) / 60.0;
+   cfg.wake_min= wake_sec / 60.0;
+   cfg.beat_amp0_pct= amp_pct;
+   cfg.mix_amp0_pct= 100.0;
+
+   snprintf(text, sizeof(text),
+	    "param l = %.17g\n"
+	    "param h = %.17g\n"
+	    "param A = %.17g\n"
+	    "param B = %.17g\n"
+	    "beat = ifelse(lt(m,D), A*tanh(l*(m-D/2-h))+B, "
+	    "ifelse(gt(U,0), ifelse(lt(m,T), b1, seg(m,T,T+U,b1,b0)), b1))\n"
+	    "carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), "
+	    "ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))\n"
+	    "amp = ifelse(lt(t,(T+U)*60), a0, "
+	    "ifelse(lt(t,(T+U)*60+10), a0*(1-ramp(t,(T+U)*60,(T+U)*60+10)), 0))\n",
+	    sig_l, sig_h, sig_a, sig_b);
+   if (sbx_curve_load_text(curve, text, "<built-in-sigmoid>") != SBX_OK ||
+       sbx_curve_prepare(curve, &cfg) != SBX_OK)
+      curve_report_error(curve, "Failed to prepare built-in sigmoid curve");
+   return curve;
 }
 
 static void
@@ -8839,7 +9158,23 @@ create_drop(int ac, char **av) {
 	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
       }
 
-      if (slide) {
+      if (slide && !opt_D) {
+	 SbxCurveProgram *curve=
+	    sbx_build_drop_curve_program(c0, c2,
+					 beat_start, beat_target,
+					 (double)len0, islong ? (double)len1 : 0.0,
+					 wakeup ? (double)len2 : 0.0,
+					 amp * 100.0);
+	 end_sec= len + (wakeup ? len2 : 0);
+	 sbx_handle_runtime_unsupported_extra("-p drop", &extra_spec);
+	 sbx_runtime_activate_from_curve_program(&curve,
+						 isisochronic, ismono,
+						 (double)(end_sec + 10),
+						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+						 extra_spec.aux_tones, extra_spec.aux_count,
+						 extra_spec.mix_fx, extra_spec.mix_fx_count,
+						 0, 0);
+      } else if (slide) {
 	 for (a= 0; a<n_step; a++) {
 	    double tim= a * len0 / (double)(n_step-1);
 	    double carr_t= c0 + (c2-c0) * tim / len;
@@ -8875,9 +9210,12 @@ create_drop(int ac, char **av) {
       sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
       sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
-      sbx_handle_runtime_unsupported_extra("-p drop", &extra_spec);
+      if (!slide || opt_D)
+	 sbx_handle_runtime_unsupported_extra("-p drop", &extra_spec);
 
-      if (opt_D) {
+      if (slide && !opt_D) {
+	 /* exact runtime already activated above */
+      } else if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
@@ -9142,7 +9480,24 @@ create_sigmoid(int ac, char **av) {
 	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
       }
 
-      if (slide) {
+      if (slide && !opt_D) {
+	 SbxCurveProgram *curve=
+	    sbx_build_sigmoid_curve_program(c0, c2,
+					    beat_start, beat_target,
+					    (double)len0, islong ? (double)len1 : 0.0,
+					    wakeup ? (double)len2 : 0.0,
+					    amp * 100.0,
+					    sig_l, sig_h, sig_a, sig_b);
+	 end_sec= len + (wakeup ? len2 : 0);
+	 sbx_handle_runtime_unsupported_extra("-p sigmoid", &extra_spec);
+	 sbx_runtime_activate_from_curve_program(&curve,
+						 isisochronic, ismono,
+						 (double)(end_sec + 10),
+						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+						 extra_spec.aux_tones, extra_spec.aux_count,
+						 extra_spec.mix_fx, extra_spec.mix_fx_count,
+						 0, 0);
+      } else if (slide) {
 	 for (a= 0; a<n_step; a++) {
 	    double tim= a * len0 / (double)(n_step-1);
 	    double carr_t= c0 + (c2-c0) * tim / len;
@@ -9178,9 +9533,12 @@ create_sigmoid(int ac, char **av) {
       sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
       sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
-      sbx_handle_runtime_unsupported_extra("-p sigmoid", &extra_spec);
+      if (!slide || opt_D)
+	 sbx_handle_runtime_unsupported_extra("-p sigmoid", &extra_spec);
 
-      if (opt_D) {
+      if (slide && !opt_D) {
+	 /* exact runtime already activated above */
+      } else if (opt_D) {
 	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
@@ -9499,7 +9857,19 @@ create_curve(int ac, char **av) {
 	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
       }
 
-      if (slide) {
+      if (slide && !opt_D) {
+	 double duration_sec= (double)(len + (wakeup ? len2 : 0) + 10);
+	 sbx_handle_runtime_unsupported_extra("-p curve", &extra_spec);
+	 sbx_runtime_activate_from_curve_program(&func_curve.prog,
+						 isisochronic, ismono,
+						 duration_sec,
+						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+						 extra_spec.aux_tones, extra_spec.aux_count,
+						 extra_spec.mix_fx, extra_spec.mix_fx_count,
+						 0, 0);
+	 clear_func_curve();
+	 return;
+      } else if (slide) {
 	 for (a= 0; a<n_step; a++) {
 	    double amp_t= have_amp_curve ? amp_sam[a] : amp;
 	    if (mute_prog_tone) amp_t= 0.0;

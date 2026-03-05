@@ -14,6 +14,17 @@ sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg) {
   cfg->mix_amp0_pct = 100.0;
 }
 
+void
+sbx_default_curve_source_config(SbxCurveSourceConfig *cfg) {
+  if (!cfg) return;
+  cfg->mode = SBX_TONE_BINAURAL;
+  cfg->waveform = SBX_WAVE_SINE;
+  cfg->duty_cycle = 0.4;
+  cfg->amplitude = 1.0;
+  cfg->duration_sec = 0.0;
+  cfg->loop = 0;
+}
+
 static int
 curve_name_char(int c, int first) {
   return isalpha(c) || c == '_' || (!first && (isdigit(c) || c == '.'));
@@ -771,8 +782,11 @@ sbx_curve_load_text(SbxCurveProgram *curve, const char *text, const char *source
   else
     snprintf(curve->src_file, sizeof(curve->src_file), "<memory>.sbgf");
 
-  if (!curve_has_sbgf_ext(curve->src_file))
-    return curve_fail(curve, "Curve source must use .sbgf extension: %s", curve->src_file);
+  if (!curve_has_sbgf_ext(curve->src_file)) {
+    int is_virtual_source = (curve->src_file[0] == '<' && strchr(curve->src_file, '>') != 0);
+    if (!is_virtual_source)
+      return curve_fail(curve, "Curve source must use .sbgf extension: %s", curve->src_file);
+  }
 
   buf = strdup(text);
   if (!buf)

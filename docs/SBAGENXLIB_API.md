@@ -143,6 +143,7 @@ API Groups
 3) Curve program API
 
 - `sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg)`
+- `sbx_default_curve_source_config(SbxCurveSourceConfig *cfg)`
 - `sbx_curve_create(void)`
 - `sbx_curve_destroy(SbxCurveProgram *curve)`
 - `sbx_curve_reset(SbxCurveProgram *curve)`
@@ -173,6 +174,16 @@ Typical flow:
 exist so hosts can build inspectors/parameter UIs without reparsing `.sbgf`
 syntax themselves.
 
+If a host wants to render a prepared curve directly through a context rather
+than sampling it manually, use:
+
+- `sbx_context_load_curve_program(SbxContext *ctx, SbxCurveProgram *curve, const SbxCurveSourceConfig *cfg)`
+
+That installs the prepared `.sbgf` as a runtime source owned by the context.
+The curve is then evaluated at sample time through the normal context render
+path, and the context reports `SBX_SOURCE_CURVE` from
+`sbx_context_source_mode()`.
+
 4) Parser/formatter helpers
 
 - `sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone)`
@@ -193,6 +204,7 @@ These are designed so front-ends can share parser semantics with CLI code.
 - `sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone)`
 - `sbx_context_set_default_waveform(SbxContext *ctx, int waveform)`
 - `sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec)`
+- `sbx_context_load_curve_program(SbxContext *ctx, SbxCurveProgram *curve, const SbxCurveSourceConfig *cfg)`
 - `sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames)`
 - `sbx_context_set_time_sec(SbxContext *ctx, double t_sec)`
 - `sbx_context_time_sec(const SbxContext *ctx)`
@@ -238,6 +250,8 @@ casing static tones as “zero lanes”.
 
 - `SBX_SOURCE_NONE`
 - `SBX_SOURCE_STATIC`
+- `SBX_SOURCE_CURVE`
+- `SBX_SOURCE_KEYFRAMES`
 - `SBX_SOURCE_KEYFRAMES`
 
 Use `sbx_context_is_looping` to decide whether keyframed transport/plotting UI
@@ -265,6 +279,8 @@ should treat the program timeline as wrapping.
 - `sbx_context_get_timed_mix_effect_slot(...)`
 - `sbx_context_sample_mix_effects(...)`
 - `sbx_context_eval_active_tones(...)`
+- `sbx_context_set_telemetry_callback(...)`
+- `sbx_context_get_runtime_telemetry(...)`
 - `sbx_context_mix_stream_sample(...)`
 - `sbx_context_configure_runtime(...)`
 
@@ -332,6 +348,11 @@ lane; higher indices address secondary lanes loaded from native multivoice
 surface. It returns the effective voice lanes first, then any configured
 auxiliary tones. Use it when a frontend needs a “current sounding tones” view
 for inspectors, live labels, or non-buffered previews.
+
+`sbx_context_set_telemetry_callback` registers an optional callback that emits
+one `SbxRuntimeTelemetry` snapshot per `sbx_context_render_f32` call. Use
+`sbx_context_get_runtime_telemetry` for pull-style snapshots at the current
+context time when callbacks are not desired.
 
 `sbx_context_sample_mix_amp` samples the effective `mix/<amp>` profile over a
 time range without advancing render time.

@@ -668,10 +668,24 @@ Phase 3.86
   - direct library curve API usage,
   - CLI `-p curve` smoke through the extracted library path.
 
+Phase 3.87
+- Add curve-backed context loading:
+  - `sbx_default_curve_source_config()`
+  - `sbx_context_load_curve_program()`
+- This lets a host render a prepared `.sbgf` directly through `SbxContext`
+  instead of flattening it into sparse keyframes first.
+- Restore exact function-driven runtime for sliding built-ins:
+  - `-p drop ...s...`
+  - `-p sigmoid ...s...`
+  - `-p curve ...s...`
+- In those sliding modes, beat/carrier and any `.sbgf` `amp`/`mixamp`
+  expressions are now evaluated at sample time through the library runtime
+  instead of minute-spaced approximations.
+
 Phase 4
 - Add optional bindings/frontends (Python, GUI, plugin/service use-cases).
 
-Current API (Phase 3.86 Slice)
+Current API (Phase 3.87 Slice)
 ------------------------------
 
 Public header: `sbagenxlib.h`
@@ -690,6 +704,7 @@ Public header: `sbagenxlib.h`
   - `sbx_engine_render_f32()`
 - Curve program API:
   - `sbx_default_curve_eval_config()`
+  - `sbx_default_curve_source_config()`
   - `sbx_curve_create()` / `sbx_curve_destroy()` / `sbx_curve_reset()`
   - `sbx_curve_load_text()` / `sbx_curve_load_file()`
   - `sbx_curve_set_param()`
@@ -711,6 +726,7 @@ Public header: `sbagenxlib.h`
   - `sbx_context_set_tone()`
   - `sbx_context_set_default_waveform()`
   - `sbx_context_load_tone_spec()`
+  - `sbx_context_load_curve_program()`
   - `sbx_context_load_keyframes()`
   - `sbx_context_load_sequence_text()`
   - `sbx_context_load_sequence_file()`
@@ -1193,12 +1209,14 @@ tests/sbagenxlib/test_pkgconfig_uninstalled_shared_consumer.sh
 tests/sbagenxlib/test_shared_consumer_manual.sh
 ```
 
-Curve API Smoke Test (Phase 3.86)
+Curve API Smoke Test (Phase 3.87)
 ---------------------------------
 
 ```bash
 gcc -O2 -I. tests/sbagenxlib/test_curve_api.c sbagenxlib.c -lm -o /tmp/test_curve_api
 /tmp/test_curve_api
+gcc -O2 -I. tests/sbagenxlib/test_curve_context_api.c sbagenxlib.c -lm -o /tmp/test_curve_context_api
+/tmp/test_curve_context_api
 tests/sbagenxlib/test_preprog_curve_library.sh
 ```
 
