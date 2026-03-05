@@ -268,6 +268,14 @@ main(void) {
     fail("negative-bell keyframe retrieval failed");
   if (kf.tone.mode != SBX_TONE_BELL || fabs(kf.tone.carrier_hz - 4000.0) > 1e-6)
     fail("negative bell carrier should normalize to positive magnitude");
+  free(buf);
+  frames = (size_t)(0.6 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (negative bell)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("negative-bell sbg timing render failed");
+  if (!(abs_sum_window(buf, (size_t)(0.02 * cfg.sample_rate), (size_t)(0.25 * cfg.sample_rate)) > 1e-3))
+    fail("negative-bell sbg timing should produce audible transient energy");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_named_text, 0);
   if (rc != SBX_OK) fail("multivoice named sbg timing load failed");
