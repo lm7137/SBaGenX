@@ -54,6 +54,7 @@ export class SbagenxStudioModel {
     protected _summary: SbagenxStudioSummary | undefined;
     protected _error: string | undefined;
     protected _validation: SbagenxStudioInspectionResult | undefined;
+    protected requestSeq = 0;
 
     get busy(): boolean {
         return this._busy;
@@ -80,6 +81,7 @@ export class SbagenxStudioModel {
     }
 
     async load(uri: URI, textOverride?: string): Promise<void> {
+        const requestId = ++this.requestSeq;
         if (!this.canHandle(uri)) {
             this.clear();
             return;
@@ -91,13 +93,24 @@ export class SbagenxStudioModel {
         try {
             const text = textOverride ?? (await this.fileService.read(uri)).value.toString();
             const fileType = uri.path.ext.toLowerCase() === '.sbgf' ? 'sbgf' : 'sbg';
-            this._summary = this.summarize(uri, text, text.length);
-            this._validation = await this.engineService.inspectText(fileType, text, uri.path.base);
+            const summary = this.summarize(uri, text, text.length);
+            const validation = await this.engineService.inspectText(fileType, text, uri.path.base);
+            if (requestId !== this.requestSeq) {
+                return;
+            }
+            this._summary = summary;
+            this._validation = validation;
         } catch (error) {
+            if (requestId !== this.requestSeq) {
+                return;
+            }
             this._summary = undefined;
             this._validation = undefined;
             this._error = error instanceof Error ? error.message : String(error);
         } finally {
+            if (requestId !== this.requestSeq) {
+                return;
+            }
             this._busy = false;
             this.onDidChangeEmitter.fire();
         }
