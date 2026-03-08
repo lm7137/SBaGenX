@@ -4584,8 +4584,10 @@ statusSbx(char *err) {
   double t_sec;
   int tim_ms;
   int minute_bucket;
-  SbxToneSpec tone;
+  SbxToneSpec tones[SBX_MAX_AUX_TONES + 1];
   char tok[256];
+  size_t tone_n= 0;
+  size_t voice_n= 0;
   size_t aux_n;
 
   if (opt_Q || !sbx_runtime_active || !sbx_runtime_ctx) return;
@@ -4604,15 +4606,19 @@ statusSbx(char *err) {
   *p++= ' '; *p++= ' ';
   p += sprintTime(p, tim_ms);
 
-  if (SBX_OK == sbx_context_sample_tones(sbx_runtime_ctx, t_sec, t_sec, 1, 0, &tone)) {
-    if (SBX_OK == sbx_format_tone_spec(&tone, tok, sizeof(tok)))
-      p += sprintf(p, " %s", tok);
+  if (SBX_OK == sbx_context_eval_active_tones(sbx_runtime_ctx, t_sec, tones,
+					      SBX_MAX_AUX_TONES + 1, &tone_n)) {
+    voice_n= sbx_context_voice_count(sbx_runtime_ctx);
+    if (voice_n > tone_n) voice_n= tone_n;
+    for (a= 0; a < (int)voice_n; a++) {
+      if (SBX_OK == sbx_format_tone_spec(&tones[a], tok, sizeof(tok)))
+	p += sprintf(p, " %s", tok);
+    }
   }
 
-  aux_n= sbx_context_aux_tone_count(sbx_runtime_ctx);
+  aux_n= (tone_n > voice_n) ? (tone_n - voice_n) : 0;
   for (a= 0; a < (int)aux_n; a++) {
-    if (SBX_OK == sbx_context_get_aux_tone(sbx_runtime_ctx, (size_t)a, &tone) &&
-	SBX_OK == sbx_format_tone_spec(&tone, tok, sizeof(tok)))
+    if (SBX_OK == sbx_format_tone_spec(&tones[voice_n + (size_t)a], tok, sizeof(tok)))
       p += sprintf(p, " %s", tok);
   }
 
