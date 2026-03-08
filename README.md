@@ -109,7 +109,7 @@ features and runtime/plotting improvements.
 
 1. Download and install:
 
-   - [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/latest/download/sbagenx-windows-setup.exe)
+   - [sbagenx-windows-setup-v3.0.4.exe](https://www.sbagenx.com/downloads/sbagenx-windows-setup-v3.0.4.exe)
 
 2. Verify installation:
 
@@ -126,9 +126,9 @@ features and runtime/plotting improvements.
 #### Ubuntu (amd64)
 
 ```bash
-wget -O sbagenx_3.0.3-1_amd64.deb \
-  https://github.com/lm7137/SBaGenX/releases/download/v3.0.3/sbagenx_3.0.3-1_amd64.deb
-sudo apt install ./sbagenx_3.0.3-1_amd64.deb
+wget -O sbagenx_3.0.4-1_amd64.deb \
+  https://www.sbagenx.com/downloads/sbagenx_3.0.4-1_amd64.deb
+sudo apt install ./sbagenx_3.0.4-1_amd64.deb
 sbagenx -h
 ```
 
@@ -166,17 +166,17 @@ At present, there is no officially published SBaGenX runtime container image for
 
 Recommended download path:
 
-- Use the latest stable release from the
-  [GitHub releases page](https://github.com/lm7137/SBaGenX/releases)
+- Use the binaries hosted on the
+  [SBaGenX website](https://www.sbagenx.com/)
 
-Current stable release assets (`v3.0.3`):
+Current stable release assets (`v3.0.4`):
 
-- Windows installer: [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/download/v3.0.3/sbagenx-windows-setup.exe)
-- Windows SHA256: `15d91995ef26100d9ccf8c0e6f456db9866589f702f7d3480f35d35020dcd96d`
-- Ubuntu package: [sbagenx_3.0.3-1_amd64.deb](https://github.com/lm7137/SBaGenX/releases/download/v3.0.3/sbagenx_3.0.3-1_amd64.deb)
-- Ubuntu SHA256: `c90f413dc1debe5e9152794e2238eb535f8b92d1f497bf6233943d74d84028d0`
+- Windows installer: [sbagenx-windows-setup-v3.0.4.exe](https://www.sbagenx.com/downloads/sbagenx-windows-setup-v3.0.4.exe)
+- Windows SHA256: `2d291d1f130f5ccef61dbec52e5454457046e8d31eac0001f2978fcda10efb03`
+- Ubuntu package: [sbagenx_3.0.4-1_amd64.deb](https://www.sbagenx.com/downloads/sbagenx_3.0.4-1_amd64.deb)
+- Ubuntu SHA256: `f39a35b68721f8cd75a9a21ae8481eea74b663c19dba8d1081f345ca581666cd`
 
-  **Important**: Always verify the SHA256 checksum of downloaded binaries against those listed on the [releases page](https://github.com/lm7137/SBaGenX/releases) to ensure file integrity and security.
+  **Important**: Always verify the SHA256 checksum of downloaded binaries against those listed on [www.sbagenx.com](https://www.sbagenx.com/) to ensure file integrity and security.
 
 ### Installing on Linux
 
@@ -234,12 +234,12 @@ sbagenx -h
 
 1. Download the installer:
 
-   - [sbagenx-windows-setup.exe](https://github.com/lm7137/SBaGenX/releases/latest/download/sbagenx-windows-setup.exe)
+   - [sbagenx-windows-setup-v3.0.4.exe](https://www.sbagenx.com/downloads/sbagenx-windows-setup-v3.0.4.exe)
 
 2. Verify the SHA256 checksum of the installer. You can use PowerShell or Command Prompt to do this:
 
    ```powershell
-   Get-FileHash -Algorithm SHA256 .\sbagenx-windows-setup.exe
+   Get-FileHash -Algorithm SHA256 .\sbagenx-windows-setup-v3.0.4.exe
    ```
 
    You can find the expected hash of the installer at https://www.sbagenx.com
