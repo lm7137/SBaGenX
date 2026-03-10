@@ -200,6 +200,7 @@ int main(int argc, char **argv) ;
 void status(char *) ;
 void statusSbx(char *) ;
 void dispCurrPer( FILE* ) ;
+void dispCurrPerSbx( FILE* ) ;
 void init_sin_table() ;
 void debug(char *fmt, ...) ;
 void warn(char *fmt, ...) ;
@@ -570,7 +571,8 @@ int fast_mult= 0;		// 0 to sync to clock (adjusting as necessary), or else sync 
 				//  output rate, with the multiplier indicated
 S64 byte_count= -1;		// Number of bytes left to output, or -1 if unlimited
 int tty_erase;			// Chars to erase from current line (for ESC[K emulation)
-int sbx_status_history_minute= -1; // Last runtime minute emitted as a newline snapshot
+int sbx_status_period_index= -1; // Last sbagenxlib keyframe period emitted to stderr
+int sbx_status_curve_history_bucket= -1; // Last 10-second curve snapshot emitted as newline
 
 int opt_Q;			// Quiet mode
 int opt_D;
@@ -4577,13 +4579,148 @@ status(char *err) {
   fflush(stderr);
 }
 
+static int
+sbx_time_ms_from_seconds(double t_sec) {
+  int tim_ms;
+  tim_ms= (int)(t_sec * 1000.0 + 0.5);
+  tim_ms %= H24;
+  if (tim_ms < 0) tim_ms += H24;
+  return tim_ms;
+}
+
+static int
+sbx_current_period_index(double t_sec, size_t *out_idx) {
+  size_t i, n;
+  double dur;
+  SbxProgramKeyframe kf;
+
+  if (!sbx_runtime_active || !sbx_runtime_ctx || !out_idx)
+    return 0;
+  if (sbx_context_source_mode(sbx_runtime_ctx) != SBX_SOURCE_KEYFRAMES)
+    return 0;
+
+  n= sbx_context_keyframe_count(sbx_runtime_ctx);
+  if (n == 0)
+    return 0;
+
+  if (sbx_context_is_looping(sbx_runtime_ctx)) {
+    dur= sbx_context_duration_sec(sbx_runtime_ctx);
+    if (dur > 0.0) {
+      t_sec= fmod(t_sec, dur);
+      if (t_sec < 0.0) t_sec += dur;
+    }
+  }
+
+  for (i= 1; i<n; i++) {
+    if (SBX_OK != sbx_context_get_keyframe(sbx_runtime_ctx, i, &kf))
+      return 0;
+    if (t_sec < kf.time_sec) {
+      *out_idx= i - 1;
+      return 1;
+    }
+  }
+
+  *out_idx= n - 1;
+  return 1;
+}
+
+static void
+sbx_clear_status_line(FILE *fp) {
+  if (tty_erase) {
+#ifdef ANSI_TTY
+    fprintf(fp, "\033[K");
+#else
+    fprintf(fp, "%*s\r", tty_erase, "");
+    tty_erase= 0;
+#endif
+  }
+}
+
+void
+dispCurrPerSbx(FILE *fp) {
+  int a;
+  size_t cur_ix, next_ix, n, voice_n;
+  SbxProgramKeyframe cur_kf, next_kf, lane;
+  char *p0, *p1;
+  int len0, len1;
+
+  if (opt_Q || !sbx_runtime_active || !sbx_runtime_ctx)
+    return;
+  if (!sbx_current_period_index(sbx_context_time_sec(sbx_runtime_ctx), &cur_ix))
+    return;
+
+  n= sbx_context_keyframe_count(sbx_runtime_ctx);
+  if (n == 0)
+    return;
+  next_ix= cur_ix + 1;
+  if (next_ix >= n) {
+    if (sbx_context_is_looping(sbx_runtime_ctx) && n > 0)
+      next_ix= 0;
+    else
+      next_ix= cur_ix;
+  }
+
+  if (SBX_OK != sbx_context_get_keyframe(sbx_runtime_ctx, cur_ix, &cur_kf))
+    return;
+  if (SBX_OK != sbx_context_get_keyframe(sbx_runtime_ctx, next_ix, &next_kf))
+    return;
+
+  p0= buf;
+  p1= buf_copy;
+  p0 += sprintf(p0, "* ");
+  p0 += sprintTime(p0, sbx_time_ms_from_seconds(cur_kf.time_sec));
+  p1 += sprintf(p1, "  ");
+  p1 += sprintTime(p1, sbx_time_ms_from_seconds(next_kf.time_sec));
+
+  voice_n= sbx_context_voice_count(sbx_runtime_ctx);
+  if (voice_n == 0)
+    voice_n= 1;
+  for (a= 0; a<(int)voice_n; a++) {
+    char tok0[256], tok1[256];
+    tok0[0]= 0;
+    tok1[0]= 0;
+    if (SBX_OK == sbx_context_get_keyframe_voice(sbx_runtime_ctx, cur_ix, (size_t)a, &lane))
+      sbx_format_tone_spec(&lane.tone, tok0, sizeof(tok0));
+    if (SBX_OK == sbx_context_get_keyframe_voice(sbx_runtime_ctx, next_ix, (size_t)a, &lane))
+      sbx_format_tone_spec(&lane.tone, tok1, sizeof(tok1));
+    if (!tok0[0]) strcpy(tok0, "-");
+    if (!tok1[0]) strcpy(tok1, "-");
+    p0 += sprintf(p0, " %s", tok0);
+    p1 += sprintf(p1, " %s", tok1);
+    len0= strlen(tok0);
+    len1= strlen(tok1);
+    while (len0 < len1) { *p0++= ' '; len0++; }
+    while (len1 < len0) { *p1++= ' '; len1++; }
+  }
+  *p0= 0;
+  *p1= 0;
+  fprintf(fp, "%s\n%s\n", buf, buf_copy);
+  fflush(fp);
+}
+
+static void
+sbx_maybe_emit_period_change(FILE *fp) {
+  size_t cur_ix;
+
+  if (opt_Q || !sbx_runtime_active || !sbx_runtime_ctx)
+    return;
+  if (!sbx_current_period_index(sbx_context_time_sec(sbx_runtime_ctx), &cur_ix))
+    return;
+  if ((int)cur_ix == sbx_status_period_index)
+    return;
+
+  sbx_clear_status_line(fp);
+  dispCurrPerSbx(fp);
+  sbx_status_period_index= (int)cur_ix;
+}
+
 void
 statusSbx(char *err) {
   int a;
   char *p= buf, *p0, *p1;
   double t_sec;
   int tim_ms;
-  int minute_bucket;
+  int curve_bucket;
   SbxToneSpec tones[SBX_MAX_AUX_TONES + 1];
   char tok[256];
   size_t tone_n= 0;
@@ -4597,10 +4734,8 @@ statusSbx(char *err) {
 #endif
 
   t_sec= sbx_context_time_sec(sbx_runtime_ctx);
-  tim_ms= (int)(t_sec * 1000.0 + 0.5);
-  tim_ms %= H24;
-  if (tim_ms < 0) tim_ms += H24;
-  minute_bucket= (int)(t_sec / 60.0);
+  tim_ms= sbx_time_ms_from_seconds(t_sec);
+  curve_bucket= (int)(t_sec / 10.0);
 
   p0= p;
   *p++= ' '; *p++= ' ';
@@ -4653,11 +4788,13 @@ statusSbx(char *err) {
 #endif
 
   tty_erase= p1-p0;
-  if (minute_bucket >= 1 && minute_bucket > sbx_status_history_minute) {
+  if (sbx_context_source_mode(sbx_runtime_ctx) == SBX_SOURCE_CURVE &&
+      curve_bucket >= 1 &&
+      curve_bucket > sbx_status_curve_history_bucket) {
     fprintf(stderr, "%s\n", buf);
     fflush(stderr);
     tty_erase= 0;
-    sbx_status_history_minute= minute_bucket;
+    sbx_status_curve_history_bucket= curve_bucket;
     return;
   }
   fprintf(stderr, "%s\r", buf);
@@ -5824,13 +5961,14 @@ loop() {
     writeWAV();
 
   if (!opt_Q) fprintf(stderr, "\n");
-  sbx_status_history_minute= -1;
+  sbx_status_period_index= -1;
+  sbx_status_curve_history_bucket= -1;
   if (!sbx_runtime_active) {
      corrVal(0);		// Get into correct period
      dispCurrPer(stderr);	// Display
      status(0);
   } else if (!opt_Q) {
-     warn("SBAGENXLIB runtime active");
+     sbx_maybe_emit_period_change(stderr);
      statusSbx(0);
   }
   
@@ -5839,6 +5977,8 @@ loop() {
       if (!sbx_runtime_active)
 	 corrVal(1);
       outChunk();
+      if (sbx_runtime_active)
+	 sbx_maybe_emit_period_change(stderr);
       ms_inc= out_buf_ms + err;
       now_lo += out_buf_lo + err_lo;
       if (now_lo >= 0x10000) { ms_inc += now_lo >> 16; now_lo &= 0xFFFF; }

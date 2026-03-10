@@ -18,14 +18,15 @@ trap cleanup EXIT
 
 "$BIN" -S -L 0:01:05 -o "$tmpdir/status.wav" -W -i 200+8/30 >/dev/null 2>"$tmpdir/err.txt"
 
-grep -q "^SBAGENXLIB runtime active$" "$tmpdir/err.txt" || {
-  echo "FAIL: missing sbagenxlib runtime banner" >&2
+if grep -q "^SBAGENXLIB runtime active$" "$tmpdir/err.txt"; then
+  echo "FAIL: unexpected sbagenxlib runtime banner" >&2
   exit 1
-}
+fi
 
-grep -q "^  00:01:" "$tmpdir/err.txt" || {
-  echo "FAIL: missing newline status history snapshot after one runtime minute" >&2
+newline_count="$(tr -cd '\n' <"$tmpdir/err.txt" | wc -c)"
+if [[ "$newline_count" -ne 2 ]]; then
+  echo "FAIL: immediate sbagenxlib status should only contain the legacy setup newlines; got $newline_count newline(s)" >&2
   exit 1
-}
+fi
 
-echo "PASS: sbagenxlib runtime emits periodic newline status history"
+echo "PASS: sbagenxlib immediate runtime status matches legacy single-line cadence"
