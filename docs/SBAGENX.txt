@@ -1493,10 +1493,19 @@ Examples:
     -p curve examples/basics/curve-sigmoid-like.sbgf Nls:S=2:l=0.2:h=0 mix/100 mixam:beat
   sbagenx -G -p curve examples/basics/curve-sigmoid-like.sbgf \
     00ls:l=0.2:h=0
+  sbagenx -G -p curve examples/basics/curve-smootherstep-demo.sbgf \
+    00ls
+  sbagenx -G -p curve examples/basics/curve-raised-cosine-demo.sbgf \
+    00ls
+  sbagenx -G -p curve examples/basics/curve-easeout-demo.sbgf \
+    00ls
   sbagenx -G -p curve examples/basics/curve-expfit-solve-demo.sbgf \
     00ls:l=0.15
   sbagenx -G -p curve examples/basics/curve-3unk-double-exp-solve-demo.sbgf \
     00ls:l=0.06:k=0.20:s0=0
+
+The installer ships curated example curve plots in the `Plots`
+sub-directory alongside these matching `.sbgf` examples.
 
 The level/depth/time modifiers are interpreted the same way as in
 `-p drop`/`-p sigmoid`:

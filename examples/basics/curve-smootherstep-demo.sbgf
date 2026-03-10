@@ -1,0 +1,8 @@
+# SBaGenX custom curve example (.sbgf)
+# Gentle start, stronger middle, gentle finish using smootherstep easing.
+#
+# Usage example:
+#   sbagenx -G -p curve examples/basics/curve-smootherstep-demo.sbgf 00ls
+
+beat = lerp(b0, b1, smootherstep(0, D, m))
+carrier = c0 + (c1-c0) * ramp(m,0,T)

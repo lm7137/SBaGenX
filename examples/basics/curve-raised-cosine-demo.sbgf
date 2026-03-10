@@ -1,0 +1,8 @@
+# SBaGenX custom curve example (.sbgf)
+# Raised-cosine descent: very soft at the beginning and end, smooth throughout.
+#
+# Usage example:
+#   sbagenx -G -p curve examples/basics/curve-raised-cosine-demo.sbgf 00ls
+
+beat = lerp(b0, b1, 0.5 - 0.5*cos(3.141592653589793 * ramp(m,0,D)))
+carrier = c0 + (c1-c0) * ramp(m,0,T)

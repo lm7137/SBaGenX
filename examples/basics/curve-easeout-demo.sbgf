@@ -1,0 +1,8 @@
+# SBaGenX custom curve example (.sbgf)
+# Ease-out descent: most of the drop happens earlier, then the curve settles gently.
+#
+# Usage example:
+#   sbagenx -G -p curve examples/basics/curve-easeout-demo.sbgf 00ls
+
+beat = lerp(b0, b1, 1 - pow(1 - ramp(m,0,D), 2))
+carrier = c0 + (c1-c0) * ramp(m,0,T)
