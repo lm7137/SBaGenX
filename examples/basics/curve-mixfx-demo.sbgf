@@ -1,0 +1,26 @@
+# Curve-driven runtime mix-effect parameters.
+#
+# These targets only take effect when a matching mix effect is present at
+# runtime, for example via:
+#   mixspin:300+3/35
+#   mixpulse:6/40
+#   mixbeat:4/45
+#   mixam:beat
+#
+# Amplitude-style targets below use the 0..100 percentage scale.
+
+beat = b0*exp(ln(b1/b0)*(m/D))
+carrier = c0 + (c1-c0)*ramp(m,0,T)
+mixamp = m0*(1-ramp(m,0,T))
+
+mixspin_width = 300 + 60*ramp(m,0,T)
+mixspin_hz = 3 + 1*ramp(m,0,T)
+mixspin_amp = 35 + 15*ramp(m,0,T)
+
+mixpulse_hz = 6 - 2*ramp(m,0,T)
+mixpulse_amp = 40 + 10*ramp(m,0,T)
+
+mixbeat_hz = 4 + 2*ramp(m,0,T)
+mixbeat_amp = 45 - 5*ramp(m,0,T)
+
+mixam_hz = 2 + 2*ramp(m,0,T)

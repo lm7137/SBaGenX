@@ -1532,6 +1532,14 @@ Supported line types:
   carrier = <expression>       (optional)
   amp = <expression>           (optional, beat/iso/mono amplitude %, 0..100 scale)
   mixamp = <expression>        (optional, mix/<amp> amplitude %, 0..100 scale)
+  mixspin_width = <expression> (optional, mixspin width in microseconds)
+  mixspin_hz = <expression>    (optional, mixspin rotation frequency in Hz)
+  mixspin_amp = <expression>   (optional, mixspin intensity %, 0..100 scale)
+  mixpulse_hz = <expression>   (optional, mixpulse rate in Hz)
+  mixpulse_amp = <expression>  (optional, mixpulse intensity %, 0..100 scale)
+  mixbeat_hz = <expression>    (optional, mixbeat frequency in Hz)
+  mixbeat_amp = <expression>   (optional, mixbeat intensity %, 0..100 scale)
+  mixam_hz = <expression>      (optional, mixam rate in Hz)
   beat<expr = <expression>     (piecewise, optional)
   beat<=expr = <expression>    (piecewise, optional)
   beat>expr = <expression>     (piecewise, optional)
@@ -1548,10 +1556,17 @@ Supported line types:
   mixamp<=expr = <expression>  (piecewise, optional)
   mixamp>expr = <expression>   (piecewise, optional)
   mixamp>=expr = <expression>  (piecewise, optional)
+  mixspin_width<expr = <expression>  (piecewise, optional)
+  ... same < <= > >= piecewise forms also apply to:
+      mixspin_hz, mixspin_amp,
+      mixpulse_hz, mixpulse_amp,
+      mixbeat_hz, mixbeat_amp,
+      mixam_hz
 
 Comments can start with `#`, `;` or `//`.
 Each expression must be on a single line.
-For each target (`beat`, `carrier`, `amp`, `mixamp`), use either:
+For each target (`beat`, `carrier`, `amp`, `mixamp`, and the optional
+mix-effect targets listed above), use either:
   1) one plain expression line (`beat = ...`), or
   2) piecewise lines (`beat<...`, `beat>...`, etc).
 Mixing plain and piecewise lines for the same target is not allowed.
@@ -1576,11 +1591,26 @@ Expression variables available at runtime:
   a0   base beat/iso/mono amplitude in % (0..100, from /amp in curve spec)
   m0   base mix amplitude in % (0..100, from mix/<amp> tone-spec)
 
-`amp` and `mixamp` expressions return percentages on a 0..100 scale
+`amp`, `mixamp`, `mixspin_amp`, `mixpulse_amp`, and `mixbeat_amp`
+expressions return percentages on a 0..100 scale
 (not fractions in the 0.0..1.0 range).
 For example: 100 = full configured amplitude, 50 = half amplitude.
 `mixamp` affects runtime mix amplitude only when a `mix/<amp>` tone-spec
 is present.
+The mix-effect targets affect runtime mix-effect parameters only when a
+matching mix effect is present.  They do not create mix effects by
+themselves.
+
+Matching rules:
+
+  mixspin_width / mixspin_hz / mixspin_amp  -> active `mixspin`
+  mixpulse_hz / mixpulse_amp                -> active `mixpulse`
+  mixbeat_hz / mixbeat_amp                  -> active `mixbeat`
+  mixam_hz                                  -> active `mixam`
+
+`mixam_hz` overrides the effective AM rate in Hz.  If a curve supplies
+`mixam_hz`, it takes precedence over `mixam:beat` binding for that
+evaluated runtime spec.
 
 Helper functions (implemented in C):
 
@@ -1775,6 +1805,21 @@ Example `.sbgf` with 3 unknowns solved:
   solve A,B,C : A+B+C=b0 ; A*exp(-l*D)+B*exp(-k*D)+C=b1 ; -l*A-k*B=s0
   beat = A*exp(-l*m) + B*exp(-k*m) + C
   carrier = c0 + (c1-c0) * ramp(m,0,T)
+
+Example `.sbgf` driving runtime mix effects:
+
+  beat = b0*exp(ln(b1/b0)*(m/D))
+  carrier = c0 + (c1-c0)*ramp(m,0,T)
+  mixspin_width = 300 + 60*ramp(m,0,T)
+  mixspin_hz = 3 + 1*ramp(m,0,T)
+  mixspin_amp = 35 + 15*ramp(m,0,T)
+  mixam_hz = 2 + 2*ramp(m,0,T)
+
+  Example use:
+    sbagenx -p curve examples/basics/curve-mixfx-demo.sbgf \
+      00ls+ mix/80 mixspin:300+3/35
+    sbagenx -p curve examples/basics/curve-mixfx-demo.sbgf \
+      Nls+ mix/100 mixam:beat
 
 
 3: Writing sequence files

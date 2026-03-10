@@ -22,11 +22,15 @@ main(void) {
   SbxCurveSourceConfig src_cfg;
   SbxContext *ctx;
   SbxCurveProgram *curve;
+  SbxMixFxSpec fx_cfg[4];
+  SbxMixFxSpec sampled_fx[8];
+  size_t sampled_fx_count = 0;
   SbxToneSpec tones[3];
   double ts[3];
   double beat_hz[3];
   double mix_pct[3];
   float audio[512];
+  double mix_add_l = 0.0, mix_add_r = 0.0;
   int rc;
 
   sbx_default_engine_config(&eng_cfg);
@@ -39,7 +43,15 @@ main(void) {
       curve,
       "beat = b0*exp(ln(b1/b0)*(m/D))\n"
       "carrier = c0 + (c1-c0)*ramp(m,0,T)\n"
-      "mixamp = m0*(1-ramp(m,0,T))\n",
+      "mixamp = m0*(1-ramp(m,0,T))\n"
+      "mixspin_width = 300 + 60*ramp(m,0,T)\n"
+      "mixspin_hz = 3 + 1*ramp(m,0,T)\n"
+      "mixspin_amp = 35 + 15*ramp(m,0,T)\n"
+      "mixpulse_hz = 6 - 2*ramp(m,0,T)\n"
+      "mixpulse_amp = 40 + 10*ramp(m,0,T)\n"
+      "mixbeat_hz = 4 + 2*ramp(m,0,T)\n"
+      "mixbeat_amp = 45 - 5*ramp(m,0,T)\n"
+      "mixam_hz = 2 + 2*ramp(m,0,T)\n",
       "curve-context-test.sbgf");
   if (rc != SBX_OK) fail(sbx_curve_last_error(curve));
 
@@ -69,6 +81,17 @@ main(void) {
   rc = sbx_context_load_curve_program(ctx, curve, &src_cfg);
   if (rc != SBX_OK) fail(sbx_context_last_error(ctx));
   curve = NULL; /* ownership transferred */
+
+  if (sbx_parse_mix_fx_spec("mixspin:300+3/35", SBX_WAVE_SINE, &fx_cfg[0]) != SBX_OK)
+    fail("parse mixspin fx failed");
+  if (sbx_parse_mix_fx_spec("mixpulse:6/40", SBX_WAVE_SINE, &fx_cfg[1]) != SBX_OK)
+    fail("parse mixpulse fx failed");
+  if (sbx_parse_mix_fx_spec("mixbeat:4/45", SBX_WAVE_SINE, &fx_cfg[2]) != SBX_OK)
+    fail("parse mixbeat fx failed");
+  if (sbx_parse_mix_fx_spec("mixam:beat:m=cos:s=0.1:f=0.3", SBX_WAVE_SINE, &fx_cfg[3]) != SBX_OK)
+    fail("parse mixam fx failed");
+  rc = sbx_context_set_mix_effects(ctx, fx_cfg, 4);
+  if (rc != SBX_OK) fail(sbx_context_last_error(ctx));
 
   if (sbx_context_source_mode(ctx) != SBX_SOURCE_CURVE)
     fail("curve context source mode mismatch");
@@ -103,6 +126,57 @@ main(void) {
     fail("curve context mix amp sample mismatch");
   if (!sbx_context_has_mix_amp_control(ctx))
     fail("curve context should report mix amp control");
+
+  rc = sbx_context_sample_mix_effects(ctx, 0.0, sampled_fx, 8, &sampled_fx_count);
+  if (rc != SBX_OK) fail("sbx_context_sample_mix_effects t=0 failed");
+  if (sampled_fx_count != 4) fail("curve context mix effect count mismatch");
+  if (!near(sampled_fx[0].carr, 300.0, 1e-9) ||
+      !near(sampled_fx[0].res, 3.0, 1e-9) ||
+      !near(sampled_fx[0].amp, 0.35, 1e-9))
+    fail("curve mixspin override at t=0 mismatch");
+  if (!near(sampled_fx[1].res, 6.0, 1e-9) ||
+      !near(sampled_fx[1].amp, 0.40, 1e-9))
+    fail("curve mixpulse override at t=0 mismatch");
+  if (!near(sampled_fx[2].res, 4.0, 1e-9) ||
+      !near(sampled_fx[2].amp, 0.45, 1e-9))
+    fail("curve mixbeat override at t=0 mismatch");
+  if (!near(sampled_fx[3].res, 2.0, 1e-9) || sampled_fx[3].mixam_bind_program_beat)
+    fail("curve mixam override at t=0 mismatch");
+
+  rc = sbx_context_sample_mix_effects(ctx, 60.0, sampled_fx, 8, &sampled_fx_count);
+  if (rc != SBX_OK) fail("sbx_context_sample_mix_effects t=60 failed");
+  if (!near(sampled_fx[0].carr, 330.0, 1e-9) ||
+      !near(sampled_fx[0].res, 3.5, 1e-9) ||
+      !near(sampled_fx[0].amp, 0.425, 1e-9))
+    fail("curve mixspin override at t=60 mismatch");
+  if (!near(sampled_fx[1].res, 5.0, 1e-9) ||
+      !near(sampled_fx[1].amp, 0.45, 1e-9))
+    fail("curve mixpulse override at t=60 mismatch");
+  if (!near(sampled_fx[2].res, 5.0, 1e-9) ||
+      !near(sampled_fx[2].amp, 0.425, 1e-9))
+    fail("curve mixbeat override at t=60 mismatch");
+  if (!near(sampled_fx[3].res, 3.0, 1e-9) || sampled_fx[3].mixam_bind_program_beat)
+    fail("curve mixam override at t=60 mismatch");
+
+  rc = sbx_context_sample_mix_effects(ctx, 120.0, sampled_fx, 8, &sampled_fx_count);
+  if (rc != SBX_OK) fail("sbx_context_sample_mix_effects t=120 failed");
+  if (!near(sampled_fx[0].carr, 360.0, 1e-9) ||
+      !near(sampled_fx[0].res, 4.0, 1e-9) ||
+      !near(sampled_fx[0].amp, 0.50, 1e-9))
+    fail("curve mixspin override at t=120 mismatch");
+  if (!near(sampled_fx[1].res, 4.0, 1e-9) ||
+      !near(sampled_fx[1].amp, 0.50, 1e-9))
+    fail("curve mixpulse override at t=120 mismatch");
+  if (!near(sampled_fx[2].res, 6.0, 1e-9) ||
+      !near(sampled_fx[2].amp, 0.40, 1e-9))
+    fail("curve mixbeat override at t=120 mismatch");
+  if (!near(sampled_fx[3].res, 4.0, 1e-9) || sampled_fx[3].mixam_bind_program_beat)
+    fail("curve mixam override at t=120 mismatch");
+
+  rc = sbx_context_mix_stream_sample(ctx, 60.0, 1200, -900, 1.0, &mix_add_l, &mix_add_r);
+  if (rc != SBX_OK) fail("sbx_context_mix_stream_sample failed");
+  if (!isfinite(mix_add_l) || !isfinite(mix_add_r))
+    fail("curve mix stream sample produced non-finite output");
 
   rc = sbx_context_render_f32(ctx, audio, 256);
   if (rc != SBX_OK) fail("sbx_context_render_f32 failed");

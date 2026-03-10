@@ -174,6 +174,17 @@ Typical flow:
 exist so hosts can build inspectors/parameter UIs without reparsing `.sbgf`
 syntax themselves.
 
+In addition to `beat`, `carrier`, `amp`, and `mixamp`, `.sbgf` can also
+define runtime mix-effect parameter targets:
+
+- `mixspin_width`, `mixspin_hz`, `mixspin_amp`
+- `mixpulse_hz`, `mixpulse_amp`
+- `mixbeat_hz`, `mixbeat_amp`
+- `mixam_hz`
+
+These only take effect when a matching runtime mix effect is present on the
+context. They override numeric parameters, not the effect type itself.
+
 If a host wants to render a prepared curve directly through a context rather
 than sampling it manually, use:
 
@@ -313,6 +324,9 @@ at one timeline time. It returns:
 
 - static runtime mix effects first,
 - then evaluated timed native `.sbg` mix-effect slots.
+
+For curve-backed contexts, any matching `.sbgf` mix-effect targets are already
+applied to those returned specs at the requested time.
 
 Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
 

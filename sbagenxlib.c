@@ -36,6 +36,40 @@
 #define SBX_CURVE_FILE_MAX 1024
 #define SBX_CURVE_MAX_SOLVE_UNK 8
 #define SBX_CURVE_MAX_SOLVE_EQ SBX_CURVE_MAX_SOLVE_UNK
+#define SBX_CURVE_MIXFX_PARAM_COUNT 8
+
+typedef struct {
+  char expr_src[SBX_CURVE_EXPR_MAX];
+  int has_expr;
+  int piece_count;
+  char piece_cond_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  char piece_expr_src[SBX_CURVE_MAX_PIECES][SBX_CURVE_EXPR_MAX];
+  te_expr *expr;
+  te_expr *piece_cond[SBX_CURVE_MAX_PIECES];
+  te_expr *piece_expr[SBX_CURVE_MAX_PIECES];
+} SbxCurveExprTarget;
+
+enum {
+  SBX_CURVE_MFX_MIXSPIN_WIDTH = 0,
+  SBX_CURVE_MFX_MIXSPIN_HZ,
+  SBX_CURVE_MFX_MIXSPIN_AMP,
+  SBX_CURVE_MFX_MIXPULSE_HZ,
+  SBX_CURVE_MFX_MIXPULSE_AMP,
+  SBX_CURVE_MFX_MIXBEAT_HZ,
+  SBX_CURVE_MFX_MIXBEAT_AMP,
+  SBX_CURVE_MFX_MIXAM_HZ
+};
+
+static const char *const sbx_curve_mixfx_target_names[SBX_CURVE_MIXFX_PARAM_COUNT] = {
+  "mixspin_width",
+  "mixspin_hz",
+  "mixspin_amp",
+  "mixpulse_hz",
+  "mixpulse_amp",
+  "mixbeat_hz",
+  "mixbeat_amp",
+  "mixam_hz"
+};
 
 typedef struct {
   SbxMixFxSpec spec;
@@ -157,6 +191,7 @@ struct SbxCurveProgram {
   double ev_D, ev_H, ev_T, ev_U;
   double ev_b0, ev_b1, ev_c0, ev_c1;
   double ev_a0, ev_m0;
+  SbxCurveExprTarget mixfx_targets[SBX_CURVE_MIXFX_PARAM_COUNT];
   SbxCurveEvalConfig cfg;
 };
 
@@ -189,6 +224,14 @@ static int ctx_set_sbg_mix_effect_keyframes_internal(SbxContext *ctx,
                                                      const SbxMixFxKeyframe *kfs,
                                                      size_t kf_count,
                                                      size_t slot_count);
+static int curve_expr_target_active(const SbxCurveExprTarget *target);
+static void curve_set_eval_time(SbxCurveProgram *curve, double t_sec);
+static int curve_eval_expr_target(SbxCurveProgram *curve,
+                                  const SbxCurveExprTarget *target,
+                                  const char *kind,
+                                  double default_value,
+                                  double *out_value);
+static int sbx_validate_mix_fx_spec_fields(const SbxMixFxSpec *spec);
 
 static void
 set_last_error(SbxEngine *eng, const char *msg) {
@@ -1587,15 +1630,25 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
 }
 
 static int
-ctx_eval_curve_point(SbxContext *ctx, double t_sec, SbxCurveEvalPoint *out) {
+ctx_curve_eval_time_sec(SbxContext *ctx, double t_sec, double *out_eval_t) {
   double eval_t = t_sec;
-  int rc;
-  if (!ctx || !ctx->curve_prog || !out) return SBX_EINVAL;
+  if (!ctx || !ctx->curve_prog || !out_eval_t) return SBX_EINVAL;
   if (!isfinite(eval_t)) return SBX_EINVAL;
   if (ctx->curve_loop && ctx->curve_duration_sec > 0.0) {
     eval_t = fmod(eval_t, ctx->curve_duration_sec);
     if (eval_t < 0.0) eval_t += ctx->curve_duration_sec;
   }
+  *out_eval_t = eval_t;
+  return SBX_OK;
+}
+
+static int
+ctx_eval_curve_point(SbxContext *ctx, double t_sec, SbxCurveEvalPoint *out) {
+  double eval_t = 0.0;
+  int rc;
+  if (!ctx || !ctx->curve_prog || !out) return SBX_EINVAL;
+  rc = ctx_curve_eval_time_sec(ctx, t_sec, &eval_t);
+  if (rc != SBX_OK) return rc;
   rc = sbx_curve_eval(ctx->curve_prog, eval_t, out);
   if (rc != SBX_OK)
     set_ctx_error(ctx, sbx_curve_last_error(ctx->curve_prog));
@@ -1628,6 +1681,83 @@ ctx_eval_curve_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
 
   *out = tone;
   return SBX_OK;
+}
+
+static int
+ctx_eval_curve_mix_effect_spec(SbxContext *ctx,
+                               double t_sec,
+                               const SbxMixFxSpec *base_spec,
+                               SbxMixFxSpec *out_spec) {
+  SbxCurveProgram *curve;
+  double eval_t;
+  double value;
+  int rc;
+  if (!ctx || !base_spec || !out_spec) return SBX_EINVAL;
+  *out_spec = *base_spec;
+  if (ctx->source_mode != SBX_CTX_SRC_CURVE || !ctx->curve_prog)
+    return SBX_OK;
+
+  curve = ctx->curve_prog;
+  rc = ctx_curve_eval_time_sec(ctx, t_sec, &eval_t);
+  if (rc != SBX_OK) return rc;
+  curve_set_eval_time(curve, eval_t);
+
+  switch (base_spec->type) {
+    case SBX_MIXFX_SPIN:
+      rc = curve_eval_expr_target(curve, &curve->mixfx_targets[SBX_CURVE_MFX_MIXSPIN_WIDTH],
+                                  "mixspin_width", base_spec->carr, &value);
+      if (rc != SBX_OK) goto eval_fail;
+      out_spec->carr = value;
+      rc = curve_eval_expr_target(curve, &curve->mixfx_targets[SBX_CURVE_MFX_MIXSPIN_HZ],
+                                  "mixspin_hz", base_spec->res, &value);
+      if (rc != SBX_OK) goto eval_fail;
+      out_spec->res = value;
+      rc = curve_eval_expr_target(curve, &curve->mixfx_targets[SBX_CURVE_MFX_MIXSPIN_AMP],
+                                  "mixspin_amp", base_spec->amp * 100.0, &value);
+      if (rc != SBX_OK) goto eval_fail;
+      out_spec->amp = value / 100.0;
+      break;
+    case SBX_MIXFX_PULSE:
+      rc = curve_eval_expr_target(curve, &curve->mixfx_targets[SBX_CURVE_MFX_MIXPULSE_HZ],
+                                  "mixpulse_hz", base_spec->res, &value);
+      if (rc != SBX_OK) goto eval_fail;
+      out_spec->res = value;
+      rc = curve_eval_expr_target(curve, &curve->mixfx_targets[SBX_CURVE_MFX_MIXPULSE_AMP],
+                                  "mixpulse_amp", base_spec->amp * 100.0, &value);
+      if (rc != SBX_OK) goto eval_fail;
+      out_spec->amp = value / 100.0;
+      break;
+    case SBX_MIXFX_BEAT:
+      rc = curve_eval_expr_target(curve, &curve->mixfx_targets[SBX_CURVE_MFX_MIXBEAT_HZ],
+                                  "mixbeat_hz", base_spec->res, &value);
+      if (rc != SBX_OK) goto eval_fail;
+      out_spec->res = value;
+      rc = curve_eval_expr_target(curve, &curve->mixfx_targets[SBX_CURVE_MFX_MIXBEAT_AMP],
+                                  "mixbeat_amp", base_spec->amp * 100.0, &value);
+      if (rc != SBX_OK) goto eval_fail;
+      out_spec->amp = value / 100.0;
+      break;
+    case SBX_MIXFX_AM:
+      rc = curve_eval_expr_target(curve, &curve->mixfx_targets[SBX_CURVE_MFX_MIXAM_HZ],
+                                  "mixam_hz", base_spec->res, &value);
+      if (rc != SBX_OK) goto eval_fail;
+      out_spec->res = value;
+      if (curve_expr_target_active(&curve->mixfx_targets[SBX_CURVE_MFX_MIXAM_HZ]))
+        out_spec->mixam_bind_program_beat = 0;
+      break;
+    default:
+      break;
+  }
+
+  if (sbx_validate_mix_fx_spec_fields(out_spec) != SBX_OK) {
+    set_ctx_error(ctx, "curve-driven mix effect produced invalid parameters");
+    return SBX_EINVAL;
+  }
+  return SBX_OK;
+
+eval_fail:
+  set_ctx_error(ctx, sbx_curve_last_error(curve));
+  return rc;
 }
 
 static void
@@ -4231,15 +4361,17 @@ sbx_apply_one_mix_effect(SbxMixFxState *fx,
   }
 }
 
-int
-sbx_context_apply_mix_effects(SbxContext *ctx,
-                              double mix_l,
-                              double mix_r,
-                              double base_amp,
-                              double *out_add_l,
-                              double *out_add_r) {
+static int
+sbx_context_apply_mix_effects_at(SbxContext *ctx,
+                                 double t_sec,
+                                 double mix_l,
+                                 double mix_r,
+                                 double base_amp,
+                                 double *out_add_l,
+                                 double *out_add_r) {
   size_t i;
   double sr;
+  SbxMixFxSpec spec;
   if (!ctx || !ctx->eng || !out_add_l || !out_add_r) return SBX_EINVAL;
   *out_add_l = 0.0;
   *out_add_r = 0.0;
@@ -4252,12 +4384,26 @@ sbx_context_apply_mix_effects(SbxContext *ctx,
   }
 
   for (i = 0; i < ctx->mix_fx_count; i++) {
-    if (ctx->mix_fx[i].spec.type == SBX_MIXFX_AM)
+    if (ctx_eval_curve_mix_effect_spec(ctx, t_sec, &ctx->mix_fx[i].spec, &spec) != SBX_OK)
+      return SBX_EINVAL;
+    if (spec.type == SBX_MIXFX_AM)
       continue;
-    sbx_apply_one_mix_effect(&ctx->mix_fx[i], &ctx->mix_fx[i].spec, sr,
+    sbx_apply_one_mix_effect(&ctx->mix_fx[i], &spec, sr,
                              mix_l, mix_r, base_amp, out_add_l, out_add_r);
   }
   return SBX_OK;
+}
+
+int
+sbx_context_apply_mix_effects(SbxContext *ctx,
+                              double mix_l,
+                              double mix_r,
+                              double base_amp,
+                              double *out_add_l,
+                              double *out_add_r) {
+  return sbx_context_apply_mix_effects_at(ctx, ctx ? ctx->t_sec : 0.0,
+                                          mix_l, mix_r, base_amp,
+                                          out_add_l, out_add_r);
 }
 
 int
@@ -4279,6 +4425,7 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
   int need_program_beat = 0;
   double sr = 0.0;
   SbxMixFxSpec dyn_fx[SBX_MAX_SBG_MIXFX];
+  SbxMixFxSpec curve_fx;
 
   if (!ctx || !out_add_l || !out_add_r) return SBX_EINVAL;
   if (!isfinite(mix_mod_mul)) mix_mod_mul = 1.0;
@@ -4295,8 +4442,8 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
     double fx_add_l = 0.0;
     double fx_add_r = 0.0;
     if (sbx_context_mix_effect_count(ctx) > 0) {
-      int rc = sbx_context_apply_mix_effects(ctx, mix_l, mix_r, mix_mul * 0.7,
-                                             &fx_add_l, &fx_add_r);
+      int rc = sbx_context_apply_mix_effects_at(ctx, t_sec, mix_l, mix_r, mix_mul * 0.7,
+                                                &fx_add_l, &fx_add_r);
       if (rc != SBX_OK) return rc;
       *out_add_l += fx_add_l;
       *out_add_r += fx_add_r;
@@ -4310,8 +4457,9 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
       return SBX_ENOTREADY;
     }
     for (i = 0; i < ctx->mix_fx_count; i++) {
-      if (ctx->mix_fx[i].spec.type == SBX_MIXFX_AM &&
-          ctx->mix_fx[i].spec.mixam_bind_program_beat) {
+      if (ctx_eval_curve_mix_effect_spec(ctx, t_sec, &ctx->mix_fx[i].spec, &curve_fx) != SBX_OK)
+        return SBX_EINVAL;
+      if (curve_fx.type == SBX_MIXFX_AM && curve_fx.mixam_bind_program_beat) {
         need_program_beat = 1;
         break;
       }
@@ -4319,11 +4467,18 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
     if (need_program_beat)
       program_beat_hz = ctx_eval_program_beat_hz(ctx, t_sec);
     for (i = 0; i < ctx->mix_fx_count; i++) {
-      if (ctx->mix_fx[i].spec.type == SBX_MIXFX_AM) {
-        double am_res_hz = ctx->mix_fx[i].spec.mixam_bind_program_beat ?
+      if (ctx_eval_curve_mix_effect_spec(ctx, t_sec, &ctx->mix_fx[i].spec, &curve_fx) != SBX_OK)
+        return SBX_EINVAL;
+      if (curve_fx.type == SBX_MIXFX_AM) {
+        double am_res_hz = curve_fx.mixam_bind_program_beat ?
           program_beat_hz : ctx->mix_fx[i].spec.res;
-        double g = sbx_mixam_gain_step(&ctx->mix_fx[i], sr, am_res_hz);
-        am_gain *= g;
+        sbx_mixfx_state_assign_spec(&ctx->mix_fx[i], &curve_fx);
+        if (!curve_fx.mixam_bind_program_beat)
+          am_res_hz = curve_fx.res;
+        {
+          double g = sbx_mixam_gain_step(&ctx->mix_fx[i], sr, am_res_hz);
+          am_gain *= g;
+        }
         if (isfinite(am_res_hz) && am_res_hz > 0.0)
           have_am = 1;
       }
@@ -4334,18 +4489,20 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
       for (i = 0; i < ctx->sbg_mix_fx_slots; i++) {
         if (dyn_fx[i].type == SBX_MIXFX_NONE || dyn_fx[i].amp <= 0.0)
           continue;
+        if (ctx_eval_curve_mix_effect_spec(ctx, t_sec, &dyn_fx[i], &curve_fx) != SBX_OK)
+          return SBX_EINVAL;
         if (dyn_fx[i].type == SBX_MIXFX_AM) {
-          if (dyn_fx[i].mixam_bind_program_beat && !need_program_beat) {
+          if (curve_fx.mixam_bind_program_beat && !need_program_beat) {
             program_beat_hz = ctx_eval_program_beat_hz(ctx, t_sec);
             need_program_beat = 1;
           }
-          double am_res_hz = dyn_fx[i].mixam_bind_program_beat ? program_beat_hz : dyn_fx[i].res;
-          sbx_mixfx_state_assign_spec(&ctx->sbg_mix_fx_state[i], &dyn_fx[i]);
+          double am_res_hz = curve_fx.mixam_bind_program_beat ? program_beat_hz : curve_fx.res;
+          sbx_mixfx_state_assign_spec(&ctx->sbg_mix_fx_state[i], &curve_fx);
           am_gain *= sbx_mixam_gain_step(&ctx->sbg_mix_fx_state[i], sr, am_res_hz);
           if (isfinite(am_res_hz) && am_res_hz > 0.0)
             have_am = 1;
         } else {
-          sbx_apply_one_mix_effect(&ctx->sbg_mix_fx_state[i], &dyn_fx[i], sr,
+          sbx_apply_one_mix_effect(&ctx->sbg_mix_fx_state[i], &curve_fx, sr,
                                    mix_l, mix_r, mix_mul * 0.7, &fx_add_l, &fx_add_r);
         }
       }
@@ -4597,6 +4754,7 @@ sbx_context_sample_mix_effects(SbxContext *ctx,
   size_t need;
   size_t seg_saved;
   SbxMixFxSpec dyn_fx[SBX_MAX_SBG_MIXFX];
+  SbxMixFxSpec curve_fx;
 
   if (!ctx) return SBX_EINVAL;
   if (!isfinite(t_sec)) {
@@ -4615,15 +4773,21 @@ sbx_context_sample_mix_effects(SbxContext *ctx,
     return SBX_EINVAL;
   }
 
-  for (i = 0; i < ctx->mix_fx_count; i++)
-    out_fxv[i] = ctx->mix_fx[i].spec;
+  for (i = 0; i < ctx->mix_fx_count; i++) {
+    if (ctx_eval_curve_mix_effect_spec(ctx, t_sec, &ctx->mix_fx[i].spec, &curve_fx) != SBX_OK)
+      return SBX_EINVAL;
+    out_fxv[i] = curve_fx;
+  }
 
   if (ctx->sbg_mix_fx_slots > 0) {
     seg_saved = ctx->sbg_mix_fx_seg;
     if (ctx_eval_sbg_mix_effects(ctx, t_sec, dyn_fx, SBX_MAX_SBG_MIXFX) != SBX_OK)
       return SBX_EINVAL;
-    for (i = 0; i < ctx->sbg_mix_fx_slots; i++)
-      out_fxv[ctx->mix_fx_count + i] = dyn_fx[i];
+    for (i = 0; i < ctx->sbg_mix_fx_slots; i++) {
+      if (ctx_eval_curve_mix_effect_spec(ctx, t_sec, &dyn_fx[i], &curve_fx) != SBX_OK)
+        return SBX_EINVAL;
+      out_fxv[ctx->mix_fx_count + i] = curve_fx;
+    }
     ctx->sbg_mix_fx_seg = seg_saved;
   }
 

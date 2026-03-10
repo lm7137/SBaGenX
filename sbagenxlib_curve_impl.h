@@ -85,7 +85,11 @@ curve_name_reserved(const char *name) {
     "smoothstep", "smootherstep", "between", "pulse",
     "lt", "le", "gt", "ge", "eq", "ne",
     "seg", "min2", "max2", "param", "solve",
-    "beat", "carrier", "amp", "mixamp"
+    "beat", "carrier", "amp", "mixamp",
+    "mixspin_width", "mixspin_hz", "mixspin_amp",
+    "mixpulse_hz", "mixpulse_amp",
+    "mixbeat_hz", "mixbeat_amp",
+    "mixam_hz"
   };
   size_t i;
   for (i = 0; i < sizeof(reserved) / sizeof(reserved[0]); i++)
@@ -101,6 +105,36 @@ curve_param_index(const SbxCurveProgram *curve, const char *name) {
     if (curve_name_eq(name, curve->param_names[i])) return i;
   }
   return -1;
+}
+
+static void
+curve_expr_target_clear_compiled(SbxCurveExprTarget *target) {
+  int i;
+  if (!target) return;
+  if (target->expr) te_free(target->expr);
+  target->expr = 0;
+  for (i = 0; i < SBX_CURVE_MAX_PIECES; i++) {
+    if (target->piece_cond[i]) te_free(target->piece_cond[i]);
+    if (target->piece_expr[i]) te_free(target->piece_expr[i]);
+    target->piece_cond[i] = 0;
+    target->piece_expr[i] = 0;
+  }
+}
+
+static void
+curve_expr_target_clear_loaded(SbxCurveExprTarget *target) {
+  if (!target) return;
+  curve_expr_target_clear_compiled(target);
+  memset(target->expr_src, 0, sizeof(target->expr_src));
+  target->has_expr = 0;
+  target->piece_count = 0;
+  memset(target->piece_cond_src, 0, sizeof(target->piece_cond_src));
+  memset(target->piece_expr_src, 0, sizeof(target->piece_expr_src));
+}
+
+static int
+curve_expr_target_active(const SbxCurveExprTarget *target) {
+  return target && (target->has_expr || target->piece_count > 0);
 }
 
 static void
@@ -133,6 +167,8 @@ sbx_curve_clear_compiled(SbxCurveProgram *curve) {
     curve->mixamp_piece_cond[i] = 0;
     curve->mixamp_piece_expr[i] = 0;
   }
+  for (i = 0; i < SBX_CURVE_MIXFX_PARAM_COUNT; i++)
+    curve_expr_target_clear_compiled(&curve->mixfx_targets[i]);
   curve->prepared = 0;
 }
 
@@ -170,6 +206,11 @@ sbx_curve_clear_loaded(SbxCurveProgram *curve) {
   memset(curve->solve_eq_rhs_src, 0, sizeof(curve->solve_eq_rhs_src));
   memset(curve->param_names, 0, sizeof(curve->param_names));
   memset(curve->param_values, 0, sizeof(curve->param_values));
+  {
+    int i;
+    for (i = 0; i < SBX_CURVE_MIXFX_PARAM_COUNT; i++)
+      curve_expr_target_clear_loaded(&curve->mixfx_targets[i]);
+  }
   memset(&curve->cfg, 0, sizeof(curve->cfg));
   curve->loaded = 0;
 }
@@ -414,6 +455,37 @@ curve_parse_piece_line(SbxCurveProgram *curve, char *s, int lno, const char *pat
   strcpy(expr_dst[*piece_count], expr);
   (*piece_count)++;
   return 1;
+}
+
+static int
+curve_parse_named_target_line(SbxCurveProgram *curve,
+                              char *s,
+                              int lno,
+                              const char *path,
+                              const char *kind,
+                              int kind_len,
+                              SbxCurveExprTarget *target) {
+  int prc;
+  if (!curve || !s || !kind || !target) return SBX_EINVAL;
+  prc = curve_parse_piece_line(curve, s, lno, path, kind, kind_len,
+                               target->piece_cond_src,
+                               target->piece_expr_src,
+                               &target->piece_count);
+  if (prc < 0) return SBX_EINVAL;
+  if (prc > 0) {
+    if (target->has_expr)
+      return curve_fail(curve, "%s:%d: cannot mix '%s = ...' with piecewise %s<... lines",
+                        path, lno, kind, kind);
+    return SBX_OK;
+  }
+  if (target->piece_count > 0)
+    return curve_fail(curve, "%s:%d: cannot mix piecewise %s<... lines with '%s = ...'",
+                      path, lno, kind, kind);
+  prc = curve_parse_expr_line(curve, s, lno, path, kind,
+                              target->expr_src, sizeof(target->expr_src));
+  if (prc != SBX_OK) return prc;
+  target->has_expr = 1;
+  return SBX_OK;
 }
 
 static int
@@ -769,6 +841,92 @@ solve_converge_fail:
   return curve_fail(curve, "%s: solve did not converge after 40 iterations", curve->src_file);
 }
 
+static void
+curve_set_eval_time(SbxCurveProgram *curve, double t_sec) {
+  double t;
+  if (!curve) return;
+  t = t_sec;
+  if (t < 0.0) t = 0.0;
+  if (t > curve->cfg.carrier_span_sec) t = curve->cfg.carrier_span_sec;
+  curve->ev_t = t;
+  curve->ev_m = t / 60.0;
+}
+
+static int
+curve_compile_expr_target(SbxCurveProgram *curve,
+                          SbxCurveExprTarget *target,
+                          const char *kind,
+                          te_variable *vars,
+                          int vcnt) {
+  int i;
+  int err = 0;
+  if (!curve || !target || !kind) return SBX_EINVAL;
+  if (target->piece_count > 0) {
+    for (i = 0; i < target->piece_count; i++) {
+      target->piece_cond[i] = te_compile(target->piece_cond_src[i], vars, vcnt, &err);
+      if (!target->piece_cond[i]) {
+        sbx_curve_clear_compiled(curve);
+        curve_set_error(curve, "%s: error in %s piece condition #%d near column %d",
+                        curve->src_file, kind, i + 1, err);
+        return SBX_EINVAL;
+      }
+      err = 0;
+      target->piece_expr[i] = te_compile(target->piece_expr_src[i], vars, vcnt, &err);
+      if (!target->piece_expr[i]) {
+        sbx_curve_clear_compiled(curve);
+        curve_set_error(curve, "%s: error in %s piece expression #%d near column %d",
+                        curve->src_file, kind, i + 1, err);
+        return SBX_EINVAL;
+      }
+      err = 0;
+    }
+  } else if (target->has_expr) {
+    target->expr = te_compile(target->expr_src, vars, vcnt, &err);
+    if (!target->expr) {
+      sbx_curve_clear_compiled(curve);
+      curve_set_error(curve, "%s: error in %s expression near column %d",
+                      curve->src_file, kind, err);
+      return SBX_EINVAL;
+    }
+  }
+  return SBX_OK;
+}
+
+static int
+curve_eval_expr_target(SbxCurveProgram *curve,
+                       const SbxCurveExprTarget *target,
+                       const char *kind,
+                       double default_value,
+                       double *out_value) {
+  int i, matched;
+  double condv, value;
+  if (!curve || !target || !kind || !out_value) return SBX_EINVAL;
+  value = default_value;
+  if (target->piece_count > 0) {
+    matched = 0;
+    for (i = 0; i < target->piece_count; i++) {
+      if (!target->piece_cond[i] || !target->piece_expr[i])
+        return curve_fail(curve, "Curve %s piece state is incomplete", kind);
+      condv = te_eval(target->piece_cond[i]);
+      if (!isfinite(condv))
+        return curve_fail(curve, "Curve %s piece condition evaluated non-finite", kind);
+      if (condv != 0.0) {
+        value = te_eval(target->piece_expr[i]);
+        matched = 1;
+        break;
+      }
+    }
+    if (!matched)
+      value = te_eval(target->piece_expr[target->piece_count - 1]);
+  } else if (target->has_expr && target->expr) {
+    value = te_eval(target->expr);
+  }
+  if (!isfinite(value))
+    return curve_fail(curve, "Curve %s evaluated non-finite", kind);
+  *out_value = value;
+  return SBX_OK;
+}
+
 int
 sbx_curve_load_text(SbxCurveProgram *curve, const char *text, const char *source_name) {
   char *buf, *line, *saveptr;
@@ -893,10 +1051,28 @@ sbx_curve_load_text(SbxCurveProgram *curve, const char *text, const char *source
       curve->has_mixamp_expr = 1;
       continue;
     }
+    {
+      int mi;
+      for (mi = 0; mi < SBX_CURVE_MIXFX_PARAM_COUNT; mi++) {
+        const char *kind = sbx_curve_mixfx_target_names[mi];
+        int kind_len = (int)strlen(kind);
+        if (!strncmp(s, kind, (size_t)kind_len) &&
+            (isspace((unsigned char)s[kind_len]) || s[kind_len] == '=' ||
+             s[kind_len] == '<' || s[kind_len] == '>')) {
+          int rc = curve_parse_named_target_line(curve, s, lno, curve->src_file,
+                                                 kind, kind_len,
+                                                 &curve->mixfx_targets[mi]);
+          if (rc != SBX_OK) { free(buf); return rc; }
+          goto parsed_line;
+        }
+      }
+    }
 
     free(buf);
-    return curve_fail(curve, "%s:%d: unknown line in .sbgf (expected 'param', 'solve', 'beat', 'beat<...>', 'carrier', 'carrier<...>', 'amp', 'amp<...>', 'mixamp', or 'mixamp<...>'): %s",
+    return curve_fail(curve, "%s:%d: unknown line in .sbgf (expected 'param', 'solve', 'beat', 'carrier', 'amp', 'mixamp', or mix-effect targets like 'mixspin_width' / 'mixpulse_hz' / 'mixbeat_amp' / 'mixam_hz'): %s",
                       curve->src_file, lno, s);
+parsed_line:
+    continue;
   }
 
   free(buf);
@@ -1114,6 +1290,13 @@ sbx_curve_prepare(SbxCurveProgram *curve, const SbxCurveEvalConfig *cfg_in) {
     if (!curve->mixamp_expr) goto mixamp_expr_fail;
   }
 
+  for (i = 0; i < SBX_CURVE_MIXFX_PARAM_COUNT; i++) {
+    rc = curve_compile_expr_target(curve, &curve->mixfx_targets[i],
+                                   sbx_curve_mixfx_target_names[i],
+                                   vars, vcnt);
+    if (rc != SBX_OK) goto prepare_fail;
+  }
+
 #undef ADD_VAR
 #undef ADD_FN1
 #undef ADD_FN2
@@ -1192,10 +1375,8 @@ sbx_curve_eval(SbxCurveProgram *curve, double t_sec, SbxCurveEvalPoint *out_poin
     return curve_fail(curve, "Curve is not prepared for evaluation");
 
   t = t_sec;
-  if (t < 0.0) t = 0.0;
-  if (t > curve->cfg.carrier_span_sec) t = curve->cfg.carrier_span_sec;
-  curve->ev_t = t;
-  curve->ev_m = t / 60.0;
+  curve_set_eval_time(curve, t);
+  t = curve->ev_t;
 
   if (curve->beat_piece_count > 0) {
     matched = 0;
