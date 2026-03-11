@@ -282,6 +282,7 @@ Recent library-side audio output work includes:
 - TPDF dithering for 16-bit output
 - wider host-side conversion helpers for `s16`, `s24`-in-`s32`, and `s32`
 - quantitative regression tests that compare dithered and undithered output
+- 24-bit FLAC export on the `sbagenxlib`-backed encoder path
 
 The current tests verify the expected tradeoff: TPDF dithering slightly raises
 the noise floor while materially reducing signal-correlated quantization error

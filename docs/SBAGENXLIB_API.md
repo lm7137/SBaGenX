@@ -143,6 +143,10 @@ and reduces the dominant-bin to average-bin error-spectrum ratio from about
 That is the behavior we want: less distortion-like error, at the cost of a
 slightly higher but more benign noise floor.
 
+The CLI now also uses the widened conversion surface for encoded output:
+the `sbagenxlib`-backed `.flac` path writes 24-bit PCM to libsndfile rather
+than collapsing everything to 16-bit before compression.
+
 API Groups
 ----------
 

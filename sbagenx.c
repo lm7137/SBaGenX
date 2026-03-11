@@ -32,6 +32,8 @@
 
 #define VERSION __VERSION__
 
+#include <stdint.h>
+
 // This should be built with one of the following target macros
 // defined, which selects options for that platform, or else with some
 // of the individual named flags #defined as listed later.
@@ -270,6 +272,7 @@ double mixbeat_hilbert_sample(int ch_index, double x);
 void detect_output_encoder();
 void init_output_encoder();
 void output_encoder_write(short *pcm, int frames);
+void output_encoder_write_i32(int32_t *pcm, int frames);
 void finish_output_encoder();
 void write_sigmoid_graph_png(const char *fmt, double level,
 			     const char *target_tok, int len0, int len1, int len2,
@@ -671,11 +674,13 @@ typedef struct {
    SNDFILE *snd;
    SNDFILE *(*sf_open_fn)(const char*, int, SF_INFO*);
    sf_count_t (*sf_writef_short_fn)(SNDFILE*, const short*, sf_count_t);
+   sf_count_t (*sf_writef_int_fn)(SNDFILE*, const int*, sf_count_t);
    int (*sf_close_fn)(SNDFILE*);
    const char *(*sf_strerror_fn)(SNDFILE*);
    int (*sf_command_fn)(SNDFILE*, int, void*, int);
 } SndEncState;
 SndEncState snd_enc;
+int out_enc_pcm_bits= 16;
 
 typedef struct lame_global_flags lame_global_flags;
 typedef lame_global_flags *lame_t;
@@ -775,6 +780,8 @@ double sbx_runtime_total_sec= 0.0;
 SbxContext *sbx_runtime_ctx= 0;
 float *sbx_runtime_fbuf= 0;
 size_t sbx_runtime_fcap= 0;
+int32_t *sbx_runtime_i32buf= 0;
+size_t sbx_runtime_i32cap= 0;
 SbxPcmConvertState sbx_runtime_pcm_state;
 
 int opt_c;			// Number of -c option points provided (max 16)
@@ -5432,6 +5439,7 @@ is_out_ext(const char *path, const char *ext) {
 void
 detect_output_encoder() {
    out_enc_fmt= OUT_ENC_NONE;
+   out_enc_pcm_bits= 16;
    if (!opt_o || opt_W) return;
 
    if (is_out_ext(opt_o, "mp3"))
@@ -5440,6 +5448,20 @@ detect_output_encoder() {
       out_enc_fmt= OUT_ENC_OGG;
    else if (is_out_ext(opt_o, "flac"))
       out_enc_fmt= OUT_ENC_FLAC;
+}
+
+static int
+output_encoder_frame_bytes(void) {
+   if (out_enc_fmt == OUT_ENC_FLAC && out_enc_pcm_bits == 24)
+      return 6;
+   return out_mode ? 4 : 2;
+}
+
+static int
+output_encoder_needs_i32_path(void) {
+   return out_enc_active &&
+          out_enc_fmt == OUT_ENC_FLAC &&
+          out_enc_pcm_bits == 24;
 }
 
 static void
@@ -5465,6 +5487,7 @@ init_snd_encoder(int format) {
 #ifdef STATIC_OUTPUT_ENCODERS
    snd_enc.sf_open_fn= sf_open;
    snd_enc.sf_writef_short_fn= sf_writef_short;
+   snd_enc.sf_writef_int_fn= sf_writef_int;
    snd_enc.sf_close_fn= sf_close;
    snd_enc.sf_strerror_fn= sf_strerror;
    snd_enc.sf_command_fn= sf_command;
@@ -5475,6 +5498,7 @@ init_snd_encoder(int format) {
 
    snd_enc.sf_open_fn= (SNDFILE*(*)(const char*, int, SF_INFO*))dlib_sym(snd_enc.lib, "sf_open");
    snd_enc.sf_writef_short_fn= (sf_count_t(*)(SNDFILE*, const short*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_short");
+   snd_enc.sf_writef_int_fn= (sf_count_t(*)(SNDFILE*, const int*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_int");
    snd_enc.sf_close_fn= (int(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_close");
    snd_enc.sf_strerror_fn= (const char*(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_strerror");
    snd_enc.sf_command_fn= (int(*)(SNDFILE*, int, void*, int))dlib_sym(snd_enc.lib, "sf_command");
@@ -5482,6 +5506,8 @@ init_snd_encoder(int format) {
        !snd_enc.sf_strerror_fn || !snd_enc.sf_command_fn)
       error("Failed to load required libsndfile symbols for %s output", output_encoder_name());
 #endif
+   if (out_enc_fmt == OUT_ENC_FLAC && out_enc_pcm_bits == 24 && !snd_enc.sf_writef_int_fn)
+      error("FLAC 24-bit output requested, but libsndfile lacks sf_writef_int()");
 
    memset(&info, 0, sizeof(info));
    info.channels= 2;
@@ -5641,15 +5667,21 @@ init_mp3_encoder() {
 
 void
 init_output_encoder() {
+   int forced_bits= 16;
    out_enc_active= 0;
    out_enc_finished= 0;
    if (out_enc_fmt == OUT_ENC_NONE) return;
 
    if (!opt_o)
       error("%s encoding requires -o <file>", output_encoder_name());
+
+   if (out_enc_fmt == OUT_ENC_FLAC && sbx_runtime_ctx)
+      forced_bits= 24;
+   out_enc_pcm_bits= forced_bits;
+
    if (out_mode != 1) {
       if (!opt_Q)
-	 warn("%s output requires 16-bit PCM input; forcing 16-bit mode", output_encoder_name());
+	 warn("%s output ignores -b and uses %d-bit encoder PCM", output_encoder_name(), out_enc_pcm_bits);
       out_mode= 1;
    }
 
@@ -5669,7 +5701,8 @@ init_output_encoder() {
       init_snd_encoder(SF_FORMAT_OGG | SF_FORMAT_VORBIS);
       break;
     case OUT_ENC_FLAC:
-      init_snd_encoder(SF_FORMAT_FLAC | SF_FORMAT_PCM_16);
+      init_snd_encoder(SF_FORMAT_FLAC |
+		       (out_enc_pcm_bits == 24 ? SF_FORMAT_PCM_24 : SF_FORMAT_PCM_16));
       break;
     default:
       break;
@@ -5681,7 +5714,8 @@ init_output_encoder() {
    }
 
    if (!opt_Q && out_enc_active)
-      warn("Outputting %s encoded audio at %d Hz", output_encoder_name(), out_rate);
+      warn("Outputting %s encoded audio at %d Hz (%d-bit PCM path)",
+	   output_encoder_name(), out_rate, out_enc_pcm_bits);
 }
 
 void
@@ -5704,6 +5738,21 @@ output_encoder_write(short *pcm, int frames) {
       if (wr != (sf_count_t)frames)
 	 error("%s encoding failed while writing frame data", output_encoder_name());
       return;
+   }
+}
+
+void
+output_encoder_write_i32(int32_t *pcm, int frames) {
+   if (!out_enc_active || !frames) return;
+   if (!output_encoder_needs_i32_path())
+      error("Internal error: 32-bit encoder write requested for unsupported output path");
+   if (!snd_enc.sf_writef_int_fn)
+      error("FLAC 24-bit output requested, but libsndfile lacks sf_writef_int()");
+
+   {
+      sf_count_t wr= snd_enc.sf_writef_int_fn(snd_enc.snd, (const int *)pcm, frames);
+      if (wr != (sf_count_t)frames)
+	 error("%s encoding failed while writing 24-bit frame data", output_encoder_name());
    }
 }
 
@@ -6367,6 +6416,7 @@ outChunkSbx() {
    double t0;
    double sr= (double)out_rate;
    double mix_mod_mul= mix_mod_multiplier(now);
+   int use_i32_encoder= output_encoder_needs_i32_path();
 
    if (!sbx_runtime_ctx)
       error("Internal error: sbagenxlib runtime context is not initialized");
@@ -6375,6 +6425,11 @@ outChunkSbx() {
       sbx_runtime_fbuf= (float*)realloc(sbx_runtime_fbuf, out_blen * sizeof(float));
       if (!sbx_runtime_fbuf) error("Out of memory");
       sbx_runtime_fcap= out_blen;
+   }
+   if (use_i32_encoder && (size_t)out_blen > sbx_runtime_i32cap) {
+      sbx_runtime_i32buf= (int32_t*)realloc(sbx_runtime_i32buf, out_blen * sizeof(int32_t));
+      if (!sbx_runtime_i32buf) error("Out of memory");
+      sbx_runtime_i32cap= out_blen;
    }
 
    if (mix_in) {
@@ -6420,15 +6475,40 @@ outChunkSbx() {
 
       {
 	 float pcm_in[2];
-	 short pcm_out[2];
 	 pcm_in[0]= (float)(out_l / 32767.0);
 	 pcm_in[1]= (float)(out_r / 32767.0);
-	 rc= sbx_convert_f32_to_s16_ex(pcm_in, (int16_t *)pcm_out, 2, &sbx_runtime_pcm_state);
-	 if (rc != SBX_OK)
-	    error("sbagenxlib PCM16 conversion failed");
-	 out_buf[off++]= pcm_out[0];
-	 out_buf[off++]= pcm_out[1];
+	 if (use_i32_encoder) {
+	    rc= sbx_convert_f32_to_s24_32(pcm_in, sbx_runtime_i32buf + off, 2, &sbx_runtime_pcm_state);
+	    if (rc != SBX_OK)
+	       error("sbagenxlib PCM24 conversion failed");
+	    off += 2;
+	 } else {
+	    short pcm_out[2];
+	    rc= sbx_convert_f32_to_s16_ex(pcm_in, (int16_t *)pcm_out, 2, &sbx_runtime_pcm_state);
+	    if (rc != SBX_OK)
+	       error("sbagenxlib PCM16 conversion failed");
+	    out_buf[off++]= pcm_out[0];
+	    out_buf[off++]= pcm_out[1];
+	 }
       }
+   }
+
+   if (use_i32_encoder) {
+      if (byte_count > 0) {
+	 if (byte_count <= out_bsiz) {
+	    output_encoder_write_i32(sbx_runtime_i32buf, frames);
+#ifdef ALSA_AUDIO
+	    cleanup_alsa();
+#endif
+	    exit(0);
+	 } else {
+	    output_encoder_write_i32(sbx_runtime_i32buf, frames);
+	    byte_count -= out_bsiz;
+	 }
+      } else {
+	 output_encoder_write_i32(sbx_runtime_i32buf, frames);
+      }
+      return;
    }
 
    // Rewrite buffer for 8-bit mode
@@ -6902,8 +6982,8 @@ setup_device(void) {
 
     out_blen= out_rate * 2 / out_prate;		// 10 fragments a second by default
     while (out_blen & (out_blen-1)) out_blen &= out_blen-1;		// Make power of two
-    out_bsiz= out_blen * (out_mode ? 2 : 1);
-    out_bps= out_mode ? 4 : 2;
+    out_bps= output_encoder_frame_bytes();
+    out_bsiz= (out_blen / 2) * out_bps;
     out_buf= (short*)Alloc(out_blen * sizeof(short));
     out_buf_lo= (int)(0x10000 * 1000.0 * 0.5 * out_blen / out_rate);
     out_buf_ms= out_buf_lo >> 16;
@@ -8588,6 +8668,11 @@ static void
       free(sbx_runtime_fbuf);
       sbx_runtime_fbuf= 0;
       sbx_runtime_fcap= 0;
+   }
+   if (sbx_runtime_i32buf) {
+      free(sbx_runtime_i32buf);
+      sbx_runtime_i32buf= 0;
+      sbx_runtime_i32cap= 0;
    }
 }
 
