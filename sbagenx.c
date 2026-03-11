@@ -9310,7 +9310,7 @@ create_drop(int ac, char **av) {
 					 beat_start, beat_target,
 					 (double)len0, islong ? (double)len1 : 0.0,
 					 wakeup ? (double)len2 : 0.0,
-					 amp * 100.0);
+					 amp);
 	 end_sec= len + (wakeup ? len2 : 0);
 	 sbx_handle_runtime_unsupported_extra("-p drop", &extra_spec);
 	 sbx_runtime_activate_from_curve_program(&curve,
@@ -9632,7 +9632,7 @@ create_sigmoid(int ac, char **av) {
 					    beat_start, beat_target,
 					    (double)len0, islong ? (double)len1 : 0.0,
 					    wakeup ? (double)len2 : 0.0,
-					    amp * 100.0,
+					    amp,
 					    sig_l, sig_h, sig_a, sig_b);
 	 end_sec= len + (wakeup ? len2 : 0);
 	 sbx_handle_runtime_unsupported_extra("-p sigmoid", &extra_spec);

@@ -4610,6 +4610,8 @@ sbx_context_mix_amp_at(SbxContext *ctx, double t_sec) {
   n = ctx->mix_kf_count;
   if (!ctx->mix_kf || n == 0) {
     if (ctx->source_mode == SBX_CTX_SRC_CURVE && ctx->curve_prog &&
+        (ctx->curve_prog->mixamp_piece_count > 0 ||
+         ctx->curve_prog->has_mixamp_expr) &&
         ctx_eval_curve_point(ctx, t_sec, &pt) == SBX_OK)
       return pt.mix_amp_pct;
     return ctx->mix_default_amp_pct;
