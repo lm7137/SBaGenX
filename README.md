@@ -1,13 +1,14 @@
 # SBaGenX - Sequenced Brainwave Generator
 
-SBaGenX is a command-line brainwave generator for creating binaural beats, monaural beats, and isochronic tones. It is designed for precise, scriptable session design and advanced audio experimentation.
+SBaGenX is a command-line brainwave generator for creating binaural beats, monaural beats, isochronic tones, and programmable mix-based entrainment effects. It is designed for precise, scriptable session design, high-quality offline rendering, and advanced audio experimentation.
 
 **Project website:** https://www.sbagenx.com
 
 > **SBaGenX is a fork of SBaGen+, continuing development of the original SBaGen lineage.**
 > Full credit is due, first and foremost, to the father of SBaGen, Jim Peters, and also to the creator of the SBaGen+ fork, Ruan Klein, who added isochronic beats as well as making numerous enhancements.
 
-> Use the latest stable release from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
+> Use the latest stable release from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).  
+> Current stable release: **v3.2.0**
 
 ## Table of Contents
 
@@ -37,8 +38,13 @@ SBaGenX is a fork of SBaGen+, created by Ruan Klein, which is itself a fork of t
 SBaGen (Sequenced Binaural Beat Generator) created by Jim Peters. The
 original project has not been maintained for many years, and SBaGenX
 aims to keep the lineage functional on modern systems while preserving
-its core structure. Updates focus on compatibility fixes and practical
-feature additions, without major refactoring of the original codebase.
+its core sequencing model and command-line workflow.
+
+The project now goes beyond maintenance work. In addition to practical
+feature additions, SBaGenX has extracted the core runtime into
+`sbagenxlib`, a reusable shared library with a documented API, modern
+sampling/export helpers, and a cleaner foundation for future front-ends
+and tooling.
 
 The name was changed from **"Sequenced Binaural Beat Generator"** to **"Sequenced Brainwave Generator"** in the SBaGen+ fork to better reflect its expanded functionality. Since SBaGen+ added support for isochronic tones in addition to binaural beats, and SBaGenX added monaural beat support for the built-in programs, the original name no longer fully represented its capabilities.
 
@@ -46,70 +52,86 @@ The name was changed from **"Sequenced Binaural Beat Generator"** to **"Sequence
 
 This fork introduces substantial functional changes beyond maintenance:
 
-1. **Function-driven real-time curves in built-in programs**  
-   Built-in programs use direct runtime curve evaluation instead of only
-   coarse piece-wise linear approximations in sliding modes.
+1. **Built-in programs now use function-driven runtime values**  
+   `drop`, `sigmoid`, and `curve` sessions evaluate beat/pulse values at
+   runtime rather than relying only on coarse piecewise approximations.
 
-2. **`-p sigmoid` built-in program**  
-   Added for smoother transitions of embedded beat/pulse frequency during
-   drop sessions.
+2. **More expressive built-in program syntax**  
+   Added:
+   - `-p sigmoid` for smoother beat/pulse transitions
+   - configurable sigmoid parameters `:l=<value>:h=<value>`
+   - built-in monaural mode via `M`
+   - signed and fractional target levels in program specs
 
-3. **Configurable sigmoid shape parameters**  
-   `-p sigmoid` supports `:l=<value>:h=<value>` (order-independent) to tune
-   curve steepness and horizontal shift.
+3. **Custom function sessions from `.sbgf` files (`-p curve`)**  
+   SBaGenX supports external function files with:
+   - helper functions implemented in C
+   - cleaner piecewise syntax such as `beat<p1 = ...`
+   - `solve` equations for automatically solving unknown constants
+   - runtime control of `beat`, `carrier`, `amp`, `mixamp`, and matching
+     mix-effect parameters
 
-4. **Custom function curves from `.sbgf` files (`-p curve`)**  
-   Added expression-driven built-in sessions using external function
-   files, with helper functions implemented in C and cleaner piecewise
-   syntax such as `beat<p1 = ...`, `beat<p2 = ...`, `beat>p2 = ...`.
+4. **Mix-stream processing has expanded substantially**  
+   Added and extended:
+   - `mixpulse`
+   - `mixbeat` (Hilbert-based embedded beat in the mix stream)
+   - `mixam` for true multiplicative amplitude modulation of broadband mix audio
+   - parameterized mix amplitude modulation via `-A`
+   - curve-driven runtime control of `mixspin`, `mixpulse`, `mixbeat`, and `mixam`
 
-5. **FLAC input mix support with loop metadata**  
-   Mix input now supports FLAC (in addition to WAV/OGG/MP3), including
-   `SBAGEN_LOOPER` metadata handling.
+5. **Isochronic and mix-envelope customization**  
+   Added:
+   - `-I` for one-cycle isochronic envelope control
+   - `-H` for one-cycle `mixam` envelope control
+   - PNG preview rendering of these cycle-level envelopes
 
-6. **`SBAGEN_LOOPER` intro extension (`i `)**  
-   Added support for one-time intro playback from `t=0` to `d<start>` when
-   the tag value begins with `i ` (including required trailing space).
-
-7. **Native output encoding for OGG/FLAC/MP3**  
-   Output format is selected by output filename extension, with quality/
-   compression controls exposed by CLI options.
-
-8. **Isochronic envelope customization (`-I`)**  
-   Added user controls for cycle-relative envelope timing and edge-shape
-   behavior.
-
-9. **Curve plotting (`-P`)**  
+6. **Preview and plotting tools**  
    Added PNG plotting for:
-   - built-in `-p drop` and `-p sigmoid` beat/pulse curves
-   - one-cycle isochronic envelope + waveform views  
-     This is designed to preview session behavior before running audio.
+   - built-in `drop`, `sigmoid`, and `curve` beat/pulse graphs
+   - one-cycle isochronic envelope and waveform views
+   - one-cycle `mixam` envelope/gain views
+   Windows builds bundle Python+Cairo for higher-quality anti-aliased plots.
 
-10. **Mix amplitude modulation (`-A`)**  
-   Added optional parameterized mix modulation curve with default and
-   user-defined constants.  
-   Conjecture: gradual linear mix reduction may be calming, while short
-   periodic dips may briefly increase awareness.
+7. **Expanded input/output format support**  
+   Added:
+   - FLAC input mix support with `SBAGEN_LOOPER` metadata handling
+   - `SBAGEN_LOOPER` intro extension via `i `
+   - native output encoding selected by filename extension for OGG/FLAC/MP3
 
-11. **Additional notable additions**
-    - Built-in **monaural mode** via `M` in `drop`/`sigmoid`/`slide` specs
-    - **Signed level values** (including negatives) to reach higher starting
-      carriers while preserving built-in sequence behavior
+8. **Modernized export quality on the `sbagenxlib` runtime path**  
+   Added:
+   - TPDF-dithered 16-bit PCM conversion
+   - 24-bit FLAC export
+   - float-path OGG/Vorbis export
+   - float-input MP3 export where the LAME runtime supports it
+   - 24-bit raw/WAV export via `-b 24`
+
+9. **`sbagenxlib` shared library**  
+   The core runtime is now available as a reusable library with:
+   - public headers
+   - shared/static libraries
+   - pkg-config metadata
+   - `.sbgf` loading and evaluation APIs
+   - context/sampling helpers for future front-ends and tooling
+
+10. **Shipped reference material**  
+    The installer now includes curated `.sbgf` examples and example plots
+    in the `Plots` directory so users can inspect curve styles and solved
+    function forms immediately after installation.
 
 ## Installation
 
 Download assets from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
 
-Use the latest stable release from the same page for current `sbagenxlib`
-features and runtime/plotting improvements.
+Current stable release: **v3.2.0**
 
 ### Try SBaGenX in 60 Seconds
 
 #### Windows
 
-1. Download and install:
+1. Download and install the current Windows installer:
 
-   - [sbagenx-windows-setup-v3.0.4.exe](https://www.sbagenx.com/downloads/sbagenx-windows-setup-v3.0.4.exe)
+   - [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx-windows-setup.exe)
 
 2. Verify installation:
 
@@ -126,9 +148,9 @@ features and runtime/plotting improvements.
 #### Ubuntu (amd64)
 
 ```bash
-wget -O sbagenx_3.0.4-1_amd64.deb \
-  https://www.sbagenx.com/downloads/sbagenx_3.0.4-1_amd64.deb
-sudo apt install ./sbagenx_3.0.4-1_amd64.deb
+wget -O sbagenx_3.2.0-1_amd64.deb \
+  https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx_3.2.0-1_amd64.deb
+sudo apt install ./sbagenx_3.2.0-1_amd64.deb
 sbagenx -h
 ```
 
@@ -144,6 +166,12 @@ This writes a PNG curve to the current directory.
 
 ```bash
 sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf 00ls:l=0.2:h=0
+```
+
+#### Solved Curve Example (`.sbgf` with `solve`)
+
+```bash
+sbagenx -G -p curve examples/basics/curve-expfit-solve-demo.sbgf 00ls:l=0.2 mix/99
 ```
 
 ### Using Docker for Builds
@@ -166,17 +194,20 @@ At present, there is no officially published SBaGenX runtime container image for
 
 Recommended download path:
 
-- Use the binaries hosted on the
-  [SBaGenX website](https://www.sbagenx.com/)
+- Use the binaries published on the
+  [GitHub releases page](https://github.com/lm7137/SBaGenX/releases)
+- The project website at [www.sbagenx.com](https://www.sbagenx.com/) provides
+  release overviews and links back to the same public assets
 
-Current stable release assets (`v3.0.4`):
+Current stable release assets (`v3.2.0`):
 
-- Windows installer: [sbagenx-windows-setup-v3.0.4.exe](https://www.sbagenx.com/downloads/sbagenx-windows-setup-v3.0.4.exe)
-- Windows SHA256: `2d291d1f130f5ccef61dbec52e5454457046e8d31eac0001f2978fcda10efb03`
-- Ubuntu package: [sbagenx_3.0.4-1_amd64.deb](https://www.sbagenx.com/downloads/sbagenx_3.0.4-1_amd64.deb)
-- Ubuntu SHA256: `f39a35b68721f8cd75a9a21ae8481eea74b663c19dba8d1081f345ca581666cd`
+- Windows installer: [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx-windows-setup.exe)
+- Windows SHA256: `f06f463381945acef11b2f11aed51694c2901b54f65347e6b5181d6eb501349b`
+- Ubuntu package: [`sbagenx_3.2.0-1_amd64.deb`](https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx_3.2.0-1_amd64.deb)
+- Ubuntu SHA256: `8a3bbd120f199174d5506fd7696a99ee3794a0c751a76b3579e0b77a282e0e39`
 
-  **Important**: Always verify the SHA256 checksum of downloaded binaries against those listed on [www.sbagenx.com](https://www.sbagenx.com/) to ensure file integrity and security.
+  **Important**: Always verify the SHA256 checksum of downloaded binaries
+  against those published with the release.
 
 ### Installing on Linux
 
@@ -234,15 +265,19 @@ sbagenx -h
 
 1. Download the installer:
 
-   - [sbagenx-windows-setup-v3.0.4.exe](https://www.sbagenx.com/downloads/sbagenx-windows-setup-v3.0.4.exe)
+   - [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx-windows-setup.exe)
 
 2. Verify the SHA256 checksum of the installer. You can use PowerShell or Command Prompt to do this:
 
    ```powershell
-   Get-FileHash -Algorithm SHA256 .\sbagenx-windows-setup-v3.0.4.exe
+   Get-FileHash -Algorithm SHA256 .\sbagenx-windows-setup.exe
    ```
 
-   You can find the expected hash of the installer at https://www.sbagenx.com
+   The expected SHA256 for `v3.2.0` is:
+
+   ```text
+   f06f463381945acef11b2f11aed51694c2901b54f65347e6b5181d6eb501349b
+   ```
 
 3. Run the installer and follow the instructions.
 
@@ -260,6 +295,38 @@ This happens because the executable is **not digitally signed**, and as a comman
 
 See [USAGE.md](USAGE.md) for more information on how to use SBaGenX.
 
+Common entry points:
+
+### Built-in Program Session
+
+```bash
+sbagenx -m river1.ogg -p drop 00ds+ mix/99
+```
+
+### Broadband Mix Amplitude Modulation
+
+```bash
+sbagenx -m river1.ogg -H s=0:d=0.35:a=0.10:r=0.10:e=2 -p sigmoid Nls+:S=2 mix/100 mixam:beat
+```
+
+### Curve-Driven Session with Solved Constants
+
+```bash
+sbagenx -p curve examples/basics/curve-expfit-solve-demo.sbgf 00ls:l=0.2 mix/99
+```
+
+### Plot a Curve Before Running Audio
+
+```bash
+sbagenx -G -p curve examples/basics/curve-raised-cosine-demo.sbgf 00ls mix/99
+```
+
+### 24-bit Uncompressed Export
+
+```bash
+sbagenx -b 24 -Wo out24.wav -L 0:20 -i 200+8/30
+```
+
 ## Documentation
 
 For detailed information on all features, see the [SBAGENX.txt](docs/SBAGENX.txt) file.
@@ -275,6 +342,10 @@ For developers integrating `sbagenxlib`:
 - Quick start: [docs/SBAGENXLIB_QUICKSTART.md](docs/SBAGENXLIB_QUICKSTART.md)
 - .NET interop notes: [docs/SBAGENXLIB_DOTNET_INTEROP.md](docs/SBAGENXLIB_DOTNET_INTEROP.md)
 - Doxygen generation: [docs/SBAGENXLIB_DOXYGEN.md](docs/SBAGENXLIB_DOXYGEN.md)
+
+The library is no longer just a sidecar experiment. The CLI now relies on
+`sbagenxlib` for core runtime generation, modernized export paths, curve
+evaluation, and host-facing sampling helpers.
 
 Recent library-side audio output work includes:
 
