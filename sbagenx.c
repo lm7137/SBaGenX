@@ -699,6 +699,10 @@ extern int lame_set_brate(lame_t gfp, int bitrate);
 extern int lame_init_params(lame_t gfp);
 extern int lame_encode_buffer_interleaved(lame_t gfp, short int pcm[], int num_samples,
 					  unsigned char *mp3buf, int mp3buf_size);
+#if 0
+extern int lame_encode_buffer_interleaved_ieee_float(lame_t gfp, float pcm[], int num_samples,
+						     unsigned char *mp3buf, int mp3buf_size);
+#endif
 extern int lame_encode_flush(lame_t gfp, unsigned char *mp3buf, int size);
 extern int lame_close(lame_t gfp);
 #endif
@@ -716,6 +720,7 @@ typedef struct {
    int (*lame_set_brate_fn)(lame_t, int);
    int (*lame_init_params_fn)(lame_t);
    int (*lame_encode_buffer_interleaved_fn)(lame_t, short int*, int, unsigned char*, int);
+   int (*lame_encode_buffer_interleaved_ieee_float_fn)(lame_t, float*, int, unsigned char*, int);
    int (*lame_encode_flush_fn)(lame_t, unsigned char*, int);
    int (*lame_close_fn)(lame_t);
    unsigned char *buf;
@@ -5456,6 +5461,8 @@ detect_output_encoder() {
 
 static int
 output_encoder_frame_bytes(void) {
+   if (out_enc_fmt == OUT_ENC_MP3 && sbx_runtime_ctx && mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn)
+      return 8;
    if (out_enc_fmt == OUT_ENC_OGG && sbx_runtime_ctx)
       return 8;
    if (out_enc_fmt == OUT_ENC_FLAC && out_enc_pcm_bits == 24)
@@ -5463,6 +5470,14 @@ output_encoder_frame_bytes(void) {
    if (out_enc_fmt == OUT_ENC_NONE && out_mode == 3)
       return 6;
    return out_mode ? 4 : 2;
+}
+
+static int
+output_encoder_needs_mp3_f32_path(void) {
+   return out_enc_active &&
+          out_enc_fmt == OUT_ENC_MP3 &&
+          sbx_runtime_ctx != 0 &&
+          mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn != 0;
 }
 
 static int
@@ -5487,6 +5502,8 @@ output_needs_packed_s24_path(void) {
 
 static const char *
 output_encoder_path_desc(void) {
+   if (output_encoder_needs_mp3_f32_path())
+      return "float encoder path";
    if (output_encoder_needs_f32_path())
       return "float encoder path";
    if (output_encoder_needs_i32_path())
@@ -5642,6 +5659,7 @@ init_mp3_encoder() {
    mp3_enc.lame_set_brate_fn= lame_set_brate;
    mp3_enc.lame_init_params_fn= lame_init_params;
    mp3_enc.lame_encode_buffer_interleaved_fn= lame_encode_buffer_interleaved;
+   mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn= 0;
    mp3_enc.lame_encode_flush_fn= lame_encode_flush;
    mp3_enc.lame_close_fn= lame_close;
 #else
@@ -5660,6 +5678,8 @@ init_mp3_encoder() {
    mp3_enc.lame_init_params_fn= (int(*)(lame_t))dlib_sym(mp3_enc.lib, "lame_init_params");
    mp3_enc.lame_encode_buffer_interleaved_fn=
       (int(*)(lame_t, short int*, int, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_buffer_interleaved");
+   mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn=
+      (int(*)(lame_t, float*, int, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_buffer_interleaved_ieee_float");
    mp3_enc.lame_encode_flush_fn=
       (int(*)(lame_t, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_flush");
    mp3_enc.lame_close_fn= (int(*)(lame_t))dlib_sym(mp3_enc.lib, "lame_close");
@@ -5800,8 +5820,18 @@ output_encoder_write(short *pcm, int frames) {
 void
 output_encoder_write_f32(float *pcm, int frames) {
    if (!out_enc_active || !frames) return;
-   if (!output_encoder_needs_f32_path())
+   if (!output_encoder_needs_f32_path() && !output_encoder_needs_mp3_f32_path())
       error("Internal error: float encoder write requested for unsupported output path");
+   if (output_encoder_needs_mp3_f32_path()) {
+      int rv;
+      ensure_mp3_buf(frames);
+      rv= mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn(mp3_enc.gfp, pcm, frames, mp3_enc.buf, mp3_enc.buflen);
+      if (rv < 0)
+	 error("MP3 float encoding failed with error code %d", rv);
+      if (rv > 0)
+	 write_out_fd_raw((char*)mp3_enc.buf, rv);
+      return;
+   }
    if (!snd_enc.sf_writef_float_fn)
       error("OGG/Vorbis float output requested, but libsndfile lacks sf_writef_float()");
 
@@ -6487,7 +6517,7 @@ outChunkSbx() {
    double t0;
    double sr= (double)out_rate;
    double mix_mod_mul= mix_mod_multiplier(now);
-   int use_f32_encoder= output_encoder_needs_f32_path();
+   int use_f32_encoder= output_encoder_needs_f32_path() || output_encoder_needs_mp3_f32_path();
    int use_i32_encoder= output_encoder_needs_i32_path();
 
    if (!sbx_runtime_ctx)

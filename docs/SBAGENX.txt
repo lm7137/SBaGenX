@@ -489,7 +489,9 @@ programs and the modern sequence-backed paths), `.flac` output is fed
 to libsndfile through a 24-bit PCM path instead of being truncated to
 16-bit first. On that same library-backed runtime path, `.ogg` output is
 handed to libsndfile as normalized float samples instead of being
-quantized to 16-bit first. MP3 remains a 16-bit encoder path.
+quantized to 16-bit first. MP3 now follows the same float handoff path
+when the available LAME runtime exposes its float-input API; otherwise
+it falls back to the existing 16-bit handoff.
 
 Examples:
 
