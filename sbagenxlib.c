@@ -259,6 +259,24 @@ sbx_rand_u32(SbxEngine *eng) {
   return eng->rng_state;
 }
 
+static unsigned int
+sbx_dither_rand_u32(SbxPcm16DitherState *state) {
+  state->rng_state = state->rng_state * 1664525u + 1013904223u;
+  return state->rng_state;
+}
+
+static short
+sbx_pcm16_quantize_sample(double pcm_sample, SbxPcm16DitherState *dither_state) {
+  if (dither_state) {
+    double u0 = (double)(sbx_dither_rand_u32(dither_state) & 0xFFFFu) / 65536.0;
+    double u1 = (double)(sbx_dither_rand_u32(dither_state) & 0xFFFFu) / 65536.0;
+    pcm_sample += (u0 - u1);
+  }
+  if (pcm_sample > 32767.0) pcm_sample = 32767.0;
+  if (pcm_sample < -32768.0) pcm_sample = -32768.0;
+  return (short)lrint(pcm_sample);
+}
+
 static double
 sbx_rand_signed_unit(SbxEngine *eng) {
   unsigned int v = sbx_rand_u32(eng);
@@ -2511,6 +2529,18 @@ sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec) {
   spec->edge_mode = 2;
 }
 
+void
+sbx_default_pcm16_dither_state(SbxPcm16DitherState *state) {
+  if (!state) return;
+  state->rng_state = 0x12345678u;
+}
+
+void
+sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed) {
+  if (!state) return;
+  state->rng_state = seed ? seed : 0x12345678u;
+}
+
 #include "sbagenxlib_curve_impl.h"
 
 SbxEngine *
@@ -2591,6 +2621,21 @@ sbx_engine_last_error(const SbxEngine *eng) {
   if (!eng) return "null engine";
   if (!eng->last_error[0]) return "";
   return eng->last_error;
+}
+
+int
+sbx_convert_f32_to_s16(const float *in,
+                       short *out,
+                       size_t sample_count,
+                       SbxPcm16DitherState *dither_state) {
+  size_t i;
+
+  if (!in || !out) return SBX_EINVAL;
+  for (i = 0; i < sample_count; i++) {
+    double pcm = (double)in[i] * 32767.0;
+    out[i] = sbx_pcm16_quantize_sample(pcm, dither_state);
+  }
+  return SBX_OK;
 }
 
 SbxContext *

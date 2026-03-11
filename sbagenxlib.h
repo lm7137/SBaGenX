@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 17  /* public API contract revision */
+#define SBX_API_VERSION 18  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -182,6 +182,10 @@ typedef struct {
 } SbxCurveSourceConfig;
 
 typedef struct {
+  unsigned int rng_state; /* caller-owned RNG state for TPDF dithering */
+} SbxPcm16DitherState;
+
+typedef struct {
   double time_sec;            /* context timeline time at snapshot */
   int source_mode;            /* SBX_SOURCE_* */
   SbxToneSpec primary_tone;   /* evaluated primary tone at time_sec */
@@ -223,6 +227,12 @@ void sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg);
 /* Fill cfg with default curve-backed context source settings. */
 void sbx_default_curve_source_config(SbxCurveSourceConfig *cfg);
 
+/* Fill dither state with library-default seed. */
+void sbx_default_pcm16_dither_state(SbxPcm16DitherState *state);
+
+/* Set explicit seed for deterministic PCM16 dithering. */
+void sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed);
+
 /* ----- Engine API ----- */
 
 /* Create low-level engine instance. Returns NULL on failure. */
@@ -242,6 +252,17 @@ int sbx_engine_render_f32(SbxEngine *eng, float *out, size_t frames);
 
 /* Last engine-local error text. */
 const char *sbx_engine_last_error(const SbxEngine *eng);
+
+/* ----- PCM conversion helpers ----- */
+
+/*
+ * Convert normalized float samples (-1..1 nominal) to signed 16-bit PCM.
+ * If dither_state is non-NULL, TPDF dither is added before rounding.
+ */
+int sbx_convert_f32_to_s16(const float *in,
+                           short *out,
+                           size_t sample_count,
+                           SbxPcm16DitherState *dither_state);
 
 /*
  * ----- Parser/formatter helpers -----

@@ -775,6 +775,7 @@ double sbx_runtime_total_sec= 0.0;
 SbxContext *sbx_runtime_ctx= 0;
 float *sbx_runtime_fbuf= 0;
 size_t sbx_runtime_fcap= 0;
+SbxPcm16DitherState sbx_runtime_pcm16_dither;
 
 int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
@@ -6417,13 +6418,17 @@ outChunkSbx() {
 	 out_r= (out_r * opt_V) / 100.0;
       }
 
-      if (out_l > 32767.0) out_l= 32767.0;
-      if (out_l < -32768.0) out_l= -32768.0;
-      if (out_r > 32767.0) out_r= 32767.0;
-      if (out_r < -32768.0) out_r= -32768.0;
-
-      out_buf[off++]= (short)lrint(out_l);
-      out_buf[off++]= (short)lrint(out_r);
+      {
+	 float pcm_in[2];
+	 short pcm_out[2];
+	 pcm_in[0]= (float)(out_l / 32767.0);
+	 pcm_in[1]= (float)(out_r / 32767.0);
+	 rc= sbx_convert_f32_to_s16(pcm_in, pcm_out, 2, &sbx_runtime_pcm16_dither);
+	 if (rc != SBX_OK)
+	    error("sbagenxlib PCM16 conversion failed");
+	 out_buf[off++]= pcm_out[0];
+	 out_buf[off++]= pcm_out[1];
+      }
    }
 
    // Rewrite buffer for 8-bit mode
@@ -8574,6 +8579,7 @@ static void
    sbx_runtime_clear(void) {
    sbx_runtime_active= 0;
    sbx_runtime_total_sec= 0.0;
+   sbx_default_pcm16_dither_state(&sbx_runtime_pcm16_dither);
    if (sbx_runtime_ctx) {
       sbx_context_destroy(sbx_runtime_ctx);
       sbx_runtime_ctx= 0;

@@ -72,6 +72,8 @@ Core Concepts
   sequence data, aux tones, mix effects, mix amplitude profile, clock).
 - `SbxToneSpec`: canonical tone description across binaural/monaural/isochronic/
   noise/bell/spin modes.
+- `SbxPcm16DitherState`: caller-owned RNG state for TPDF dither when converting
+  normalized float render output to signed 16-bit PCM.
 - `SbxProgramKeyframe`: timestamp + tone + interpolation mode to next keyframe.
 - `SbxMixAmpKeyframe`: explicit `mix/<amp>` timeline point.
 - `SbxTimedMixFxKeyframeInfo`: timestamp/interp metadata for one native timed
@@ -128,6 +130,8 @@ API Groups
 - `sbx_status_string(int status)`
 - `sbx_default_engine_config(SbxEngineConfig *cfg)`
 - `sbx_default_tone_spec(SbxToneSpec *tone)`
+- `sbx_default_pcm16_dither_state(SbxPcm16DitherState *state)`
+- `sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed)`
 
 2) Engine lifecycle and render
 
@@ -140,7 +144,15 @@ API Groups
 
 `sbx_engine_render_f32` writes interleaved stereo floats to `out`.
 
-3) Curve program API
+3) PCM conversion helpers
+
+- `sbx_convert_f32_to_s16(const float *in, short *out, size_t sample_count, SbxPcm16DitherState *dither_state)`
+
+This converts normalized float samples (`-1..1` nominal) to signed 16-bit PCM.
+If `dither_state` is non-NULL, the helper adds TPDF dither before rounding.
+Pass `NULL` to disable dithering.
+
+4) Curve program API
 
 - `sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg)`
 - `sbx_default_curve_source_config(SbxCurveSourceConfig *cfg)`
@@ -195,7 +207,7 @@ The curve is then evaluated at sample time through the normal context render
 path, and the context reports `SBX_SOURCE_CURVE` from
 `sbx_context_source_mode()`.
 
-4) Parser/formatter helpers
+5) Parser/formatter helpers
 
 - `sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone)`
 - `sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *out_tone)`
@@ -207,7 +219,7 @@ path, and the context reports `SBX_SOURCE_CURVE` from
 
 These are designed so front-ends can share parser semantics with CLI code.
 
-5) Context lifecycle and basic load/render
+6) Context lifecycle and basic load/render
 
 - `sbx_context_create(const SbxEngineConfig *cfg)`
 - `sbx_context_destroy(SbxContext *ctx)`
@@ -226,7 +238,7 @@ It resets internal oscillator/effect phase/state and restarts playback from the
 requested timeline time. That gives deterministic behavior for GUI scrubbing
 and preview playback.
 
-6) Keyframes and sequence loading
+7) Keyframes and sequence loading
 
 - `sbx_context_load_keyframes(SbxContext *ctx, const SbxProgramKeyframe *frames, size_t frame_count, int loop)`
 - `sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop)`
