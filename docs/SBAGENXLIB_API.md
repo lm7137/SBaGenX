@@ -145,7 +145,9 @@ slightly higher but more benign noise floor.
 
 The CLI now also uses the widened conversion surface for encoded output:
 the `sbagenxlib`-backed `.flac` path writes 24-bit PCM to libsndfile rather
-than collapsing everything to 16-bit before compression.
+than collapsing everything to 16-bit before compression, and the matching
+`.ogg`/Vorbis path now hands libsndfile normalized float samples directly
+instead of quantizing them to 16-bit first.
 
 API Groups
 ----------

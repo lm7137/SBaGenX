@@ -272,6 +272,7 @@ double mixbeat_hilbert_sample(int ch_index, double x);
 void detect_output_encoder();
 void init_output_encoder();
 void output_encoder_write(short *pcm, int frames);
+void output_encoder_write_f32(float *pcm, int frames);
 void output_encoder_write_i32(int32_t *pcm, int frames);
 void finish_output_encoder();
 void write_sigmoid_graph_png(const char *fmt, double level,
@@ -674,6 +675,7 @@ typedef struct {
    SNDFILE *snd;
    SNDFILE *(*sf_open_fn)(const char*, int, SF_INFO*);
    sf_count_t (*sf_writef_short_fn)(SNDFILE*, const short*, sf_count_t);
+   sf_count_t (*sf_writef_float_fn)(SNDFILE*, const float*, sf_count_t);
    sf_count_t (*sf_writef_int_fn)(SNDFILE*, const int*, sf_count_t);
    int (*sf_close_fn)(SNDFILE*);
    const char *(*sf_strerror_fn)(SNDFILE*);
@@ -5452,9 +5454,18 @@ detect_output_encoder() {
 
 static int
 output_encoder_frame_bytes(void) {
+   if (out_enc_fmt == OUT_ENC_OGG && sbx_runtime_ctx)
+      return 8;
    if (out_enc_fmt == OUT_ENC_FLAC && out_enc_pcm_bits == 24)
       return 6;
    return out_mode ? 4 : 2;
+}
+
+static int
+output_encoder_needs_f32_path(void) {
+   return out_enc_active &&
+          out_enc_fmt == OUT_ENC_OGG &&
+          sbx_runtime_ctx != 0;
 }
 
 static int
@@ -5462,6 +5473,17 @@ output_encoder_needs_i32_path(void) {
    return out_enc_active &&
           out_enc_fmt == OUT_ENC_FLAC &&
           out_enc_pcm_bits == 24;
+}
+
+static const char *
+output_encoder_path_desc(void) {
+   if (output_encoder_needs_f32_path())
+      return "float encoder path";
+   if (output_encoder_needs_i32_path())
+      return "24-bit PCM path";
+   if (out_mode == 0)
+      return "8-bit PCM path";
+   return "16-bit PCM path";
 }
 
 static void
@@ -5487,6 +5509,7 @@ init_snd_encoder(int format) {
 #ifdef STATIC_OUTPUT_ENCODERS
    snd_enc.sf_open_fn= sf_open;
    snd_enc.sf_writef_short_fn= sf_writef_short;
+   snd_enc.sf_writef_float_fn= sf_writef_float;
    snd_enc.sf_writef_int_fn= sf_writef_int;
    snd_enc.sf_close_fn= sf_close;
    snd_enc.sf_strerror_fn= sf_strerror;
@@ -5498,6 +5521,7 @@ init_snd_encoder(int format) {
 
    snd_enc.sf_open_fn= (SNDFILE*(*)(const char*, int, SF_INFO*))dlib_sym(snd_enc.lib, "sf_open");
    snd_enc.sf_writef_short_fn= (sf_count_t(*)(SNDFILE*, const short*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_short");
+   snd_enc.sf_writef_float_fn= (sf_count_t(*)(SNDFILE*, const float*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_float");
    snd_enc.sf_writef_int_fn= (sf_count_t(*)(SNDFILE*, const int*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_int");
    snd_enc.sf_close_fn= (int(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_close");
    snd_enc.sf_strerror_fn= (const char*(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_strerror");
@@ -5506,6 +5530,8 @@ init_snd_encoder(int format) {
        !snd_enc.sf_strerror_fn || !snd_enc.sf_command_fn)
       error("Failed to load required libsndfile symbols for %s output", output_encoder_name());
 #endif
+   if (out_enc_fmt == OUT_ENC_OGG && sbx_runtime_ctx && !snd_enc.sf_writef_float_fn)
+      error("OGG/Vorbis float output requested, but libsndfile lacks sf_writef_float()");
    if (out_enc_fmt == OUT_ENC_FLAC && out_enc_pcm_bits == 24 && !snd_enc.sf_writef_int_fn)
       error("FLAC 24-bit output requested, but libsndfile lacks sf_writef_int()");
 
@@ -5681,7 +5707,7 @@ init_output_encoder() {
 
    if (out_mode != 1) {
       if (!opt_Q)
-	 warn("%s output ignores -b and uses %d-bit encoder PCM", output_encoder_name(), out_enc_pcm_bits);
+	 warn("%s output ignores -b and uses %s", output_encoder_name(), output_encoder_path_desc());
       out_mode= 1;
    }
 
@@ -5714,8 +5740,8 @@ init_output_encoder() {
    }
 
    if (!opt_Q && out_enc_active)
-      warn("Outputting %s encoded audio at %d Hz (%d-bit PCM path)",
-	   output_encoder_name(), out_rate, out_enc_pcm_bits);
+      warn("Outputting %s encoded audio at %d Hz (%s)",
+	   output_encoder_name(), out_rate, output_encoder_path_desc());
 }
 
 void
@@ -5738,6 +5764,21 @@ output_encoder_write(short *pcm, int frames) {
       if (wr != (sf_count_t)frames)
 	 error("%s encoding failed while writing frame data", output_encoder_name());
       return;
+   }
+}
+
+void
+output_encoder_write_f32(float *pcm, int frames) {
+   if (!out_enc_active || !frames) return;
+   if (!output_encoder_needs_f32_path())
+      error("Internal error: float encoder write requested for unsupported output path");
+   if (!snd_enc.sf_writef_float_fn)
+      error("OGG/Vorbis float output requested, but libsndfile lacks sf_writef_float()");
+
+   {
+      sf_count_t wr= snd_enc.sf_writef_float_fn(snd_enc.snd, (const float *)pcm, frames);
+      if (wr != (sf_count_t)frames)
+	 error("%s encoding failed while writing float frame data", output_encoder_name());
    }
 }
 
@@ -6416,6 +6457,7 @@ outChunkSbx() {
    double t0;
    double sr= (double)out_rate;
    double mix_mod_mul= mix_mod_multiplier(now);
+   int use_f32_encoder= output_encoder_needs_f32_path();
    int use_i32_encoder= output_encoder_needs_i32_path();
 
    if (!sbx_runtime_ctx)
@@ -6477,7 +6519,11 @@ outChunkSbx() {
 	 float pcm_in[2];
 	 pcm_in[0]= (float)(out_l / 32767.0);
 	 pcm_in[1]= (float)(out_r / 32767.0);
-	 if (use_i32_encoder) {
+	 if (use_f32_encoder) {
+	    sbx_runtime_fbuf[idx]= pcm_in[0];
+	    sbx_runtime_fbuf[idx+1]= pcm_in[1];
+	    off += 2;
+	 } else if (use_i32_encoder) {
 	    rc= sbx_convert_f32_to_s24_32(pcm_in, sbx_runtime_i32buf + off, 2, &sbx_runtime_pcm_state);
 	    if (rc != SBX_OK)
 	       error("sbagenxlib PCM24 conversion failed");
@@ -6491,6 +6537,24 @@ outChunkSbx() {
 	    out_buf[off++]= pcm_out[1];
 	 }
       }
+   }
+
+   if (use_f32_encoder) {
+      if (byte_count > 0) {
+	 if (byte_count <= out_bsiz) {
+	    output_encoder_write_f32(sbx_runtime_fbuf, frames);
+#ifdef ALSA_AUDIO
+	    cleanup_alsa();
+#endif
+	    exit(0);
+	 } else {
+	    output_encoder_write_f32(sbx_runtime_fbuf, frames);
+	    byte_count -= out_bsiz;
+	 }
+      } else {
+	 output_encoder_write_f32(sbx_runtime_fbuf, frames);
+      }
+      return;
    }
 
    if (use_i32_encoder) {

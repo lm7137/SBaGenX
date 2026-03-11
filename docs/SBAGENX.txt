@@ -481,8 +481,9 @@ If -X is provided, MP3 variable bitrate mode is used and -K is ignored.
 When the runtime is handled by `sbagenxlib` (which now covers built-in
 programs and the modern sequence-backed paths), `.flac` output is fed
 to libsndfile through a 24-bit PCM path instead of being truncated to
-16-bit first. MP3 remains a 16-bit encoder path, and OGG/Vorbis
-continues to use its existing short-based write path.
+16-bit first. On that same library-backed runtime path, `.ogg` output is
+handed to libsndfile as normalized float samples instead of being
+quantized to 16-bit first. MP3 remains a 16-bit encoder path.
 
 Examples:
 
