@@ -9,12 +9,13 @@
  */
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 18  /* public API contract revision */
+#define SBX_API_VERSION 19  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -185,6 +186,16 @@ typedef struct {
   unsigned int rng_state; /* caller-owned RNG state for TPDF dithering */
 } SbxPcm16DitherState;
 
+typedef enum {
+  SBX_PCM_DITHER_NONE = 0,
+  SBX_PCM_DITHER_TPDF = 1
+} SbxPcmDitherMode;
+
+typedef struct {
+  unsigned int rng_state; /* caller-owned RNG state for quantization helpers */
+  int dither_mode;        /* SBX_PCM_DITHER_* */
+} SbxPcmConvertState;
+
 typedef struct {
   double time_sec;            /* context timeline time at snapshot */
   int source_mode;            /* SBX_SOURCE_* */
@@ -233,6 +244,14 @@ void sbx_default_pcm16_dither_state(SbxPcm16DitherState *state);
 /* Set explicit seed for deterministic PCM16 dithering. */
 void sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed);
 
+/* Fill generic PCM conversion state with default seed + TPDF dither. */
+void sbx_default_pcm_convert_state(SbxPcmConvertState *state);
+
+/* Set explicit seed and dither mode for generic PCM conversion helpers. */
+void sbx_seed_pcm_convert_state(SbxPcmConvertState *state,
+                                unsigned int seed,
+                                int dither_mode);
+
 /* ----- Engine API ----- */
 
 /* Create low-level engine instance. Returns NULL on failure. */
@@ -263,6 +282,24 @@ int sbx_convert_f32_to_s16(const float *in,
                            short *out,
                            size_t sample_count,
                            SbxPcm16DitherState *dither_state);
+
+/*
+ * Convert normalized float samples (-1..1 nominal) to signed PCM using an
+ * explicit conversion state. dither_mode controls whether TPDF dither is
+ * added before rounding.
+ */
+int sbx_convert_f32_to_s16_ex(const float *in,
+                              int16_t *out,
+                              size_t sample_count,
+                              SbxPcmConvertState *state);
+int sbx_convert_f32_to_s24_32(const float *in,
+                              int32_t *out,
+                              size_t sample_count,
+                              SbxPcmConvertState *state);
+int sbx_convert_f32_to_s32(const float *in,
+                           int32_t *out,
+                           size_t sample_count,
+                           SbxPcmConvertState *state);
 
 /*
  * ----- Parser/formatter helpers -----

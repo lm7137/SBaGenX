@@ -16,7 +16,11 @@ main(void) {
   short out0[64], out1[64], out2[64];
   float clip_in[4] = { 2.0f, -2.0f, 1.0f, -1.0f };
   short clip_out[4];
+  int16_t out16_ex[64];
+  int32_t clip24_out[4];
+  int32_t clip32_out[4];
   SbxPcm16DitherState st1, st2;
+  SbxPcmConvertState cvt;
   size_t i;
   int nonzero = 0, have_pos = 0, have_neg = 0;
 
@@ -57,6 +61,32 @@ main(void) {
   sbx_default_pcm16_dither_state(&st1);
   if (st1.rng_state != 0x12345678u)
     fail("default dither seed mismatch");
+
+  sbx_default_pcm_convert_state(&cvt);
+  if (cvt.rng_state != 0x12345678u || cvt.dither_mode != SBX_PCM_DITHER_TPDF)
+    fail("default generic convert state mismatch");
+
+  sbx_seed_pcm_convert_state(&cvt, 77u, SBX_PCM_DITHER_NONE);
+  if (cvt.rng_state != 77u || cvt.dither_mode != SBX_PCM_DITHER_NONE)
+    fail("seed generic convert state mismatch");
+
+  if (sbx_convert_f32_to_s16_ex(zero, out16_ex, 64, &cvt) != SBX_OK)
+    fail("s16_ex conversion failed");
+  for (i = 0; i < 64; i++)
+    if (out16_ex[i] != 0)
+      fail("s16_ex without dither should keep silence exact");
+
+  if (sbx_convert_f32_to_s24_32(clip_in, clip24_out, 4, NULL) != SBX_OK)
+    fail("s24_32 conversion failed");
+  if (clip24_out[0] != 8388607 || clip24_out[1] != -8388608 ||
+      clip24_out[2] != 8388607 || clip24_out[3] != -8388607)
+    fail("s24_32 endpoint mismatch");
+
+  if (sbx_convert_f32_to_s32(clip_in, clip32_out, 4, NULL) != SBX_OK)
+    fail("s32 conversion failed");
+  if (clip32_out[0] != 2147483647 || clip32_out[1] != (-2147483647 - 1) ||
+      clip32_out[2] != 2147483647 || clip32_out[3] != -2147483647)
+    fail("s32 endpoint mismatch");
 
   puts("PASS: pcm16 dither conversion API");
   return 0;

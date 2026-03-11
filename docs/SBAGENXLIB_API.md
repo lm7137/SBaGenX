@@ -74,6 +74,7 @@ Core Concepts
   noise/bell/spin modes.
 - `SbxPcm16DitherState`: caller-owned RNG state for TPDF dither when converting
   normalized float render output to signed 16-bit PCM.
+- `SbxPcmConvertState`: generic PCM conversion state with explicit dither mode.
 - `SbxProgramKeyframe`: timestamp + tone + interpolation mode to next keyframe.
 - `SbxMixAmpKeyframe`: explicit `mix/<amp>` timeline point.
 - `SbxTimedMixFxKeyframeInfo`: timestamp/interp metadata for one native timed
@@ -132,6 +133,8 @@ API Groups
 - `sbx_default_tone_spec(SbxToneSpec *tone)`
 - `sbx_default_pcm16_dither_state(SbxPcm16DitherState *state)`
 - `sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed)`
+- `sbx_default_pcm_convert_state(SbxPcmConvertState *state)`
+- `sbx_seed_pcm_convert_state(SbxPcmConvertState *state, unsigned int seed, int dither_mode)`
 
 2) Engine lifecycle and render
 
@@ -147,10 +150,24 @@ API Groups
 3) PCM conversion helpers
 
 - `sbx_convert_f32_to_s16(const float *in, short *out, size_t sample_count, SbxPcm16DitherState *dither_state)`
+- `sbx_convert_f32_to_s16_ex(const float *in, int16_t *out, size_t sample_count, SbxPcmConvertState *state)`
+- `sbx_convert_f32_to_s24_32(const float *in, int32_t *out, size_t sample_count, SbxPcmConvertState *state)`
+- `sbx_convert_f32_to_s32(const float *in, int32_t *out, size_t sample_count, SbxPcmConvertState *state)`
 
 This converts normalized float samples (`-1..1` nominal) to signed 16-bit PCM.
 If `dither_state` is non-NULL, the helper adds TPDF dither before rounding.
 Pass `NULL` to disable dithering.
+
+The `_ex` and wider-width helpers use `SbxPcmConvertState`, which makes the
+dither policy explicit:
+
+- `SBX_PCM_DITHER_NONE`
+- `SBX_PCM_DITHER_TPDF`
+
+`sbx_convert_f32_to_s24_32` returns signed 24-bit PCM in a 32-bit container.
+`sbx_convert_f32_to_s32` returns full signed 32-bit PCM. Both are useful for
+host-side exporters and GUI tooling even though the render source remains
+32-bit float.
 
 4) Curve program API
 

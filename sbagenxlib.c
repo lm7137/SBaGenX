@@ -260,21 +260,32 @@ sbx_rand_u32(SbxEngine *eng) {
 }
 
 static unsigned int
-sbx_dither_rand_u32(SbxPcm16DitherState *state) {
-  state->rng_state = state->rng_state * 1664525u + 1013904223u;
-  return state->rng_state;
+sbx_dither_rand_u32(unsigned int *rng_state) {
+  *rng_state = (*rng_state) * 1664525u + 1013904223u;
+  return *rng_state;
 }
 
-static short
-sbx_pcm16_quantize_sample(double pcm_sample, SbxPcm16DitherState *dither_state) {
-  if (dither_state) {
-    double u0 = (double)(sbx_dither_rand_u32(dither_state) & 0xFFFFu) / 65536.0;
-    double u1 = (double)(sbx_dither_rand_u32(dither_state) & 0xFFFFu) / 65536.0;
-    pcm_sample += (u0 - u1);
+static double
+sbx_pcm_dither_noise(SbxPcmConvertState *state) {
+  if (!state || state->dither_mode == SBX_PCM_DITHER_NONE)
+    return 0.0;
+  if (state->dither_mode == SBX_PCM_DITHER_TPDF) {
+    double u0 = (double)(sbx_dither_rand_u32(&state->rng_state) & 0xFFFFu) / 65536.0;
+    double u1 = (double)(sbx_dither_rand_u32(&state->rng_state) & 0xFFFFu) / 65536.0;
+    return u0 - u1;
   }
-  if (pcm_sample > 32767.0) pcm_sample = 32767.0;
-  if (pcm_sample < -32768.0) pcm_sample = -32768.0;
-  return (short)lrint(pcm_sample);
+  return 0.0;
+}
+
+static long long
+sbx_pcm_quantize_sample_ll(double pcm_sample,
+                           double min_sample,
+                           double max_sample,
+                           SbxPcmConvertState *state) {
+  pcm_sample += sbx_pcm_dither_noise(state);
+  if (pcm_sample > max_sample) pcm_sample = max_sample;
+  if (pcm_sample < min_sample) pcm_sample = min_sample;
+  return llrint(pcm_sample);
 }
 
 static double
@@ -2541,6 +2552,22 @@ sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed) {
   state->rng_state = seed ? seed : 0x12345678u;
 }
 
+void
+sbx_default_pcm_convert_state(SbxPcmConvertState *state) {
+  if (!state) return;
+  state->rng_state = 0x12345678u;
+  state->dither_mode = SBX_PCM_DITHER_TPDF;
+}
+
+void
+sbx_seed_pcm_convert_state(SbxPcmConvertState *state,
+                           unsigned int seed,
+                           int dither_mode) {
+  if (!state) return;
+  state->rng_state = seed ? seed : 0x12345678u;
+  state->dither_mode = dither_mode;
+}
+
 #include "sbagenxlib_curve_impl.h"
 
 SbxEngine *
@@ -2628,12 +2655,61 @@ sbx_convert_f32_to_s16(const float *in,
                        short *out,
                        size_t sample_count,
                        SbxPcm16DitherState *dither_state) {
+  SbxPcmConvertState state;
+  SbxPcmConvertState *sp = 0;
+  if (dither_state) {
+    state.rng_state = dither_state->rng_state;
+    state.dither_mode = SBX_PCM_DITHER_TPDF;
+    sp = &state;
+  }
+  {
+    int rc = sbx_convert_f32_to_s16_ex(in, (int16_t *)out, sample_count, sp);
+    if (dither_state) dither_state->rng_state = state.rng_state;
+    return rc;
+  }
+}
+
+int
+sbx_convert_f32_to_s16_ex(const float *in,
+                          int16_t *out,
+                          size_t sample_count,
+                          SbxPcmConvertState *state) {
   size_t i;
 
   if (!in || !out) return SBX_EINVAL;
   for (i = 0; i < sample_count; i++) {
     double pcm = (double)in[i] * 32767.0;
-    out[i] = sbx_pcm16_quantize_sample(pcm, dither_state);
+    out[i] = (int16_t)sbx_pcm_quantize_sample_ll(pcm, -32768.0, 32767.0, state);
+  }
+  return SBX_OK;
+}
+
+int
+sbx_convert_f32_to_s24_32(const float *in,
+                          int32_t *out,
+                          size_t sample_count,
+                          SbxPcmConvertState *state) {
+  size_t i;
+
+  if (!in || !out) return SBX_EINVAL;
+  for (i = 0; i < sample_count; i++) {
+    double pcm = (double)in[i] * 8388607.0;
+    out[i] = (int32_t)sbx_pcm_quantize_sample_ll(pcm, -8388608.0, 8388607.0, state);
+  }
+  return SBX_OK;
+}
+
+int
+sbx_convert_f32_to_s32(const float *in,
+                       int32_t *out,
+                       size_t sample_count,
+                       SbxPcmConvertState *state) {
+  size_t i;
+
+  if (!in || !out) return SBX_EINVAL;
+  for (i = 0; i < sample_count; i++) {
+    double pcm = (double)in[i] * 2147483647.0;
+    out[i] = (int32_t)sbx_pcm_quantize_sample_ll(pcm, -2147483648.0, 2147483647.0, state);
   }
   return SBX_OK;
 }
