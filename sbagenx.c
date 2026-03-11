@@ -379,7 +379,7 @@ help() {
 	  NL
 	  NL "          -r rate   Select the output rate (default is 44100 Hz, or from -m)"
 #ifndef MAC_AUDIO
-	  NL "          -b bits   Select the number bits for output (8 or 16, default 16)"
+	  NL "          -b bits   Select the number bits for output (8, 16 or 24, default 16)"
 #else
 	  NL "          -B size   Force buffer size (in samples) for audio output."
     NL "                     (e.g. 1024, 2048, 4096, etc.)"
@@ -784,6 +784,8 @@ float *sbx_runtime_fbuf= 0;
 size_t sbx_runtime_fcap= 0;
 int32_t *sbx_runtime_i32buf= 0;
 size_t sbx_runtime_i32cap= 0;
+unsigned char *sbx_runtime_bytebuf= 0;
+size_t sbx_runtime_bytecap= 0;
 SbxPcmConvertState sbx_runtime_pcm_state;
 
 int opt_c;			// Number of -c option points provided (max 16)
@@ -3975,9 +3977,9 @@ scanOptions(int *acp, char ***avp) {
 	  case 'b':
 	     if (argc-- < 1 || 
 		 1 != sscanf(*argv++, "%d %c", &val, &dmy) ||
-		 !(val == 8 || val == 16))
-		error("Expecting -b 8 or -b 16");
-	     out_mode= (val == 8) ? 0 : 1;
+		 !(val == 8 || val == 16 || val == 24))
+		error("Expecting -b 8, -b 16 or -b 24");
+	     out_mode= (val == 8) ? 0 : (val == 24 ? 3 : 1);
 	     break;
 #endif
 	  case 'o':
@@ -5458,6 +5460,8 @@ output_encoder_frame_bytes(void) {
       return 8;
    if (out_enc_fmt == OUT_ENC_FLAC && out_enc_pcm_bits == 24)
       return 6;
+   if (out_enc_fmt == OUT_ENC_NONE && out_mode == 3)
+      return 6;
    return out_mode ? 4 : 2;
 }
 
@@ -5475,6 +5479,12 @@ output_encoder_needs_i32_path(void) {
           out_enc_pcm_bits == 24;
 }
 
+static int
+output_needs_packed_s24_path(void) {
+   return !out_enc_active &&
+          out_mode == 3;
+}
+
 static const char *
 output_encoder_path_desc(void) {
    if (output_encoder_needs_f32_path())
@@ -5483,7 +5493,27 @@ output_encoder_path_desc(void) {
       return "24-bit PCM path";
    if (out_mode == 0)
       return "8-bit PCM path";
+   if (out_mode == 3)
+      return "24-bit PCM path";
    return "16-bit PCM path";
+}
+
+static int
+output_pcm_bits(void) {
+   if (out_mode == 0) return 8;
+   if (out_mode == 3) return 24;
+   return 16;
+}
+
+static void
+pack_s24le_from_i32(const int32_t *in, unsigned char *out, size_t sample_count) {
+   size_t i;
+   for (i= 0; i<sample_count; i++) {
+      uint32_t u= (uint32_t)in[i];
+      out[i*3 + 0]= (unsigned char)(u & 0xFF);
+      out[i*3 + 1]= (unsigned char)((u >> 8) & 0xFF);
+      out[i*3 + 2]= (unsigned char)((u >> 16) & 0xFF);
+   }
 }
 
 static void
@@ -6468,10 +6498,15 @@ outChunkSbx() {
       if (!sbx_runtime_fbuf) error("Out of memory");
       sbx_runtime_fcap= out_blen;
    }
-   if (use_i32_encoder && (size_t)out_blen > sbx_runtime_i32cap) {
+   if ((use_i32_encoder || output_needs_packed_s24_path()) && (size_t)out_blen > sbx_runtime_i32cap) {
       sbx_runtime_i32buf= (int32_t*)realloc(sbx_runtime_i32buf, out_blen * sizeof(int32_t));
       if (!sbx_runtime_i32buf) error("Out of memory");
       sbx_runtime_i32cap= out_blen;
+   }
+   if (output_needs_packed_s24_path() && (size_t)out_bsiz > sbx_runtime_bytecap) {
+      sbx_runtime_bytebuf= (unsigned char*)realloc(sbx_runtime_bytebuf, out_bsiz);
+      if (!sbx_runtime_bytebuf) error("Out of memory");
+      sbx_runtime_bytecap= out_bsiz;
    }
 
    if (mix_in) {
@@ -6523,7 +6558,7 @@ outChunkSbx() {
 	    sbx_runtime_fbuf[idx]= pcm_in[0];
 	    sbx_runtime_fbuf[idx+1]= pcm_in[1];
 	    off += 2;
-	 } else if (use_i32_encoder) {
+	 } else if (use_i32_encoder || output_needs_packed_s24_path()) {
 	    rc= sbx_convert_f32_to_s24_32(pcm_in, sbx_runtime_i32buf + off, 2, &sbx_runtime_pcm_state);
 	    if (rc != SBX_OK)
 	       error("sbagenxlib PCM24 conversion failed");
@@ -6571,6 +6606,25 @@ outChunkSbx() {
 	 }
       } else {
 	 output_encoder_write_i32(sbx_runtime_i32buf, frames);
+      }
+      return;
+   }
+
+   if (output_needs_packed_s24_path()) {
+      pack_s24le_from_i32(sbx_runtime_i32buf, sbx_runtime_bytebuf, out_blen);
+      if (byte_count > 0) {
+	 if (byte_count <= out_bsiz) {
+	    writeOut((char*)sbx_runtime_bytebuf, byte_count);
+#ifdef ALSA_AUDIO
+	    cleanup_alsa();
+#endif
+	    exit(0);
+	 } else {
+	    writeOut((char*)sbx_runtime_bytebuf, out_bsiz);
+	    byte_count -= out_bsiz;
+	 }
+      } else {
+	 writeOut((char*)sbx_runtime_bytebuf, out_bsiz);
       }
       return;
    }
@@ -7029,6 +7083,8 @@ setup_device(void) {
 
   // Handle output to files and pipes
   if (opt_O || opt_o) {
+    if (out_enc_fmt == OUT_ENC_NONE && out_mode == 3 && !sbx_runtime_active)
+      error("24-bit raw/WAV output currently requires an sbagenxlib-backed runtime path");
     if (opt_O)
       out_fd= 1;		// stdout
     else {
@@ -7056,9 +7112,12 @@ setup_device(void) {
 
     if (!opt_Q && !opt_W && !out_enc_active)		// Informational message for opt_W/encoded is written later
        warn("Outputting %d-bit raw audio data at %d Hz with %d-sample blocks, %d ms per block",
-	    out_mode ? 16 : 8, out_rate, out_blen/2, out_buf_ms);
+	    output_pcm_bits(), out_rate, out_blen/2, out_buf_ms);
     return;
   }
+
+  if (out_mode == 3)
+     error("-b 24 is supported only for file/pipe output (-o / -O)");
 
 #ifdef ALSA_AUDIO
   // ALSA audio output
@@ -7443,7 +7502,7 @@ writeWAV() {
 
   if (!opt_Q)
      warn("Outputting %d-bit WAV data at %d Hz, file size %d bytes",
-	  out_mode ? 16 : 8, out_rate, byte_count + 44);
+	  output_pcm_bits(), out_rate, byte_count + 44);
 }
 
 //
@@ -8737,6 +8796,11 @@ static void
       free(sbx_runtime_i32buf);
       sbx_runtime_i32buf= 0;
       sbx_runtime_i32cap= 0;
+   }
+    if (sbx_runtime_bytebuf) {
+      free(sbx_runtime_bytebuf);
+      sbx_runtime_bytebuf= 0;
+      sbx_runtime_bytecap= 0;
    }
 }
 

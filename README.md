@@ -284,6 +284,7 @@ Recent library-side audio output work includes:
 - quantitative regression tests that compare dithered and undithered output
 - 24-bit FLAC export on the `sbagenxlib`-backed encoder path
 - float-path OGG/Vorbis export on the `sbagenxlib`-backed encoder path
+- 24-bit raw/WAV export on the `sbagenxlib`-backed uncompressed path
 
 The current tests verify the expected tradeoff: TPDF dithering slightly raises
 the noise floor while materially reducing signal-correlated quantization error

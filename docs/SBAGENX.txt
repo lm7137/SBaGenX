@@ -443,6 +443,12 @@ file or effect utility.  It is assumed that the eventual output device
 will use exactly the sampling frequency specified, or otherwise all
 the frequencies and timings will be out.
 
+For raw/WAV output, `-b` now accepts `24` as well as `8` and `16`.
+The 24-bit path currently applies to the `sbagenxlib`-backed runtime
+engine (for example `-i`, built-in `-p` programs, and the modern
+library-backed sequence paths), and writes 24-bit little-endian PCM for
+raw output and 24-bit PCM inside WAV files.
+
 The -o option can also be used to output directly to a file.  By
 default this writes headerless raw data (to write a WAV file, see the
 -W option below).  If the filename given to -o ends with .mp3, .ogg or
@@ -491,6 +497,7 @@ Examples:
 >> sbagenx -r 44100 -o session.mp3 -X 2.5 -J 2 -L 0:20 -i 200+8/30
 >> sbagenx -r 44100 -o session.ogg -U 6 -L 0:20 -i 200+8/30
 >> sbagenx -r 44100 -o session.flac -Z 8 -L 0:20 -i 200+8/30
+>> sbagenx -r 44100 -b 24 -o session.raw -L 0:20 -i 200+8/30
 
 The -L option allows a time-limit to be set on the output.  So, for
 example, to output 45 minutes of data to a file, and then play it with
@@ -517,6 +524,10 @@ and:
 
 >> sbagenx -r 8000 -Wo out.wav -L 0:45 -i 100+0.92/30 200+4.2/15
 >> bplay out.wav
+
+For 24-bit WAV output on the `sbagenxlib` runtime path:
+
+>> sbagenx -r 44100 -b 24 -Wo out24.wav -L 0:20 -i 200+8/30
 
 The -Q option may be useful to turn off the information that the
 utility normally writes to the screen.
