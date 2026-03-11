@@ -276,6 +276,17 @@ For developers integrating `sbagenxlib`:
 - .NET interop notes: [docs/SBAGENXLIB_DOTNET_INTEROP.md](docs/SBAGENXLIB_DOTNET_INTEROP.md)
 - Doxygen generation: [docs/SBAGENXLIB_DOXYGEN.md](docs/SBAGENXLIB_DOXYGEN.md)
 
+Recent library-side audio output work includes:
+
+- a modernized PCM conversion path for `sbagenxlib`
+- TPDF dithering for 16-bit output
+- wider host-side conversion helpers for `s16`, `s24`-in-`s32`, and `s32`
+- quantitative regression tests that compare dithered and undithered output
+
+The current tests verify the expected tradeoff: TPDF dithering slightly raises
+the noise floor while materially reducing signal-correlated quantization error
+and flattening the error spectrum.
+
 ## Research
 
 For the scientific background behind SBaGenX, check out [RESEARCH.md](RESEARCH.md).

@@ -121,6 +121,28 @@ Determinism Notes
   sample-level differences.
 - No bit-identical guarantee across all platforms/build flags.
 
+PCM Quality Notes
+-----------------
+
+`sbagenxlib` now exposes explicit float-to-PCM conversion helpers rather than
+leaving 16-bit quantization entirely to host code. The default high-quality
+path is TPDF-dithered 16-bit conversion.
+
+The bundled regression tests quantify the expected tradeoff:
+
+- total quantization noise rises slightly when dithering is enabled
+- signal-correlated quantization error drops substantially
+- the error spectrum becomes much flatter and less tonal
+
+On the current low-level sine fixture in
+`tests/sbagenxlib/test_pcm_quant_metrics.c`, TPDF dithering reduces absolute
+error correlation with the source signal from about `0.126` to about `0.0135`,
+and reduces the dominant-bin to average-bin error-spectrum ratio from about
+`132x` to about `2.9x`.
+
+That is the behavior we want: less distortion-like error, at the cost of a
+slightly higher but more benign noise floor.
+
 API Groups
 ----------
 
