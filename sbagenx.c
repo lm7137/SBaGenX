@@ -255,8 +255,6 @@ void clear_mix_mod_curve(void);
 void setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level,
 			 double main_len_min, double wake_len_min, int wake_enabled);
 double mix_mod_multiplier(int now_ms);
-static double mix_mod_multiplier_elapsed_min(double t_min);
-static double mix_mod_multiplier_runtime_sec(double t_sec);
 void normalizeAmplitude(Voice *voices, int numChannels, const char *line, int lineNum);
 void printSequenceDuration();
 void checkMixInSequence(); // Check if mix/<amp> is specified
@@ -632,17 +630,7 @@ int mix_flag= 0;		// Has 'mix/*' been used in the sequence?
 double *mix_amp= NULL; // Amplitude of mix sound data to use with mixspin/mixpulse/mixbeat. Default is 100%
 double mix_amp_current= 4096.0; // Current mix/<amp> value (0-4096)
 
-typedef struct {
-   int active;
-   double delta;		// d
-   double epsilon;		// e
-   double period_min;		// k (minutes)
-   double end_level;		// E
-   double main_len_min;		// T, includes hold if present, excludes wake
-   double wake_len_min;		// U
-   int wake_enabled;
-} MixModCurve;
-MixModCurve mix_mod_curve;
+SbxMixModSpec mix_mod_curve;
 int mix_mod_anchor_ms= -1;	// Session start anchor for -A modulation in built-in/runtime playback
 
 typedef enum {
@@ -1244,74 +1232,38 @@ clear_func_curve() {
 
 void
 clear_mix_mod_curve(void) {
-   memset(&mix_mod_curve, 0, sizeof(mix_mod_curve));
+   sbx_default_mix_mod_spec(&mix_mod_curve);
+   mix_mod_curve.active= 0;
    mix_mod_anchor_ms= -1;
 }
 
 void
 setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level,
 		    double main_len_min, double wake_len_min, int wake_enabled) {
+   sbx_default_mix_mod_spec(&mix_mod_curve);
    mix_mod_curve.active= 1;
    mix_mod_curve.delta= delta;
    mix_mod_curve.epsilon= epsilon;
-   mix_mod_curve.period_min= k_min;
+   mix_mod_curve.period_sec= k_min * 60.0;
    mix_mod_curve.end_level= end_level;
-   mix_mod_curve.main_len_min= main_len_min;
-   mix_mod_curve.wake_len_min= wake_len_min;
+   mix_mod_curve.main_len_sec= main_len_min * 60.0;
+   mix_mod_curve.wake_len_sec= wake_len_min * 60.0;
    mix_mod_curve.wake_enabled= wake_enabled ? 1 : 0;
    mix_mod_anchor_ms= -1;
 }
 
 double
 mix_mod_multiplier(int now_ms) {
-   double t_min;
+   double t_sec;
    int anchor_ms;
 
-   if (!mix_mod_curve.active || mix_mod_curve.main_len_min <= 0.0)
+   if (!mix_mod_curve.active || mix_mod_curve.main_len_sec <= 0.0)
       return 1.0;
 
    anchor_ms= (mix_mod_anchor_ms >= 0) ? mix_mod_anchor_ms :
       ((fast_tim0 >= 0) ? fast_tim0 : now_ms);
-   t_min= t_per0(anchor_ms, now_ms) / 60000.0;
-   return mix_mod_multiplier_elapsed_min(t_min);
-}
-
-static double
-mix_mod_multiplier_elapsed_min(double t_min) {
-   double mod_2k, x, g, v, two_k;
-
-   if (!mix_mod_curve.active || mix_mod_curve.main_len_min <= 0.0)
-      return 1.0;
-
-   if (t_min < mix_mod_curve.main_len_min) {
-      two_k= 2.0 * mix_mod_curve.period_min;
-      mod_2k= fmod(t_min, two_k);
-      if (mod_2k < 0.0) mod_2k += two_k;
-      x= mod_2k - mix_mod_curve.period_min;
-      g= 1.0 - mix_mod_curve.delta * exp(-mix_mod_curve.epsilon * x * x);
-      v= 1.0 - ((1.0 - mix_mod_curve.end_level) / mix_mod_curve.main_len_min) * t_min;
-      if (g < 0.0) g= 0.0;
-      if (v < 0.0) v= 0.0;
-      return g * v;
-   }
-
-   if (mix_mod_curve.wake_enabled && mix_mod_curve.wake_len_min > 0.0) {
-      double tw= t_min - mix_mod_curve.main_len_min;
-      double w;
-      if (tw < 0.0) tw= 0.0;
-      if (tw <= mix_mod_curve.wake_len_min) {
-	 w= (1.0 - mix_mod_curve.end_level) + (mix_mod_curve.end_level / mix_mod_curve.wake_len_min) * tw;
-	 if (w < 0.0) w= 0.0;
-	 return w;
-      }
-   }
-
-   return 1.0;
-}
-
-static double
-mix_mod_multiplier_runtime_sec(double t_sec) {
-   return mix_mod_multiplier_elapsed_min(t_sec / 60.0);
+   t_sec= t_per0(anchor_ms, now_ms) / 1000.0;
+   return sbx_mix_mod_mul_at(&mix_mod_curve, t_sec);
 }
 
 int
@@ -4834,8 +4786,7 @@ statusSbx(char *err) {
   }
 
   if (mix_in) {
-    double mix_pct= sbx_context_mix_amp_at(sbx_runtime_ctx, t_sec);
-    if (opt_A) mix_pct *= mix_mod_multiplier_runtime_sec(t_sec);
+    double mix_pct= sbx_context_mix_amp_effective_at(sbx_runtime_ctx, t_sec);
     p += sprintf(p, " mix/%.2f", mix_pct);
   }
 
@@ -6625,10 +6576,9 @@ outChunkSbx() {
 
       if (mix_in) {
 	 double t_sec= t0 + frm / sr;
-	 double mix_mod_mul= opt_A ? mix_mod_multiplier_runtime_sec(t_sec) : 1.0;
 	 double mix_add_l= 0.0;
 	 double mix_add_r= 0.0;
-	 rc= sbx_context_mix_stream_sample(sbx_runtime_ctx, t_sec, mix1, mix2, mix_mod_mul,
+	 rc= sbx_context_mix_stream_sample(sbx_runtime_ctx, t_sec, mix1, mix2, 1.0,
 					   &mix_add_l, &mix_add_r);
 	 if (rc != SBX_OK)
 	    error("sbagenxlib mix stream processing failed: %s", sbx_context_last_error(sbx_runtime_ctx));
@@ -8896,6 +8846,27 @@ static void
 }
 
 static void
+sbx_runtime_apply_mix_mod(void) {
+   int rc;
+
+   if (!sbx_runtime_ctx)
+      return;
+
+   if (!mix_mod_curve.active) {
+      rc= sbx_context_set_mix_mod(sbx_runtime_ctx, 0);
+      if (rc != SBX_OK)
+	 error("Failed to clear sbagenxlib mix modulation: %s",
+	       sbx_context_last_error(sbx_runtime_ctx));
+      return;
+   }
+
+   rc= sbx_context_set_mix_mod(sbx_runtime_ctx, &mix_mod_curve);
+   if (rc != SBX_OK)
+      error("Failed to configure sbagenxlib mix modulation: %s",
+	    sbx_context_last_error(sbx_runtime_ctx));
+}
+
+static void
 sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double mix_amp_pct,
 				     const SbxMixFxSpec *mix_fx, size_t mix_fx_count) {
    SbxEngineConfig cfg;
@@ -8928,6 +8899,7 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
    if (rc != SBX_OK)
       error("Failed to configure sbagenxlib runtime extras: %s",
 	    sbx_context_last_error(sbx_runtime_ctx));
+   sbx_runtime_apply_mix_mod();
 }
 
 int
@@ -9033,13 +9005,14 @@ sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int
 
    sbx_runtime_active= 1;
    sbx_runtime_total_sec= kfs[n-1].time_sec;
-   rc= sbx_context_configure_runtime(sbx_runtime_ctx,
-				     mkf, mkf_n, mix_amp_pct,
-				     mix_fx, mix_fx_count,
-				     aux_tones, aux_count);
-  if (rc != SBX_OK)
-      error("Failed to configure sbagenxlib runtime extras: %s",
-	    sbx_context_last_error(sbx_runtime_ctx));
+	  rc= sbx_context_configure_runtime(sbx_runtime_ctx,
+					     mkf, mkf_n, mix_amp_pct,
+					     mix_fx, mix_fx_count,
+					     aux_tones, aux_count);
+	   if (rc != SBX_OK)
+	      error("Failed to configure sbagenxlib runtime extras: %s",
+		    sbx_context_last_error(sbx_runtime_ctx));
+   sbx_runtime_apply_mix_mod();
 }
 
 static void
@@ -9093,6 +9066,7 @@ sbx_runtime_activate_from_curve_program(SbxCurveProgram **curvep,
    if (rc != SBX_OK)
       error("Failed to configure sbagenxlib runtime extras: %s",
 	    sbx_context_last_error(sbx_runtime_ctx));
+   sbx_runtime_apply_mix_mod();
 }
 
 static SbxCurveProgram *

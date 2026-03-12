@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 20  /* public API contract revision */
+#define SBX_API_VERSION 21  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -95,6 +95,17 @@ typedef struct {
   double amp_pct;
   int interp; /* SBX_INTERP_* */
 } SbxMixAmpKeyframe;
+
+typedef struct {
+  int active;            /* 1 => enabled, 0 => disabled */
+  double delta;          /* dip depth parameter */
+  double epsilon;        /* Gaussian width parameter */
+  double period_sec;     /* half-period spacing in seconds */
+  double end_level;      /* terminal linear level at end of main phase, 0..1 */
+  double main_len_sec;   /* main phase duration in seconds (drop+hold) */
+  double wake_len_sec;   /* wake phase duration in seconds */
+  int wake_enabled;      /* 1 => include wake phase ramp */
+} SbxMixModSpec;
 
 typedef struct {
   double time_sec;
@@ -248,6 +259,9 @@ void sbx_default_curve_source_config(SbxCurveSourceConfig *cfg);
 
 /* Fill dither state with library-default seed. */
 void sbx_default_pcm16_dither_state(SbxPcm16DitherState *state);
+
+/* Fill spec with library-default -A mix modulation parameters. */
+void sbx_default_mix_mod_spec(SbxMixModSpec *spec);
 
 /* Set explicit seed for deterministic PCM16 dithering. */
 void sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed);
@@ -465,6 +479,8 @@ int sbx_context_apply_mix_effects(SbxContext *ctx,
 /*
  * Full mix-stream sample path used by runtime adapters.
  * Accepts int16 mix samples and returns additive stereo contribution.
+ * mix_mod_mul is an optional extra host multiplier applied on top of any
+ * configured SbxMixModSpec runtime modulation.
  */
 int sbx_context_mix_stream_sample(SbxContext *ctx,
                                   double t_sec,
@@ -482,6 +498,15 @@ int sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
                                       size_t kf_count,
                                       double default_amp_pct);
 
+/* Replace mix-modulation runtime profile used by the -A host option. */
+int sbx_context_set_mix_mod(SbxContext *ctx, const SbxMixModSpec *spec);
+
+/* Read currently configured mix-modulation profile. */
+int sbx_context_get_mix_mod(const SbxContext *ctx, SbxMixModSpec *out);
+
+/* Report whether a mix-modulation runtime profile is active. */
+int sbx_context_has_mix_mod(const SbxContext *ctx);
+
 /* One-call runtime extras setup (mix amp + mix effects + aux tones). */
 int sbx_context_configure_runtime(SbxContext *ctx,
                                   const SbxMixAmpKeyframe *mix_kfs,
@@ -494,6 +519,15 @@ int sbx_context_configure_runtime(SbxContext *ctx,
 
 /* Evaluate mix amplitude percentage at context time t_sec. */
 double sbx_context_mix_amp_at(SbxContext *ctx, double t_sec);
+
+/* Evaluate mix-modulation multiplier at context time t_sec. */
+double sbx_context_mix_mod_mul_at(SbxContext *ctx, double t_sec);
+
+/* Evaluate runtime-effective mix amplitude percentage at t_sec. */
+double sbx_context_mix_amp_effective_at(SbxContext *ctx, double t_sec);
+
+/* Evaluate one mix-modulation spec directly, without a context. */
+double sbx_mix_mod_mul_at(const SbxMixModSpec *spec, double t_sec);
 
 /*
  * Sample evaluated mix amplitude percentage over [t0_sec, t1_sec].

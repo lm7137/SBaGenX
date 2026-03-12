@@ -350,7 +350,12 @@ should treat the program timeline as wrapping.
 - `sbx_context_get_mix_effect(...)`
 - `sbx_context_apply_mix_effects(...)`
 - `sbx_context_set_mix_amp_keyframes(...)`
+- `sbx_context_set_mix_mod(...)`
+- `sbx_context_get_mix_mod(...)`
+- `sbx_context_has_mix_mod(...)`
 - `sbx_context_mix_amp_at(...)`
+- `sbx_context_mix_mod_mul_at(...)`
+- `sbx_context_mix_amp_effective_at(...)`
 - `sbx_context_sample_mix_amp(...)`
 - `sbx_context_mix_amp_keyframe_count(...)`
 - `sbx_context_get_mix_amp_keyframe(...)`
@@ -366,6 +371,10 @@ should treat the program timeline as wrapping.
 - `sbx_context_get_runtime_telemetry(...)`
 - `sbx_context_mix_stream_sample(...)`
 - `sbx_context_configure_runtime(...)`
+
+`SbxMixModSpec` is the library-owned runtime representation of the CLI `-A`
+mix-modulation model. The CLI now configures that state on the context instead
+of re-implementing the modulation math privately.
 
 `sbx_context_configure_runtime` is the one-call setup path for mix keyframes,
 mix effects, and auxiliary tones.
@@ -388,8 +397,10 @@ mix-effect slots loaded from native `.sbg` content, without reverse-engineering
 them from render output.
 
 `sbx_context_sample_mix_amp(...)` is the range-sampling companion to
-`sbx_context_mix_amp_at(...)`. Use it when a frontend wants a full amplitude
-curve for plotting or inspection.
+`sbx_context_mix_amp_at(...)`. Use it when a frontend wants the base `mix/<amp>`
+curve before `-A`/`SbxMixModSpec` is applied. Use
+`sbx_context_mix_amp_effective_at(...)` when the effective runtime mix level is
+what matters.
 
 `sbx_context_sample_mix_effects(...)` evaluates the effective mix-effect chain
 at one timeline time. It returns:

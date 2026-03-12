@@ -134,6 +134,7 @@ struct SbxContext {
   size_t mix_kf_count;
   size_t mix_kf_seg;
   double mix_default_amp_pct;
+  SbxMixModSpec mix_mod;
   double *custom_waves[SBX_CUSTOM_WAVE_COUNT];
   SbxTelemetryCallback telemetry_cb;
   void *telemetry_user;
@@ -232,6 +233,7 @@ static int curve_eval_expr_target(SbxCurveProgram *curve,
                                   double default_value,
                                   double *out_value);
 static int sbx_validate_mix_fx_spec_fields(const SbxMixFxSpec *spec);
+static int sbx_validate_mix_mod_spec(const SbxMixModSpec *spec);
 
 static void
 set_last_error(SbxEngine *eng, const char *msg) {
@@ -2004,7 +2006,7 @@ ctx_collect_runtime_telemetry(SbxContext *ctx,
   out->primary_tone = tone;
   out->program_beat_hz = tone.beat_hz;
   out->program_carrier_hz = tone.carrier_hz;
-  out->mix_amp_pct = sbx_context_mix_amp_at(ctx, t_sec);
+  out->mix_amp_pct = sbx_context_mix_amp_effective_at(ctx, t_sec);
   out->voice_count = sbx_context_voice_count(ctx);
   out->aux_tone_count = ctx->aux_count;
   out->mix_effect_count = ctx->mix_fx_count + ctx->sbg_mix_fx_slots;
@@ -2586,6 +2588,16 @@ sbx_default_pcm16_dither_state(SbxPcm16DitherState *state) {
 }
 
 void
+sbx_default_mix_mod_spec(SbxMixModSpec *spec) {
+  if (!spec) return;
+  memset(spec, 0, sizeof(*spec));
+  spec->delta = 0.3;
+  spec->epsilon = 0.3;
+  spec->period_sec = 10.0 * 60.0;
+  spec->end_level = 0.7;
+}
+
+void
 sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed) {
   if (!state) return;
   state->rng_state = seed ? seed : 0x12345678u;
@@ -2795,6 +2807,7 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->mix_kf_count = 0;
   ctx->mix_kf_seg = 0;
   ctx->mix_default_amp_pct = 100.0;
+  sbx_default_mix_mod_spec(&ctx->mix_mod);
   ctx->telemetry_cb = 0;
   ctx->telemetry_user = 0;
   memset(&ctx->telemetry_last, 0, sizeof(ctx->telemetry_last));
@@ -4236,6 +4249,25 @@ sbx_validate_mix_fx_spec_fields(const SbxMixFxSpec *spec) {
   return SBX_OK;
 }
 
+static int
+sbx_validate_mix_mod_spec(const SbxMixModSpec *spec) {
+  if (!spec) return SBX_OK;
+  if (!spec->active) return SBX_OK;
+  if (!isfinite(spec->delta) || !isfinite(spec->epsilon) ||
+      !isfinite(spec->period_sec) || !isfinite(spec->end_level) ||
+      !isfinite(spec->main_len_sec) || !isfinite(spec->wake_len_sec))
+    return SBX_EINVAL;
+  if (spec->delta < 0.0 || spec->epsilon < 0.0)
+    return SBX_EINVAL;
+  if (!(spec->period_sec > 0.0) || !(spec->main_len_sec > 0.0) || spec->wake_len_sec < 0.0)
+    return SBX_EINVAL;
+  if (spec->end_level < 0.0 || spec->end_level > 1.0)
+    return SBX_EINVAL;
+  if (spec->wake_enabled != 0 && spec->wake_enabled != 1)
+    return SBX_EINVAL;
+  return SBX_OK;
+}
+
 static void
 sbx_mixfx_state_assign_spec(SbxMixFxState *state, const SbxMixFxSpec *spec) {
   int reset = 0;
@@ -4618,7 +4650,7 @@ sbx_context_mix_stream_sample(SbxContext *ctx,
 
   mix_l = (double)(mix_l_sample >> 4);
   mix_r = (double)(mix_r_sample >> 4);
-  mix_pct = sbx_context_mix_amp_at(ctx, t_sec);
+  mix_pct = sbx_context_mix_amp_effective_at(ctx, t_sec);
   mix_mul = (mix_pct / 100.0) * mix_mod_mul;
 
   *out_add_l = mix_l * mix_mul;
@@ -4764,6 +4796,35 @@ sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
 }
 
 int
+sbx_context_set_mix_mod(SbxContext *ctx, const SbxMixModSpec *spec) {
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!spec) {
+    memset(&ctx->mix_mod, 0, sizeof(ctx->mix_mod));
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (sbx_validate_mix_mod_spec(spec) != SBX_OK) {
+    set_ctx_error(ctx, "invalid mix modulation spec");
+    return SBX_EINVAL;
+  }
+  ctx->mix_mod = *spec;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
+sbx_context_get_mix_mod(const SbxContext *ctx, SbxMixModSpec *out) {
+  if (!ctx || !out) return SBX_EINVAL;
+  *out = ctx->mix_mod;
+  return SBX_OK;
+}
+
+int
+sbx_context_has_mix_mod(const SbxContext *ctx) {
+  return (ctx && ctx->mix_mod.active) ? 1 : 0;
+}
+
+int
 sbx_context_configure_runtime(SbxContext *ctx,
                               const SbxMixAmpKeyframe *mix_kfs,
                               size_t mix_kf_count,
@@ -4827,6 +4888,56 @@ sbx_context_mix_amp_at(SbxContext *ctx, double t_sec) {
   if (u > 1.0) u = 1.0;
   if (k0->interp == SBX_INTERP_STEP) u = 0.0;
   return k0->amp_pct + (k1->amp_pct - k0->amp_pct) * u;
+}
+
+double
+sbx_mix_mod_mul_at(const SbxMixModSpec *spec, double t_sec) {
+  double t_main, mod_2k, x, g, v, two_k;
+
+  if (!spec || !spec->active)
+    return 1.0;
+  if (!isfinite(t_sec))
+    return 1.0;
+  if (sbx_validate_mix_mod_spec(spec) != SBX_OK)
+    return 1.0;
+
+  if (t_sec < 0.0) t_sec = 0.0;
+  t_main = spec->main_len_sec;
+
+  if (t_sec < t_main) {
+    two_k = 2.0 * spec->period_sec;
+    mod_2k = fmod(t_sec, two_k);
+    if (mod_2k < 0.0) mod_2k += two_k;
+    x = (mod_2k - spec->period_sec) / 60.0;
+    g = 1.0 - spec->delta * exp(-spec->epsilon * x * x);
+    v = 1.0 - ((1.0 - spec->end_level) / t_main) * t_sec;
+    if (g < 0.0) g = 0.0;
+    if (v < 0.0) v = 0.0;
+    return g * v;
+  }
+
+  if (spec->wake_enabled && spec->wake_len_sec > 0.0) {
+    double tw = t_sec - t_main;
+    if (tw < 0.0) tw = 0.0;
+    if (tw <= spec->wake_len_sec) {
+      double w = (1.0 - spec->end_level) + (spec->end_level / spec->wake_len_sec) * tw;
+      if (w < 0.0) w = 0.0;
+      return w;
+    }
+  }
+
+  return 1.0;
+}
+
+double
+sbx_context_mix_mod_mul_at(SbxContext *ctx, double t_sec) {
+  if (!ctx) return 1.0;
+  return sbx_mix_mod_mul_at(&ctx->mix_mod, t_sec);
+}
+
+double
+sbx_context_mix_amp_effective_at(SbxContext *ctx, double t_sec) {
+  return sbx_context_mix_amp_at(ctx, t_sec) * sbx_context_mix_mod_mul_at(ctx, t_sec);
 }
 
 int

@@ -398,6 +398,38 @@ int main(void) {
       fail("mix amp default mismatch");
   }
   {
+    SbxMixModSpec mod;
+    double base_pct, eff_pct, mul;
+    sbx_default_mix_mod_spec(&mod);
+    mod.active = 1;
+    mod.main_len_sec = 120.0;
+    mod.wake_len_sec = 0.0;
+    mod.wake_enabled = 0;
+    if (sbx_context_set_mix_amp_keyframes(ctx, 0, 0, 97.0) != SBX_OK)
+      fail("set default mix amp before mix modulation failed");
+    if (sbx_context_set_mix_mod(ctx, &mod) != SBX_OK)
+      fail("set mix modulation failed");
+    if (!sbx_context_has_mix_mod(ctx))
+      fail("mix modulation should report active");
+    if (sbx_context_get_mix_mod(ctx, &mod) != SBX_OK)
+      fail("get mix modulation failed");
+    if (!mod.active || fabs(mod.end_level - 0.7) > 1e-9)
+      fail("get mix modulation mismatch");
+    base_pct = sbx_context_mix_amp_at(ctx, 10.0);
+    mul = sbx_context_mix_mod_mul_at(ctx, 10.0);
+    eff_pct = sbx_context_mix_amp_effective_at(ctx, 10.0);
+    if (fabs(base_pct - 97.0) > 1e-9)
+      fail("base mix amp should remain unchanged by mix modulation");
+    if (!(mul < 1.0 && mul > 0.0))
+      fail("mix modulation multiplier should attenuate during main phase");
+    if (!(eff_pct < base_pct))
+      fail("effective mix amp should include mix modulation");
+    if (sbx_context_set_mix_mod(ctx, 0) != SBX_OK)
+      fail("clear mix modulation failed");
+    if (sbx_context_has_mix_mod(ctx))
+      fail("mix modulation should report inactive after clear");
+  }
+  {
     SbxProgramKeyframe kf[2];
     SbxToneSpec t;
     if (sbx_parse_tone_spec("200+10/20", &t) != SBX_OK)
