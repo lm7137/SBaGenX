@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 19  /* public API contract revision */
+#define SBX_API_VERSION 20  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -120,6 +120,10 @@ typedef struct {
   double amplitude;  /* 0.0 .. 1.0 */
   int waveform;      /* SBX_WAVE_* or SBX_WAVE_CUSTOM_BASE + [0..99] for waveNN */
   double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.4) */
+  double iso_start;   /* cycle-relative start phase for isochronic mode (default 0.0) */
+  double iso_attack;  /* attack share of isochronic on-window (default 0.15) */
+  double iso_release; /* release share of isochronic on-window (default 0.15) */
+  int iso_edge_mode;  /* 0 hard, 1 linear, 2 smoothstep, 3 smootherstep */
 } SbxToneSpec;
 
 typedef struct {
@@ -177,6 +181,10 @@ typedef struct {
   SbxToneMode mode;
   int waveform;
   double duty_cycle;
+  double iso_start;
+  double iso_attack;
+  double iso_release;
+  int iso_edge_mode;
   double amplitude;
   double duration_sec;
   int loop;
@@ -665,10 +673,40 @@ int sbx_sample_mixam_cycle(const SbxMixFxSpec *fx,
                            double *out_gain);
 
 /*
+ * Sample the built-in exponential drop beat/pulse curve used by `-p drop`.
+ * Times are in seconds. out_t_sec is optional (may be NULL).
+ */
+int sbx_sample_drop_curve(double drop_sec,
+                          double beat_start_hz,
+                          double beat_target_hz,
+                          int slide,
+                          int n_step,
+                          int step_len_sec,
+                          size_t sample_count,
+                          double *out_t_sec,
+                          double *out_hz);
+
+/*
+ * Sample the built-in sigmoid beat/pulse curve used by `-p sigmoid`.
+ * Times are in seconds. out_t_sec is optional (may be NULL).
+ */
+int sbx_sample_sigmoid_curve(double drop_sec,
+                             double beat_start_hz,
+                             double beat_target_hz,
+                             double sig_l,
+                             double sig_h,
+                             double sig_a,
+                             double sig_b,
+                             size_t sample_count,
+                             double *out_t_sec,
+                             double *out_hz);
+
+/*
  * Sample one isochronic cycle for plotting/inspection.
  * - tone must be an isochronic tone with beat_hz > 0.
- * - if env is NULL, library runtime defaults are used:
- *   start=0, duty=tone->duty_cycle, attack=0.15, release=0.15, edge=2.
+ * - if env is NULL, the tone's runtime envelope is used:
+ *   start=tone->iso_start, duty=tone->duty_cycle, attack=tone->iso_attack,
+ *   release=tone->iso_release, edge=tone->iso_edge_mode.
  * - at least one of out_envelope/out_wave must be non-NULL.
  * - out_t_sec is optional (may be NULL).
  */

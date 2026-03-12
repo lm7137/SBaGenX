@@ -71,7 +71,9 @@ Core Concepts
 - `SbxContext`: higher-level runtime object with load state (tone, keyframes,
   sequence data, aux tones, mix effects, mix amplitude profile, clock).
 - `SbxToneSpec`: canonical tone description across binaural/monaural/isochronic/
-  noise/bell/spin modes.
+  noise/bell/spin modes. For isochronic tones it now carries the full runtime
+  envelope (`duty_cycle`, `iso_start`, `iso_attack`, `iso_release`,
+  `iso_edge_mode`), not just duty.
 - `SbxPcm16DitherState`: caller-owned RNG state for TPDF dither when converting
   normalized float render output to signed 16-bit PCM.
 - `SbxPcmConvertState`: generic PCM conversion state with explicit dither mode.
@@ -218,6 +220,10 @@ host-side exporters and GUI tooling even though the render source remains
 - `sbx_curve_get_param(const SbxCurveProgram *curve, size_t index, const char **out_name, double *out_value)`
 - `sbx_curve_source_name(const SbxCurveProgram *curve)`
 - `sbx_curve_last_error(const SbxCurveProgram *curve)`
+
+For isochronic curve sources, `SbxCurveSourceConfig` mirrors the full runtime
+envelope transport used by `SbxToneSpec`: `duty_cycle`, `iso_start`,
+`iso_attack`, `iso_release`, and `iso_edge_mode`.
 
 This is the library-owned `.sbgf` surface used by both the CLI `-p curve`
 path and future IDE/GUI tooling.
@@ -399,6 +405,8 @@ Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
 - `sbx_context_sample_program_beat_voice(...)`
 - `sbx_context_eval_active_tones(...)`
 - `sbx_sample_mixam_cycle(...)`
+- `sbx_sample_drop_curve(...)`
+- `sbx_sample_sigmoid_curve(...)`
 - `sbx_sample_isochronic_cycle(...)`
 - `sbx_default_iso_envelope_spec(...)`
 
@@ -435,10 +443,17 @@ time range without advancing render time.
 `sbx_sample_mixam_cycle` samples one cycle of a `mixam` envelope plus the
 derived gain curve (`f + (1-f) * envelope`) for plotting/inspection.
 
+`sbx_sample_drop_curve` and `sbx_sample_sigmoid_curve` sample the built-in
+`-p drop` and `-p sigmoid` beat/pulse curves directly from `sbagenxlib`
+without requiring the CLI to reimplement their math. These are the preferred
+frontend helpers for backend-neutral beat-vs-time plot data when a host wants
+the built-in program shapes but not a full render context.
+
 `sbx_sample_isochronic_cycle` samples one isochronic cycle into envelope and
 waveform arrays. If no explicit `SbxIsoEnvelopeSpec` is provided, the helper
-uses the library runtime defaults (`start=0`, `duty=tone->duty_cycle`,
-`attack=0.15`, `release=0.15`, `edge=2`).
+uses the envelope carried on the supplied `SbxToneSpec`
+(`iso_start`/`duty_cycle`/`iso_attack`/`iso_release`/`iso_edge_mode`), so
+cycle plots and runtime playback share the same defaults and custom settings.
 
 Minimal Lifecycle
 -----------------

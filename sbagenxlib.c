@@ -1089,6 +1089,10 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     tone->amplitude = 0.0;
     tone->waveform = SBX_WAVE_SINE;
     tone->duty_cycle = 0.4;
+    tone->iso_start = 0.0;
+    tone->iso_attack = 0.15;
+    tone->iso_release = 0.15;
+    tone->iso_edge_mode = 2;
     return SBX_OK;
   }
 
@@ -1148,7 +1152,30 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
       if (err && err_sz) snprintf(err, err_sz, "%s", "duty_cycle must be finite");
       return SBX_EINVAL;
     }
+    if (!isfinite(tone->iso_start)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "iso_start must be finite");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(tone->iso_attack)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "iso_attack must be finite");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(tone->iso_release)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "iso_release must be finite");
+      return SBX_EINVAL;
+    }
     tone->duty_cycle = sbx_dsp_clamp(tone->duty_cycle, 0.01, 1.0);
+    tone->iso_start = sbx_dsp_clamp(tone->iso_start, 0.0, 1.0);
+    tone->iso_attack = sbx_dsp_clamp(tone->iso_attack, 0.0, 1.0);
+    tone->iso_release = sbx_dsp_clamp(tone->iso_release, 0.0, 1.0);
+    if ((tone->iso_attack + tone->iso_release) > (1.0 + 1e-12)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "iso_attack + iso_release must be <= 1");
+      return SBX_EINVAL;
+    }
+    if (tone->iso_edge_mode < 0 || tone->iso_edge_mode > 3) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "iso_edge_mode must be 0..3");
+      return SBX_EINVAL;
+    }
   }
 
   return SBX_OK;
@@ -1326,7 +1353,6 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f2 / sr, SBX_TAU);
   } else if (eng->tone.mode == SBX_TONE_ISOCHRONIC) {
     double env = 0.0;
-    double duty = eng->tone.duty_cycle;
     double pos;
     double carrier;
 
@@ -1337,7 +1363,12 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     while (eng->pulse_phase >= 1.0) eng->pulse_phase -= 1.0;
     pos = eng->pulse_phase;
 
-    env = sbx_dsp_iso_mod_factor_custom(pos, 0.0, duty, 0.15, 0.15, 2);
+    env = sbx_dsp_iso_mod_factor_custom(pos,
+                                        eng->tone.iso_start,
+                                        eng->tone.duty_cycle,
+                                        eng->tone.iso_attack,
+                                        eng->tone.iso_release,
+                                        eng->tone.iso_edge_mode);
 
     left = right = amp * env * carrier;
   } else if (eng->tone.mode == SBX_TONE_BELL) {
@@ -1850,6 +1881,10 @@ ctx_eval_keyframed_tone_at(const SbxProgramKeyframe *kfs,
   out->amplitude = sbx_lerp(k0->tone.amplitude, k1->tone.amplitude, u);
   out->waveform = k0->tone.waveform;
   out->duty_cycle = sbx_lerp(k0->tone.duty_cycle, k1->tone.duty_cycle, u);
+  out->iso_start = sbx_lerp(k0->tone.iso_start, k1->tone.iso_start, u);
+  out->iso_attack = sbx_lerp(k0->tone.iso_attack, k1->tone.iso_attack, u);
+  out->iso_release = sbx_lerp(k0->tone.iso_release, k1->tone.iso_release, u);
+  out->iso_edge_mode = k0->tone.iso_edge_mode;
   if (inout_seg) *inout_seg = seg;
 }
 
@@ -2528,6 +2563,10 @@ sbx_default_tone_spec(SbxToneSpec *tone) {
   tone->amplitude = 0.5;
   tone->waveform = SBX_WAVE_SINE;
   tone->duty_cycle = 0.4;
+  tone->iso_start = 0.0;
+  tone->iso_attack = 0.15;
+  tone->iso_release = 0.15;
+  tone->iso_edge_mode = 2;
 }
 
 void
@@ -2868,15 +2907,41 @@ sbx_context_load_curve_program(SbxContext *ctx,
     set_ctx_error(ctx, "curve source amplitude must be finite and >= 0");
     return SBX_EINVAL;
   }
-  if (!isfinite(local_cfg.duty_cycle) || local_cfg.duty_cycle < 0.0 || local_cfg.duty_cycle > 1.0) {
-    set_ctx_error(ctx, "curve source duty_cycle must be in [0,1]");
-    return SBX_EINVAL;
+  if (local_cfg.mode == SBX_TONE_ISOCHRONIC) {
+    if (!isfinite(local_cfg.duty_cycle) || local_cfg.duty_cycle < 0.0 || local_cfg.duty_cycle > 1.0) {
+      set_ctx_error(ctx, "curve source duty_cycle must be in [0,1]");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(local_cfg.iso_start) || local_cfg.iso_start < 0.0 || local_cfg.iso_start > 1.0) {
+      set_ctx_error(ctx, "curve source iso_start must be in [0,1]");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(local_cfg.iso_attack) || local_cfg.iso_attack < 0.0 || local_cfg.iso_attack > 1.0) {
+      set_ctx_error(ctx, "curve source iso_attack must be in [0,1]");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(local_cfg.iso_release) || local_cfg.iso_release < 0.0 || local_cfg.iso_release > 1.0) {
+      set_ctx_error(ctx, "curve source iso_release must be in [0,1]");
+      return SBX_EINVAL;
+    }
+    if ((local_cfg.iso_attack + local_cfg.iso_release) > (1.0 + 1e-12)) {
+      set_ctx_error(ctx, "curve source iso_attack + iso_release must be <= 1");
+      return SBX_EINVAL;
+    }
+    if (local_cfg.iso_edge_mode < 0 || local_cfg.iso_edge_mode > 3) {
+      set_ctx_error(ctx, "curve source iso_edge_mode must be 0..3");
+      return SBX_EINVAL;
+    }
   }
 
   sbx_default_tone_spec(&tone);
   tone.mode = local_cfg.mode;
   tone.waveform = local_cfg.waveform;
   tone.duty_cycle = local_cfg.duty_cycle;
+  tone.iso_start = local_cfg.iso_start;
+  tone.iso_attack = local_cfg.iso_attack;
+  tone.iso_release = local_cfg.iso_release;
+  tone.iso_edge_mode = local_cfg.iso_edge_mode;
   tone.amplitude = local_cfg.amplitude;
 
   rc = sbx_curve_eval(curve, 0.0, &pt);
@@ -5243,6 +5308,97 @@ sbx_sample_mixam_cycle(const SbxMixFxSpec *fx,
   return SBX_OK;
 }
 
+static double
+sbx_sigmoid_curve_eval(double t_min,
+                       double d_min,
+                       double beat_target,
+                       double sig_l,
+                       double sig_h,
+                       double sig_a,
+                       double sig_b) {
+  if (t_min >= d_min) return beat_target;
+  return sig_a * tanh(sig_l * (t_min - d_min / 2.0 - sig_h)) + sig_b;
+}
+
+int
+sbx_sample_drop_curve(double drop_sec,
+                      double beat_start_hz,
+                      double beat_target_hz,
+                      int slide,
+                      int n_step,
+                      int step_len_sec,
+                      size_t sample_count,
+                      double *out_t_sec,
+                      double *out_hz) {
+  size_t i;
+  double drop_min;
+
+  if (!out_hz || sample_count == 0) return SBX_EINVAL;
+  if (!isfinite(drop_sec) || drop_sec <= 0.0) return SBX_EINVAL;
+  if (!isfinite(beat_start_hz) || beat_start_hz <= 0.0) return SBX_EINVAL;
+  if (!isfinite(beat_target_hz) || beat_target_hz <= 0.0) return SBX_EINVAL;
+
+  drop_min = drop_sec / 60.0;
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double t_sec = sbx_lerp(0.0, drop_sec, u);
+    double t_min = t_sec / 60.0;
+    double y;
+
+    if (!slide && n_step > 1 && step_len_sec > 0) {
+      int idx = (int)(t_sec / (double)step_len_sec);
+      if (idx < 0) idx = 0;
+      if (idx > n_step - 1) idx = n_step - 1;
+      y = beat_start_hz * exp(log(beat_target_hz / beat_start_hz) *
+                              idx / (double)(n_step - 1));
+    } else {
+      if (t_min < 0.0) t_min = 0.0;
+      if (t_min > drop_min) t_min = drop_min;
+      y = beat_start_hz * exp(log(beat_target_hz / beat_start_hz) * t_min / drop_min);
+    }
+
+    if (out_t_sec) out_t_sec[i] = t_sec;
+    out_hz[i] = y;
+  }
+
+  return SBX_OK;
+}
+
+int
+sbx_sample_sigmoid_curve(double drop_sec,
+                         double beat_start_hz,
+                         double beat_target_hz,
+                         double sig_l,
+                         double sig_h,
+                         double sig_a,
+                         double sig_b,
+                         size_t sample_count,
+                         double *out_t_sec,
+                         double *out_hz) {
+  size_t i;
+  double drop_min;
+
+  if (!out_hz || sample_count == 0) return SBX_EINVAL;
+  if (!isfinite(drop_sec) || drop_sec <= 0.0) return SBX_EINVAL;
+  if (!isfinite(beat_start_hz) || beat_start_hz <= 0.0) return SBX_EINVAL;
+  if (!isfinite(beat_target_hz) || beat_target_hz <= 0.0) return SBX_EINVAL;
+  if (!isfinite(sig_l) || !isfinite(sig_h) || !isfinite(sig_a) || !isfinite(sig_b))
+    return SBX_EINVAL;
+
+  drop_min = drop_sec / 60.0;
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double t_sec = sbx_lerp(0.0, drop_sec, u);
+    double t_min = t_sec / 60.0;
+    double y = sbx_sigmoid_curve_eval(t_min, drop_min,
+                                      beat_target_hz, sig_l, sig_h, sig_a, sig_b);
+    if (out_t_sec) out_t_sec[i] = t_sec;
+    out_hz[i] = y;
+  }
+
+  return SBX_OK;
+}
+
 int
 sbx_sample_isochronic_cycle(const SbxToneSpec *tone_in,
                             const SbxIsoEnvelopeSpec *env,
@@ -5266,8 +5422,11 @@ sbx_sample_isochronic_cycle(const SbxToneSpec *tone_in,
   if (env) {
     use_env = *env;
   } else {
-    sbx_default_iso_envelope_spec(&use_env);
+    use_env.start = tone.iso_start;
     use_env.duty = tone.duty_cycle;
+    use_env.attack = tone.iso_attack;
+    use_env.release = tone.iso_release;
+    use_env.edge_mode = tone.iso_edge_mode;
   }
 
   if (!isfinite(use_env.start) || use_env.start < 0.0 || use_env.start > 1.0) return SBX_EINVAL;

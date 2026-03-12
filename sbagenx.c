@@ -423,7 +423,7 @@ help() {
 	  NL "                      defaults: d=0.3:e=0.3:k=10:E=0.7"
 	  NL "          -I [spec] Customize isochronic (@) pulse envelope; spec is"
 	  NL "                      s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>"
-	  NL "                      defaults s=0.0485:d=0.4030:a=0.5:r=0.5:e=2"
+	  NL "                      defaults s=0:d=0.4:a=0.15:r=0.15:e=2"
 	  NL "          -H [spec] Customize global mixam envelope for mixam:<pulse|beat>"
 	  NL "                      spec is m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>"
 	  NL "                      order-independent; omitted params use defaults"
@@ -608,10 +608,10 @@ double opt_A_e= 0.3;		// e parameter for mix modulation
 double opt_A_k= 10.0;		// k parameter (minutes) for mix modulation
 double opt_A_E= 0.7;		// E parameter for mix modulation
 int opt_I;			// Enable custom isochronic gate for @ tones
-double opt_I_s= 0.048493;	// Gate start as cycle proportion (legacy-equivalent default)
-double opt_I_d= 0.403014;	// Gate duty as cycle proportion (legacy-equivalent default)
-double opt_I_a= 0.5;		// Attack as fraction of ON window
-double opt_I_r= 0.5;		// Release as fraction of ON window
+double opt_I_s= 0.0;		// Gate start as cycle proportion (library-aligned default)
+double opt_I_d= 0.4;		// Gate duty as cycle proportion (library-aligned default)
+double opt_I_a= 0.15;		// Attack as fraction of ON window
+double opt_I_r= 0.15;		// Release as fraction of ON window
 int opt_I_e= 2;			// Edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
 int opt_H;			// Enable global mixam envelope override
 int opt_H_m= SBX_MIXAM_MODE_COS;	// mixam model: 0 pulse, 1 raised-cosine
@@ -1571,24 +1571,8 @@ isochronic_mod_factor_phase_custom(double phase,
 }
 
 static double
-wave_sample_phase(int waveform, double phase) {
-   int idx;
-   phase= sbx_dsp_wrap_unit(phase);
-   idx= (int)(phase * ST_SIZ);
-   if (idx >= ST_SIZ) idx= ST_SIZ-1;
-   return sin_tables[waveform][idx] / (double)ST_AMP;
-}
-
-static double
-isochronic_mod_factor_phase_legacy(double phase, int waveform) {
-   double wave= wave_sample_phase(waveform, phase);
-   double mod_factor= 0.0;
-   double threshold= 0.3;
-   if (wave > threshold) {
-      mod_factor= (wave - threshold) / (1.0 - threshold);
-      mod_factor= sbx_dsp_smoothstep01(mod_factor);
-   }
-   return mod_factor;
+isochronic_mod_factor_phase_default(double phase) {
+   return sbx_dsp_iso_mod_factor_custom(phase, opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
 }
 
 static double
@@ -1596,7 +1580,7 @@ isochronic_mod_factor(Channel *ch) {
    double phase= ch->off2 / (double)(ST_SIZ * 65536.0);
    if (opt_I)
       return isochronic_mod_factor_phase_custom(phase, opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
-   return isochronic_mod_factor_phase_legacy(phase, ch->v.waveform);
+   return isochronic_mod_factor_phase_default(phase);
 }
 
 // Configure monaural twin routing for the registered curve.
@@ -2492,13 +2476,6 @@ try_external_mixam_cycle_graph_png(const char *out_fname,
    return plot_try_external_cmd(script, out_fname, args);
 }
 
-static double
-sigmoid_eval(double t_min, double d_min, double beat_target,
-	     double sig_l, double sig_h, double sig_a, double sig_b) {
-   if (t_min >= d_min) return beat_target;
-   return sig_a * tanh(sig_l * (t_min - d_min/2 - sig_h)) + sig_b;
-}
-
 static int
 build_integer_axis_ticks(double max_v, double *ticks, int max_ticks) {
    double step, xv;
@@ -2520,25 +2497,6 @@ build_integer_axis_ticks(double max_v, double *ticks, int max_ticks) {
    if (n < max_ticks && fabs(ticks[n-1] - max_v) > 1e-9)
       ticks[n++]= max_v;
    return n;
-}
-
-static double
-drop_eval(double t_min, double d_min, double beat_start, double beat_target,
-	  int slide, int n_step, int steplen_sec) {
-   if (d_min <= 0.0) return beat_target;
-   if (t_min < 0.0) t_min= 0.0;
-   if (t_min > d_min) t_min= d_min;
-   if (!(beat_start > 0.0))
-      beat_start= 10.0;
-
-   if (!slide && n_step > 1 && steplen_sec > 0) {
-      int idx= (int)(t_min * 60.0 / steplen_sec);
-      if (idx < 0) idx= 0;
-      if (idx > n_step-1) idx= n_step-1;
-      return beat_start * exp(log(beat_target/beat_start) * idx / (double)(n_step-1));
-   }
-
-   return beat_start * exp(log(beat_target/beat_start) * t_min / d_min);
 }
 
 static const char *
@@ -2581,11 +2539,21 @@ write_drop_graph_png(const char *fmt, double level,
    int nx;
    const char *x_label= "TIME MIN";
    const char *y_label= "FREQ HZ";
+   int n_curve= 2001;
+   double *curve_y= 0;
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
    if (d_min <= 0.0)
       error("Drop graph requires a drop-time > 0");
+
+   curve_y= ALLOC_ARR(n_curve, double);
+   if (sbx_sample_drop_curve(len0, beat_start, beat_target,
+			     slide, n_step, steplen,
+			     n_curve, 0, curve_y) != SBX_OK) {
+      free(curve_y);
+      error("Failed to sample drop graph through sbagenxlib");
+   }
 
    sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
    double_to_token(level, lvl_tok, sizeof(lvl_tok));
@@ -2618,9 +2586,8 @@ write_drop_graph_png(const char *fmt, double level,
       plot_vline(img_hi, hw, hh, gx, mt, mt+ph-1, 236, 236, 236);
    }
 
-   for (a= 0; a<=2000; a++) {
-      double t_min= d_min * a / 2000.0;
-      double y= drop_eval(t_min, d_min, beat_start, beat_target, slide, n_step, steplen);
+   for (a= 0; a<n_curve; a++) {
+      double y= curve_y[a];
       if (y < y_min) y_min= y;
       if (y > y_max) y_max= y;
    }
@@ -2657,10 +2624,17 @@ write_drop_graph_png(const char *fmt, double level,
    plot_vline(img_hi, hw, hh, ml+pw-1, mt, mt+ph-1, 90, 90, 90);
 
    for (a= 0; a<pw; a++) {
-      double t_min= d_min * a / (double)(pw-1);
-      double y= drop_eval(t_min, d_min, beat_start, beat_target, slide, n_step, steplen);
+      double pos= (n_curve-1) * a / (double)(pw-1);
+      int i0= (int)floor(pos);
+      int i1= i0 + 1;
+      double rat, y;
       int px= ml + a;
-      int py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
+      int py;
+      if (i0 < 0) i0= 0;
+      if (i1 >= n_curve) i1= n_curve-1;
+      rat= pos - i0;
+      y= curve_y[i0] + (curve_y[i1] - curve_y[i0]) * rat;
+      py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
       if (a == 0) start_y= py;
       if (a == pw-1) end_y= py;
       if (prev_x >= 0)
@@ -2742,6 +2716,7 @@ write_drop_graph_png(const char *fmt, double level,
       warn("Drop graph saved to: %s", fname);
 
    free(img);
+   free(curve_y);
 }
 
 void
@@ -3002,9 +2977,19 @@ write_sigmoid_graph_png(const char *fmt, double level,
    char fname[1024];
    const char *x_label= "TIME MIN";
    const char *y_label= "FREQ HZ";
+   int n_curve= 2001;
+   double *curve_y= 0;
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
+
+   curve_y= ALLOC_ARR(n_curve, double);
+   if (sbx_sample_sigmoid_curve(len0, beat_start, beat_target,
+				sig_l, sig_h, sig_a, sig_b,
+				n_curve, 0, curve_y) != SBX_OK) {
+      free(curve_y);
+      error("Failed to sample sigmoid graph through sbagenxlib");
+   }
 
    sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
    double_to_token(level, lvl_tok, sizeof(lvl_tok));
@@ -3030,9 +3015,8 @@ write_sigmoid_graph_png(const char *fmt, double level,
       plot_vline(img_hi, hw, hh, gx, mt, mt+ph-1, 236, 236, 236);
    }
 
-   for (a= 0; a<=2000; a++) {
-      double t_min= d_min * a / 2000.0;
-      double y= sigmoid_eval(t_min, d_min, beat_target, sig_l, sig_h, sig_a, sig_b);
+   for (a= 0; a<n_curve; a++) {
+      double y= curve_y[a];
       if (y < y_min) y_min= y;
       if (y > y_max) y_max= y;
    }
@@ -3070,10 +3054,17 @@ write_sigmoid_graph_png(const char *fmt, double level,
    plot_vline(img_hi, hw, hh, ml+pw-1, mt, mt+ph-1, 90, 90, 90);
 
    for (a= 0; a<pw; a++) {
-      double t_min= d_min * a / (double)(pw-1);
-      double y= sigmoid_eval(t_min, d_min, beat_target, sig_l, sig_h, sig_a, sig_b);
+      double pos= (n_curve-1) * a / (double)(pw-1);
+      int i0= (int)floor(pos);
+      int i1= i0 + 1;
+      double rat, y;
       int px= ml + a;
-      int py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
+      int py;
+      if (i0 < 0) i0= 0;
+      if (i1 >= n_curve) i1= n_curve-1;
+      rat= pos - i0;
+      y= curve_y[i0] + (curve_y[i1] - curve_y[i0]) * rat;
+      py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
       if (a == 0) start_y= py;
       if (a == pw-1) end_y= py;
       if (prev_x >= 0)
@@ -3153,6 +3144,7 @@ write_sigmoid_graph_png(const char *fmt, double level,
       warn("Sigmoid graph saved to: %s", fname);
 
    free(img);
+   free(curve_y);
 }
 
 void
@@ -3171,6 +3163,9 @@ write_mixam_cycle_graph_png(void) {
    int a, i, prev_ex= -1, prev_ey= -1, prev_gx= -1, prev_gy= -1;
    unsigned char *img_hi;
    unsigned char *img;
+   double *env_samp;
+   double *gain_samp;
+   SbxMixFxSpec fx;
    char s_tok[64], d_tok[64], a_tok[64], r_tok[64], f_tok[64], fname[512];
    char tick_txt[64];
    char ptxt1[256], ptxt2[256];
@@ -3196,6 +3191,23 @@ write_mixam_cycle_graph_png(void) {
       if (!opt_Q)
 	 warn("Mixam cycle graph saved to: %s (Python/Cairo)", fname);
       return;
+   }
+
+   memset(&fx, 0, sizeof(fx));
+   fx.type= SBX_MIXFX_AM;
+   fx.mixam_mode= opt_H_m;
+   fx.mixam_start= opt_H_s;
+   fx.mixam_duty= opt_H_d;
+   fx.mixam_attack= opt_H_a;
+   fx.mixam_release= opt_H_r;
+   fx.mixam_edge_mode= opt_H_e;
+   fx.mixam_floor= opt_H_f;
+   env_samp= ALLOC_ARR(pw, double);
+   gain_samp= ALLOC_ARR(pw, double);
+   if (sbx_sample_mixam_cycle(&fx, 1.0, pw, 0, env_samp, gain_samp) != SBX_OK) {
+      free(env_samp);
+      free(gain_samp);
+      error("Failed to sample mixam cycle through sbagenxlib");
    }
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
@@ -3229,16 +3241,8 @@ write_mixam_cycle_graph_png(void) {
 
    for (a= 0; a<pw; a++) {
       int ex= ml + a;
-      double phase= a / (double)(pw-1);
-      double env;
-      if (opt_H_m == SBX_MIXAM_MODE_COS) {
-	 double phx= sbx_dsp_wrap_unit(phase + opt_H_s);
-	 env= 0.5 * (1.0 + cos(2.0 * M_PI * phx));
-      } else {
-	 env= sbx_dsp_iso_mod_factor_custom(phase, opt_H_s, opt_H_d,
-					    opt_H_a, opt_H_r, opt_H_e);
-      }
-      double gain= opt_H_f + (1.0 - opt_H_f) * env;
+      double env= env_samp[a];
+      double gain= gain_samp[a];
       int ey= top_y0 + (int)((1.0 - env) * (ph-1) + 0.5);
       int gy= bot_y0 + (int)((1.0 - gain) * (ph-1) + 0.5);
 
@@ -3334,6 +3338,8 @@ write_mixam_cycle_graph_png(void) {
    if (!opt_Q)
       warn("Mixam cycle graph saved to: %s", fname);
    free(img);
+   free(env_samp);
+   free(gain_samp);
 }
 
 static int
@@ -3439,6 +3445,9 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
    int a, i, prev_ex= -1, prev_ey= -1, prev_wx= -1, prev_wy= -1;
    unsigned char *img_hi;
    unsigned char *img;
+   double *env_samp;
+   double *wave_samp;
+   SbxToneSpec tone;
    double period_sec;
    char carr_tok[64], pulse_tok[64], amp_tok[64];
    char wave_tok[64], tick_txt[64], fname[512];
@@ -3475,6 +3484,25 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
       return;
    }
 
+   sbx_default_tone_spec(&tone);
+   tone.mode= SBX_TONE_ISOCHRONIC;
+   tone.carrier_hz= carr_hz;
+   tone.beat_hz= pulse_hz;
+   tone.amplitude= amp_pct / 100.0;
+   tone.waveform= waveform;
+   tone.duty_cycle= opt_I ? opt_I_d : 0.4;
+   tone.iso_start= opt_I ? opt_I_s : 0.0;
+   tone.iso_attack= opt_I ? opt_I_a : 0.15;
+   tone.iso_release= opt_I ? opt_I_r : 0.15;
+   tone.iso_edge_mode= opt_I ? opt_I_e : 2;
+   env_samp= ALLOC_ARR(pw, double);
+   wave_samp= ALLOC_ARR(pw, double);
+   if (sbx_sample_isochronic_cycle(&tone, 0, pw, 0, env_samp, wave_samp) != SBX_OK) {
+      free(env_samp);
+      free(wave_samp);
+      error("Failed to sample isochronic cycle through sbagenxlib");
+   }
+
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
    plot_fill(img_hi, hw, hh, 255, 255, 255);
    plot_fill_rect(img_hi, hw, hh, ml, top_y0, ml+pw-1, top_y1, 250, 250, 250);
@@ -3506,13 +3534,8 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
 
    for (a= 0; a<pw; a++) {
       int ex= ml + a;
-      double t= period_sec * a / (double)(pw-1);
-      double pulse_phase= pulse_hz * t;
-      double carr_phase= carr_hz * t;
-      double env= opt_I ?
-	 isochronic_mod_factor_phase_custom(pulse_phase, opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e) :
-	 isochronic_mod_factor_phase_legacy(pulse_phase, waveform);
-      double wav= wave_sample_phase(waveform, carr_phase) * env * (amp_pct / 100.0);
+      double env= env_samp[a];
+      double wav= wave_samp[a];
       int ey= top_y0 + (int)((1.0 - env) * (ph-1) + 0.5);
       int wy= bot_y0 + (int)((1.0 - ((wav + 1.0) * 0.5)) * (ph-1) + 0.5);
 
@@ -3589,7 +3612,8 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
       snprintf(ptxt2, sizeof(ptxt2), "I:s=%.4f d=%.4f a=%.2f r=%.2f e=%d",
 	       opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
    } else {
-      snprintf(ptxt2, sizeof(ptxt2), "I=default threshold gate");
+      snprintf(ptxt2, sizeof(ptxt2), "I:s=%.4f d=%.4f a=%.2f r=%.2f e=%d",
+	       opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
    }
    {
       int tw1= font5x7_text_width(ptxt1, param_scale);
@@ -3610,6 +3634,8 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
    if (!opt_Q)
       warn("Isochronic cycle graph saved to: %s", fname);
    free(img);
+   free(env_samp);
+   free(wave_samp);
 }
 
 void
@@ -9009,6 +9035,10 @@ sbx_runtime_activate_from_curve_program(SbxCurveProgram **curvep,
    csrc.mode= isisochronic ? SBX_TONE_ISOCHRONIC : (ismono ? SBX_TONE_MONAURAL : SBX_TONE_BINAURAL);
    csrc.waveform= opt_w;
    csrc.duty_cycle= opt_I ? opt_I_d : 0.4;
+   csrc.iso_start= opt_I ? opt_I_s : 0.0;
+   csrc.iso_attack= opt_I ? opt_I_a : 0.15;
+   csrc.iso_release= opt_I ? opt_I_r : 0.15;
+   csrc.iso_edge_mode= opt_I ? opt_I_e : 2;
    csrc.amplitude= 1.0;
    csrc.duration_sec= duration_sec;
    csrc.loop= 0;
@@ -9269,6 +9299,10 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
    tone->amplitude= amp_pct / 100.0;
    tone->waveform= opt_w;
    tone->duty_cycle= opt_I ? opt_I_d : 0.4;
+   tone->iso_start= opt_I ? opt_I_s : 0.0;
+   tone->iso_attack= opt_I ? opt_I_a : 0.15;
+   tone->iso_release= opt_I ? opt_I_r : 0.15;
+   tone->iso_edge_mode= opt_I ? opt_I_e : 2;
 }
 
 static const double sbx_prog_target_vals[]= {

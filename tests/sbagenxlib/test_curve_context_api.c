@@ -184,6 +184,49 @@ main(void) {
   sbx_context_destroy(ctx);
   if (curve) sbx_curve_destroy(curve);
 
+  {
+    SbxContext *ctx_iso = NULL;
+    SbxCurveProgram *curve_iso = NULL;
+    SbxCurveSourceConfig iso_cfg;
+    SbxToneSpec iso_tone;
+
+    ctx_iso = sbx_context_create(&eng_cfg);
+    if (!ctx_iso) fail("sbx_context_create iso failed");
+    curve_iso = sbx_curve_create();
+    if (!curve_iso) fail("sbx_curve_create iso failed");
+    rc = sbx_curve_load_text(curve_iso,
+                             "beat = b0\n"
+                             "carrier = c0\n",
+                             "curve-context-iso-test.sbgf");
+    if (rc != SBX_OK) fail(sbx_curve_last_error(curve_iso));
+    rc = sbx_curve_prepare(curve_iso, &curve_cfg);
+    if (rc != SBX_OK) fail(sbx_curve_last_error(curve_iso));
+    sbx_default_curve_source_config(&iso_cfg);
+    iso_cfg.mode = SBX_TONE_ISOCHRONIC;
+    iso_cfg.waveform = SBX_WAVE_TRIANGLE;
+    iso_cfg.duty_cycle = 0.35;
+    iso_cfg.iso_start = 0.2;
+    iso_cfg.iso_attack = 0.25;
+    iso_cfg.iso_release = 0.5;
+    iso_cfg.iso_edge_mode = 3;
+    iso_cfg.amplitude = 0.9;
+    iso_cfg.duration_sec = 10.0;
+    rc = sbx_context_load_curve_program(ctx_iso, curve_iso, &iso_cfg);
+    if (rc != SBX_OK) fail(sbx_context_last_error(ctx_iso));
+    curve_iso = NULL; /* ownership transferred */
+    rc = sbx_context_sample_tones(ctx_iso, 0.0, 0.0, 1, NULL, &iso_tone);
+    if (rc != SBX_OK) fail("sample_tones iso curve failed");
+    if (iso_tone.mode != SBX_TONE_ISOCHRONIC ||
+        !near(iso_tone.duty_cycle, 0.35, 1e-9) ||
+        !near(iso_tone.iso_start, 0.2, 1e-9) ||
+        !near(iso_tone.iso_attack, 0.25, 1e-9) ||
+        !near(iso_tone.iso_release, 0.5, 1e-9) ||
+        iso_tone.iso_edge_mode != 3)
+      fail("curve context isochronic envelope transport mismatch");
+    sbx_context_destroy(ctx_iso);
+    if (curve_iso) sbx_curve_destroy(curve_iso);
+  }
+
   puts("PASS: curve-backed context API checks");
   return 0;
 }

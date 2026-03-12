@@ -20,6 +20,10 @@ sbx_default_curve_source_config(SbxCurveSourceConfig *cfg) {
   cfg->mode = SBX_TONE_BINAURAL;
   cfg->waveform = SBX_WAVE_SINE;
   cfg->duty_cycle = 0.4;
+  cfg->iso_start = 0.0;
+  cfg->iso_attack = 0.15;
+  cfg->iso_release = 0.15;
+  cfg->iso_edge_mode = 2;
   cfg->amplitude = 1.0;
   cfg->duration_sec = 0.0;
   cfg->loop = 0;

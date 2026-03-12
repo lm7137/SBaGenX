@@ -15,9 +15,21 @@ near(double a, double b, double eps) {
   return fabs(a - b) <= eps;
 }
 
+static double
+stereo_window_abs(const float *buf, size_t frame0, size_t frame1) {
+  size_t i;
+  double sum = 0.0;
+  for (i = frame0; i < frame1; i++) {
+    sum += fabs((double)buf[i * 2]);
+    sum += fabs((double)buf[i * 2 + 1]);
+  }
+  return sum;
+}
+
 int
 main(void) {
   SbxEngineConfig cfg;
+  SbxEngine *eng;
   SbxContext *ctx;
   SbxProgramKeyframe kf[2];
   SbxToneSpec samples[8];
@@ -36,6 +48,7 @@ main(void) {
   double env[8];
   double gain[8];
   double wave[8];
+  float iso_audio[2000];
   double max_env = 0.0;
   size_t i;
   size_t fx_count = 0;
@@ -119,6 +132,27 @@ main(void) {
   if (rc != SBX_EINVAL) fail("static tone secondary voice sampling should fail");
   rc = sbx_context_sample_program_beat_voice(ctx, 1, 0.0, 1.0, 4, ts, hz);
   if (rc != SBX_EINVAL) fail("static beat secondary voice sampling should fail");
+
+  sbx_default_tone_spec(&iso_tone);
+  iso_tone.mode = SBX_TONE_ISOCHRONIC;
+  iso_tone.carrier_hz = 200.0;
+  iso_tone.beat_hz = 2.0;
+  iso_tone.amplitude = 0.6;
+  iso_tone.duty_cycle = 0.35;
+  iso_tone.iso_start = 0.2;
+  iso_tone.iso_attack = 0.25;
+  iso_tone.iso_release = 0.5;
+  iso_tone.iso_edge_mode = 3;
+  rc = sbx_context_set_tone(ctx, &iso_tone);
+  if (rc != SBX_OK) fail("set_tone isochronic failed");
+  rc = sbx_context_sample_tones(ctx, 0.0, 0.5, 2, ts, samples);
+  if (rc != SBX_OK) fail("sample_tones isochronic failed");
+  if (!near(samples[0].duty_cycle, 0.35, 1e-9) ||
+      !near(samples[0].iso_start, 0.2, 1e-9) ||
+      !near(samples[0].iso_attack, 0.25, 1e-9) ||
+      !near(samples[0].iso_release, 0.5, 1e-9) ||
+      samples[0].iso_edge_mode != 3)
+    fail("static isochronic envelope sampling mismatch");
 
   rc = sbx_context_sample_tones(ctx, 0.0, 1.0, 0, ts, samples);
   if (rc != SBX_EINVAL) fail("sample_count=0 should fail");
@@ -251,11 +285,26 @@ main(void) {
 
   if (sbx_parse_tone_spec("200@1/100", &iso_tone) != SBX_OK)
     fail("parse isochronic tone failed");
+  iso_tone.iso_start = 0.25;
+  iso_tone.iso_attack = 0.0;
+  iso_tone.iso_release = 0.0;
+  iso_tone.iso_edge_mode = 0;
   sbx_default_iso_envelope_spec(&iso_env);
+  if (!near(iso_env.start, 0.0, 1e-12) ||
+      !near(iso_env.duty, 0.4, 1e-12) ||
+      !near(iso_env.attack, 0.15, 1e-12) ||
+      !near(iso_env.release, 0.15, 1e-12) ||
+      iso_env.edge_mode != 2)
+    fail("default isochronic envelope spec mismatch");
+  rc = sbx_sample_isochronic_cycle(&iso_tone, NULL, 8, ts, env, wave);
+  if (rc != SBX_OK) fail("sample_isochronic_cycle default env failed");
+  if (!(env[0] == 0.0 && env[1] == 0.0 && env[2] > 0.0))
+    fail("isochronic default-env sampling should honor tone envelope fields");
   iso_env.start = 0.1;
   iso_env.duty = 0.4;
   iso_env.attack = 0.25;
   iso_env.release = 0.25;
+  max_env = 0.0;
   rc = sbx_sample_isochronic_cycle(&iso_tone, &iso_env, 8, ts, env, wave);
   if (rc != SBX_OK) fail("sample_isochronic_cycle failed");
   if (!near(ts[0], 0.0, 1e-12) || !near(ts[7], 1.0, 1e-12))
@@ -270,6 +319,31 @@ main(void) {
     fail("isochronic envelope peak unexpectedly low");
   if (fabs(wave[0]) > 1e-12)
     fail("isochronic waveform should start at zero when envelope is zero");
+
+  sbx_default_engine_config(&cfg);
+  cfg.sample_rate = 1000.0;
+  eng = sbx_engine_create(&cfg);
+  if (!eng) fail("engine create failed");
+  sbx_default_tone_spec(&iso_tone);
+  iso_tone.mode = SBX_TONE_ISOCHRONIC;
+  iso_tone.carrier_hz = 50.0;
+  iso_tone.beat_hz = 1.0;
+  iso_tone.amplitude = 1.0;
+  iso_tone.waveform = SBX_WAVE_SINE;
+  iso_tone.duty_cycle = 0.2;
+  iso_tone.iso_start = 0.3;
+  iso_tone.iso_attack = 0.0;
+  iso_tone.iso_release = 0.0;
+  iso_tone.iso_edge_mode = 0;
+  rc = sbx_engine_set_tone(eng, &iso_tone);
+  if (rc != SBX_OK) fail("engine set isochronic tone failed");
+  rc = sbx_engine_render_f32(eng, iso_audio, 1000);
+  if (rc != SBX_OK) fail("engine render isochronic failed");
+  if (stereo_window_abs(iso_audio, 0, 200) > 1e-6)
+    fail("iso engine should remain silent before custom start");
+  if (stereo_window_abs(iso_audio, 350, 450) <= 1.0)
+    fail("iso engine should emit energy inside custom on-window");
+  sbx_engine_destroy(eng);
 
   sbx_context_destroy(ctx);
   printf("PASS: sbagenxlib plot sampling API checks\n");

@@ -281,7 +281,11 @@ Parameters are colon-separated, order-independent, and may be omitted.
 Constraint: `a + r <= 1`.
 Defaults are:
 
-  s=0.0485, d=0.4030, a=0.5, r=0.5, e=2
+  s=0, d=0.4, a=0.15, r=0.15, e=2
+
+These are also the runtime defaults used when `-I` is omitted entirely.
+When `-I` is supplied, those custom envelope parameters are now applied
+consistently to actual isochronic playback as well as to one-cycle plots.
 
 To render a one-cycle isochronic plot (PNG) instead of audio output,
 use `-P` with an isochronic (`@`) tone:
@@ -1930,7 +1934,7 @@ follows:
               Supported with -p drop/-p sigmoid/-p curve.
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
-              Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.
+              Defaults: s=0, d=0.4, a=0.15, r=0.15, e=2.
               Constraint: a+r <= 1.
               e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
   -H [spec] Customize mixam envelope globally.
