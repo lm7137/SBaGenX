@@ -2762,21 +2762,32 @@ write_curve_graph_png(const char *fmt, double level,
       error("Curve graph requires a drop-time > 0");
 
    curve_y= ALLOC_ARR(n_curve, double);
-   for (a= 0; a<n_curve; a++) {
-      double tim= len0 * a / (double)(n_curve-1);
-      double tim_eval= tim;
-      double beatv, carrv, ampv, mixv;
-      if (!slide && n_step > 1 && steplen > 0) {
-	 int idx= (int)(tim / steplen);
-	 if (idx < 0) idx= 0;
-	 if (idx > n_step-1) idx= n_step-1;
-	 tim_eval= idx * len0 / (double)(n_step-1);
-      }
-      if (!eval_custom_curve_point(tim_eval, &beatv, &carrv, &ampv, &mixv)) {
+   if (slide) {
+      if (sbx_curve_sample_program_beat(func_curve.prog, 0.0, (double)len0,
+					n_curve, 0, curve_y) != SBX_OK) {
 	 free(curve_y);
-	 error("Custom curve evaluation failed at t=%g seconds while plotting", tim_eval);
+	 curve_report_error(func_curve.prog, "Failed to sample .sbgf beat curve");
       }
-      curve_y[a]= beatv;
+   } else {
+      for (a= 0; a<n_curve; a++) {
+	 double tim= len0 * a / (double)(n_curve-1);
+	 double tim_eval= tim;
+	 double beatv;
+	 if (n_step > 1 && steplen > 0) {
+	    int idx= (int)(tim / steplen);
+	    if (idx < 0) idx= 0;
+	    if (idx > n_step-1) idx= n_step-1;
+	    tim_eval= idx * len0 / (double)(n_step-1);
+	 }
+	 if (sbx_curve_sample_program_beat(func_curve.prog, tim_eval, tim_eval, 1, 0, &beatv) != SBX_OK) {
+	    free(curve_y);
+	    curve_report_error(func_curve.prog, "Failed to sample stepped .sbgf beat curve");
+	 }
+	 curve_y[a]= beatv;
+      }
+   }
+   for (a= 0; a<n_curve; a++) {
+      double beatv= curve_y[a];
       if (beatv < y_min) y_min= beatv;
       if (beatv > y_max) y_max= beatv;
    }

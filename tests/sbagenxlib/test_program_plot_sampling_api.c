@@ -51,6 +51,8 @@ int
 main(void) {
   double ts[4];
   double ys[4];
+  SbxCurveProgram *curve = NULL;
+  SbxCurveEvalConfig cfg;
   int rc;
 
   rc = sbx_sample_drop_curve(600.0, 10.0, 2.5, 1, 0, 0, 3, ts, ys);
@@ -82,6 +84,33 @@ main(void) {
   if (sbx_sample_sigmoid_curve(0.0, 10.0, 2.5, 0.125, 0.0, -3.9306, 6.25, 3, ts, ys) != SBX_EINVAL)
     fail("sigmoid invalid args should fail");
 
-  puts("PASS: built-in program plot sampling API checks");
+  curve = sbx_curve_create();
+  if (!curve) fail("sbx_curve_create failed");
+  rc = sbx_curve_load_text(curve,
+                           "beat = lerp(b0,b1,ramp(m,0,D))\n"
+                           "carrier = c0\n",
+                           "<curve-plot-test>");
+  if (rc != SBX_OK) fail("sbx_curve_load_text failed");
+  sbx_default_curve_eval_config(&cfg);
+  cfg.carrier_start_hz = 205.0;
+  cfg.carrier_end_hz = 205.0;
+  cfg.carrier_span_sec = 600.0;
+  cfg.beat_start_hz = 10.0;
+  cfg.beat_target_hz = 2.5;
+  cfg.beat_span_sec = 600.0;
+  cfg.total_min = 10.0;
+  cfg.beat_amp0_pct = 100.0;
+  cfg.mix_amp0_pct = 100.0;
+  rc = sbx_curve_prepare(curve, &cfg);
+  if (rc != SBX_OK) fail("sbx_curve_prepare failed");
+  rc = sbx_curve_sample_program_beat(curve, 0.0, 600.0, 3, ts, ys);
+  if (rc != SBX_OK) fail("sbx_curve_sample_program_beat failed");
+  if (!near(ys[0], 10.0, 1e-9) || !near(ys[1], 6.25, 1e-9) || !near(ys[2], 2.5, 1e-9))
+    fail("curve beat sample values mismatch");
+  if (sbx_curve_sample_program_beat(curve, 0.0, 600.0, 0, ts, ys) != SBX_EINVAL)
+    fail("curve beat invalid args should fail");
+  sbx_curve_destroy(curve);
+
+  puts("PASS: program plot sampling API checks");
   return 0;
 }

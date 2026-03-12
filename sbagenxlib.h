@@ -361,6 +361,18 @@ int sbx_curve_prepare(SbxCurveProgram *curve, const SbxCurveEvalConfig *cfg);
 /* Evaluate prepared curve at timeline position t_sec. */
 int sbx_curve_eval(SbxCurveProgram *curve, double t_sec, SbxCurveEvalPoint *out_point);
 
+/*
+ * Sample effective beat/pulse frequency from a prepared curve program over
+ * a caller-specified time range. The curve must already be prepared.
+ * out_t_sec is optional (may be NULL).
+ */
+int sbx_curve_sample_program_beat(SbxCurveProgram *curve,
+                                  double t0_sec,
+                                  double t1_sec,
+                                  size_t sample_count,
+                                  double *out_t_sec,
+                                  double *out_hz);
+
 /* Curve introspection. */
 int sbx_curve_get_info(const SbxCurveProgram *curve, SbxCurveInfo *out_info);
 size_t sbx_curve_param_count(const SbxCurveProgram *curve);

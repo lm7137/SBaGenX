@@ -215,6 +215,7 @@ host-side exporters and GUI tooling even though the render source remains
 - `sbx_curve_set_param(SbxCurveProgram *curve, const char *name, double value)`
 - `sbx_curve_prepare(SbxCurveProgram *curve, const SbxCurveEvalConfig *cfg)`
 - `sbx_curve_eval(SbxCurveProgram *curve, double t_sec, SbxCurveEvalPoint *out_point)`
+- `sbx_curve_sample_program_beat(SbxCurveProgram *curve, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, double *out_hz)`
 - `sbx_curve_get_info(const SbxCurveProgram *curve, SbxCurveInfo *out_info)`
 - `sbx_curve_param_count(const SbxCurveProgram *curve)`
 - `sbx_curve_get_param(const SbxCurveProgram *curve, size_t index, const char **out_name, double *out_value)`
@@ -240,6 +241,10 @@ Typical flow:
 `sbx_curve_get_info`, `sbx_curve_param_count`, and `sbx_curve_get_param`
 exist so hosts can build inspectors/parameter UIs without reparsing `.sbgf`
 syntax themselves.
+
+`sbx_curve_sample_program_beat` is the backend-neutral plot/data helper for
+custom `.sbgf` beat graphs. It samples the prepared curve directly over a time
+range without requiring the CLI or a GUI host to reimplement the curve math.
 
 In addition to `beat`, `carrier`, `amp`, and `mixamp`, `.sbgf` can also
 define runtime mix-effect parameter targets:
@@ -404,6 +409,7 @@ Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
 - `sbx_context_sample_program_beat(...)`
 - `sbx_context_sample_program_beat_voice(...)`
 - `sbx_context_eval_active_tones(...)`
+- `sbx_curve_sample_program_beat(...)`
 - `sbx_sample_mixam_cycle(...)`
 - `sbx_sample_drop_curve(...)`
 - `sbx_sample_sigmoid_curve(...)`
@@ -443,11 +449,13 @@ time range without advancing render time.
 `sbx_sample_mixam_cycle` samples one cycle of a `mixam` envelope plus the
 derived gain curve (`f + (1-f) * envelope`) for plotting/inspection.
 
-`sbx_sample_drop_curve` and `sbx_sample_sigmoid_curve` sample the built-in
-`-p drop` and `-p sigmoid` beat/pulse curves directly from `sbagenxlib`
-without requiring the CLI to reimplement their math. These are the preferred
-frontend helpers for backend-neutral beat-vs-time plot data when a host wants
-the built-in program shapes but not a full render context.
+`sbx_curve_sample_program_beat` samples the effective beat/pulse trajectory
+from a prepared custom `.sbgf` program over a caller-specified time range.
+
+`sbx_sample_drop_curve` and `sbx_sample_sigmoid_curve` do the same for the
+built-in `-p drop` and `-p sigmoid` beat/pulse curves. Together these helpers
+cover the plot-data generation surface for the CLI's current beat-vs-time
+graphs without requiring the host to duplicate the program math.
 
 `sbx_sample_isochronic_cycle` samples one isochronic cycle into envelope and
 waveform arrays. If no explicit `SbxIsoEnvelopeSpec` is provided, the helper

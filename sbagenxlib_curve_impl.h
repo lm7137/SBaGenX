@@ -1489,3 +1489,33 @@ sbx_curve_eval(SbxCurveProgram *curve, double t_sec, SbxCurveEvalPoint *out_poin
   curve->last_error[0] = 0;
   return SBX_OK;
 }
+
+int
+sbx_curve_sample_program_beat(SbxCurveProgram *curve,
+                              double t0_sec,
+                              double t1_sec,
+                              size_t sample_count,
+                              double *out_t_sec,
+                              double *out_hz) {
+  size_t i;
+
+  if (!curve || !out_hz || sample_count == 0) return SBX_EINVAL;
+  if (!curve->prepared)
+    return curve_fail(curve, "Curve program is not prepared");
+  if (!isfinite(t0_sec) || !isfinite(t1_sec))
+    return curve_fail(curve, "Curve sampling times must be finite");
+
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double ts = sbx_lerp(t0_sec, t1_sec, u);
+    SbxCurveEvalPoint pt;
+    int rc = sbx_curve_eval(curve, ts, &pt);
+    if (rc != SBX_OK)
+      return rc;
+    if (out_t_sec) out_t_sec[i] = ts;
+    out_hz[i] = pt.beat_hz;
+  }
+
+  curve->last_error[0] = 0;
+  return SBX_OK;
+}
