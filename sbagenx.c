@@ -255,6 +255,8 @@ void clear_mix_mod_curve(void);
 void setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level,
 			 double main_len_min, double wake_len_min, int wake_enabled);
 double mix_mod_multiplier(int now_ms);
+static double mix_mod_multiplier_elapsed_min(double t_min);
+static double mix_mod_multiplier_runtime_sec(double t_sec);
 void normalizeAmplitude(Voice *voices, int numChannels, const char *line, int lineNum);
 void printSequenceDuration();
 void checkMixInSequence(); // Check if mix/<amp> is specified
@@ -641,6 +643,7 @@ typedef struct {
    int wake_enabled;
 } MixModCurve;
 MixModCurve mix_mod_curve;
+int mix_mod_anchor_ms= -1;	// Session start anchor for -A modulation in built-in/runtime playback
 
 typedef enum {
    OUT_ENC_NONE= 0,
@@ -1242,6 +1245,7 @@ clear_func_curve() {
 void
 clear_mix_mod_curve(void) {
    memset(&mix_mod_curve, 0, sizeof(mix_mod_curve));
+   mix_mod_anchor_ms= -1;
 }
 
 void
@@ -1255,16 +1259,29 @@ setup_mix_mod_curve(double delta, double epsilon, double k_min, double end_level
    mix_mod_curve.main_len_min= main_len_min;
    mix_mod_curve.wake_len_min= wake_len_min;
    mix_mod_curve.wake_enabled= wake_enabled ? 1 : 0;
+   mix_mod_anchor_ms= -1;
 }
 
 double
 mix_mod_multiplier(int now_ms) {
-   double t_min, mod_2k, x, g, v, two_k;
+   double t_min;
+   int anchor_ms;
 
-   if (!mix_mod_curve.active || mix_mod_curve.main_len_min <= 0.0 || fast_tim0 < 0)
+   if (!mix_mod_curve.active || mix_mod_curve.main_len_min <= 0.0)
       return 1.0;
 
-   t_min= t_per0(fast_tim0, now_ms) / 60000.0;
+   anchor_ms= (mix_mod_anchor_ms >= 0) ? mix_mod_anchor_ms :
+      ((fast_tim0 >= 0) ? fast_tim0 : now_ms);
+   t_min= t_per0(anchor_ms, now_ms) / 60000.0;
+   return mix_mod_multiplier_elapsed_min(t_min);
+}
+
+static double
+mix_mod_multiplier_elapsed_min(double t_min) {
+   double mod_2k, x, g, v, two_k;
+
+   if (!mix_mod_curve.active || mix_mod_curve.main_len_min <= 0.0)
+      return 1.0;
 
    if (t_min < mix_mod_curve.main_len_min) {
       two_k= 2.0 * mix_mod_curve.period_min;
@@ -1290,6 +1307,11 @@ mix_mod_multiplier(int now_ms) {
    }
 
    return 1.0;
+}
+
+static double
+mix_mod_multiplier_runtime_sec(double t_sec) {
+   return mix_mod_multiplier_elapsed_min(t_sec / 60.0);
 }
 
 int
@@ -4813,7 +4835,7 @@ statusSbx(char *err) {
 
   if (mix_in) {
     double mix_pct= sbx_context_mix_amp_at(sbx_runtime_ctx, t_sec);
-    if (opt_A) mix_pct *= mix_mod_multiplier(now);
+    if (opt_A) mix_pct *= mix_mod_multiplier_runtime_sec(t_sec);
     p += sprintf(p, " mix/%.2f", mix_pct);
   }
 
@@ -6115,6 +6137,8 @@ loop() {
   cnt= 1 + 1999 / out_buf_ms;	// Update every 2 seconds or so
   now= opt_S ? fast_tim0 : calcNow();
   if (opt_T != -1) now= opt_T;
+  if (mix_mod_curve.active && mix_mod_anchor_ms < 0)
+    mix_mod_anchor_ms= now;
   err= fast ? out_buf_ms * (fast_mult - 1) : 0;
   if (opt_L)
     byte_count= out_bps * (S64)(opt_L * 0.001 * out_rate);
@@ -6553,7 +6577,6 @@ outChunkSbx() {
    int rc;
    double t0;
    double sr= (double)out_rate;
-   double mix_mod_mul= mix_mod_multiplier(now);
    int use_f32_encoder= output_encoder_needs_f32_path() || output_encoder_needs_mp3_f32_path();
    int use_i32_encoder= output_encoder_needs_i32_path();
 
@@ -6602,6 +6625,7 @@ outChunkSbx() {
 
       if (mix_in) {
 	 double t_sec= t0 + frm / sr;
+	 double mix_mod_mul= opt_A ? mix_mod_multiplier_runtime_sec(t_sec) : 1.0;
 	 double mix_add_l= 0.0;
 	 double mix_add_r= 0.0;
 	 rc= sbx_context_mix_stream_sample(sbx_runtime_ctx, t_sec, mix1, mix2, mix_mod_mul,
