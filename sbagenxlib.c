@@ -1088,10 +1088,10 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     tone->beat_hz = 0.0;
     tone->amplitude = 0.0;
     tone->waveform = SBX_WAVE_SINE;
-    tone->duty_cycle = 0.4;
-    tone->iso_start = 0.0;
-    tone->iso_attack = 0.15;
-    tone->iso_release = 0.15;
+    tone->duty_cycle = 0.403014;
+    tone->iso_start = 0.048493;
+    tone->iso_attack = 0.5;
+    tone->iso_release = 0.5;
     tone->iso_edge_mode = 2;
     return SBX_OK;
   }
@@ -2562,20 +2562,20 @@ sbx_default_tone_spec(SbxToneSpec *tone) {
   tone->beat_hz = 10.0;
   tone->amplitude = 0.5;
   tone->waveform = SBX_WAVE_SINE;
-  tone->duty_cycle = 0.4;
-  tone->iso_start = 0.0;
-  tone->iso_attack = 0.15;
-  tone->iso_release = 0.15;
+  tone->duty_cycle = 0.403014;
+  tone->iso_start = 0.048493;
+  tone->iso_attack = 0.5;
+  tone->iso_release = 0.5;
   tone->iso_edge_mode = 2;
 }
 
 void
 sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec) {
   if (!spec) return;
-  spec->start = 0.0;
-  spec->duty = 0.4;
-  spec->attack = 0.15;
-  spec->release = 0.15;
+  spec->start = 0.048493;
+  spec->duty = 0.403014;
+  spec->attack = 0.5;
+  spec->release = 0.5;
   spec->edge_mode = 2;
 }
 

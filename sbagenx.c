@@ -423,7 +423,7 @@ help() {
 	  NL "                      defaults: d=0.3:e=0.3:k=10:E=0.7"
 	  NL "          -I [spec] Customize isochronic (@) pulse envelope; spec is"
 	  NL "                      s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>"
-	  NL "                      defaults s=0:d=0.4:a=0.15:r=0.15:e=2"
+	  NL "                      defaults s=0.0485:d=0.4030:a=0.5:r=0.5:e=2"
 	  NL "          -H [spec] Customize global mixam envelope for mixam:<pulse|beat>"
 	  NL "                      spec is m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>"
 	  NL "                      order-independent; omitted params use defaults"
@@ -608,10 +608,10 @@ double opt_A_e= 0.3;		// e parameter for mix modulation
 double opt_A_k= 10.0;		// k parameter (minutes) for mix modulation
 double opt_A_E= 0.7;		// E parameter for mix modulation
 int opt_I;			// Enable custom isochronic gate for @ tones
-double opt_I_s= 0.0;		// Gate start as cycle proportion (library-aligned default)
-double opt_I_d= 0.4;		// Gate duty as cycle proportion (library-aligned default)
-double opt_I_a= 0.15;		// Attack as fraction of ON window
-double opt_I_r= 0.15;		// Release as fraction of ON window
+double opt_I_s= 0.048493;	// Gate start as cycle proportion (legacy-equivalent default)
+double opt_I_d= 0.403014;	// Gate duty as cycle proportion (legacy-equivalent default)
+double opt_I_a= 0.5;		// Attack as fraction of ON window
+double opt_I_r= 0.5;		// Release as fraction of ON window
 int opt_I_e= 2;			// Edge shape: 0 hard, 1 linear, 2 smoothstep, 3 smootherstep
 int opt_H;			// Enable global mixam envelope override
 int opt_H_m= SBX_MIXAM_MODE_COS;	// mixam model: 0 pulse, 1 raised-cosine
@@ -3501,10 +3501,10 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
    tone.beat_hz= pulse_hz;
    tone.amplitude= amp_pct / 100.0;
    tone.waveform= waveform;
-   tone.duty_cycle= opt_I ? opt_I_d : 0.4;
-   tone.iso_start= opt_I ? opt_I_s : 0.0;
-   tone.iso_attack= opt_I ? opt_I_a : 0.15;
-   tone.iso_release= opt_I ? opt_I_r : 0.15;
+   tone.duty_cycle= opt_I ? opt_I_d : 0.403014;
+   tone.iso_start= opt_I ? opt_I_s : 0.048493;
+   tone.iso_attack= opt_I ? opt_I_a : 0.5;
+   tone.iso_release= opt_I ? opt_I_r : 0.5;
    tone.iso_edge_mode= opt_I ? opt_I_e : 2;
    env_samp= ALLOC_ARR(pw, double);
    wave_samp= ALLOC_ARR(pw, double);
@@ -9045,10 +9045,10 @@ sbx_runtime_activate_from_curve_program(SbxCurveProgram **curvep,
    sbx_default_curve_source_config(&csrc);
    csrc.mode= isisochronic ? SBX_TONE_ISOCHRONIC : (ismono ? SBX_TONE_MONAURAL : SBX_TONE_BINAURAL);
    csrc.waveform= opt_w;
-   csrc.duty_cycle= opt_I ? opt_I_d : 0.4;
-   csrc.iso_start= opt_I ? opt_I_s : 0.0;
-   csrc.iso_attack= opt_I ? opt_I_a : 0.15;
-   csrc.iso_release= opt_I ? opt_I_r : 0.15;
+   csrc.duty_cycle= opt_I ? opt_I_d : 0.403014;
+   csrc.iso_start= opt_I ? opt_I_s : 0.048493;
+   csrc.iso_attack= opt_I ? opt_I_a : 0.5;
+   csrc.iso_release= opt_I ? opt_I_r : 0.5;
    csrc.iso_edge_mode= opt_I ? opt_I_e : 2;
    csrc.amplitude= 1.0;
    csrc.duration_sec= duration_sec;
@@ -9309,10 +9309,10 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
    tone->beat_hz= beat_hz;
    tone->amplitude= amp_pct / 100.0;
    tone->waveform= opt_w;
-   tone->duty_cycle= opt_I ? opt_I_d : 0.4;
-   tone->iso_start= opt_I ? opt_I_s : 0.0;
-   tone->iso_attack= opt_I ? opt_I_a : 0.15;
-   tone->iso_release= opt_I ? opt_I_r : 0.15;
+   tone->duty_cycle= opt_I ? opt_I_d : 0.403014;
+   tone->iso_start= opt_I ? opt_I_s : 0.048493;
+   tone->iso_attack= opt_I ? opt_I_a : 0.5;
+   tone->iso_release= opt_I ? opt_I_r : 0.5;
    tone->iso_edge_mode= opt_I ? opt_I_e : 2;
 }
 

@@ -119,10 +119,10 @@ typedef struct {
   double beat_hz;
   double amplitude;  /* 0.0 .. 1.0 */
   int waveform;      /* SBX_WAVE_* or SBX_WAVE_CUSTOM_BASE + [0..99] for waveNN */
-  double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.4) */
-  double iso_start;   /* cycle-relative start phase for isochronic mode (default 0.0) */
-  double iso_attack;  /* attack share of isochronic on-window (default 0.15) */
-  double iso_release; /* release share of isochronic on-window (default 0.15) */
+  double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.403014) */
+  double iso_start;   /* cycle-relative start phase for isochronic mode (default 0.048493) */
+  double iso_attack;  /* attack share of isochronic on-window (default 0.5) */
+  double iso_release; /* release share of isochronic on-window (default 0.5) */
   int iso_edge_mode;  /* 0 hard, 1 linear, 2 smoothstep, 3 smootherstep */
 } SbxToneSpec;
 

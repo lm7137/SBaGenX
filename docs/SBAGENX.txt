@@ -281,11 +281,26 @@ Parameters are colon-separated, order-independent, and may be omitted.
 Constraint: `a + r <= 1`.
 Defaults are:
 
-  s=0, d=0.4, a=0.15, r=0.15, e=2
+  s=0.0485, d=0.4030, a=0.5, r=0.5, e=2
 
 These are also the runtime defaults used when `-I` is omitted entirely.
 When `-I` is supplied, those custom envelope parameters are now applied
 consistently to actual isochronic playback as well as to one-cycle plots.
+
+The defaults above are chosen for legacy compatibility with the original
+threshold-gated SBaGen+/SBaGen envelope. If you want a more explicitly
+literature-informed starting point for low-frequency envelope salience,
+try:
+
+  s=0, d=0.35, a=0.12, r=0.65, e=2
+
+This alternative keeps a brisk onset, a longer decay, and substantial
+off-time between pulses. It should be treated as an informed experimental
+preset rather than a proven optimum. The installer ships comparison plots
+in the `Plots` directory, including:
+
+  assets/example-plot-iso-cycle-default.png
+  assets/example-plot-iso-cycle-literature-informed.png
 
 To render a one-cycle isochronic plot (PNG) instead of audio output,
 use `-P` with an isochronic (`@`) tone:
@@ -1934,7 +1949,7 @@ follows:
               Supported with -p drop/-p sigmoid/-p curve.
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec: s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
-              Defaults: s=0, d=0.4, a=0.15, r=0.15, e=2.
+              Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.
               Constraint: a+r <= 1.
               e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
   -H [spec] Customize mixam envelope globally.

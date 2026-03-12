@@ -290,10 +290,10 @@ main(void) {
   iso_tone.iso_release = 0.0;
   iso_tone.iso_edge_mode = 0;
   sbx_default_iso_envelope_spec(&iso_env);
-  if (!near(iso_env.start, 0.0, 1e-12) ||
-      !near(iso_env.duty, 0.4, 1e-12) ||
-      !near(iso_env.attack, 0.15, 1e-12) ||
-      !near(iso_env.release, 0.15, 1e-12) ||
+  if (!near(iso_env.start, 0.048493, 1e-12) ||
+      !near(iso_env.duty, 0.403014, 1e-12) ||
+      !near(iso_env.attack, 0.5, 1e-12) ||
+      !near(iso_env.release, 0.5, 1e-12) ||
       iso_env.edge_mode != 2)
     fail("default isochronic envelope spec mismatch");
   rc = sbx_sample_isochronic_cycle(&iso_tone, NULL, 8, ts, env, wave);
