@@ -379,7 +379,8 @@ help() {
 	  NL
 	  NL "          -r rate   Select the output rate (default is 44100 Hz, or from -m)"
 #ifndef MAC_AUDIO
-	  NL "          -b bits   Select the number bits for output (8, 16 or 24, default 16)"
+	  NL "          -b bits   Select the number bits for output (8, 16 or 24, default 16;"
+	  NL "                     .flac uses 24-bit automatically on the sbagenxlib path)"
 #else
 	  NL "          -B size   Force buffer size (in samples) for audio output."
     NL "                     (e.g. 1024, 2048, 4096, etc.)"

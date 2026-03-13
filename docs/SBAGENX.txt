@@ -463,6 +463,8 @@ will use exactly the sampling frequency specified, or otherwise all
 the frequencies and timings will be out.
 
 For raw/WAV output, `-b` now accepts `24` as well as `8` and `16`.
+The normal default remains `16`, except that `.flac` output on the
+`sbagenxlib`-backed runtime path uses 24-bit automatically.
 The 24-bit path currently applies to the `sbagenxlib`-backed runtime
 engine (for example `-i`, built-in `-p` programs, and the modern
 library-backed sequence paths), and writes 24-bit little-endian PCM for
