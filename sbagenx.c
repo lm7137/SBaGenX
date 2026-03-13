@@ -6599,7 +6599,12 @@ outChunkSbx() {
 	    sbx_runtime_fbuf[idx]= pcm_in[0];
 	    sbx_runtime_fbuf[idx+1]= pcm_in[1];
 	    off += 2;
-	 } else if (use_i32_encoder || output_needs_packed_s24_path()) {
+	 } else if (use_i32_encoder) {
+	    rc= sbx_convert_f32_to_s32(pcm_in, sbx_runtime_i32buf + off, 2, &sbx_runtime_pcm_state);
+	    if (rc != SBX_OK)
+	       error("sbagenxlib PCM32 conversion failed");
+	    off += 2;
+	 } else if (output_needs_packed_s24_path()) {
 	    rc= sbx_convert_f32_to_s24_32(pcm_in, sbx_runtime_i32buf + off, 2, &sbx_runtime_pcm_state);
 	    if (rc != SBX_OK)
 	       error("sbagenxlib PCM24 conversion failed");
