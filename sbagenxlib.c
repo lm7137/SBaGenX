@@ -4920,13 +4920,13 @@ sbx_mix_mod_mul_at(const SbxMixModSpec *spec, double t_sec) {
     double tw = t_sec - t_main;
     if (tw < 0.0) tw = 0.0;
     if (tw <= spec->wake_len_sec) {
-      double w = (1.0 - spec->end_level) + (spec->end_level / spec->wake_len_sec) * tw;
+      double w = spec->end_level + ((1.0 - spec->end_level) / spec->wake_len_sec) * tw;
       if (w < 0.0) w = 0.0;
       return w;
     }
   }
 
-  return 1.0;
+  return spec->wake_enabled ? 1.0 : spec->end_level;
 }
 
 double

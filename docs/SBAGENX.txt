@@ -1092,10 +1092,14 @@ Optional overrides are provided via `-A` as colon-separated tokens:
 
 If `^` wake-up is present, wake mix amplitude uses:
 
-  W(t) = (1 - E) + (E/U) * t
+  W(t) = E + ((1 - E) / U) * t
 
 Where `t` is minutes from wake start, and `U` is wake length in
 minutes.
+
+If there is no wake-up phase, the modulation holds at the end level
+`E` once the main session has finished instead of jumping back to full
+mix level.
 
 After the spec comes an optional list of normal tone-sets.  These can
 be used to add mix sounds (e.g. mix/100) or pink noise (pink/30), or
@@ -1462,7 +1466,10 @@ effective mix amplitude after modulation.
 
 For wake-up time (if `^` is present):
 
-  W(t) = (1 - E) + (E/U) * t
+  W(t) = E + ((1 - E) / U) * t
+
+If there is no wake-up phase, the modulation holds at `E` after the
+main session instead of jumping back to full level.
 
 All times in these equations are in minutes.
 

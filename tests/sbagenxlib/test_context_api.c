@@ -424,6 +424,19 @@ int main(void) {
       fail("mix modulation multiplier should attenuate during main phase");
     if (!(eff_pct < base_pct))
       fail("effective mix amp should include mix modulation");
+    mul = sbx_context_mix_mod_mul_at(ctx, 120.0);
+    if (fabs(mul - 0.7) > 1e-9)
+      fail("mix modulation should hold end level after main phase when no wake is present");
+    mod.wake_enabled = 1;
+    mod.wake_len_sec = 30.0;
+    if (sbx_context_set_mix_mod(ctx, &mod) != SBX_OK)
+      fail("set wake mix modulation failed");
+    mul = sbx_context_mix_mod_mul_at(ctx, 120.0);
+    if (fabs(mul - 0.7) > 1e-9)
+      fail("wake mix modulation should start at end level");
+    mul = sbx_context_mix_mod_mul_at(ctx, 150.0);
+    if (fabs(mul - 1.0) > 1e-9)
+      fail("wake mix modulation should end at full level");
     if (sbx_context_set_mix_mod(ctx, 0) != SBX_OK)
       fail("clear mix modulation failed");
     if (sbx_context_has_mix_mod(ctx))
