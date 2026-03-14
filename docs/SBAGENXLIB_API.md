@@ -73,7 +73,12 @@ Core Concepts
 - `SbxToneSpec`: canonical tone description across binaural/monaural/isochronic/
   noise/bell/spin modes. For isochronic tones it now carries the full runtime
   envelope (`duty_cycle`, `iso_start`, `iso_attack`, `iso_release`,
-  `iso_edge_mode`), not just duty.
+  `iso_edge_mode`), not just duty. It also now carries
+  `envelope_waveform`, which can reference either legacy `waveNN` envelopes
+  or literal `customNN` envelopes stored on the context. `customNN`
+  definitions may optionally declare `e=0..3` smoothing on the definition
+  line itself, matching the edge-shape numbering used elsewhere in SBaGenX
+  (`0=hard`, `1=linear`, `2=smoothstep`, `3=smootherstep`).
 - `SbxPcm16DitherState`: caller-owned RNG state for TPDF dither when converting
   normalized float render output to signed 16-bit PCM.
 - `SbxPcmConvertState`: generic PCM conversion state with explicit dither mode.
@@ -425,6 +430,7 @@ Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
 - `sbx_sample_drop_curve(...)`
 - `sbx_sample_sigmoid_curve(...)`
 - `sbx_sample_isochronic_cycle(...)`
+- `sbx_context_sample_isochronic_cycle(...)`
 - `sbx_default_iso_envelope_spec(...)`
 
 `sbx_context_sample_tones` evaluates the currently loaded source over a caller
@@ -473,6 +479,11 @@ waveform arrays. If no explicit `SbxIsoEnvelopeSpec` is provided, the helper
 uses the envelope carried on the supplied `SbxToneSpec`
 (`iso_start`/`duty_cycle`/`iso_attack`/`iso_release`/`iso_edge_mode`), so
 cycle plots and runtime playback share the same defaults and custom settings.
+
+If the tone references a context-owned custom envelope (`waveNN` or
+`customNN`), use `sbx_context_sample_isochronic_cycle` instead. That variant
+resolves the envelope through the loaded context tables and samples the same
+shape used by runtime playback.
 
 Minimal Lifecycle
 -----------------

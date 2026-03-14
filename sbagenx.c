@@ -310,7 +310,9 @@ int try_external_curve_graph_png(const char *out_fname,
 				 const char *sample_file);
 int try_external_iso_cycle_graph_png(const char *out_fname,
 				     double carr_hz, double pulse_hz,
-				     double amp_pct, int waveform);
+				     double amp_pct, int waveform,
+				     const char *sample_file,
+				     const char *line2);
 int try_external_mixam_cycle_graph_png(const char *out_fname,
 				       int m, double s, double d, double a, double r,
 				       int e, double f);
@@ -2329,16 +2331,10 @@ try_external_drop_graph_png(const char *out_fname,
 
 static int curve_plot_tmp_counter= 0;
 
-static int
-write_curve_plot_samples_file(const double *samples, int n,
-			      char *out_path, int out_path_sz) {
-   FILE *fp;
-   int i;
+static void
+make_plot_tmp_path(char *out_path, int out_path_sz, const char *prefix) {
    long now= (long)time(0);
-
-   if (!samples || n < 2 || !out_path || out_path_sz < 8)
-      return 0;
-
+   if (!out_path || out_path_sz < 8) return;
 #ifdef T_MINGW
    {
       char tdir[PATH_MAX];
@@ -2346,28 +2342,70 @@ write_curve_plot_samples_file(const double *samples, int n,
       DWORD len= GetTempPathA((DWORD)sizeof(tdir), tdir);
       UINT trv= 0;
       if (len > 0 && len < sizeof(tdir)-1) {
-	 trv= GetTempFileNameA(tdir, "sgx", 0, tfile);
+	 trv= GetTempFileNameA(tdir, prefix ? prefix : "sgx", 0, tfile);
       }
       if (trv != 0 && tfile[0]) {
 	 int ncpy= (int)strlen(tfile);
 	 if (ncpy >= out_path_sz) ncpy= out_path_sz-1;
 	 memcpy(out_path, tfile, ncpy);
 	 out_path[ncpy]= 0;
-      } else {
-	 snprintf(out_path, out_path_sz, "sbagenx_curve_%ld_%d.dat",
-		  now, curve_plot_tmp_counter++);
+	 return;
       }
    }
+   snprintf(out_path, out_path_sz, "sbagenx_%s_%ld_%d.dat",
+	    prefix ? prefix : "plot", now, curve_plot_tmp_counter++);
 #else
-   snprintf(out_path, out_path_sz, "/tmp/sbagenx_curve_%ld_%ld_%d.dat",
-	    (long)getpid(), now, curve_plot_tmp_counter++);
+   snprintf(out_path, out_path_sz, "/tmp/sbagenx_%s_%ld_%ld_%d.dat",
+	    prefix ? prefix : "plot", (long)getpid(), now, curve_plot_tmp_counter++);
 #endif
+}
+
+static int
+write_curve_plot_samples_file(const double *samples, int n,
+			      char *out_path, int out_path_sz) {
+   FILE *fp;
+   int i;
+
+   if (!samples || n < 2 || !out_path || out_path_sz < 8)
+      return 0;
+   make_plot_tmp_path(out_path, out_path_sz, "curve");
 
    fp= fopen(out_path, "w");
    if (!fp)
       return 0;
    for (i= 0; i<n; i++) {
       if (fprintf(fp, "%.12g\n", samples[i]) < 0) {
+	 fclose(fp);
+	 remove(out_path);
+	 return 0;
+      }
+   }
+   if (fclose(fp) != 0) {
+      remove(out_path);
+      return 0;
+   }
+   return 1;
+}
+
+static int
+write_iso_cycle_plot_samples_file(const double *ts,
+				  const double *env,
+				  const double *wave,
+				  int n,
+				  char *out_path, int out_path_sz) {
+   FILE *fp;
+   int i;
+
+   if (!ts || !env || !wave || n < 2 || !out_path || out_path_sz < 8)
+      return 0;
+
+   make_plot_tmp_path(out_path, out_path_sz, "iso");
+   fp= fopen(out_path, "w");
+   if (!fp)
+      return 0;
+
+   for (i= 0; i<n; i++) {
+      if (fprintf(fp, "%.12g %.12g %.12g\n", ts[i], env[i], wave[i]) < 0) {
 	 fclose(fp);
 	 remove(out_path);
 	 return 0;
@@ -2411,9 +2449,11 @@ try_external_curve_graph_png(const char *out_fname,
 int
 try_external_iso_cycle_graph_png(const char *out_fname,
 				 double carr_hz, double pulse_hz,
-				 double amp_pct, int waveform) {
+				 double amp_pct, int waveform,
+				 const char *sample_file,
+				 const char *line2) {
    char script[PATH_MAX];
-   char args[2048];
+   char args[4096];
    int force_external= plot_external_force();
 
    if (!plot_find_script(script, sizeof(script))) {
@@ -2426,6 +2466,18 @@ try_external_iso_cycle_graph_png(const char *out_fname,
 	    " iso-cycle --out \"%s\" --carrier-hz %.12g --pulse-hz %.12g --amp-pct %.12g --waveform %d --opt-i %d --i-s %.12g --i-d %.12g --i-a %.12g --i-r %.12g --i-e %d",
 	    out_fname, carr_hz, pulse_hz, amp_pct, waveform, opt_I,
 	    opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
+   if (sample_file && *sample_file) {
+      if (!plot_cmd_append(args, sizeof(args), " --sample-file "))
+	 return 0;
+      if (!plot_cmd_append_quoted(args, sizeof(args), sample_file))
+	 return 0;
+   }
+   if (line2 && *line2) {
+      if (!plot_cmd_append(args, sizeof(args), " --line2 "))
+	 return 0;
+      if (!plot_cmd_append_quoted(args, sizeof(args), line2))
+	 return 0;
+   }
 
    return plot_try_external_cmd(script, out_fname, args);
 }
@@ -3353,8 +3405,7 @@ find_first_iso_voice(Voice *out) {
 }
 
 static int
-find_first_iso_plot_tone(double *out_carr_hz, double *out_pulse_hz,
-			 double *out_amp_pct, int *out_waveform) {
+find_first_iso_plot_tone(SbxToneSpec *out_tone) {
    if (sbx_runtime_ctx) {
       size_t kf_n= sbx_context_keyframe_count(sbx_runtime_ctx);
       size_t voice_n= sbx_context_voice_count(sbx_runtime_ctx);
@@ -3367,10 +3418,7 @@ find_first_iso_plot_tone(double *out_carr_hz, double *out_pulse_hz,
 	    if (SBX_OK == sbx_context_get_keyframe_voice(sbx_runtime_ctx, i, v, &kf) &&
 		kf.tone.mode == SBX_TONE_ISOCHRONIC &&
 		kf.tone.amplitude > 0.0 && fabs(kf.tone.beat_hz) > 0.0) {
-	       if (out_carr_hz) *out_carr_hz= kf.tone.carrier_hz;
-	       if (out_pulse_hz) *out_pulse_hz= fabs(kf.tone.beat_hz);
-	       if (out_amp_pct) *out_amp_pct= 100.0 * kf.tone.amplitude;
-	       if (out_waveform) *out_waveform= kf.tone.waveform;
+	       if (out_tone) *out_tone= kf.tone;
 	       return 1;
 	    }
 	 }
@@ -3379,10 +3427,7 @@ find_first_iso_plot_tone(double *out_carr_hz, double *out_pulse_hz,
       if (SBX_OK == sbx_context_sample_tones(sbx_runtime_ctx, 0.0, 0.0, 1, 0, &tone) &&
 	  tone.mode == SBX_TONE_ISOCHRONIC &&
 	  tone.amplitude > 0.0 && fabs(tone.beat_hz) > 0.0) {
-	 if (out_carr_hz) *out_carr_hz= tone.carrier_hz;
-	 if (out_pulse_hz) *out_pulse_hz= fabs(tone.beat_hz);
-	 if (out_amp_pct) *out_amp_pct= 100.0 * tone.amplitude;
-	 if (out_waveform) *out_waveform= tone.waveform;
+	 if (out_tone) *out_tone= tone;
 	 return 1;
       }
 
@@ -3391,10 +3436,7 @@ find_first_iso_plot_tone(double *out_carr_hz, double *out_pulse_hz,
 	 if (SBX_OK == sbx_context_get_aux_tone(sbx_runtime_ctx, i, &tone) &&
 	     tone.mode == SBX_TONE_ISOCHRONIC &&
 	     tone.amplitude > 0.0 && fabs(tone.beat_hz) > 0.0) {
-	    if (out_carr_hz) *out_carr_hz= tone.carrier_hz;
-	    if (out_pulse_hz) *out_pulse_hz= fabs(tone.beat_hz);
-	    if (out_amp_pct) *out_amp_pct= 100.0 * tone.amplitude;
-	    if (out_waveform) *out_waveform= tone.waveform;
+	    if (out_tone) *out_tone= tone;
 	    return 1;
 	 }
       }
@@ -3403,10 +3445,14 @@ find_first_iso_plot_tone(double *out_carr_hz, double *out_pulse_hz,
    {
       Voice vv;
       if (find_first_iso_voice(&vv)) {
-	 if (out_carr_hz) *out_carr_hz= vv.carr;
-	 if (out_pulse_hz) *out_pulse_hz= fabs(vv.res);
-	 if (out_amp_pct) *out_amp_pct= AMP_AD(vv.amp);
-	 if (out_waveform) *out_waveform= vv.waveform;
+	 if (out_tone) {
+	    sbx_default_tone_spec(out_tone);
+	    out_tone->mode= SBX_TONE_ISOCHRONIC;
+	    out_tone->carrier_hz= vv.carr;
+	    out_tone->beat_hz= fabs(vv.res);
+	    out_tone->amplitude= AMP_AD(vv.amp) / 100.0;
+	    out_tone->waveform= vv.waveform;
+	 }
 	 return 1;
       }
    }
@@ -3415,8 +3461,7 @@ find_first_iso_plot_tone(double *out_carr_hz, double *out_pulse_hz,
 }
 
 static void
-write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
-			  double amp_pct, int waveform) {
+write_iso_cycle_graph_png(const SbxToneSpec *src_tone) {
    int w= 1600, h= 980, ss= 4;
    int hw= w * ss, hh= h * ss;
    int ml= 130 * ss, mr= 40 * ss, mt= 40 * ss, mb= 160 * ss;
@@ -3431,29 +3476,39 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
    int a, i, prev_ex= -1, prev_ey= -1, prev_wx= -1, prev_wy= -1;
    unsigned char *img_hi;
    unsigned char *img;
+   double *t_samp;
    double *env_samp;
    double *wave_samp;
    SbxToneSpec tone;
    double period_sec;
    char carr_tok[64], pulse_tok[64], amp_tok[64];
-   char wave_tok[64], tick_txt[64], fname[512];
+   char wave_tok[128], tick_txt[64], fname[512], tone_spec[128];
    char ptxt1[256], ptxt2[256];
+   char sample_file[PATH_MAX];
    const char *title= "ISOCHRONIC SINGLE-CYCLE PLOT";
 
-   if (pulse_hz <= 0.0)
+   if (!src_tone)
+      error("-P requires an isochronic pulse tone");
+
+   tone= *src_tone;
+   if (tone.mode != SBX_TONE_ISOCHRONIC)
+      error("-P requires an isochronic pulse tone");
+
+   if (tone.beat_hz <= 0.0)
       error("-P requires an isochronic pulse frequency > 0 Hz");
+   if (tone.waveform < 0 || tone.waveform > 3)
+      tone.waveform= 0;
 
-   if (waveform < 0 || waveform > 3)
-      waveform= 0;
-
-   period_sec= 1.0 / pulse_hz;
+   period_sec= 1.0 / tone.beat_hz;
    if (period_sec <= 0.0)
       error("-P calculated an invalid cycle period");
 
-   sanitize_filename_token(waveform_name[waveform], wave_tok, sizeof(wave_tok));
-   double_to_token(carr_hz, carr_tok, sizeof(carr_tok));
-   double_to_token(pulse_hz, pulse_tok, sizeof(pulse_tok));
-   double_to_token(amp_pct, amp_tok, sizeof(amp_tok));
+   if (sbx_format_tone_spec(&tone, tone_spec, sizeof(tone_spec)) != SBX_OK)
+      snprintf(tone_spec, sizeof(tone_spec), "iso");
+   sanitize_filename_token(tone_spec, wave_tok, sizeof(wave_tok));
+   double_to_token(tone.carrier_hz, carr_tok, sizeof(carr_tok));
+   double_to_token(tone.beat_hz, pulse_tok, sizeof(pulse_tok));
+   double_to_token(100.0 * tone.amplitude, amp_tok, sizeof(amp_tok));
    if (opt_I) {
       snprintf(fname, sizeof(fname),
 	       "iso_cycle_%s_c%s_p%s_a%s_i%d.png",
@@ -3464,30 +3519,54 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
 	       wave_tok, carr_tok, pulse_tok, amp_tok);
    }
 
-   if (try_external_iso_cycle_graph_png(fname, carr_hz, pulse_hz, amp_pct, waveform)) {
-      if (!opt_Q)
-	 warn("Isochronic cycle graph saved to: %s (Python/Cairo)", fname);
-      return;
-   }
-
-   sbx_default_tone_spec(&tone);
-   tone.mode= SBX_TONE_ISOCHRONIC;
-   tone.carrier_hz= carr_hz;
-   tone.beat_hz= pulse_hz;
-   tone.amplitude= amp_pct / 100.0;
-   tone.waveform= waveform;
-   tone.duty_cycle= opt_I ? opt_I_d : 0.403014;
-   tone.iso_start= opt_I ? opt_I_s : 0.048493;
-   tone.iso_attack= opt_I ? opt_I_a : 0.5;
-   tone.iso_release= opt_I ? opt_I_r : 0.5;
-   tone.iso_edge_mode= opt_I ? opt_I_e : 2;
+   sample_file[0]= 0;
+   t_samp= ALLOC_ARR(pw, double);
    env_samp= ALLOC_ARR(pw, double);
    wave_samp= ALLOC_ARR(pw, double);
-   if (sbx_sample_isochronic_cycle(&tone, 0, pw, 0, env_samp, wave_samp) != SBX_OK) {
+   if (((sbx_runtime_ctx && tone.envelope_waveform != SBX_ENV_WAVE_NONE)
+        ? sbx_context_sample_isochronic_cycle(sbx_runtime_ctx, &tone, 0, pw, t_samp, env_samp, wave_samp)
+        : sbx_sample_isochronic_cycle(&tone, 0, pw, t_samp, env_samp, wave_samp)) != SBX_OK) {
+      free(t_samp);
       free(env_samp);
       free(wave_samp);
       error("Failed to sample isochronic cycle through sbagenxlib");
    }
+
+   snprintf(ptxt1, sizeof(ptxt1), "c=%.1fHz p=%.2fHz a=%.1f%% w=%s",
+	    tone.carrier_hz, tone.beat_hz, 100.0 * tone.amplitude, waveform_name[tone.waveform]);
+   if (tone.envelope_waveform == SBX_ENV_WAVE_NONE && opt_I) {
+      snprintf(ptxt2, sizeof(ptxt2), "I:s=%.4f d=%.4f a=%.2f r=%.2f e=%d",
+	       opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
+   } else if (tone.envelope_waveform == SBX_ENV_WAVE_NONE) {
+      snprintf(ptxt2, sizeof(ptxt2), "I:s=%.4f d=%.4f a=%.2f r=%.2f e=%d",
+	       tone.iso_start, tone.duty_cycle, tone.iso_attack, tone.iso_release, tone.iso_edge_mode);
+   } else if (tone.envelope_waveform >= SBX_ENV_WAVE_CUSTOM_BASE &&
+              tone.envelope_waveform < SBX_ENV_WAVE_CUSTOM_BASE + 100) {
+      int env_edge = 1;
+      if (sbx_runtime_ctx)
+	 sbx_context_get_envelope_edge_mode(sbx_runtime_ctx, tone.envelope_waveform, &env_edge);
+      snprintf(ptxt2, sizeof(ptxt2), "ENV=custom%02d literal envelope e=%d",
+               tone.envelope_waveform - SBX_ENV_WAVE_CUSTOM_BASE, env_edge);
+   } else {
+      snprintf(ptxt2, sizeof(ptxt2), "ENV=wave%02d legacy normalized envelope",
+               tone.envelope_waveform - SBX_ENV_WAVE_LEGACY_BASE);
+   }
+
+   if (write_iso_cycle_plot_samples_file(t_samp, env_samp, wave_samp, pw,
+					 sample_file, sizeof(sample_file)) &&
+       try_external_iso_cycle_graph_png(fname, tone.carrier_hz, tone.beat_hz,
+					100.0 * tone.amplitude, tone.waveform,
+					sample_file, ptxt2)) {
+      remove(sample_file);
+      if (!opt_Q)
+	 warn("Isochronic cycle graph saved to: %s (Python/Cairo)", fname);
+      free(t_samp);
+      free(env_samp);
+      free(wave_samp);
+      return;
+   }
+   if (sample_file[0])
+      remove(sample_file);
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
    plot_fill(img_hi, hw, hh, 255, 255, 255);
@@ -3592,15 +3671,6 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
       font5x7_draw_text(img_hi, hw, hh, x0, y02, y2_label, label_scale, 1, 30, 30, 30);
    }
 
-   snprintf(ptxt1, sizeof(ptxt1), "c=%.1fHz p=%.2fHz a=%.1f%% w=%s",
-	    carr_hz, pulse_hz, amp_pct, waveform_name[waveform]);
-   if (opt_I) {
-      snprintf(ptxt2, sizeof(ptxt2), "I:s=%.4f d=%.4f a=%.2f r=%.2f e=%d",
-	       opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
-   } else {
-      snprintf(ptxt2, sizeof(ptxt2), "I:s=%.4f d=%.4f a=%.2f r=%.2f e=%d",
-	       opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
-   }
    {
       int tw1= font5x7_text_width(ptxt1, param_scale);
       int tw2= font5x7_text_width(ptxt2, param_scale);
@@ -3620,17 +3690,17 @@ write_iso_cycle_graph_png(double carr_hz, double pulse_hz,
    if (!opt_Q)
       warn("Isochronic cycle graph saved to: %s", fname);
    free(img);
+   free(t_samp);
    free(env_samp);
    free(wave_samp);
 }
 
 void
 write_iso_cycle_graph_png_from_sequence(void) {
-   double carr_hz, pulse_hz, amp_pct;
-   int waveform;
-   if (!find_first_iso_plot_tone(&carr_hz, &pulse_hz, &amp_pct, &waveform))
+   SbxToneSpec tone;
+   if (!find_first_iso_plot_tone(&tone))
       error("-P requires at least one isochronic (@) tone in the loaded sequence");
-   write_iso_cycle_graph_png(carr_hz, pulse_hz, amp_pct, waveform);
+   write_iso_cycle_graph_png(&tone);
 }
 
 static void

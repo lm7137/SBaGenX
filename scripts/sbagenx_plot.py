@@ -632,6 +632,26 @@ def render_curve(args):
     surface.write_to_png(args.out)
 
 
+def _load_iso_cycle_samples(path: str):
+    ts = []
+    env = []
+    wave = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            cols = line.split()
+            if len(cols) != 3:
+                raise ValueError("iso-cycle sample-file must contain three numeric columns")
+            ts.append(float(cols[0]))
+            env.append(float(cols[1]))
+            wave.append(float(cols[2]))
+    if len(ts) < 2:
+        raise ValueError("iso-cycle sample-file must contain at least two rows")
+    return ts, env, wave
+
+
 def _wave_sample(waveform: int, phase01: float) -> float:
     phase01 = phase01 - math.floor(phase01)
     phase = phase01 * 2.0 * PI
@@ -866,6 +886,11 @@ def render_iso_cycle(args):
     waveform = int(args.waveform)
     waveform = waveform if 0 <= waveform <= 3 else 0
     amp = max(0.0, args.amp_pct / 100.0)
+    sample_ts = sample_env = sample_wave = None
+    if args.sample_file:
+        sample_ts, sample_env, sample_wave = _load_iso_cycle_samples(args.sample_file)
+        if sample_ts[-1] > 0:
+            period_sec = sample_ts[-1]
 
     surface, ctx = _setup_canvas(width, height)
 
@@ -885,16 +910,22 @@ def render_iso_cycle(args):
     ctx.set_source_rgb(0.86, 0.16, 0.16)
     ctx.set_line_width(2.0)
     first = True
-    samples = 8000
-    for i in range(samples + 1):
-        t = period_sec * i / samples
-        pulse_phase = args.pulse_hz * t
-        if args.opt_i:
-            env = _iso_mod_custom(
-                pulse_phase, args.i_s, args.i_d, args.i_a, args.i_r, int(args.i_e)
-            )
-        else:
-            env = _iso_mod_legacy(pulse_phase, waveform)
+    if sample_ts is not None:
+        seq = zip(sample_ts, sample_env)
+    else:
+        samples = 8000
+        seq = []
+        for i in range(samples + 1):
+            t = period_sec * i / samples
+            pulse_phase = args.pulse_hz * t
+            if args.opt_i:
+                env = _iso_mod_custom(
+                    pulse_phase, args.i_s, args.i_d, args.i_a, args.i_r, int(args.i_e)
+                )
+            else:
+                env = _iso_mod_legacy(pulse_phase, waveform)
+            seq.append((t, env))
+    for t, env in seq:
         px = x_map(t)
         py = y_env(env)
         if first:
@@ -908,17 +939,23 @@ def render_iso_cycle(args):
     ctx.set_source_rgb(0.13, 0.37, 0.88)
     ctx.set_line_width(1.4)
     first = True
-    for i in range(samples + 1):
-        t = period_sec * i / samples
-        pulse_phase = args.pulse_hz * t
-        carr_phase = args.carrier_hz * t
-        if args.opt_i:
-            env = _iso_mod_custom(
-                pulse_phase, args.i_s, args.i_d, args.i_a, args.i_r, int(args.i_e)
-            )
-        else:
-            env = _iso_mod_legacy(pulse_phase, waveform)
-        wav = _wave_sample(waveform, carr_phase) * env * amp
+    if sample_ts is not None:
+        seq = zip(sample_ts, sample_wave)
+    else:
+        seq = []
+        for i in range(samples + 1):
+            t = period_sec * i / samples
+            pulse_phase = args.pulse_hz * t
+            carr_phase = args.carrier_hz * t
+            if args.opt_i:
+                env = _iso_mod_custom(
+                    pulse_phase, args.i_s, args.i_d, args.i_a, args.i_r, int(args.i_e)
+                )
+            else:
+                env = _iso_mod_legacy(pulse_phase, waveform)
+            wav = _wave_sample(waveform, carr_phase) * env * amp
+            seq.append((t, wav))
+    for t, wav in seq:
         px = x_map(t)
         py = y_wave(wav)
         if first:
@@ -1004,13 +1041,15 @@ def render_iso_cycle(args):
     ctx.set_font_size(13)
     wave_name = ["sine", "square", "triangle", "sawtooth"][waveform]
     line1 = f"c={args.carrier_hz:.1f}Hz  p={args.pulse_hz:.2f}Hz  a={args.amp_pct:.1f}%  w={wave_name}"
-    if args.opt_i:
+    if args.line2:
+        line2 = args.line2
+    elif args.opt_i:
         line2 = (
             f"I:s={args.i_s:.4f} d={args.i_d:.4f} "
             f"a={args.i_a:.2f} r={args.i_r:.2f} e={int(args.i_e)}"
         )
     else:
-        line2 = "I=default threshold gate"
+        line2 = "I=default envelope"
 
     ext = ctx.text_extents(line1)
     ctx.move_to(ml + (pw - ext.width) / 2, height - 54)
@@ -1268,6 +1307,8 @@ def main():
     ip.add_argument("--i-a", type=float, required=True)
     ip.add_argument("--i-r", type=float, required=True)
     ip.add_argument("--i-e", type=int, required=True)
+    ip.add_argument("--sample-file")
+    ip.add_argument("--line2")
 
     mp = sub.add_parser("mixam-cycle", help="Render mixam single-cycle envelope/gain plot")
     mp.add_argument("--out", required=True)

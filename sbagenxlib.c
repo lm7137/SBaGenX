@@ -95,7 +95,10 @@ struct SbxEngine {
   double bell_env;
   int bell_tick;
   int bell_tick_period;
-  const double *custom_waves[SBX_CUSTOM_WAVE_COUNT];
+  const double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT];
+  const double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT];
+  const int *legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
+  const int *custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   char last_error[256];
 };
 
@@ -135,7 +138,10 @@ struct SbxContext {
   size_t mix_kf_seg;
   double mix_default_amp_pct;
   SbxMixModSpec mix_mod;
-  double *custom_waves[SBX_CUSTOM_WAVE_COUNT];
+  double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT];
+  double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT];
+  int legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
+  int custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   SbxTelemetryCallback telemetry_cb;
   void *telemetry_user;
   SbxRuntimeTelemetry telemetry_last;
@@ -233,6 +239,8 @@ static int curve_eval_expr_target(SbxCurveProgram *curve,
                                   double default_value,
                                   double *out_value);
 static int sbx_validate_mix_fx_spec_fields(const SbxMixFxSpec *spec);
+static int sbx_envelope_wave_legacy_index(int waveform);
+static int sbx_envelope_wave_custom_index(int waveform);
 static int sbx_validate_mix_mod_spec(const SbxMixModSpec *spec);
 
 static void
@@ -369,46 +377,65 @@ streq_prefix_nocase(const char *s, const char *prefix) {
 }
 
 static int
-sbx_custom_wave_index(int waveform) {
-  if (waveform >= SBX_WAVE_CUSTOM_BASE &&
-      waveform < SBX_WAVE_CUSTOM_BASE + SBX_CUSTOM_WAVE_COUNT)
-    return waveform - SBX_WAVE_CUSTOM_BASE;
+sbx_envelope_wave_legacy_index(int waveform) {
+  if (waveform >= SBX_ENV_WAVE_LEGACY_BASE &&
+      waveform < SBX_ENV_WAVE_LEGACY_BASE + SBX_CUSTOM_WAVE_COUNT)
+    return waveform - SBX_ENV_WAVE_LEGACY_BASE;
   return -1;
 }
 
 static int
-sbx_parse_custom_wave_prefix(const char *spec, int *out_waveform, const char **out_after) {
+sbx_envelope_wave_custom_index(int waveform) {
+  if (waveform >= SBX_ENV_WAVE_CUSTOM_BASE &&
+      waveform < SBX_ENV_WAVE_CUSTOM_BASE + SBX_CUSTOM_WAVE_COUNT)
+    return waveform - SBX_ENV_WAVE_CUSTOM_BASE;
+  return -1;
+}
+
+static int
+sbx_parse_legacy_env_prefix(const char *spec, int *out_waveform, const char **out_after) {
   int idx;
   if (!spec || !out_after) return 0;
   if (strncasecmp(spec, "wave", 4) != 0) return 0;
   if (!isdigit((unsigned char)spec[4]) || !isdigit((unsigned char)spec[5]) || spec[6] != ':')
     return 0;
   idx = (spec[4] - '0') * 10 + (spec[5] - '0');
-  if (out_waveform) *out_waveform = SBX_WAVE_CUSTOM_BASE + idx;
+  if (out_waveform) *out_waveform = SBX_ENV_WAVE_LEGACY_BASE + idx;
   *out_after = spec + 7;
   return 1;
 }
 
 static void
-engine_set_custom_waves(SbxEngine *eng, double *const *waves) {
+engine_set_custom_waves(SbxEngine *eng,
+                        double *const *legacy_waves,
+                        double *const *custom_waves,
+                        const int *legacy_edge_modes,
+                        const int *custom_edge_modes) {
   size_t i;
   if (!eng) return;
-  for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++)
-    eng->custom_waves[i] = waves ? waves[i] : 0;
+  for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
+    eng->legacy_env_waves[i] = legacy_waves ? legacy_waves[i] : 0;
+    eng->custom_env_waves[i] = custom_waves ? custom_waves[i] : 0;
+    eng->legacy_env_edge_modes[i] = legacy_edge_modes ? &legacy_edge_modes[i] : 0;
+    eng->custom_env_edge_modes[i] = custom_edge_modes ? &custom_edge_modes[i] : 0;
+  }
 }
 
 static void
 ctx_sync_custom_waves(SbxContext *ctx) {
   size_t i;
   if (!ctx || !ctx->eng) return;
-  engine_set_custom_waves(ctx->eng, ctx->custom_waves);
+  engine_set_custom_waves(ctx->eng, ctx->legacy_env_waves, ctx->custom_env_waves,
+                          ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
   for (i = 0; i + 1 < ctx->mv_voice_count; i++) {
     if (ctx->mv_eng && ctx->mv_eng[i])
-      engine_set_custom_waves(ctx->mv_eng[i], ctx->custom_waves);
+      engine_set_custom_waves(ctx->mv_eng[i], ctx->legacy_env_waves, ctx->custom_env_waves,
+                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
   }
   for (i = 0; i < ctx->aux_count; i++) {
     if (ctx->aux_eng && ctx->aux_eng[i])
-      engine_set_custom_waves(ctx->aux_eng[i], ctx->custom_waves);
+      engine_set_custom_waves(ctx->aux_eng[i], ctx->legacy_env_waves, ctx->custom_env_waves,
+                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
   }
 }
 
@@ -417,28 +444,40 @@ ctx_clear_custom_waves(SbxContext *ctx) {
   size_t i;
   if (!ctx) return;
   for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
-    if (ctx->custom_waves[i]) free(ctx->custom_waves[i]);
-    ctx->custom_waves[i] = 0;
+    if (ctx->legacy_env_waves[i]) free(ctx->legacy_env_waves[i]);
+    if (ctx->custom_env_waves[i]) free(ctx->custom_env_waves[i]);
+    ctx->legacy_env_waves[i] = 0;
+    ctx->custom_env_waves[i] = 0;
+    ctx->legacy_env_edge_modes[i] = 1;
+    ctx->custom_env_edge_modes[i] = 1;
   }
   ctx_sync_custom_waves(ctx);
 }
 
 static void
-ctx_replace_custom_waves(SbxContext *ctx, double **waves) {
+ctx_replace_custom_waves(SbxContext *ctx,
+                         double **legacy_waves,
+                         double **custom_waves,
+                         const int *legacy_edge_modes,
+                         const int *custom_edge_modes) {
   size_t i;
-  if (!ctx || !waves) return;
+  if (!ctx || !legacy_waves || !custom_waves || !legacy_edge_modes || !custom_edge_modes) return;
   ctx_clear_custom_waves(ctx);
   for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
-    ctx->custom_waves[i] = waves[i];
-    waves[i] = 0;
+    ctx->legacy_env_waves[i] = legacy_waves[i];
+    legacy_waves[i] = 0;
+    ctx->custom_env_waves[i] = custom_waves[i];
+    custom_waves[i] = 0;
+    ctx->legacy_env_edge_modes[i] = legacy_edge_modes[i];
+    ctx->custom_env_edge_modes[i] = custom_edge_modes[i];
   }
   ctx_sync_custom_waves(ctx);
 }
 
 static int
-sbx_build_custom_wave_table_from_samples(const double *samples,
-                                         size_t count,
-                                         double **out_table) {
+sbx_build_legacy_custom_wave_table_from_samples(const double *samples,
+                                                size_t count,
+                                                double **out_table) {
   double *tbl;
   double minv, maxv;
   size_t i;
@@ -470,8 +509,6 @@ sbx_build_custom_wave_table_from_samples(const double *samples,
 static const char *
 skip_optional_waveform_prefix(const char *spec, int *out_waveform) {
   const char *p = spec;
-  if (sbx_parse_custom_wave_prefix(p, out_waveform, &p))
-    return p;
   if (streq_prefix_nocase(p, "sine:")) {
     if (out_waveform) *out_waveform = SBX_WAVE_SINE;
     return p + 5;
@@ -489,6 +526,68 @@ skip_optional_waveform_prefix(const char *spec, int *out_waveform) {
     return p + 9;
   }
   return p;
+}
+
+static int
+sbx_parse_literal_env_prefix(const char *spec, int *out_waveform, const char **out_after) {
+  int idx;
+  if (!spec || !out_after) return 0;
+  if (strncasecmp(spec, "custom", 6) != 0) return 0;
+  if (!isdigit((unsigned char)spec[6]) || !isdigit((unsigned char)spec[7]) || spec[8] != ':')
+    return 0;
+  idx = (spec[6] - '0') * 10 + (spec[7] - '0');
+  if (out_waveform) *out_waveform = SBX_ENV_WAVE_CUSTOM_BASE + idx;
+  *out_after = spec + 9;
+  return 1;
+}
+
+static int
+sbx_build_literal_custom_env_table_from_samples(const double *samples,
+                                                size_t count,
+                                                int edge_mode,
+                                                double **out_table) {
+  double *tbl;
+  double maxv = 0.0;
+  size_t i;
+
+  if (!samples || count < 2 || !out_table) return SBX_EINVAL;
+  if (edge_mode < 0 || edge_mode > 3) return SBX_EINVAL;
+  for (i = 0; i < count; i++) {
+    if (!isfinite(samples[i]) || samples[i] < 0.0)
+      return SBX_EINVAL;
+    if (samples[i] > maxv) maxv = samples[i];
+  }
+  if (!(isfinite(maxv)) || maxv <= 0.0)
+    return SBX_EINVAL;
+
+  tbl = (double *)calloc(SBX_CUSTOM_WAVE_SAMPLES, sizeof(*tbl));
+  if (!tbl) return SBX_ENOMEM;
+  for (i = 0; i < SBX_CUSTOM_WAVE_SAMPLES; i++) {
+    double pos = ((double)i * (double)count) / (double)SBX_CUSTOM_WAVE_SAMPLES;
+    size_t i0 = (size_t)floor(pos) % count;
+    size_t i1 = (i0 + 1) % count;
+    double frac = pos - floor(pos);
+    double v0 = sbx_dsp_clamp(samples[i0] / maxv, 0.0, 1.0);
+    double v1 = sbx_dsp_clamp(samples[i1] / maxv, 0.0, 1.0);
+    double u = frac;
+    switch (edge_mode) {
+      case 0:
+        u = 0.0;
+        break;
+      case 2:
+        u = sbx_dsp_smoothstep01(u);
+        break;
+      case 3:
+        u = sbx_dsp_smootherstep01(u);
+        break;
+      case 1:
+      default:
+        break;
+    }
+    tbl[i] = sbx_lerp(v0, v1, u);
+  }
+  *out_table = tbl;
+  return SBX_OK;
 }
 
 static char *
@@ -1061,6 +1160,8 @@ static int
 normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   int uses_carrier;
   int strict_carrier_positive;
+  int legacy_env_idx;
+  int custom_env_idx;
   if (!tone) return SBX_EINVAL;
   if (err && err_sz) err[0] = 0;
 
@@ -1090,6 +1191,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     tone->beat_hz = 0.0;
     tone->amplitude = 0.0;
     tone->waveform = SBX_WAVE_SINE;
+    tone->envelope_waveform = SBX_ENV_WAVE_NONE;
     tone->duty_cycle = 0.403014;
     tone->iso_start = 0.048493;
     tone->iso_attack = 0.5;
@@ -1098,19 +1200,32 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     return SBX_OK;
   }
 
+  legacy_env_idx = sbx_envelope_wave_legacy_index(tone->envelope_waveform);
+  custom_env_idx = sbx_envelope_wave_custom_index(tone->envelope_waveform);
+
   if (uses_carrier) {
-    int custom_idx = sbx_custom_wave_index(tone->waveform);
-    if (custom_idx >= 0) {
-      if (tone->mode != SBX_TONE_BINAURAL) {
-        if (err && err_sz) snprintf(err, err_sz, "%s", "custom waveNN envelopes are only valid for binaural tones");
-        return SBX_EINVAL;
-      }
-    } else if (tone->waveform < SBX_WAVE_SINE || tone->waveform > SBX_WAVE_SAWTOOTH) {
+    if (tone->waveform < SBX_WAVE_SINE || tone->waveform > SBX_WAVE_SAWTOOTH) {
       if (err && err_sz) snprintf(err, err_sz, "%s", "waveform must be a valid SBX_WAVE_* value");
+      return SBX_EINVAL;
+    }
+    if (tone->envelope_waveform != SBX_ENV_WAVE_NONE &&
+        legacy_env_idx < 0 && custom_env_idx < 0) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "envelope_waveform must be a valid SBX_ENV_WAVE_* value");
+      return SBX_EINVAL;
+    }
+    if (legacy_env_idx >= 0 && tone->mode != SBX_TONE_BINAURAL) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "legacy waveNN envelopes are only valid for binaural tones");
+      return SBX_EINVAL;
+    }
+    if (custom_env_idx >= 0 &&
+        tone->mode != SBX_TONE_BINAURAL &&
+        tone->mode != SBX_TONE_ISOCHRONIC) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural or isochronic tones");
       return SBX_EINVAL;
     }
   } else {
     tone->waveform = SBX_WAVE_SINE;
+    tone->envelope_waveform = SBX_ENV_WAVE_NONE;
   }
 
   if (tone->mode != SBX_TONE_NONE) {
@@ -1198,10 +1313,17 @@ engine_apply_tone(SbxEngine *eng, const SbxToneSpec *tone_in, int reset_phase) {
     set_last_error(eng, err);
     return rc;
   }
-  if (sbx_custom_wave_index(tone.waveform) >= 0 &&
-      !eng->custom_waves[sbx_custom_wave_index(tone.waveform)]) {
-    set_last_error(eng, "custom waveNN envelope is not defined in this context");
-    return SBX_EINVAL;
+  {
+    int legacy_env_idx = sbx_envelope_wave_legacy_index(tone.envelope_waveform);
+    int custom_env_idx = sbx_envelope_wave_custom_index(tone.envelope_waveform);
+    if (legacy_env_idx >= 0 && !eng->legacy_env_waves[legacy_env_idx]) {
+      set_last_error(eng, "legacy waveNN envelope is not defined in this context");
+      return SBX_EINVAL;
+    }
+    if (custom_env_idx >= 0 && !eng->custom_env_waves[custom_env_idx]) {
+      set_last_error(eng, "customNN envelope is not defined in this context");
+      return SBX_EINVAL;
+    }
   }
 
   eng->tone = tone;
@@ -1252,13 +1374,20 @@ engine_wave_sample(int waveform, double phase, double *out_sample) {
 static int
 engine_custom_env_sample(const SbxEngine *eng, int waveform, double phase_unit, double *out_env) {
   const double *tbl;
-  int custom_idx = sbx_custom_wave_index(waveform);
+  int legacy_idx = sbx_envelope_wave_legacy_index(waveform);
+  int custom_idx = sbx_envelope_wave_custom_index(waveform);
   size_t i0, i1;
   double pos, frac;
   if (!out_env) return 0;
-  if (custom_idx < 0) return 0;
-  if (!eng || !eng->custom_waves[custom_idx]) return -1;
-  tbl = eng->custom_waves[custom_idx];
+  if (legacy_idx < 0 && custom_idx < 0) return 0;
+  if (!eng) return -1;
+  if (legacy_idx >= 0) {
+    if (!eng->legacy_env_waves[legacy_idx]) return -1;
+    tbl = eng->legacy_env_waves[legacy_idx];
+  } else {
+    if (!eng->custom_env_waves[custom_idx]) return -1;
+    tbl = eng->custom_env_waves[custom_idx];
+  }
   phase_unit = sbx_dsp_wrap_unit(phase_unit);
   pos = phase_unit * (double)SBX_CUSTOM_WAVE_SAMPLES;
   i0 = (size_t)floor(pos) % SBX_CUSTOM_WAVE_SAMPLES;
@@ -1266,6 +1395,59 @@ engine_custom_env_sample(const SbxEngine *eng, int waveform, double phase_unit, 
   frac = pos - floor(pos);
   *out_env = sbx_lerp(tbl[i0], tbl[i1], frac);
   return 1;
+}
+
+static int
+ctx_custom_env_sample(const SbxContext *ctx, int waveform, double phase_unit, double *out_env) {
+  const double *tbl;
+  int legacy_idx = sbx_envelope_wave_legacy_index(waveform);
+  int custom_idx = sbx_envelope_wave_custom_index(waveform);
+  size_t i0, i1;
+  double pos, frac;
+  if (!out_env) return 0;
+  if (legacy_idx < 0 && custom_idx < 0) return 0;
+  if (!ctx) return -1;
+  if (legacy_idx >= 0) {
+    if (!ctx->legacy_env_waves[legacy_idx]) return -1;
+    tbl = ctx->legacy_env_waves[legacy_idx];
+  } else {
+    if (!ctx->custom_env_waves[custom_idx]) return -1;
+    tbl = ctx->custom_env_waves[custom_idx];
+  }
+  phase_unit = sbx_dsp_wrap_unit(phase_unit);
+  pos = phase_unit * (double)SBX_CUSTOM_WAVE_SAMPLES;
+  i0 = (size_t)floor(pos) % SBX_CUSTOM_WAVE_SAMPLES;
+  i1 = (i0 + 1) % SBX_CUSTOM_WAVE_SAMPLES;
+  frac = pos - floor(pos);
+  *out_env = sbx_lerp(tbl[i0], tbl[i1], frac);
+  return 1;
+}
+
+static int
+ctx_custom_env_edge_mode(const SbxContext *ctx, int waveform, int *out_edge_mode) {
+  int legacy_idx = sbx_envelope_wave_legacy_index(waveform);
+  int custom_idx = sbx_envelope_wave_custom_index(waveform);
+  if (!out_edge_mode) return 0;
+  if (!ctx) return -1;
+  if (legacy_idx >= 0) {
+    *out_edge_mode = ctx->legacy_env_edge_modes[legacy_idx];
+    return 1;
+  }
+  if (custom_idx >= 0) {
+    *out_edge_mode = ctx->custom_env_edge_modes[custom_idx];
+    return 1;
+  }
+  return 0;
+}
+
+int
+sbx_context_get_envelope_edge_mode(const SbxContext *ctx,
+                                   int envelope_waveform,
+                                   int *out_edge_mode) {
+  int rc = ctx_custom_env_edge_mode(ctx, envelope_waveform, out_edge_mode);
+  if (rc < 0) return SBX_EINVAL;
+  if (rc == 0) return SBX_EINVAL;
+  return SBX_OK;
 }
 
 static double
@@ -1325,10 +1507,10 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     double f_l = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
     double f_r = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
     double env = 1.0;
-    int custom_rc = engine_custom_env_sample(eng, eng->tone.waveform, eng->pulse_phase, &env);
+    int custom_rc = engine_custom_env_sample(eng, eng->tone.envelope_waveform, eng->pulse_phase, &env);
     if (custom_rc == 1) {
-      engine_wave_sample(SBX_WAVE_SINE, eng->phase_l, &left);
-      engine_wave_sample(SBX_WAVE_SINE, eng->phase_r, &right);
+      engine_wave_sample(eng->tone.waveform, eng->phase_l, &left);
+      engine_wave_sample(eng->tone.waveform, eng->phase_r, &right);
       left *= amp * env;
       right *= amp * env;
       eng->pulse_phase += fabs(eng->tone.beat_hz) / sr;
@@ -1357,6 +1539,7 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     double env = 0.0;
     double pos;
     double carrier;
+    int custom_rc;
 
     engine_wave_sample(eng->tone.waveform, eng->phase_l, &carrier);
     eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr, SBX_TAU);
@@ -1365,12 +1548,15 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     while (eng->pulse_phase >= 1.0) eng->pulse_phase -= 1.0;
     pos = eng->pulse_phase;
 
-    env = sbx_dsp_iso_mod_factor_custom(pos,
-                                        eng->tone.iso_start,
-                                        eng->tone.duty_cycle,
-                                        eng->tone.iso_attack,
-                                        eng->tone.iso_release,
-                                        eng->tone.iso_edge_mode);
+    custom_rc = engine_custom_env_sample(eng, eng->tone.envelope_waveform, pos, &env);
+    if (custom_rc == 0) {
+      env = sbx_dsp_iso_mod_factor_custom(pos,
+                                          eng->tone.iso_start,
+                                          eng->tone.duty_cycle,
+                                          eng->tone.iso_attack,
+                                          eng->tone.iso_release,
+                                          eng->tone.iso_edge_mode);
+    }
 
     left = right = amp * env * carrier;
   } else if (eng->tone.mode == SBX_TONE_BELL) {
@@ -1643,7 +1829,8 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
         set_ctx_error(ctx, "out of memory");
         return SBX_ENOMEM;
       }
-      engine_set_custom_waves(mv_eng[vi - 1], ctx->custom_waves);
+      engine_set_custom_waves(mv_eng[vi - 1], ctx->legacy_env_waves, ctx->custom_env_waves,
+                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
     }
   }
 
@@ -1874,7 +2061,8 @@ ctx_eval_keyframed_tone_at(const SbxProgramKeyframe *kfs,
   if (u > 1.0) u = 1.0;
   if (k0->interp == SBX_INTERP_STEP ||
       k0->tone.mode != k1->tone.mode ||
-      k0->tone.waveform != k1->tone.waveform)
+      k0->tone.waveform != k1->tone.waveform ||
+      k0->tone.envelope_waveform != k1->tone.envelope_waveform)
     u = 0.0;
 
   out->mode = k0->tone.mode;
@@ -1882,6 +2070,7 @@ ctx_eval_keyframed_tone_at(const SbxProgramKeyframe *kfs,
   out->beat_hz = sbx_lerp(k0->tone.beat_hz, k1->tone.beat_hz, u);
   out->amplitude = sbx_lerp(k0->tone.amplitude, k1->tone.amplitude, u);
   out->waveform = k0->tone.waveform;
+  out->envelope_waveform = k0->tone.envelope_waveform;
   out->duty_cycle = sbx_lerp(k0->tone.duty_cycle, k1->tone.duty_cycle, u);
   out->iso_start = sbx_lerp(k0->tone.iso_start, k1->tone.iso_start, u);
   out->iso_attack = sbx_lerp(k0->tone.iso_attack, k1->tone.iso_attack, u);
@@ -2076,8 +2265,9 @@ parse_tone_spec_with_default_waveform(const char *spec,
                                       int default_waveform,
                                       SbxToneSpec *out_tone) {
   const char *p;
-  const char *p0;
+  const char *next;
   int waveform = SBX_WAVE_SINE;
+  int env_waveform = SBX_ENV_WAVE_NONE;
   int n = 0;
   double carrier = 0.0, beat = 0.0, amp_pct = 0.0;
   char c = 0;
@@ -2085,14 +2275,28 @@ parse_tone_spec_with_default_waveform(const char *spec,
   if (!spec || !out_tone) return SBX_EINVAL;
 
   p = skip_ws(spec);
-  p0 = p;
   sbx_default_tone_spec(out_tone);
-  p = skip_optional_waveform_prefix(p, &waveform);
-  if (p != p0) {
-    out_tone->waveform = waveform;
-  } else if (default_waveform >= SBX_WAVE_SINE &&
-             default_waveform <= SBX_WAVE_SAWTOOTH) {
+  if (default_waveform >= SBX_WAVE_SINE &&
+      default_waveform <= SBX_WAVE_SAWTOOTH) {
     out_tone->waveform = default_waveform;
+  }
+  for (;;) {
+    int advanced = 0;
+    if (sbx_parse_legacy_env_prefix(p, &env_waveform, &next) ||
+        sbx_parse_literal_env_prefix(p, &env_waveform, &next)) {
+      p = next;
+      out_tone->envelope_waveform = env_waveform;
+      advanced = 1;
+    } else {
+      next = skip_optional_waveform_prefix(p, &waveform);
+      if (next != p) {
+        p = next;
+        out_tone->waveform = waveform;
+        advanced = 1;
+      }
+    }
+    if (!advanced)
+      break;
   }
 
   if (*p == '-' && *skip_ws(p + 1) == 0) {
@@ -2395,11 +2599,22 @@ wave_name_for_tone(int waveform) {
 
 static int
 wave_prefix_for_tone(int waveform, char *out, size_t out_sz) {
-  int custom_idx = sbx_custom_wave_index(waveform);
   if (!out || out_sz == 0) return 0;
-  if (custom_idx >= 0)
-    return snprintf_checked(out, out_sz, "wave%02d", custom_idx);
   return snprintf_checked(out, out_sz, "%s", wave_name_for_tone(waveform));
+}
+
+static int
+env_prefix_for_tone(int env_waveform, char *out, size_t out_sz) {
+  int legacy_idx = sbx_envelope_wave_legacy_index(env_waveform);
+  int custom_idx = sbx_envelope_wave_custom_index(env_waveform);
+  if (!out || out_sz == 0) return 0;
+  if (env_waveform == SBX_ENV_WAVE_NONE)
+    return snprintf_checked(out, out_sz, "");
+  if (legacy_idx >= 0)
+    return snprintf_checked(out, out_sz, "wave%02d", legacy_idx);
+  if (custom_idx >= 0)
+    return snprintf_checked(out, out_sz, "custom%02d", custom_idx);
+  return 0;
 }
 
 static int
@@ -2482,6 +2697,8 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
   double amp_pct;
   SbxToneSpec norm;
   char wprefix[24];
+  char eprefix[24];
+  char prefix[64];
   if (!tone || !out || out_sz == 0) return SBX_EINVAL;
 
   norm = *tone;
@@ -2489,6 +2706,21 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
   amp_pct = norm.amplitude * 100.0;
   if (!wave_prefix_for_tone(norm.waveform, wprefix, sizeof(wprefix)))
     return SBX_EINVAL;
+  if (!env_prefix_for_tone(norm.envelope_waveform, eprefix, sizeof(eprefix)))
+    return SBX_EINVAL;
+  if (norm.envelope_waveform != SBX_ENV_WAVE_NONE) {
+    if (norm.waveform == SBX_WAVE_SINE) {
+      if (!snprintf_checked(prefix, sizeof(prefix), "%s:", eprefix))
+        return SBX_EINVAL;
+    } else {
+      if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:", eprefix, wprefix))
+        return SBX_EINVAL;
+    }
+  } else if (norm.waveform == SBX_WAVE_SINE) {
+    prefix[0] = 0;
+  } else if (!snprintf_checked(prefix, sizeof(prefix), "%s:", wprefix)) {
+    return SBX_EINVAL;
+  }
 
   switch (norm.mode) {
     case SBX_TONE_NONE:
@@ -2498,8 +2730,8 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
     case SBX_TONE_BINAURAL: {
       char sign = norm.beat_hz < 0.0 ? '-' : '+';
       double beat = fabs(norm.beat_hz);
-      if (!snprintf_checked(out, out_sz, "%s:%g%c%g/%g",
-                            wprefix, norm.carrier_hz, sign, beat, amp_pct))
+      if (!snprintf_checked(out, out_sz, "%s%g%c%g/%g",
+                            prefix, norm.carrier_hz, sign, beat, amp_pct))
         return SBX_EINVAL;
       return SBX_OK;
     }
@@ -2507,15 +2739,15 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
       double beat = fabs(norm.beat_hz);
       double f1 = norm.carrier_hz - beat * 0.5;
       double f2 = norm.carrier_hz + beat * 0.5;
-      if (!snprintf_checked(out, out_sz, "%s:%g/%g %s:%g/%g",
-                            wprefix, f1, amp_pct, wprefix, f2, amp_pct))
+      if (!snprintf_checked(out, out_sz, "%s%g/%g %s%g/%g",
+                            prefix, f1, amp_pct, prefix, f2, amp_pct))
         return SBX_EINVAL;
       return SBX_OK;
     }
     case SBX_TONE_ISOCHRONIC: {
       double pulse = fabs(norm.beat_hz);
-      if (!snprintf_checked(out, out_sz, "%s:%g@%g/%g",
-                            wprefix, norm.carrier_hz, pulse, amp_pct))
+      if (!snprintf_checked(out, out_sz, "%s%g@%g/%g",
+                            prefix, norm.carrier_hz, pulse, amp_pct))
         return SBX_EINVAL;
       return SBX_OK;
     }
@@ -2529,19 +2761,19 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
       if (!snprintf_checked(out, out_sz, "brown/%g", amp_pct)) return SBX_EINVAL;
       return SBX_OK;
     case SBX_TONE_BELL:
-      if (!snprintf_checked(out, out_sz, "%s:bell%g/%g", wprefix, norm.carrier_hz, amp_pct))
+      if (!snprintf_checked(out, out_sz, "%sbell%g/%g", prefix, norm.carrier_hz, amp_pct))
         return SBX_EINVAL;
       return SBX_OK;
     case SBX_TONE_SPIN_PINK:
-      if (!snprintf_checked(out, out_sz, "%s:spin:%g%+g/%g", wprefix, norm.carrier_hz, norm.beat_hz, amp_pct))
+      if (!snprintf_checked(out, out_sz, "%sspin:%g%+g/%g", prefix, norm.carrier_hz, norm.beat_hz, amp_pct))
         return SBX_EINVAL;
       return SBX_OK;
     case SBX_TONE_SPIN_BROWN:
-      if (!snprintf_checked(out, out_sz, "%s:bspin:%g%+g/%g", wprefix, norm.carrier_hz, norm.beat_hz, amp_pct))
+      if (!snprintf_checked(out, out_sz, "%sbspin:%g%+g/%g", prefix, norm.carrier_hz, norm.beat_hz, amp_pct))
         return SBX_EINVAL;
       return SBX_OK;
     case SBX_TONE_SPIN_WHITE:
-      if (!snprintf_checked(out, out_sz, "%s:wspin:%g%+g/%g", wprefix, norm.carrier_hz, norm.beat_hz, amp_pct))
+      if (!snprintf_checked(out, out_sz, "%swspin:%g%+g/%g", prefix, norm.carrier_hz, norm.beat_hz, amp_pct))
         return SBX_EINVAL;
       return SBX_OK;
     default:
@@ -2564,6 +2796,7 @@ sbx_default_tone_spec(SbxToneSpec *tone) {
   tone->beat_hz = 10.0;
   tone->amplitude = 0.5;
   tone->waveform = SBX_WAVE_SINE;
+  tone->envelope_waveform = SBX_ENV_WAVE_NONE;
   tone->duty_cycle = 0.403014;
   tone->iso_start = 0.048493;
   tone->iso_attack = 0.5;
@@ -3207,7 +3440,10 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   size_t ndefs = 0, defs_cap = 0;
   SbxNamedBlockDef *blocks = 0;
   size_t nblocks = 0, blocks_cap = 0;
-  double *custom_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
+  double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
+  double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
+  int legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
+  int custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   int active_block_idx = -1;
   double active_block_last_off = -1.0;
   double last_abs_sec = -1.0;
@@ -3216,6 +3452,14 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   int rc = SBX_OK;
 
   if (!ctx || !ctx->eng || !text) return SBX_EINVAL;
+
+  {
+    size_t i;
+    for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
+      legacy_env_edge_modes[i] = 1;
+      custom_env_edge_modes[i] = 1;
+    }
+  }
 
   buf = sbx_strdup_local(text);
   if (!buf) {
@@ -3530,22 +3774,60 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         goto done;
       }
 
-      if (strncmp(name, "wave", 4) == 0 &&
-          isdigit((unsigned char)name[4]) &&
-          isdigit((unsigned char)name[5]) &&
-          name[6] == 0) {
-        int wave_idx = (name[4] - '0') * 10 + (name[5] - '0');
+      if (((strncmp(name, "wave", 4) == 0 &&
+            isdigit((unsigned char)name[4]) &&
+            isdigit((unsigned char)name[5]) &&
+            name[6] == 0)) ||
+          ((strncmp(name, "custom", 6) == 0 &&
+            isdigit((unsigned char)name[6]) &&
+            isdigit((unsigned char)name[7]) &&
+            name[8] == 0))) {
+        int is_custom = (strncmp(name, "custom", 6) == 0);
+        int wave_idx = is_custom ? ((name[6] - '0') * 10 + (name[7] - '0'))
+                                 : ((name[4] - '0') * 10 + (name[5] - '0'));
         double *raw = 0;
         size_t raw_count = 0, raw_cap = 0;
         char *wr = r;
-        if (custom_waves[wave_idx]) {
+        int custom_edge_mode = 1;
+        int custom_edge_seen = 0;
+        if ((is_custom ? custom_env_waves[wave_idx] : legacy_env_waves[wave_idx])) {
           char emsg[224];
           snprintf(emsg, sizeof(emsg),
-                   "line %lu: waveform %02d already defined",
-                   (unsigned long)line_no, wave_idx);
+                   "line %lu: %s %02d already defined",
+                   (unsigned long)line_no, is_custom ? "customNN" : "waveNN", wave_idx);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
+        }
+        wr = (char *)skip_ws(wr);
+        if (is_custom) {
+          while ((*wr == 'e' || *wr == 'E') && wr[1] == '=') {
+            char *end = 0;
+            long edge = strtol(wr + 2, &end, 10);
+            if (end == wr + 2 || !(*end == 0 || isspace((unsigned char)*end) || *end == ':')) {
+              char emsg[224];
+              snprintf(emsg, sizeof(emsg),
+                       "line %lu: customNN %02d expects optional e=<0..3> before samples",
+                       (unsigned long)line_no, wave_idx);
+              if (raw) free(raw);
+              set_ctx_error(ctx, emsg);
+              rc = SBX_EINVAL;
+              goto done;
+            }
+            if (custom_edge_seen || edge < 0 || edge > 3) {
+              char emsg[224];
+              snprintf(emsg, sizeof(emsg),
+                       "line %lu: customNN %02d optional e=<0..3> may appear at most once",
+                       (unsigned long)line_no, wave_idx);
+              if (raw) free(raw);
+              set_ctx_error(ctx, emsg);
+              rc = SBX_EINVAL;
+              goto done;
+            }
+            custom_edge_mode = (int)edge;
+            custom_edge_seen = 1;
+            wr = (char *)skip_ws((*end == ':') ? end + 1 : end);
+          }
         }
         while (*wr) {
           char *end = 0;
@@ -3553,8 +3835,8 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           if (end == wr || !isfinite(v)) {
             char emsg[224];
             snprintf(emsg, sizeof(emsg),
-                     "line %lu: waveform %02d expects floating-point samples",
-                     (unsigned long)line_no, wave_idx);
+                     "line %lu: %s %02d expects floating-point samples",
+                     (unsigned long)line_no, is_custom ? "customNN" : "waveNN", wave_idx);
             if (raw) free(raw);
             set_ctx_error(ctx, emsg);
             rc = SBX_EINVAL;
@@ -3575,13 +3857,18 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           raw[raw_count++] = v;
           wr = (char *)skip_ws(end);
         }
-        rc = sbx_build_custom_wave_table_from_samples(raw, raw_count, &custom_waves[wave_idx]);
+        rc = is_custom
+             ? sbx_build_literal_custom_env_table_from_samples(raw, raw_count, custom_edge_mode,
+                                                               &custom_env_waves[wave_idx])
+             : sbx_build_legacy_custom_wave_table_from_samples(raw, raw_count, &legacy_env_waves[wave_idx]);
+        if (is_custom)
+          custom_env_edge_modes[wave_idx] = custom_edge_mode;
         if (raw) free(raw);
         if (rc != SBX_OK) {
           char emsg[224];
           snprintf(emsg, sizeof(emsg),
-                   "line %lu: invalid waveform %02d definition (need at least two non-identical samples)",
-                   (unsigned long)line_no, wave_idx);
+                   "line %lu: invalid %s %02d definition",
+                   (unsigned long)line_no, is_custom ? "customNN" : "waveNN", wave_idx);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
@@ -3997,7 +4284,8 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     }
   }
 
-  ctx_replace_custom_waves(ctx, custom_waves);
+  ctx_replace_custom_waves(ctx, legacy_env_waves, custom_env_waves,
+                           legacy_env_edge_modes, custom_env_edge_modes);
   rc = ctx_activate_keyframes_internal(ctx, primary, count,
                                        mv_frames ? mv_frames : primary,
                                        max_voice_count ? max_voice_count : 1,
@@ -4034,7 +4322,8 @@ done:
   {
     size_t i;
     for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
-      if (custom_waves[i]) free(custom_waves[i]);
+      if (legacy_env_waves[i]) free(legacy_env_waves[i]);
+      if (custom_env_waves[i]) free(custom_env_waves[i]);
     }
   }
   if (buf) free(buf);
@@ -4125,7 +4414,8 @@ sbx_context_set_aux_tones(SbxContext *ctx, const SbxToneSpec *tones, size_t tone
       set_ctx_error(ctx, "out of memory");
       return SBX_ENOMEM;
     }
-    engine_set_custom_waves(engv[i], ctx->custom_waves);
+    engine_set_custom_waves(engv[i], ctx->legacy_env_waves, ctx->custom_env_waves,
+                            ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
     rc = engine_apply_tone(engv[i], &copy[i], 1);
     if (rc != SBX_OK) {
       size_t j;
@@ -5529,6 +5819,7 @@ sbx_sample_isochronic_cycle(const SbxToneSpec *tone_in,
   if (normalize_tone(&tone, err, sizeof(err)) != SBX_OK) return SBX_EINVAL;
   if (tone.mode != SBX_TONE_ISOCHRONIC) return SBX_EINVAL;
   if (!isfinite(tone.beat_hz) || tone.beat_hz <= 0.0) return SBX_EINVAL;
+  if (tone.envelope_waveform != SBX_ENV_WAVE_NONE) return SBX_EINVAL;
 
   if (env) {
     use_env = *env;
@@ -5556,6 +5847,71 @@ sbx_sample_isochronic_cycle(const SbxToneSpec *tone_in,
                                                       use_env.attack,
                                                       use_env.release,
                                                       use_env.edge_mode);
+    if (out_t_sec) out_t_sec[i] = t_sec;
+    if (out_envelope) out_envelope[i] = env_sample;
+    if (out_wave) {
+      double carr = 0.0;
+      engine_wave_sample(tone.waveform, SBX_TAU * tone.carrier_hz * t_sec, &carr);
+      out_wave[i] = tone.amplitude * env_sample * carr;
+    }
+  }
+
+  return SBX_OK;
+}
+
+int
+sbx_context_sample_isochronic_cycle(const SbxContext *ctx,
+                                    const SbxToneSpec *tone_in,
+                                    const SbxIsoEnvelopeSpec *env,
+                                    size_t sample_count,
+                                    double *out_t_sec,
+                                    double *out_envelope,
+                                    double *out_wave) {
+  SbxToneSpec tone;
+  SbxIsoEnvelopeSpec use_env;
+  char err[160];
+  size_t i;
+
+  if (!ctx || !tone_in || sample_count == 0) return SBX_EINVAL;
+  if (!out_envelope && !out_wave) return SBX_EINVAL;
+
+  tone = *tone_in;
+  if (normalize_tone(&tone, err, sizeof(err)) != SBX_OK) return SBX_EINVAL;
+  if (tone.mode != SBX_TONE_ISOCHRONIC) return SBX_EINVAL;
+  if (!isfinite(tone.beat_hz) || tone.beat_hz <= 0.0) return SBX_EINVAL;
+
+  if (env) {
+    use_env = *env;
+  } else {
+    use_env.start = tone.iso_start;
+    use_env.duty = tone.duty_cycle;
+    use_env.attack = tone.iso_attack;
+    use_env.release = tone.iso_release;
+    use_env.edge_mode = tone.iso_edge_mode;
+  }
+
+  if (!isfinite(use_env.start) || use_env.start < 0.0 || use_env.start > 1.0) return SBX_EINVAL;
+  if (!isfinite(use_env.duty) || use_env.duty < 0.0 || use_env.duty > 1.0) return SBX_EINVAL;
+  if (!isfinite(use_env.attack) || use_env.attack < 0.0 || use_env.attack > 1.0) return SBX_EINVAL;
+  if (!isfinite(use_env.release) || use_env.release < 0.0 || use_env.release > 1.0) return SBX_EINVAL;
+  if (use_env.edge_mode < 0 || use_env.edge_mode > 3) return SBX_EINVAL;
+  if ((use_env.attack + use_env.release) > (1.0 + 1e-12)) return SBX_EINVAL;
+
+  for (i = 0; i < sample_count; i++) {
+    double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
+    double t_sec = u / tone.beat_hz;
+    double env_sample = 0.0;
+    int custom_rc = ctx_custom_env_sample(ctx, tone.envelope_waveform, u, &env_sample);
+    if (custom_rc == 0) {
+      env_sample = sbx_dsp_iso_mod_factor_custom(u,
+                                                 use_env.start,
+                                                 use_env.duty,
+                                                 use_env.attack,
+                                                 use_env.release,
+                                                 use_env.edge_mode);
+    } else if (custom_rc < 0) {
+      return SBX_EINVAL;
+    }
     if (out_t_sec) out_t_sec[i] = t_sec;
     if (out_envelope) out_envelope[i] = env_sample;
     if (out_wave) {

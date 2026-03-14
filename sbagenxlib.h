@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 21  /* public API contract revision */
+#define SBX_API_VERSION 22  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -45,8 +45,14 @@ typedef enum {
   SBX_WAVE_SQUARE = 1,
   SBX_WAVE_TRIANGLE = 2,
   SBX_WAVE_SAWTOOTH = 3,
-  SBX_WAVE_CUSTOM_BASE = 1000 /* context-owned waveNN table: SBX_WAVE_CUSTOM_BASE + [0..99] */
+  SBX_WAVE_CUSTOM_BASE = 1000 /* deprecated legacy placeholder; use SBX_ENV_WAVE_* for custom envelopes */
 } SbxWaveform;
+
+typedef enum {
+  SBX_ENV_WAVE_NONE = 0,
+  SBX_ENV_WAVE_LEGACY_BASE = 2000, /* legacy waveNN envelope id: + [0..99] */
+  SBX_ENV_WAVE_CUSTOM_BASE = 2100  /* literal customNN envelope id: + [0..99] */
+} SbxEnvelopeWaveform;
 
 typedef enum {
   SBX_INTERP_LINEAR = 0,
@@ -129,7 +135,8 @@ typedef struct {
   double carrier_hz;
   double beat_hz;
   double amplitude;  /* 0.0 .. 1.0 */
-  int waveform;      /* SBX_WAVE_* or SBX_WAVE_CUSTOM_BASE + [0..99] for waveNN */
+  int waveform;      /* SBX_WAVE_* carrier waveform */
+  int envelope_waveform; /* SBX_ENV_WAVE_NONE or SBX_ENV_WAVE_* + [0..99] */
   double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.403014) */
   double iso_start;   /* cycle-relative start phase for isochronic mode (default 0.048493) */
   double iso_attack;  /* attack share of isochronic on-window (default 0.5) */
@@ -762,6 +769,23 @@ int sbx_sample_isochronic_cycle(const SbxToneSpec *tone,
                                 double *out_t_sec,
                                 double *out_envelope,
                                 double *out_wave);
+
+/*
+ * Context-aware variant used when the tone references a context-owned custom
+ * envelope (`waveNN` or `customNN`).
+ */
+int sbx_context_sample_isochronic_cycle(const SbxContext *ctx,
+                                        const SbxToneSpec *tone,
+                                        const SbxIsoEnvelopeSpec *env,
+                                        size_t sample_count,
+                                        double *out_t_sec,
+                                        double *out_envelope,
+                                        double *out_wave);
+
+/* Query stored edge/smoothing mode for a context-owned waveNN/customNN envelope. */
+int sbx_context_get_envelope_edge_mode(const SbxContext *ctx,
+                                       int envelope_waveform,
+                                       int *out_edge_mode);
 
 /* Render interleaved stereo float frames from context source. */
 int sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames);

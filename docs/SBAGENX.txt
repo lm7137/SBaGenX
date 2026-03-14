@@ -301,6 +301,7 @@ in the `Plots` directory, including:
 
   assets/example-plot-iso-cycle-default.png
   assets/example-plot-iso-cycle-literature-informed.png
+  assets/example-plot-iso-cycle-custom00-literal.png
 
 To render a one-cycle isochronic plot (PNG) instead of audio output,
 use `-P` with an isochronic (`@`) tone:
@@ -310,6 +311,35 @@ use `-P` with an isochronic (`@`) tone:
 This writes a two-panel graph (envelope + waveform) for exactly one
 pulse cycle, with labelled numeric ticks and the effective parameters
 printed at the bottom.
+
+For sequence-file work, there is now also a separate `customNN` envelope
+definition family intended specifically for intuitive custom shaping where
+literal zero really means silence.  Unlike historical `waveNN`, these
+samples are treated as a unipolar envelope, scaled only by their maximum,
+with optional segment smoothing specified directly on the definition via
+`e=<mode>`:
+
+  e=0  hard / step
+  e=1  linear (default)
+  e=2  smoothstep
+  e=3  smootherstep
+
+The `customNN` samples are then interpolated around the cycle with no
+global min/max recentering.  Example:
+
+  custom00: e=2 0 0.1 0.9 1 1 0.9 0.1 0
+  base: custom00:400@2/20
+  00:00 base
+
+`customNN` currently supports binaural and isochronic tones on the
+`sbagenxlib` path.  For isochronic tones, the custom envelope replaces the
+default `-I` pulse shape for that tone.  The installer ships a rendered
+reference plot for the example above as:
+
+  assets/example-plot-iso-cycle-custom00-literal.png
+
+`-P` plots for these `customNN` isochronic envelopes now work through both
+the built-in renderer and the Python/Cairo backend.
 
 If Python+Cairo plotting is available (for example from a bundled
 Windows runtime), `-P` uses that high-quality backend automatically.
@@ -2625,6 +2655,35 @@ a smooth 0-100% envelope and used directly for custom beat modulation.
   cycle.  It is scaled to 0-100%, smoothed by periodic sinc
   interpolation, and then applied at the beat rate while the underlying
   left/right carriers are still generated at `carrier +/- beat/2`.
+
+  This means that `waveNN` remains a legacy "shape import" feature rather
+  than a literal envelope authoring format.  In particular, a numeric input
+  sample of `0` does not necessarily end up at zero amplitude after the
+  periodic sinc interpolation plus global min/max normalization.
+
+  If you want a more intuitive literal envelope where `0` stays `0`, use
+  `customNN` instead:
+
+    custom<2-digits>: [e=<0..3>] <list of non-negative samples>
+
+  `customNN` samples are interpreted as a unipolar envelope, scaled only by
+  their maximum value and interpolated around the cycle using:
+
+    e=0 hard / step
+    e=1 linear (default)
+    e=2 smoothstep
+    e=3 smootherstep
+
+  For example:
+
+    custom00: e=2 0 0.1 0.9 1 1 0.9 0.1 0
+    custom00:400@2/20
+
+  This creates a 400Hz isochronic tone pulsing at 2Hz with a custom literal
+  envelope.  The same `customNN:` prefix may also be used with binaural
+  tones.  Unlike `waveNN`, `customNN` is intended for envelope design, not
+  arbitrary imported waveform normalization.  A rendered reference plot is
+  shipped as `assets/example-plot-iso-cycle-custom00-literal.png`.
 
   The historical derivation below is retained for reference:
   

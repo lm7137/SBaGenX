@@ -98,6 +98,10 @@ main(void) {
       "wave00: 0 1 0 0.25\n"
       "base: wave00:180+2/20\n"
       "NOW base\n";
+  const char *sbg_custom_iso_text =
+      "custom00: 0 0.25 1 0.25\n"
+      "base: custom00:180@4/20\n"
+      "NOW base\n";
   const char *sbg_mix_tokens_text =
       "00:00 mix/70 mixpulse:2/40 180+0/20 ==\n"
       "00:00:02 -\n";
@@ -299,7 +303,7 @@ main(void) {
   if (rc != SBX_OK) fail("custom wave sbg timing load failed");
   if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
     fail("custom wave keyframe retrieval failed");
-  if (kf.tone.waveform != SBX_WAVE_CUSTOM_BASE)
+  if (kf.tone.envelope_waveform != SBX_ENV_WAVE_LEGACY_BASE)
     fail("custom wave keyframe should preserve wave00 prefix");
   {
     char spec_buf[128];
@@ -316,6 +320,36 @@ main(void) {
     fail("custom wave render failed");
   if (!(abs_sum_window(buf, (size_t)(0.1 * cfg.sample_rate), (size_t)(0.5 * cfg.sample_rate)) > 1e-3))
     fail("custom wave render should produce non-zero energy");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_iso_text, 0);
+  if (rc != SBX_OK) fail("customNN isochronic timing load failed");
+  {
+    int edge_mode = -1;
+    if (sbx_context_get_envelope_edge_mode(ctx, SBX_ENV_WAVE_CUSTOM_BASE, &edge_mode) != SBX_OK)
+      fail("customNN edge-mode query failed");
+    if (edge_mode != 1)
+      fail("customNN default edge mode should be linear (e=1)");
+  }
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("customNN isochronic keyframe retrieval failed");
+  if (kf.tone.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+    fail("customNN isochronic keyframe should preserve custom00 prefix");
+  {
+    char spec_buf[128];
+    if (sbx_format_tone_spec(&kf.tone, spec_buf, sizeof(spec_buf)) != SBX_OK)
+      fail("customNN isochronic format failed");
+    if (strncmp(spec_buf, "custom00:", 9) != 0)
+      fail("customNN isochronic tone should round-trip custom00 prefix");
+  }
+  free(buf);
+  frames = (size_t)(0.6 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (customNN isochronic)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("customNN isochronic render failed");
+  if (!(abs_sum_window(buf, (size_t)(0.15 * cfg.sample_rate), (size_t)(0.35 * cfg.sample_rate)) >
+        abs_sum_window(buf, 0, (size_t)(0.05 * cfg.sample_rate)) * 4.0))
+    fail("customNN isochronic render should honor zero-based custom envelope");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_mix_tokens_text, 0);
   if (rc != SBX_OK) fail("sbg timing load with direct mix tokens failed");

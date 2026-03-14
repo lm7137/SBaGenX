@@ -1,0 +1,16 @@
+## Literal customNN envelope driving an isochronic tone.
+## The custom00 samples are treated as a unipolar 0..1 envelope shape:
+##   - 0 really means silence
+##   - values are scaled only by the maximum sample
+##   - interpolation mode is selected with e=0..3
+##   - here we use smoothstep interpolation (e=2)
+##
+## Try:
+##   sbagenx -D examples/basics/prog-custom-envelope-iso-demo.sbg
+##   sbagenx -P examples/basics/prog-custom-envelope-iso-demo.sbg
+
+custom00: e=2 0 0.1 0.9 1 1 0.9 0.1 0
+
+base: custom00:400@2/20
+
+00:00 base

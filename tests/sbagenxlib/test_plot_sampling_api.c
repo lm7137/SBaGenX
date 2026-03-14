@@ -320,6 +320,42 @@ main(void) {
   if (fabs(wave[0]) > 1e-12)
     fail("isochronic waveform should start at zero when envelope is zero");
 
+  {
+    const char *sbg_custom_iso_text =
+      "custom00: 0 0 1 1\n"
+      "00:00 custom00:200@1/100\n";
+    SbxProgramKeyframe custom_kf;
+    rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_iso_text, 0);
+    if (rc != SBX_OK) fail("load customNN isochronic timing failed");
+    if (sbx_context_get_keyframe(ctx, 0, &custom_kf) != SBX_OK)
+      fail("get customNN isochronic keyframe failed");
+    rc = sbx_context_sample_isochronic_cycle(ctx, &custom_kf.tone, NULL, 8, ts, env, wave);
+    if (rc != SBX_OK) fail("context_sample_isochronic_cycle customNN failed");
+    if (!(env[0] == 0.0 && env[1] == 0.0 && env[4] > 0.9))
+      fail("customNN isochronic cycle should preserve literal zero-based envelope");
+  }
+  {
+    const char *sbg_custom_iso_smooth_text =
+      "custom01: e=2 0 1 1 0\n"
+      "00:00 custom01:200@1/100\n";
+    SbxProgramKeyframe custom_kf;
+    int edge_mode = -1;
+    rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_iso_smooth_text, 0);
+    if (rc != SBX_OK) fail("load smoothed customNN isochronic timing failed");
+    if (sbx_context_get_envelope_edge_mode(ctx, SBX_ENV_WAVE_CUSTOM_BASE + 1, &edge_mode) != SBX_OK)
+      fail("get smoothed customNN edge mode failed");
+    if (edge_mode != 2)
+      fail("customNN e=2 edge mode should be preserved on the context");
+    if (sbx_context_get_keyframe(ctx, 0, &custom_kf) != SBX_OK)
+      fail("get smoothed customNN isochronic keyframe failed");
+    rc = sbx_context_sample_isochronic_cycle(ctx, &custom_kf.tone, NULL, 17, ts, env, wave);
+    if (rc != SBX_OK) fail("context_sample_isochronic_cycle smoothed customNN failed");
+    if (!(env[1] > 0.10 && env[1] < 0.20))
+      fail("customNN e=2 should apply smoothstep segment interpolation");
+    if (!(env[2] > 0.45 && env[2] < 0.55))
+      fail("customNN e=2 should preserve midpoint level on rising segment");
+  }
+
   sbx_default_engine_config(&cfg);
   cfg.sample_rate = 1000.0;
   eng = sbx_engine_create(&cfg);
