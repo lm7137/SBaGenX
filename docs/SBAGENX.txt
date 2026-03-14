@@ -313,6 +313,11 @@ This writes a two-panel graph (envelope + waveform) for exactly one
 pulse cycle, with labelled numeric ticks and the effective parameters
 printed at the bottom.
 
+For isochronic work, `-I` remains the normal recommended control path.
+It expresses the pulse shape in explicit structural parameters
+(`s/d/a/r/e`) that are easier to reason about, compare, and document
+than an arbitrary point list.
+
 For sequence-file work, there is now also a separate `customNN` envelope
 definition family intended specifically for intuitive custom shaping where
 literal zero really means silence.  Unlike historical `waveNN`, these
@@ -336,6 +341,11 @@ global min/max recentering.  Example:
 `sbagenxlib` path.  For isochronic tones, the custom envelope replaces the
 default `-I` pulse shape for that tone.  The installer ships a rendered
 reference plot for the example above as:
+
+For new isochronic designs, `-I` is still the recommended first choice.
+Use `customNN` when you specifically want a nonstandard hand-shaped
+envelope that cannot be expressed cleanly with the normal `-I`
+parameters.
 
   assets/example-plot-iso-cycle-custom00-literal.png
 
