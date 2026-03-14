@@ -7,8 +7,7 @@ SBaGenX is a command-line brainwave generator for creating binaural beats, monau
 > **SBaGenX is a fork of SBaGen+, continuing development of the original SBaGen lineage.**
 > Full credit is due, first and foremost, to the father of SBaGen, Jim Peters, and also to the creator of the SBaGen+ fork, Ruan Klein, who added isochronic beats as well as making numerous enhancements.
 
-> Use the latest stable release from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).  
-> Current stable release: **v3.2.0**
+> Use the latest stable release from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
 
 ## Table of Contents
 
@@ -83,6 +82,8 @@ This fork introduces substantial functional changes beyond maintenance:
    Added:
    - `-I` for one-cycle isochronic envelope control
    - `-H` for one-cycle `mixam` envelope control
+   - `customNN` literal envelope definitions where `0` really means `0`
+   - optional `e=0..3` smoothing for `customNN` envelope shaping
    - PNG preview rendering of these cycle-level envelopes
 
 6. **Preview and plotting tools**  
@@ -123,15 +124,13 @@ This fork introduces substantial functional changes beyond maintenance:
 
 Download assets from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases).
 
-Current stable release: **v3.2.0**
-
 ### Try SBaGenX in 60 Seconds
 
 #### Windows
 
 1. Download and install the current Windows installer:
 
-   - [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx-windows-setup.exe)
+   - [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/latest/download/sbagenx-windows-setup.exe)
 
 2. Verify installation:
 
@@ -148,9 +147,9 @@ Current stable release: **v3.2.0**
 #### Ubuntu (amd64)
 
 ```bash
-wget -O sbagenx_3.2.0-1_amd64.deb \
-  https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx_3.2.0-1_amd64.deb
-sudo apt install ./sbagenx_3.2.0-1_amd64.deb
+# Download the latest amd64 .deb from:
+# https://github.com/lm7137/SBaGenX/releases
+sudo apt install ./sbagenx_*_amd64.deb
 sbagenx -h
 ```
 
@@ -172,6 +171,12 @@ sbagenx -p curve examples/basics/curve-sigmoid-like.sbgf 00ls:l=0.2:h=0
 
 ```bash
 sbagenx -G -p curve examples/basics/curve-expfit-solve-demo.sbgf 00ls:l=0.2 mix/99
+```
+
+#### Literal Custom Isochronic Envelope (`customNN`)
+
+```bash
+sbagenx -P examples/basics/prog-custom-envelope-iso-demo.sbg
 ```
 
 ### Using Docker for Builds
@@ -199,15 +204,13 @@ Recommended download path:
 - The project website at [www.sbagenx.com](https://www.sbagenx.com/) provides
   release overviews and links back to the same public assets
 
-Current stable release assets (`v3.2.0`):
-
-- Windows installer: [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx-windows-setup.exe)
-- Windows SHA256: `f06f463381945acef11b2f11aed51694c2901b54f65347e6b5181d6eb501349b`
-- Ubuntu package: [`sbagenx_3.2.0-1_amd64.deb`](https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx_3.2.0-1_amd64.deb)
-- Ubuntu SHA256: `8a3bbd120f199174d5506fd7696a99ee3794a0c751a76b3579e0b77a282e0e39`
+- Windows installer: [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/latest/download/sbagenx-windows-setup.exe)
+- Ubuntu package: download the latest `sbagenx_*_amd64.deb` asset from the [GitHub releases page](https://github.com/lm7137/SBaGenX/releases)
 
   **Important**: Always verify the SHA256 checksum of downloaded binaries
-  against those published with the release.
+  against those published with the release. The project website at
+  [www.sbagenx.com](https://www.sbagenx.com/) also mirrors the current
+  release overview and checksums.
 
 ### Installing on Linux
 
@@ -265,7 +268,7 @@ sbagenx -h
 
 1. Download the installer:
 
-   - [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/download/v3.2.0/sbagenx-windows-setup.exe)
+   - [`sbagenx-windows-setup.exe`](https://github.com/lm7137/SBaGenX/releases/latest/download/sbagenx-windows-setup.exe)
 
 2. Verify the SHA256 checksum of the installer. You can use PowerShell or Command Prompt to do this:
 
@@ -273,11 +276,9 @@ sbagenx -h
    Get-FileHash -Algorithm SHA256 .\sbagenx-windows-setup.exe
    ```
 
-   The expected SHA256 for `v3.2.0` is:
-
-   ```text
-   f06f463381945acef11b2f11aed51694c2901b54f65347e6b5181d6eb501349b
-   ```
+   The expected SHA256 is published with each release on the
+   [GitHub releases page](https://github.com/lm7137/SBaGenX/releases) and on
+   [www.sbagenx.com](https://www.sbagenx.com/).
 
 3. Run the installer and follow the instructions.
 
@@ -321,6 +322,12 @@ sbagenx -p curve examples/basics/curve-expfit-solve-demo.sbgf 00ls:l=0.2 mix/99
 sbagenx -G -p curve examples/basics/curve-raised-cosine-demo.sbgf 00ls mix/99
 ```
 
+### Literal Custom Envelope for Isochronic Work
+
+```bash
+sbagenx -P examples/basics/prog-custom-envelope-iso-demo.sbg
+```
+
 ### 24-bit Uncompressed Export
 
 ```bash
@@ -345,7 +352,7 @@ For developers integrating `sbagenxlib`:
 
 The library is no longer just a sidecar experiment. The CLI now relies on
 `sbagenxlib` for core runtime generation, modernized export paths, curve
-evaluation, and host-facing sampling helpers.
+evaluation, plot-data sampling, and host-facing sampling helpers.
 
 Recent library-side audio output work includes:
 
