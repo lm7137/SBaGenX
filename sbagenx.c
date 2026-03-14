@@ -2102,7 +2102,6 @@ plot_cmd_append(char *cmd, int cmd_sz, const char *txt) {
    return 1;
 }
 
-#ifndef T_MINGW
 static int
 plot_cmd_append_quoted(char *cmd, int cmd_sz, const char *arg) {
    const char *p= arg;
@@ -2121,7 +2120,6 @@ plot_cmd_append_quoted(char *cmd, int cmd_sz, const char *arg) {
    if (!plot_cmd_append(cmd, cmd_sz, "\"")) return 0;
    return 1;
 }
-#endif
 
 #ifdef T_MINGW
 static int
