@@ -395,6 +395,10 @@ Phase 3.63
   - allow `waveNN:` tone tokens in native `.sbg` timing/name/block parsing,
   - render those tones as custom-envelope binaural voices without falling back
     to the legacy parser/runtime.
+  - preserve the historical `waveNN` reconstruction model:
+    periodic-sinc smoothing plus global min/max normalization of the
+    reconstructed cycle, rather than treating the sample list as a literal
+    envelope.
 
 Phase 3.64
 - Extend native `.sbg` loading with keyframed mix-side tokens:

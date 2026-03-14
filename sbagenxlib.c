@@ -479,8 +479,13 @@ sbx_build_legacy_custom_wave_table_from_samples(const double *samples,
                                                 size_t count,
                                                 double **out_table) {
   double *tbl;
+  double *norm = 0;
+  double *sinc = 0;
+  double *out = 0;
   double minv, maxv;
-  size_t i;
+  double dmax, dmin;
+  double adj;
+  size_t i, b;
 
   if (!samples || count < 2 || !out_table) return SBX_EINVAL;
   minv = maxv = samples[0];
@@ -491,17 +496,66 @@ sbx_build_legacy_custom_wave_table_from_samples(const double *samples,
   if (!(isfinite(minv) && isfinite(maxv)) || maxv <= minv)
     return SBX_EINVAL;
 
+  norm = (double *)malloc(count * sizeof(*norm));
+  sinc = (double *)malloc(SBX_CUSTOM_WAVE_SAMPLES * sizeof(*sinc));
+  out = (double *)calloc(SBX_CUSTOM_WAVE_SAMPLES, sizeof(*out));
   tbl = (double *)calloc(SBX_CUSTOM_WAVE_SAMPLES, sizeof(*tbl));
-  if (!tbl) return SBX_ENOMEM;
-  for (i = 0; i < SBX_CUSTOM_WAVE_SAMPLES; i++) {
-    double pos = ((double)i * (double)count) / (double)SBX_CUSTOM_WAVE_SAMPLES;
-    size_t i0 = (size_t)floor(pos) % count;
-    size_t i1 = (i0 + 1) % count;
-    double frac = pos - floor(pos);
-    double v0 = (samples[i0] - minv) / (maxv - minv);
-    double v1 = (samples[i1] - minv) / (maxv - minv);
-    tbl[i] = sbx_lerp(v0, v1, frac);
+  if (!norm || !sinc || !out || !tbl) {
+    if (norm) free(norm);
+    if (sinc) free(sinc);
+    if (out) free(out);
+    if (tbl) free(tbl);
+    return SBX_ENOMEM;
   }
+
+  /* Match the legacy engine: normalize samples first, then reconstruct the
+   * periodic cycle with the modified periodic sinc kernel, then renormalize
+   * the reconstructed cycle to 0..1. */
+  for (i = 0; i < count; i++)
+    norm[i] = (samples[i] - minv) / (maxv - minv);
+
+  sinc[0] = 1.0;
+  for (i = SBX_CUSTOM_WAVE_SAMPLES / 2; i > 0; i--) {
+    double tt = (double)i / (double)SBX_CUSTOM_WAVE_SAMPLES;
+    double t2 = tt * tt;
+    double adj_local = 1.0 - 4.0 * t2;
+    double xx = 2.0 * (double)count * M_PI * tt;
+    double vv = adj_local * sin(xx) / xx;
+    sinc[i] = vv;
+    sinc[SBX_CUSTOM_WAVE_SAMPLES - i] = vv;
+  }
+
+  for (b = 0; b < count; b++) {
+    size_t off = (b * (size_t)SBX_CUSTOM_WAVE_SAMPLES) / count;
+    double val = norm[b];
+    for (i = 0; i < SBX_CUSTOM_WAVE_SAMPLES; i++)
+      out[(i + off) & (SBX_CUSTOM_WAVE_SAMPLES - 1)] += sinc[i] * val;
+  }
+
+  dmax = dmin = 0.0;
+  for (i = 0; i < SBX_CUSTOM_WAVE_SAMPLES; i++) {
+    if (out[i] > dmax) dmax = out[i];
+    if (out[i] < dmin) dmin = out[i];
+  }
+  if (!(isfinite(dmin) && isfinite(dmax)) || dmax <= dmin) {
+    free(norm);
+    free(sinc);
+    free(out);
+    free(tbl);
+    return SBX_EINVAL;
+  }
+
+  adj = 1.0 / (dmax - dmin);
+  for (i = 0; i < SBX_CUSTOM_WAVE_SAMPLES; i++) {
+    double vv = (out[i] - dmin) * adj;
+    if (vv < 0.0) vv = 0.0;
+    if (vv > 1.0) vv = 1.0;
+    tbl[i] = vv;
+  }
+
+  free(norm);
+  free(sinc);
+  free(out);
   *out_table = tbl;
   return SBX_OK;
 }

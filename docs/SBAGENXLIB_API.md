@@ -78,7 +78,9 @@ Core Concepts
   or literal `customNN` envelopes stored on the context. `customNN`
   definitions may optionally declare `e=0..3` smoothing on the definition
   line itself, matching the edge-shape numbering used elsewhere in SBaGenX
-  (`0=hard`, `1=linear`, `2=smoothstep`, `3=smootherstep`).
+  (`0=hard`, `1=linear`, `2=smoothstep`, `3=smootherstep`). Legacy
+  `waveNN` remains binaural-only and follows the historical periodic-sinc
+  reconstruction plus global min/max normalization path.
 - `SbxPcm16DitherState`: caller-owned RNG state for TPDF dither when converting
   normalized float render output to signed 16-bit PCM.
 - `SbxPcmConvertState`: generic PCM conversion state with explicit dither mode.
