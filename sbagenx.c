@@ -4180,13 +4180,16 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 				   int *out_have_q, int *out_q_mult,
 				   int *out_have_r, int *out_rate,
 				   int *out_have_F, int *out_fade_ms,
-				   char **out_mix_path) {
+				   char **out_mix_path,
+				   char **out_out_path,
+				   int *out_have_Z, double *out_flac_compression) {
    char *dup, *argv[64], *p;
    int argc= 0, i;
 
    if (!line || !out_S || !out_E || !out_have_T || !out_T_ms ||
        !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
-       !out_have_F || !out_fade_ms || !out_mix_path)
+       !out_have_F || !out_fade_ms || !out_mix_path ||
+       !out_out_path || !out_have_Z || !out_flac_compression)
       return 0;
    dup= StrDup((char *)line);
    p= dup;
@@ -4236,6 +4239,16 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     i++;
 	     a= strlen(tok) - 1;
 	     break;
+	  case 'o':
+	     if (tok[a+1] || i+1 >= argc) {
+		free(dup);
+		return 0;
+	     }
+	     if (*out_out_path) free(*out_out_path);
+	     *out_out_path= StrDup(argv[i+1]);
+	     i++;
+	     a= strlen(tok) - 1;
+	     break;
 	  case 'q':
 	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_q_mult)) {
 		free(dup);
@@ -4262,6 +4275,16 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 		return 0;
 	     }
 	     *out_have_F= 1;
+	     i++;
+	     a= strlen(tok) - 1;
+	     break;
+	  case 'Z':
+	     if (tok[a+1] || i+1 >= argc ||
+		 1 != sscanf(argv[i+1], "%lf", out_flac_compression)) {
+		free(dup);
+		return 0;
+	     }
+	     *out_have_Z= 1;
 	     i++;
 	     a= strlen(tok) - 1;
 	     break;
@@ -4393,13 +4416,16 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 				 int *out_have_q, int *out_q_mult,
 				 int *out_have_r, int *out_rate,
 				 int *out_have_F, int *out_fade_ms,
-				 char **out_mix_path) {
+				 char **out_mix_path,
+				 char **out_out_path,
+				 int *out_have_Z, double *out_flac_compression) {
    char *text, *line;
    int rc;
 
    if (!out_text || !out_S || !out_E || !out_have_T || !out_T_ms ||
        !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
-       !out_have_F || !out_fade_ms || !out_mix_path)
+       !out_have_F || !out_fade_ms || !out_mix_path ||
+       !out_out_path || !out_have_Z || !out_flac_compression)
       return SBX_EINVAL;
    *out_text= 0;
    *out_S= 0;
@@ -4413,6 +4439,9 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
    *out_have_F= 0;
    *out_fade_ms= 60000;
    *out_mix_path= 0;
+   *out_out_path= 0;
+   *out_have_Z= 0;
+   *out_flac_compression= 5.0;
 
    rc= sbx_read_text_file_alloc_cli(fnam, &text);
    if (rc != SBX_OK)
@@ -4455,9 +4484,13 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 						 out_have_q, out_q_mult,
 						 out_have_r, out_rate,
 						 out_have_F, out_fade_ms,
-						 out_mix_path)) {
+						 out_mix_path,
+						 out_out_path,
+						 out_have_Z, out_flac_compression)) {
 	    if (*out_mix_path) free(*out_mix_path);
+	    if (*out_out_path) free(*out_out_path);
 	    *out_mix_path= 0;
+	    *out_out_path= 0;
 	    if (saved) *line_nl= saved;
 	    free(text);
 	    return SBX_EINVAL;
@@ -7743,10 +7776,13 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    int rc;
    char *seq_text= 0;
    char *safe_mix_path= 0;
+   char *safe_out_path= 0;
    int safe_S= 0, safe_E= 0, safe_have_T= 0, safe_T_ms= -1;
    int safe_have_q= 0, safe_q_mult= 1;
    int safe_have_r= 0, safe_rate= 44100;
    int safe_have_F= 0, safe_fade_ms= 60000;
+   int safe_have_Z= 0;
+   double safe_flac_compression= 5.0;
 
    if (ac != 1 || !av)
       return 0;
@@ -7763,7 +7799,9 @@ sbx_try_readSeq_runtime(int ac, char **av) {
 					&safe_have_q, &safe_q_mult,
 					&safe_have_r, &safe_rate,
 					&safe_have_F, &safe_fade_ms,
-					&safe_mix_path);
+					&safe_mix_path,
+					&safe_out_path,
+					&safe_have_Z, &safe_flac_compression);
    if (rc == SBX_ENOMEM)
       error("Out of memory preparing sequence file for sbagenxlib runtime");
    if (rc != SBX_OK)
@@ -7778,6 +7816,14 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (safe_have_q) {
       opt_S= 1;
       fast_mult= safe_q_mult;
+   }
+   if (safe_out_path) {
+      opt_o= StrDup(safe_out_path);
+      if (!fast_mult) fast_mult= 1;
+   }
+   if (safe_have_Z) {
+      opt_flac_compression= safe_flac_compression;
+      opt_flac_compression_set= 1;
    }
 
    sbx_default_engine_config(&cfg);
@@ -7836,11 +7882,13 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       warn("Using sbagenxlib runtime for sequence file subset: %s", fnam);
    free(seq_text);
    if (safe_mix_path) free(safe_mix_path);
+   if (safe_out_path) free(safe_out_path);
    return 1;
 
 fail:
    if (seq_text) free(seq_text);
    if (safe_mix_path) free(safe_mix_path);
+   if (safe_out_path) free(safe_out_path);
    return 0;
 }
 
@@ -7864,7 +7912,7 @@ sbx_seq_backend_mode(void) {
 void 
 readSeq(int ac, char **av) {
    int seq_backend= sbx_seq_backend_mode();
-   if (seq_backend != 1 && !(seq_backend == 0 && opt_D)) {
+   if (seq_backend != 1) {
       if (sbx_try_readSeq_runtime(ac, av))
 	 return;
       if (seq_backend == 2)
