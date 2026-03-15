@@ -16,14 +16,35 @@ cleanup() {
 }
 trap cleanup EXIT
 
+python3 - <<'PY' "$tmpdir/mix.wav"
+import math
+import struct
+import sys
+import wave
+
+path = sys.argv[1]
+sr = 8000
+dur = 4
+n = sr * dur
+with wave.open(path, "wb") as wf:
+    wf.setnchannels(2)
+    wf.setsampwidth(2)
+    wf.setframerate(sr)
+    frames = bytearray()
+    for i in range(n):
+        s = int(2000.0 * math.sin(2.0 * math.pi * 220.0 * (i / sr)))
+        frames += struct.pack("<hh", s, s)
+    wf.writeframes(frames)
+PY
+
 cat >"$tmpdir/periods.sbg" <<'EOF'
-v0: 180+0/20
-v1: 260+0/20
+v0: 180+0/20 mix/70
+v1: 260+0/20 mix/40
 00:00 v0
 00:00:02 v1
 EOF
 
-"$BIN" -S -L 0:00:04 -o "$tmpdir/out.wav" -W "$tmpdir/periods.sbg" >/dev/null 2>"$tmpdir/err.raw"
+"$BIN" -S -L 0:00:04 -m "$tmpdir/mix.wav" -o "$tmpdir/out.wav" -W "$tmpdir/periods.sbg" >/dev/null 2>"$tmpdir/err.raw"
 tr '\r' '\n' <"$tmpdir/err.raw" >"$tmpdir/err.txt"
 
 grep -Fq "* 00:00:00" "$tmpdir/err.txt" || {
@@ -36,9 +57,14 @@ grep -Fq "  00:00:02" "$tmpdir/err.txt" || {
   exit 1
 }
 
-grep -Fq "* 00:00:02" "$tmpdir/err.txt" || {
-  echo "FAIL: missing runtime period transition header" >&2
+grep -Fq "* 00:00:00 180+0/20 mix/70.00" "$tmpdir/err.txt" || {
+  echo "FAIL: initial keyframe period header is missing mix state" >&2
   exit 1
 }
 
-echo "PASS: sbagenxlib keyframed runtime emits legacy-style period history"
+grep -Fq "  00:00:02 260+0/20 mix/40.00" "$tmpdir/err.txt" || {
+  echo "FAIL: next-period keyframe line is missing mix state" >&2
+  exit 1
+}
+
+echo "PASS: sbagenxlib keyframed runtime emits period history with mix state"

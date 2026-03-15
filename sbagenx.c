@@ -259,6 +259,7 @@ void normalizeAmplitude(Voice *voices, int numChannels, const char *line, int li
 void printSequenceDuration();
 void checkMixInSequence(); // Check if mix/<amp> is specified
 void emit_dry_run_report(int mode_flag, int ac, char **av);
+static void open_mix_input_stream_if_requested(void);
 void create_noise_spin_effect(
   int typ,
   int amp,
@@ -3758,6 +3759,9 @@ main(int argc, char **argv) {
 
    if (argc < 1) usage();
    
+   if (!opt_dry_run)
+      open_mix_input_stream_if_requested();
+
    if (rv == 'i') {
       // Immediate mode
       if (opt_G)
@@ -3804,89 +3808,7 @@ main(int argc, char **argv) {
       }
    }
    
-   mix_in= 0;
-   if (opt_M || opt_m) {
-      char *p;
-      char tmp[8];
-      int raw= 1;
-      tmp[0]= 0;
-      if (opt_M) {
-	 mix_in= stdin; 
-	 tmp[0]= 0;
-      } 
-      if (opt_m) {
-	 // Pick up #<digits> on end of filename
-	 p= strchr(opt_m, 0);
-	 mix_cnt= -1;
-	 if (p > opt_m && isdigit(p[-1])) {
-	    mix_cnt= 0;
-	    while (p > opt_m && isdigit(p[-1]))
-	       mix_cnt= mix_cnt * 10 + *--p - '0';
-	    if (p > opt_m && p[-1] == '#') 
-	       *--p= 0;
-	    else {
-	       p= strchr(opt_m, 0);
-	       mix_cnt= -1;
-	    } 
-	 }
-	 // p points to end of filename (NUL)
-
-	 // Open file
-	 mix_in= fopen(opt_m, "rb");
-	 if (!mix_in && opt_m[0] != '/') {
-	    int len= strlen(opt_m) + strlen(pdir) + 1;
-	    char *tmp= ALLOC_ARR(len, char);
-	    strcpy(tmp, pdir);
-	    strcat(tmp, opt_m);
-	    mix_in= fopen(tmp, "rb");
-	    free(tmp);
-	 }
-	 if (!mix_in)
-	    error("Can't open -m option mix input file: %s", opt_m);
-
-	 // Pick up extension
-	 {
-	    char *dot= strrchr(opt_m, '.');
-	    char *slash= strrchr(opt_m, '/');
-	    char *bslash= strrchr(opt_m, '\\');
-	    char *sep= slash > bslash ? slash : bslash;
-	    if (dot && (!sep || dot > sep) && dot + 1 < p) {
-	       int a, len= p - (dot + 1);
-	       if (len >= (int)sizeof(tmp))
-		  len= sizeof(tmp)-1;
-	       for (a= 0; a<len; a++)
-		  tmp[a]= tolower((unsigned char)dot[1+a]);
-	       tmp[len]= 0;
-	    }
-	 }
-      }
-      if (0 == strcmp(tmp, "wav"))	// Skip header on WAV files
-	 find_wav_data_start(mix_in);
-      if (0 == strcmp(tmp, "ogg")) {
-#ifdef OGG_DECODE
-	 ogg_init(); raw= 0;
-#else
-	 error("Sorry: Ogg support wasn't compiled into this executable");
-#endif
-      }
-      if (0 == strcmp(tmp, "mp3")) {
-#ifdef MP3_DECODE
-	 mp3_init(); raw= 0;
-#else
-	 error("Sorry: MP3 support wasn't compiled into this executable");
-#endif
-      }
-      if (0 == strcmp(tmp, "flac")) {
-#ifdef FLAC_DECODE
-	 flac_init(); raw= 0;
-#else
-	 error("Sorry: FLAC support wasn't compiled into this executable");
-#endif
-      }
-      // If this is a raw/wav data stream, setup a 256*1024-int
-      // buffer (3s@44.1kHz)
-      if (raw) inbuf_start(raw_mix_in, 256*1024);
-   }
+   open_mix_input_stream_if_requested();
 
    if (opt_A && !mix_in)
       error("-A requires a mix input stream; use -m <file> or -M");
@@ -4628,6 +4550,94 @@ find_wav_data_start(FILE *in) {
    rewind(in);
 }
 
+static void
+open_mix_input_stream_if_requested(void) {
+   char *p;
+   char tmp[8];
+   int raw= 1;
+
+   if (mix_in || (!opt_M && !opt_m))
+      return;
+
+   tmp[0]= 0;
+   if (opt_M) {
+      mix_in= stdin;
+      tmp[0]= 0;
+   }
+   if (opt_m) {
+      // Pick up #<digits> on end of filename
+      p= strchr(opt_m, 0);
+      mix_cnt= -1;
+      if (p > opt_m && isdigit(p[-1])) {
+         mix_cnt= 0;
+         while (p > opt_m && isdigit(p[-1]))
+            mix_cnt= mix_cnt * 10 + *--p - '0';
+         if (p > opt_m && p[-1] == '#')
+            *--p= 0;
+         else {
+            p= strchr(opt_m, 0);
+            mix_cnt= -1;
+         }
+      }
+      // p points to end of filename (NUL)
+
+      // Open file
+      mix_in= fopen(opt_m, "rb");
+      if (!mix_in && opt_m[0] != '/') {
+         int len= strlen(opt_m) + strlen(pdir) + 1;
+         char *tmp_path= ALLOC_ARR(len, char);
+         strcpy(tmp_path, pdir);
+         strcat(tmp_path, opt_m);
+         mix_in= fopen(tmp_path, "rb");
+         free(tmp_path);
+      }
+      if (!mix_in)
+         error("Can't open -m option mix input file: %s", opt_m);
+
+      // Pick up extension
+      {
+         char *dot= strrchr(opt_m, '.');
+         char *slash= strrchr(opt_m, '/');
+         char *bslash= strrchr(opt_m, '\\');
+         char *sep= slash > bslash ? slash : bslash;
+         if (dot && (!sep || dot > sep) && dot + 1 < p) {
+            int a, len= p - (dot + 1);
+            if (len >= (int)sizeof(tmp))
+               len= sizeof(tmp)-1;
+            for (a= 0; a<len; a++)
+               tmp[a]= tolower((unsigned char)dot[1+a]);
+            tmp[len]= 0;
+         }
+      }
+   }
+   if (0 == strcmp(tmp, "wav"))	// Skip header on WAV files
+      find_wav_data_start(mix_in);
+   if (0 == strcmp(tmp, "ogg")) {
+#ifdef OGG_DECODE
+      ogg_init(); raw= 0;
+#else
+      error("Sorry: Ogg support wasn't compiled into this executable");
+#endif
+   }
+   if (0 == strcmp(tmp, "mp3")) {
+#ifdef MP3_DECODE
+      mp3_init(); raw= 0;
+#else
+      error("Sorry: MP3 support wasn't compiled into this executable");
+#endif
+   }
+   if (0 == strcmp(tmp, "flac")) {
+#ifdef FLAC_DECODE
+      flac_init(); raw= 0;
+#else
+      error("Sorry: FLAC support wasn't compiled into this executable");
+#endif
+   }
+   // If this is a raw/wav data stream, setup a 256*1024-int
+   // buffer (3s@44.1kHz)
+   if (raw) inbuf_start(raw_mix_in, 256*1024);
+}
+
 //
 //	Input raw audio data from the 'mix_in' stream, and convert to
 //	32-bit values (max 'dlen')
@@ -4766,6 +4776,38 @@ sbx_clear_status_line(FILE *fp) {
   }
 }
 
+static char *
+sbx_append_mix_status_at(char *p, double t_sec) {
+  size_t fx_n;
+  size_t need = 0;
+  size_t i;
+  char tok[256];
+  SbxMixFxSpec *fxv = NULL;
+
+  if (mix_in) {
+    double mix_pct= sbx_context_mix_amp_effective_at(sbx_runtime_ctx, t_sec);
+    p += sprintf(p, " mix/%.2f", mix_pct);
+  }
+
+  if (SBX_OK != sbx_context_sample_mix_effects(sbx_runtime_ctx, t_sec, NULL, 0, &need))
+    return p;
+  if (need == 0)
+    return p;
+  fxv = (SbxMixFxSpec *)malloc(sizeof(*fxv) * need);
+  if (!fxv)
+    return p;
+  if (SBX_OK != sbx_context_sample_mix_effects(sbx_runtime_ctx, t_sec, fxv, need, &fx_n)) {
+    free(fxv);
+    return p;
+  }
+  for (i = 0; i < fx_n; i++) {
+    if (SBX_OK == sbx_format_mix_fx_spec(&fxv[i], tok, sizeof(tok)))
+      p += sprintf(p, " %s", tok);
+  }
+  free(fxv);
+  return p;
+}
+
 void
 dispCurrPerSbx(FILE *fp) {
   int a;
@@ -4822,6 +4864,8 @@ dispCurrPerSbx(FILE *fp) {
     while (len0 < len1) { *p0++= ' '; len0++; }
     while (len1 < len0) { *p1++= ' '; len1++; }
   }
+  p0 = sbx_append_mix_status_at(p0, cur_kf.time_sec);
+  p1 = sbx_append_mix_status_at(p1, next_kf.time_sec);
   *p0= 0;
   *p1= 0;
   fprintf(fp, "%s\n%s\n", buf, buf_copy);
@@ -4887,20 +4931,7 @@ statusSbx(char *err) {
       p += sprintf(p, " %s", tok);
   }
 
-  if (mix_in) {
-    double mix_pct= sbx_context_mix_amp_effective_at(sbx_runtime_ctx, t_sec);
-    p += sprintf(p, " mix/%.2f", mix_pct);
-  }
-
-  {
-    size_t fx_n= sbx_context_mix_effect_count(sbx_runtime_ctx);
-    SbxMixFxSpec fx;
-    for (a= 0; a < (int)fx_n; a++) {
-      if (SBX_OK == sbx_context_get_mix_effect(sbx_runtime_ctx, (size_t)a, &fx) &&
-	  SBX_OK == sbx_format_mix_fx_spec(&fx, tok, sizeof(tok)))
-	p += sprintf(p, " %s", tok);
-    }
-  }
+  p = sbx_append_mix_status_at(p, t_sec);
 
   if (err) p += sprintf(p, " %s", err);
   p1= p;
@@ -7825,6 +7856,9 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       opt_flac_compression= safe_flac_compression;
       opt_flac_compression_set= 1;
    }
+   if (safe_mix_path && !opt_m)
+      opt_m= StrDup(safe_mix_path);
+   open_mix_input_stream_if_requested();
 
    sbx_default_engine_config(&cfg);
    cfg.sample_rate= (double)out_rate;
@@ -7851,12 +7885,11 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    }
    if (safe_E)
       opt_E= 1;
+
    if (safe_have_T && opt_T == -1) {
       opt_T= safe_T_ms;
       if (!fast_mult) fast_mult= 1;
    }
-   if (safe_mix_path && !opt_m)
-      opt_m= StrDup(safe_mix_path);
 
    if (opt_D) {
       emit_periods_from_sbx_context(ctx, 0);
