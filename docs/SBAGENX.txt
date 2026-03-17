@@ -926,7 +926,7 @@ To render the drop beat/pulse curve as an image instead of running
 audio output, add `-G` with `-p drop`:
 
   sbagenx -G -p drop t40,10,5 -01ds+
-  sbagenx --graph-video drop.mp4 --graph-video-fps 8 \
+  sbagenx --graph-video drop.mp4 --graph-video-fps 30 \
           -G -p drop t40,10,5 -01ds+
 
 This writes a PNG graph of the beat/pulse curve over the drop period
@@ -1361,7 +1361,7 @@ To render the sigmoid beat/pulse curve as an image instead of running
 audio output, add `-G` with `-p sigmoid`:
 
   sbagenx -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
-  sbagenx --graph-video sigmoid.mp4 --graph-video-fps 8 \
+  sbagenx --graph-video sigmoid.mp4 --graph-video-fps 30 \
           -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
 
 This writes a PNG graph of the beat/pulse curve over the drop period
@@ -2036,7 +2036,7 @@ follows:
               With -G, also write an MP4 graph animation with audio.
               Requires Python+Cairo backend plus ffmpeg.
             --graph-video-fps n
-              Frame rate for --graph-video (default 10).
+              Frame rate for --graph-video (default 30).
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec:
                 s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>

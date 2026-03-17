@@ -385,7 +385,7 @@ help() {
 	  NL "                     muxed audio, a tracking cursor and"
 	  NL "                     pulsating dot"
 	  NL "          --graph-video-fps n"
-	  NL "                     Frame rate for --graph-video (default 10)"
+	  NL "                     Frame rate for --graph-video (default 30)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -605,7 +605,7 @@ int opt_Q;			// Quiet mode
 int opt_D;
 int opt_G;			// Program beat/pulse graph flag (-G)
 char *opt_G_video;		// Optional MP4 graph animation output for -G
-int opt_G_video_fps= 10;	// Frame rate for optional graph animation video
+int opt_G_video_fps= 30;	// Frame rate for optional graph animation video
 int opt_P;			// Cycle plot flag (-P)
 int opt_P_sigmoid;		// Program graph requested for -p sigmoid
 int opt_P_drop;		// Program graph requested for -p drop

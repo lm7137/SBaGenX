@@ -59,8 +59,8 @@ def _add_graph_video_args(parser):
     parser.add_argument(
         "--video-fps",
         type=int,
-        default=10,
-        help="Frame rate for optional graph video output (default 10)",
+        default=30,
+        help="Frame rate for optional graph video output (default 30)",
     )
     parser.add_argument(
         "--audio-file",
