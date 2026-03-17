@@ -14,6 +14,8 @@ Modes:
 import argparse
 import math
 import os
+import shutil
+import subprocess
 import sys
 
 try:
@@ -24,6 +26,7 @@ except Exception as exc:
 
 
 PI = math.pi
+_GRAPH_VIDEO_ENCODER_ARGS = None
 
 
 def _fmt_tick(value: float) -> str:
@@ -46,6 +49,244 @@ def _setup_canvas(width: int, height: int):
     ctx.set_source_rgb(1.0, 1.0, 1.0)
     ctx.paint()
     return surface, ctx
+
+
+def _add_graph_video_args(parser):
+    parser.add_argument(
+        "--video-out",
+        help="Optional MP4 graph video output with a real-time tracking cursor",
+    )
+    parser.add_argument(
+        "--video-fps",
+        type=int,
+        default=10,
+        help="Frame rate for optional graph video output (default 10)",
+    )
+    parser.add_argument(
+        "--audio-file",
+        help="Optional audio file to mux into the MP4 graph video",
+    )
+
+
+def _draw_graph_cursor(ctx, x, y, plot_top, plot_bottom, pulse):
+    halo_radius = 12.0 + 8.0 * pulse
+    dot_radius = 5.5 + 2.5 * pulse
+    halo_alpha = 0.12 + 0.16 * pulse
+
+    ctx.set_source_rgba(0.05, 0.28, 0.76, 0.28)
+    ctx.set_line_width(2.0)
+    ctx.move_to(x, plot_top)
+    ctx.line_to(x, plot_bottom)
+    ctx.stroke()
+
+    ctx.set_source_rgba(0.88, 0.28, 0.14, halo_alpha)
+    ctx.arc(x, y, halo_radius, 0.0, 2.0 * PI)
+    ctx.fill()
+
+    ctx.set_source_rgb(0.88, 0.28, 0.14)
+    ctx.arc(x, y, dot_radius, 0.0, 2.0 * PI)
+    ctx.fill_preserve()
+    ctx.set_source_rgb(1.0, 1.0, 1.0)
+    ctx.set_line_width(2.0)
+    ctx.stroke()
+
+
+def _graph_video_encoder_args(ffmpeg_path: str):
+    global _GRAPH_VIDEO_ENCODER_ARGS
+    if _GRAPH_VIDEO_ENCODER_ARGS is not None:
+        return list(_GRAPH_VIDEO_ENCODER_ARGS)
+
+    encoders = ""
+    try:
+        probe = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+        )
+        encoders = probe.stdout or ""
+    except Exception:
+        encoders = ""
+
+    if "libx264" in encoders:
+        _GRAPH_VIDEO_ENCODER_ARGS = [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-tune",
+            "animation",
+            "-crf",
+            "12",
+            "-pix_fmt",
+            "yuv444p",
+        ]
+    else:
+        _GRAPH_VIDEO_ENCODER_ARGS = [
+            "-c:v",
+            "mpeg4",
+            "-q:v",
+            "2",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+
+    return list(_GRAPH_VIDEO_ENCODER_ARGS)
+
+
+def _maybe_write_graph_video(
+    base_surface,
+    video_out: str,
+    video_fps: int,
+    duration_sec: float,
+    width: int,
+    height: int,
+    plot_left: float,
+    plot_top: float,
+    plot_width: float,
+    plot_height: float,
+    y_pixels,
+    freqs,
+    audio_file: str = None,
+):
+    if not video_out:
+        return
+    if os.path.splitext(video_out)[1].lower() != ".mp4":
+        raise ValueError("graph video output currently requires an .mp4 filename")
+    if video_fps <= 0:
+        raise ValueError("graph video fps must be > 0")
+    if duration_sec <= 0.0:
+        raise ValueError("graph video duration must be > 0")
+    if len(y_pixels) < 2 or len(freqs) < 2 or len(y_pixels) != len(freqs):
+        raise ValueError("graph video needs matching sampled y/frequency arrays")
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found in PATH; graph video export requires ffmpeg")
+
+    frame_count = max(2, int(round(duration_sec * video_fps)) + 1)
+    video_args = _graph_video_encoder_args(ffmpeg)
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr0",
+        "-s",
+        f"{width}x{height}",
+        "-r",
+        str(video_fps),
+        "-i",
+        "-",
+    ]
+    if audio_file:
+        cmd.extend([
+            "-i",
+            audio_file,
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:a",
+            "alac",
+            "-shortest",
+        ])
+    else:
+        cmd.append("-an")
+    cmd.extend(video_args)
+    cmd.extend(["-movflags", "+faststart", video_out])
+
+    os.makedirs(os.path.dirname(video_out) or ".", exist_ok=True)
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    plot_bottom = plot_top + plot_height - 1
+    base_surface.flush()
+    frame_surface = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
+    frame_ctx = cairo.Context(frame_surface)
+    frame_ctx.set_antialias(cairo.ANTIALIAS_BEST)
+
+    beat_phase = 0.0
+    prev_t = 0.0
+
+    def interp(seq, pos):
+        if pos <= 0.0:
+            return seq[0]
+        if pos >= len(seq) - 1:
+            return seq[-1]
+        i0 = int(math.floor(pos))
+        i1 = i0 + 1
+        frac = pos - i0
+        return seq[i0] + (seq[i1] - seq[i0]) * frac
+
+    try:
+        assert proc.stdin is not None
+        for frame_idx in range(frame_count):
+            t_sec = duration_sec * frame_idx / float(frame_count - 1)
+            progress = t_sec / duration_sec
+            pos = progress * (len(y_pixels) - 1)
+            x = plot_left + progress * (plot_width - 1)
+            y = interp(y_pixels, pos)
+            freq = max(0.0, interp(freqs, pos))
+            dt_sec = max(0.0, t_sec - prev_t)
+            prev_t = t_sec
+            beat_phase += freq * dt_sec * 2.0 * PI
+            pulse = 0.5 + 0.5 * math.sin(beat_phase)
+
+            frame_ctx.set_source_surface(base_surface, 0, 0)
+            frame_ctx.paint()
+            _draw_graph_cursor(frame_ctx, x, y, plot_top, plot_bottom, pulse)
+            frame_ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            frame_ctx.set_font_size(14)
+            frame_ctx.set_source_rgba(0.10, 0.13, 0.18, 0.88)
+            label = f"t={t_sec:0.1f}s  beat={freq:0.3f}Hz"
+            ext = frame_ctx.text_extents(label)
+            pad = 10.0
+            box_w = ext.width + 2.0 * pad
+            box_h = ext.height + 2.0 * pad
+            box_x = width - box_w - 18.0
+            box_y = 16.0
+            frame_ctx.set_source_rgba(1.0, 1.0, 1.0, 0.85)
+            frame_ctx.rectangle(box_x, box_y, box_w, box_h)
+            frame_ctx.fill()
+            frame_ctx.set_source_rgba(0.10, 0.13, 0.18, 0.90)
+            frame_ctx.move_to(box_x + pad, box_y + pad + ext.height)
+            frame_ctx.show_text(label)
+            frame_surface.flush()
+            try:
+                proc.stdin.write(frame_surface.get_data())
+            except BrokenPipeError:
+                stderr = (
+                    proc.stderr.read().decode("utf-8", "replace")
+                    if proc.stderr
+                    else ""
+                )
+                rc = proc.wait()
+                raise RuntimeError(
+                    "ffmpeg failed while encoding graph video"
+                    + (f": {stderr.strip()}" if stderr.strip() else "")
+                    + f" (rc={rc})"
+                ) from None
+        proc.stdin.close()
+        proc.stdin = None
+        stderr = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
+        rc = proc.wait()
+        if rc != 0 or not os.path.exists(video_out):
+            raise RuntimeError(
+                "ffmpeg failed to encode graph video"
+                + (f": {stderr.strip()}" if stderr.strip() else "")
+            )
+    finally:
+        if proc.stdin is not None:
+            proc.stdin.close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
 
 
 def _draw_grid_box(ctx, x0, y0, w, h, x_divs, y_vals, y_map):
@@ -229,6 +470,8 @@ def render_sigmoid(args):
 
     _draw_grid_box(ctx, ml, mt, pw, ph, 10, y_ticks, y_map)
 
+    curve_vals = []
+    y_pixels = []
     # curve
     ctx.set_source_rgb(0.13, 0.37, 0.88)
     ctx.set_line_width(2.0)
@@ -236,8 +479,10 @@ def render_sigmoid(args):
     for i in range(2001):
         t = d_min * i / 2000.0
         y = _sigmoid_eval(t, d_min, args.beat_target, args.sig_l, args.sig_h, args.sig_a, args.sig_b)
+        curve_vals.append(y)
         px = x_map(t)
         py = y_map(y)
+        y_pixels.append(py)
         if first:
             ctx.move_to(px, py)
             first = False
@@ -324,6 +569,21 @@ def render_sigmoid(args):
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     surface.write_to_png(args.out)
+    _maybe_write_graph_video(
+        surface,
+        args.video_out,
+        args.video_fps,
+        d_min * 60.0,
+        width,
+        height,
+        ml,
+        mt,
+        pw,
+        ph,
+        y_pixels,
+        curve_vals,
+        args.audio_file,
+    )
 
 
 def render_drop(args):
@@ -378,6 +638,8 @@ def render_drop(args):
 
     _draw_grid_box(ctx, ml, mt, pw, ph, 10, y_ticks, y_map)
 
+    curve_vals = []
+    y_pixels = []
     # curve
     ctx.set_source_rgb(0.13, 0.37, 0.88)
     ctx.set_line_width(2.0)
@@ -385,8 +647,10 @@ def render_drop(args):
     for i in range(2001):
         t = d_min * i / 2000.0
         y = _drop_eval(t, d_min, args.beat_start, args.beat_target, slide, n_step, step_len_sec)
+        curve_vals.append(y)
         px = x_map(t)
         py = y_map(y)
+        y_pixels.append(py)
         if first:
             ctx.move_to(px, py)
             first = False
@@ -477,6 +741,21 @@ def render_drop(args):
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     surface.write_to_png(args.out)
+    _maybe_write_graph_video(
+        surface,
+        args.video_out,
+        args.video_fps,
+        d_min * 60.0,
+        width,
+        height,
+        ml,
+        mt,
+        pw,
+        ph,
+        y_pixels,
+        curve_vals,
+        args.audio_file,
+    )
 
 
 def render_curve(args):
@@ -532,6 +811,7 @@ def render_curve(args):
 
     _draw_grid_box(ctx, ml, mt, pw, ph, 10, y_ticks, y_map)
 
+    y_pixels = []
     # curve
     ctx.set_source_rgb(0.13, 0.37, 0.88)
     ctx.set_line_width(2.0)
@@ -541,6 +821,7 @@ def render_curve(args):
         t = d_min * i / (n - 1)
         px = x_map(t)
         py = y_map(y)
+        y_pixels.append(py)
         if first:
             ctx.move_to(px, py)
             first = False
@@ -630,6 +911,21 @@ def render_curve(args):
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     surface.write_to_png(args.out)
+    _maybe_write_graph_video(
+        surface,
+        args.video_out,
+        args.video_fps,
+        d_min * 60.0,
+        width,
+        height,
+        ml,
+        mt,
+        pw,
+        ph,
+        y_pixels,
+        samples,
+        args.audio_file,
+    )
 
 
 def _load_iso_cycle_samples(path: str):
@@ -1273,6 +1569,7 @@ def main():
     sp.add_argument("--sig-h", type=float, required=True)
     sp.add_argument("--sig-a", type=float, required=True)
     sp.add_argument("--sig-b", type=float, required=True)
+    _add_graph_video_args(sp)
 
     dp = sub.add_parser("drop", help="Render drop curve plot")
     dp.add_argument("--out", required=True)
@@ -1283,6 +1580,7 @@ def main():
     dp.add_argument("--n-step", type=int, required=True)
     dp.add_argument("--step-len-sec", type=int, required=True)
     dp.add_argument("--mode-kind", type=int, required=True)
+    _add_graph_video_args(dp)
 
     cp = sub.add_parser("curve", help="Render custom .sbgf beat/pulse curve plot")
     cp.add_argument("--out", required=True)
@@ -1294,6 +1592,7 @@ def main():
     cp.add_argument("--n-step", type=int, required=True)
     cp.add_argument("--step-len-sec", type=int, required=True)
     cp.add_argument("--sample-file", required=True)
+    _add_graph_video_args(cp)
 
     ip = sub.add_parser("iso-cycle", help="Render isochronic single-cycle plot")
     ip.add_argument("--out", required=True)

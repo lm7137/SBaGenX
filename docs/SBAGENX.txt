@@ -926,11 +926,18 @@ To render the drop beat/pulse curve as an image instead of running
 audio output, add `-G` with `-p drop`:
 
   sbagenx -G -p drop t40,10,5 -01ds+
+  sbagenx --graph-video drop.mp4 --graph-video-fps 8 \
+          -G -p drop t40,10,5 -01ds+
 
 This writes a PNG graph of the beat/pulse curve over the drop period
 only, then exits.  The graph uses whole-number tick labels on both
 axes (time in minutes and frequency in Hz).  `@` and `M` are reflected
 in the plotted mode label (pulse vs monaural beat).
+
+If `--graph-video file.mp4` is supplied as well, SBaGenX also writes an
+MP4 animation of the same graph with the plotted-period audio muxed
+into the video.  The video uses a tracking cursor and a pulsating dot
+whose motion follows the plotted beat/pulse curve over the drop period.
 
 Compatibility fallback: `-P` also triggers this program graph when no
 cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
@@ -1354,6 +1361,8 @@ To render the sigmoid beat/pulse curve as an image instead of running
 audio output, add `-G` with `-p sigmoid`:
 
   sbagenx -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
+  sbagenx --graph-video sigmoid.mp4 --graph-video-fps 8 \
+          -G -p sigmoid t40,10,5 -01ds+:l=0.125:h=0
 
 This writes a PNG graph of the beat/pulse curve over the drop period
 only, then exits.  The filename is generated from the sigmoid
@@ -1370,6 +1379,11 @@ a/b values) for reference.
 `-G` first tries the Python+Cairo backend (bundled by default in current
 Windows builds).  If not available, it falls back to the built-in
 renderer.
+
+`--graph-video` requires the Python+Cairo backend plus `ffmpeg`, and
+writes an MP4 animation of the plotted drop curve with audio for the
+same plotted period.  By default the muxed audio uses the highest
+quality available for that render path.
 
 Compatibility fallback: `-P` also triggers this program graph when no
 cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
@@ -1630,6 +1644,10 @@ For `amp` and `mixamp`:
 
 With `-G`, `-p curve` plots the evaluated beat/pulse frequency curve
 over the drop period (`D`) and exits.
+
+`--graph-video file.mp4` may be added with `-G` to write an MP4
+animation of the same curve with a moving cursor, pulsating dot, and
+the plotted-period audio track muxed into the video.
 
 Compatibility fallback: `-P` also triggers this program graph when no
 cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
@@ -2014,6 +2032,11 @@ follows:
               plotting is used.
   -G        Plot program beat/pulse-vs-time graph as PNG and exit.
               Supported with -p drop/-p sigmoid/-p curve.
+            --graph-video file
+              With -G, also write an MP4 graph animation with audio.
+              Requires Python+Cairo backend plus ffmpeg.
+            --graph-video-fps n
+              Frame rate for --graph-video (default 10).
   -I [spec] Customize isochronic (@) pulse envelope.
               Optional spec:
                 s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>

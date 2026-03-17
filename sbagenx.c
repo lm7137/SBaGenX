@@ -278,16 +278,19 @@ void output_encoder_write_i32(int32_t *pcm, int frames);
 void finish_output_encoder();
 void write_sigmoid_graph_png(const char *fmt, double level,
 			     const char *target_tok, int len0, int len1, int len2,
+			     const char *extra,
 			     double beat_start, double beat_target,
 			     double sig_l, double sig_h,
 			     double sig_a, double sig_b);
 void write_drop_graph_png(const char *fmt, double level,
 			  const char *target_tok, int len0, int len1, int len2,
+			  const char *extra,
 			  double beat_start, double beat_target,
 			  int slide, int n_step, int steplen,
 			  int isisochronic, int ismono);
 void write_curve_graph_png(const char *fmt, double level,
 			   const char *target_tok, int len0, int len1, int len2,
+			   const char *extra,
 			   int slide, int n_step, int steplen,
 			   int isisochronic, int ismono,
 			   double beat_start, double beat_target);
@@ -297,18 +300,21 @@ int try_external_sigmoid_graph_png(const char *out_fname,
 				   int len0_sec,
 				   double beat_start, double beat_target,
 				   double sig_l, double sig_h,
-				   double sig_a, double sig_b);
+				   double sig_a, double sig_b,
+				   const char *audio_file);
 int try_external_drop_graph_png(const char *out_fname,
 				int len0_sec,
 				double beat_start, double beat_target,
 				int slide, int n_step, int steplen_sec,
-				int mode_kind);
+				int mode_kind,
+				const char *audio_file);
 int try_external_curve_graph_png(const char *out_fname,
 				 int len0_sec,
 				 double beat_start, double beat_target,
 				 int mode_kind,
 				 int slide, int n_step, int steplen_sec,
-				 const char *sample_file);
+				 const char *sample_file,
+				 const char *audio_file);
 int try_external_iso_cycle_graph_png(const char *out_fname,
 				     double carr_hz, double pulse_hz,
 				     double amp_pct, int waveform,
@@ -317,6 +323,12 @@ int try_external_iso_cycle_graph_png(const char *out_fname,
 int try_external_mixam_cycle_graph_png(const char *out_fname,
 				       int m, double s, double d, double a, double r,
 				       int e, double f);
+static int render_graph_video_audio_temp(const char *prog_kind,
+					 const char *curve_file,
+					 const char *fmt,
+					 int len0, int len1, int len2,
+					 const char *extra,
+					 char *out_path, int out_path_sz);
 static void emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested);
 
 #define ALLOC_ARR(cnt, type) ((type*)Alloc((cnt) * sizeof(type)))
@@ -368,6 +380,12 @@ help() {
 	  NL "                     cycle target, falls back to program beat/pulse graph"
 	  NL "          -G        Plot program beat/pulse-vs-time PNG and exit"
 	  NL "                     Supported with -p drop/-p sigmoid/-p curve"
+	  NL "          --graph-video file"
+	  NL "                     With -G, also write an MP4 animation with"
+	  NL "                     muxed audio, a tracking cursor and"
+	  NL "                     pulsating dot"
+	  NL "          --graph-video-fps n"
+	  NL "                     Frame rate for --graph-video (default 10)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -559,6 +577,7 @@ int out_fd;			// Output file descriptor
 int out_rate= 44100;		// Sample rate
 int out_rate_def= 1;		// Sample rate is default value, not set by user
 int out_mode= 1;		// Output mode: 0 unsigned char[2], 1 short[2], 2 swapped short[2]
+int opt_b_set= 0;		// Whether -b was explicitly specified
 int out_prate= 10;		// Rate of parameter change (for file and pipe output only)
 int fade_int= 60000;		// Fade interval (ms)
 FILE *in;			// Input sequence file
@@ -585,6 +604,8 @@ int sbx_status_curve_history_bucket= -1; // Last 10-second curve snapshot emitte
 int opt_Q;			// Quiet mode
 int opt_D;
 int opt_G;			// Program beat/pulse graph flag (-G)
+char *opt_G_video;		// Optional MP4 graph animation output for -G
+int opt_G_video_fps= 10;	// Frame rate for optional graph animation video
 int opt_P;			// Cycle plot flag (-P)
 int opt_P_sigmoid;		// Program graph requested for -p sigmoid
 int opt_P_drop;		// Program graph requested for -p drop
@@ -794,6 +815,7 @@ struct AmpAdj {
 } ampadj[16];			// List of maximum 16 (freq,adj) pairs, freq-increasing order
 
 char *pdir;			// Program directory (used as second place to look for -m files)
+char self_exe[PATH_MAX];	// Full path to current executable when available
 
 #ifdef WIN_AUDIO
  #define BUFFER_COUNT 8
@@ -2286,7 +2308,8 @@ try_external_sigmoid_graph_png(const char *out_fname,
 			       int len0_sec,
 			       double beat_start, double beat_target,
 			       double sig_l, double sig_h,
-			       double sig_a, double sig_b) {
+			       double sig_a, double sig_b,
+			       const char *audio_file) {
    char script[PATH_MAX];
    char args[2048];
    int force_external= plot_external_force();
@@ -2300,6 +2323,24 @@ try_external_sigmoid_graph_png(const char *out_fname,
    snprintf(args, sizeof(args),
 	    " sigmoid --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --sig-l %.12g --sig-h %.12g --sig-a %.12g --sig-b %.12g",
 	    out_fname, len0_sec / 60.0, beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
+   if (opt_G_video && *opt_G_video) {
+      char fps_txt[64];
+      snprintf(fps_txt, sizeof(fps_txt), "%d", opt_G_video_fps);
+      if (!plot_cmd_append(args, sizeof(args), " --video-out "))
+	 return 0;
+      if (!plot_cmd_append_quoted(args, sizeof(args), opt_G_video))
+	 return 0;
+      if (!plot_cmd_append(args, sizeof(args), " --video-fps "))
+	 return 0;
+      if (!plot_cmd_append(args, sizeof(args), fps_txt))
+	 return 0;
+      if (audio_file && *audio_file) {
+	 if (!plot_cmd_append(args, sizeof(args), " --audio-file "))
+	    return 0;
+	 if (!plot_cmd_append_quoted(args, sizeof(args), audio_file))
+	    return 0;
+      }
+   }
 
    return plot_try_external_cmd(script, out_fname, args);
 }
@@ -2309,7 +2350,8 @@ try_external_drop_graph_png(const char *out_fname,
 			    int len0_sec,
 			    double beat_start, double beat_target,
 			    int slide, int n_step, int steplen_sec,
-			    int mode_kind) {
+			    int mode_kind,
+			    const char *audio_file) {
    char script[PATH_MAX];
    char args[2048];
    int force_external= plot_external_force();
@@ -2324,6 +2366,24 @@ try_external_drop_graph_png(const char *out_fname,
 	    " drop --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --slide %d --n-step %d --step-len-sec %d --mode-kind %d",
 	    out_fname, len0_sec / 60.0, beat_start, beat_target,
 	    slide ? 1 : 0, n_step, steplen_sec, mode_kind);
+   if (opt_G_video && *opt_G_video) {
+      char fps_txt[64];
+      snprintf(fps_txt, sizeof(fps_txt), "%d", opt_G_video_fps);
+      if (!plot_cmd_append(args, sizeof(args), " --video-out "))
+	 return 0;
+      if (!plot_cmd_append_quoted(args, sizeof(args), opt_G_video))
+	 return 0;
+      if (!plot_cmd_append(args, sizeof(args), " --video-fps "))
+	 return 0;
+      if (!plot_cmd_append(args, sizeof(args), fps_txt))
+	 return 0;
+      if (audio_file && *audio_file) {
+	 if (!plot_cmd_append(args, sizeof(args), " --audio-file "))
+	    return 0;
+	 if (!plot_cmd_append_quoted(args, sizeof(args), audio_file))
+	    return 0;
+      }
+   }
 
    return plot_try_external_cmd(script, out_fname, args);
 }
@@ -2357,6 +2417,248 @@ make_plot_tmp_path(char *out_path, int out_path_sz, const char *prefix) {
    snprintf(out_path, out_path_sz, "/tmp/sbagenx_%s_%ld_%ld_%d.dat",
 	    prefix ? prefix : "plot", (long)getpid(), now, curve_plot_tmp_counter++);
 #endif
+}
+
+static void
+make_plot_tmp_path_ext(char *out_path, int out_path_sz,
+		       const char *prefix, const char *ext) {
+   char base[PATH_MAX];
+   int need;
+
+   if (!out_path || out_path_sz < 8)
+      return;
+
+   make_plot_tmp_path(base, sizeof(base), prefix);
+   if (!ext || !*ext) {
+      snprintf(out_path, out_path_sz, "%s", base);
+      return;
+   }
+   need= (int)strlen(base) + (int)strlen(ext) + 1;
+   if (need > out_path_sz)
+      error("Internal graph-video temp path too long");
+   strcpy(out_path, base);
+   strcat(out_path, ext);
+}
+
+static int
+graph_video_audio_bits(void) {
+   if (!opt_b_set)
+      return 24;
+   if (out_mode == 3)
+      return 24;
+   if (out_mode == 1)
+      return 16;
+   error("--graph-video audio muxing supports only 16-bit or 24-bit render audio");
+   return 24;
+}
+
+static void
+graph_video_format_hms(int total_sec, char *out, int out_sz) {
+   int hh, mm, ss;
+   if (!out || out_sz < 9)
+      return;
+   if (total_sec < 0)
+      total_sec= 0;
+   hh= total_sec / 3600;
+   mm= (total_sec / 60) % 60;
+   ss= total_sec % 60;
+   snprintf(out, out_sz, "%02d:%02d:%02d", hh, mm, ss);
+}
+
+static int
+graph_cmd_append_arg(char *cmd, int cmd_sz, const char *arg) {
+   if (!plot_cmd_append(cmd, cmd_sz, " "))
+      return 0;
+   return plot_cmd_append_quoted(cmd, cmd_sz, arg);
+}
+
+static void
+build_opt_c_spec(char *out, int out_sz) {
+   int a;
+   int pos= 0;
+   if (!out || out_sz < 2)
+      return;
+   out[0]= 0;
+   for (a= 0; a<opt_c; a++) {
+      char item[64];
+      snprintf(item, sizeof(item), "%s%.12g=%.12g",
+	       (a ? "," : ""),
+	       ampadj[a].freq, ampadj[a].adj);
+      if (pos + (int)strlen(item) >= out_sz)
+	 error("Internal error building -c spec for graph video audio render");
+      strcpy(out + pos, item);
+      pos += (int)strlen(item);
+   }
+}
+
+static int
+append_graph_video_extra_tokens(char *cmd, int cmd_sz, const char *extra) {
+   char copy[512];
+   char *tok;
+   if (!extra || !*extra)
+      return 1;
+   if (strlen(extra) >= sizeof(copy))
+      return 0;
+   strcpy(copy, extra);
+   tok= strtok(copy, " \t\r\n");
+   while (tok) {
+      if (!graph_cmd_append_arg(cmd, cmd_sz, tok))
+	 return 0;
+      tok= strtok(0, " \t\r\n");
+   }
+   return 1;
+}
+
+static int
+render_graph_video_audio_temp(const char *prog_kind,
+			      const char *curve_file,
+			      const char *fmt,
+			      int len0, int len1, int len2,
+			      const char *extra,
+			      char *out_path, int out_path_sz) {
+   char cmd[8192];
+   char time_spec[64];
+   char len_spec[32];
+   char bits_spec[16];
+   char rate_spec[16];
+   char vol_spec[16];
+   const char *tmp_ext;
+   char a_spec[128];
+   char i_spec[128];
+   char h_spec[160];
+   char c_spec[256];
+   const char *wave_name= "sine";
+   int bits;
+   int rc;
+
+   if (!out_path || out_path_sz < 16)
+      return 0;
+   if (!self_exe[0])
+      return 0;
+   if (opt_M)
+      error("--graph-video audio muxing is not supported with -M stdin mix input");
+
+   bits= graph_video_audio_bits();
+   tmp_ext= (bits == 16 ? ".wav" : ".flac");
+   make_plot_tmp_path_ext(out_path, out_path_sz, "gvaud", tmp_ext);
+   graph_video_format_hms(len0, len_spec, sizeof(len_spec));
+   snprintf(time_spec, sizeof(time_spec), "t%d,%d,%d", len0 / 60, len1 / 60, len2 / 60);
+   snprintf(bits_spec, sizeof(bits_spec), "%d", bits);
+   snprintf(rate_spec, sizeof(rate_spec), "%d", out_rate);
+   snprintf(vol_spec, sizeof(vol_spec), "%d", opt_V);
+   snprintf(a_spec, sizeof(a_spec), "d=%g:e=%g:k=%g:E=%g", opt_A_d, opt_A_e, opt_A_k, opt_A_E);
+   snprintf(i_spec, sizeof(i_spec), "s=%g:d=%g:a=%g:r=%g:e=%d",
+	    opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
+   snprintf(h_spec, sizeof(h_spec), "m=%s:s=%g:d=%g:a=%g:r=%g:e=%d:f=%g",
+	    opt_H_m == 1 ? "cos" : "pulse",
+	    opt_H_s, opt_H_d, opt_H_a, opt_H_r, opt_H_e, opt_H_f);
+   build_opt_c_spec(c_spec, sizeof(c_spec));
+
+   if (opt_w == 1) wave_name= "square";
+   else if (opt_w == 2) wave_name= "triangle";
+   else if (opt_w == 3) wave_name= "sawtooth";
+
+   cmd[0]= 0;
+   if (!plot_cmd_append_quoted(cmd, sizeof(cmd), self_exe))
+      return 0;
+   if (!plot_cmd_append(cmd, sizeof(cmd), " -Q"))
+      return 0;
+   if (bits == 16) {
+      if (!plot_cmd_append(cmd, sizeof(cmd), " -W"))
+	 return 0;
+   }
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-o"))
+      return 0;
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), out_path))
+      return 0;
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-L"))
+      return 0;
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), len_spec))
+      return 0;
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-b"))
+      return 0;
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), bits_spec))
+      return 0;
+   if (!out_rate_def) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-r"))
+	 return 0;
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), rate_spec))
+	 return 0;
+   }
+   if (!opt_N) {
+      if (!plot_cmd_append(cmd, sizeof(cmd), " -N"))
+	 return 0;
+   }
+   if (opt_V != 100) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-V"))
+	 return 0;
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), vol_spec))
+	 return 0;
+   }
+   if (opt_w != 0) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-w"))
+	 return 0;
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), wave_name))
+	 return 0;
+   }
+   if (opt_c > 0) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-c"))
+	 return 0;
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), c_spec))
+	 return 0;
+   }
+   if (opt_m) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-m"))
+	 return 0;
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), opt_m))
+	 return 0;
+   }
+   if (opt_A) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-A"))
+	 return 0;
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), a_spec))
+	 return 0;
+   }
+   if (opt_I) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-I"))
+	 return 0;
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), i_spec))
+	 return 0;
+   }
+   if (opt_H) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-H"))
+	 return 0;
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), h_spec))
+	 return 0;
+   }
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-p"))
+      return 0;
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), prog_kind))
+      return 0;
+   if (curve_file && *curve_file) {
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), curve_file))
+	 return 0;
+   }
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), time_spec))
+      return 0;
+   if (!graph_cmd_append_arg(cmd, sizeof(cmd), fmt))
+      return 0;
+   if (!append_graph_video_extra_tokens(cmd, sizeof(cmd), extra))
+      return 0;
+#ifdef T_MINGW
+   if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL"))
+      return 0;
+#else
+   if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null 2>&1"))
+      return 0;
+#endif
+
+   rc= system(cmd);
+   if (rc != 0 || !file_exists_regular(out_path)) {
+      remove(out_path);
+      return 0;
+   }
+   return 1;
 }
 
 static int
@@ -2423,7 +2725,8 @@ try_external_curve_graph_png(const char *out_fname,
 			     double beat_start, double beat_target,
 			     int mode_kind,
 			     int slide, int n_step, int steplen_sec,
-			     const char *sample_file) {
+			     const char *sample_file,
+			     const char *audio_file) {
    char script[PATH_MAX];
    char args[2048];
    int force_external= plot_external_force();
@@ -2441,6 +2744,24 @@ try_external_curve_graph_png(const char *out_fname,
 	    " curve --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --mode-kind %d --slide %d --n-step %d --step-len-sec %d --sample-file \"%s\"",
 	    out_fname, len0_sec / 60.0, beat_start, beat_target, mode_kind,
 	    slide ? 1 : 0, n_step, steplen_sec, sample_file);
+   if (opt_G_video && *opt_G_video) {
+      char fps_txt[64];
+      snprintf(fps_txt, sizeof(fps_txt), "%d", opt_G_video_fps);
+      if (!plot_cmd_append(args, sizeof(args), " --video-out "))
+	 return 0;
+      if (!plot_cmd_append_quoted(args, sizeof(args), opt_G_video))
+	 return 0;
+      if (!plot_cmd_append(args, sizeof(args), " --video-fps "))
+	 return 0;
+      if (!plot_cmd_append(args, sizeof(args), fps_txt))
+	 return 0;
+      if (audio_file && *audio_file) {
+	 if (!plot_cmd_append(args, sizeof(args), " --audio-file "))
+	    return 0;
+	 if (!plot_cmd_append_quoted(args, sizeof(args), audio_file))
+	    return 0;
+      }
+   }
 
    return plot_try_external_cmd(script, out_fname, args);
 }
@@ -2535,6 +2856,7 @@ drop_mode_label(int mode_kind) {
 void
 write_drop_graph_png(const char *fmt, double level,
 		     const char *target_tok, int len0, int len1, int len2,
+		     const char *extra,
 		     double beat_start, double beat_target,
 		     int slide, int n_step, int steplen,
 		     int isisochronic, int ismono) {
@@ -2567,6 +2889,7 @@ write_drop_graph_png(const char *fmt, double level,
    const char *y_label= "FREQ HZ";
    int n_curve= 2001;
    double *curve_y= 0;
+   char audio_file[PATH_MAX];
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
@@ -2574,6 +2897,7 @@ write_drop_graph_png(const char *fmt, double level,
       error("Drop graph requires a drop-time > 0");
 
    curve_y= ALLOC_ARR(n_curve, double);
+   audio_file[0]= 0;
    if (sbx_sample_drop_curve(len0, beat_start, beat_target,
 			     slide, n_step, steplen,
 			     n_curve, 0, curve_y) != SBX_OK) {
@@ -2591,11 +2915,29 @@ write_drop_graph_png(const char *fmt, double level,
 	    fmt_tok, lvl_tok, depth_tok,
 	    len0/60, len1/60, len2/60, mode_ch, curve_ch);
 
+   if (opt_G_video && *opt_G_video &&
+       !render_graph_video_audio_temp("drop", 0, fmt, len0, len1, len2,
+				      extra, audio_file, sizeof(audio_file))) {
+      free(curve_y);
+      error("Failed to render temporary audio track for graph video");
+   }
+
    if (try_external_drop_graph_png(fname, len0, beat_start, beat_target,
-				   slide, n_step, steplen, mode_kind)) {
-      if (!opt_Q)
+				   slide, n_step, steplen, mode_kind,
+				   audio_file[0] ? audio_file : 0)) {
+      if (!opt_Q) {
 	 warn("Drop graph saved to: %s (Python/Cairo)", fname);
+	 if (opt_G_video && *opt_G_video)
+	    warn("Drop graph video saved to: %s", opt_G_video);
+      }
+      if (audio_file[0]) remove(audio_file);
+      free(curve_y);
       return;
+   }
+   if (opt_G_video && *opt_G_video) {
+      if (audio_file[0]) remove(audio_file);
+      free(curve_y);
+      error("Graph video export requires the external Python/Cairo plot backend and ffmpeg");
    }
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
@@ -2742,12 +3084,14 @@ write_drop_graph_png(const char *fmt, double level,
       warn("Drop graph saved to: %s", fname);
 
    free(img);
+   if (audio_file[0]) remove(audio_file);
    free(curve_y);
 }
 
 void
 write_curve_graph_png(const char *fmt, double level,
 		      const char *target_tok, int len0, int len1, int len2,
+		      const char *extra,
 		      int slide, int n_step, int steplen,
 		      int isisochronic, int ismono,
 		      double beat_start, double beat_target) {
@@ -2781,6 +3125,7 @@ write_curve_graph_png(const char *fmt, double level,
    int n_curve= 2001;
    double *curve_y= 0;
    char sample_file[PATH_MAX];
+   char audio_file[PATH_MAX];
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
@@ -2788,6 +3133,7 @@ write_curve_graph_png(const char *fmt, double level,
       error("Curve graph requires a drop-time > 0");
 
    curve_y= ALLOC_ARR(n_curve, double);
+   audio_file[0]= 0;
    if (slide) {
       if (sbx_curve_sample_program_beat(func_curve.prog, 0.0, (double)len0,
 					n_curve, 0, curve_y) != SBX_OK) {
@@ -2828,19 +3174,36 @@ write_curve_graph_png(const char *fmt, double level,
 	    fmt_tok, lvl_tok, depth_tok,
 	    len0/60, len1/60, len2/60, mode_ch, curve_ch);
 
+   if (opt_G_video && *opt_G_video &&
+       !render_graph_video_audio_temp("curve", func_curve.src_file, fmt, len0, len1, len2,
+				      extra, audio_file, sizeof(audio_file))) {
+      free(curve_y);
+      error("Failed to render temporary audio track for graph video");
+   }
+
    sample_file[0]= 0;
    if (write_curve_plot_samples_file(curve_y, n_curve, sample_file, sizeof(sample_file))) {
       if (try_external_curve_graph_png(fname, len0,
 				       beat_start, beat_target,
 				       mode_kind, slide, n_step, steplen,
-				       sample_file)) {
-	 if (!opt_Q)
+				       sample_file,
+				       audio_file[0] ? audio_file : 0)) {
+	 if (!opt_Q) {
 	    warn("Curve graph saved to: %s (Python/Cairo)", fname);
+	    if (opt_G_video && *opt_G_video)
+	       warn("Curve graph video saved to: %s", opt_G_video);
+	 }
 	 remove(sample_file);
+	 if (audio_file[0]) remove(audio_file);
 	 free(curve_y);
 	 return;
       }
       remove(sample_file);
+   }
+   if (opt_G_video && *opt_G_video) {
+      if (audio_file[0]) remove(audio_file);
+      free(curve_y);
+      error("Graph video export requires the external Python/Cairo plot backend and ffmpeg");
    }
 
    if (beat_start < y_min) y_min= beat_start;
@@ -2983,12 +3346,14 @@ write_curve_graph_png(const char *fmt, double level,
       warn("Curve graph saved to: %s", fname);
 
    free(img);
+   if (audio_file[0]) remove(audio_file);
    free(curve_y);
 }
 
 void
 write_sigmoid_graph_png(const char *fmt, double level,
 			const char *target_tok, int len0, int len1, int len2,
+			const char *extra,
 			double beat_start, double beat_target,
 			double sig_l, double sig_h,
 			double sig_a, double sig_b) {
@@ -3016,11 +3381,13 @@ write_sigmoid_graph_png(const char *fmt, double level,
    const char *y_label= "FREQ HZ";
    int n_curve= 2001;
    double *curve_y= 0;
+   char audio_file[PATH_MAX];
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
 
    curve_y= ALLOC_ARR(n_curve, double);
+   audio_file[0]= 0;
    if (sbx_sample_sigmoid_curve(len0, beat_start, beat_target,
 				sig_l, sig_h, sig_a, sig_b,
 				n_curve, 0, curve_y) != SBX_OK) {
@@ -3038,10 +3405,29 @@ write_sigmoid_graph_png(const char *fmt, double level,
 	    fmt_tok, lvl_tok, depth_tok,
 	    len0/60, len1/60, len2/60, l_tok, h_tok);
 
-   if (try_external_sigmoid_graph_png(fname, len0, beat_start, beat_target, sig_l, sig_h, sig_a, sig_b)) {
-      if (!opt_Q)
+   if (opt_G_video && *opt_G_video &&
+       !render_graph_video_audio_temp("sigmoid", 0, fmt, len0, len1, len2,
+				      0, audio_file, sizeof(audio_file))) {
+      free(curve_y);
+      error("Failed to render temporary audio track for graph video");
+   }
+
+   if (try_external_sigmoid_graph_png(fname, len0, beat_start, beat_target,
+				      sig_l, sig_h, sig_a, sig_b,
+				      audio_file[0] ? audio_file : 0)) {
+      if (!opt_Q) {
 	 warn("Sigmoid graph saved to: %s (Python/Cairo)", fname);
+	 if (opt_G_video && *opt_G_video)
+	    warn("Sigmoid graph video saved to: %s", opt_G_video);
+      }
+      if (audio_file[0]) remove(audio_file);
+      free(curve_y);
       return;
+   }
+   if (opt_G_video && *opt_G_video) {
+      if (audio_file[0]) remove(audio_file);
+      free(curve_y);
+      error("Graph video export requires the external Python/Cairo plot backend and ffmpeg");
    }
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
@@ -3181,6 +3567,7 @@ write_sigmoid_graph_png(const char *fmt, double level,
       warn("Sigmoid graph saved to: %s", fname);
 
    free(img);
+   if (audio_file[0]) remove(audio_file);
    free(curve_y);
 }
 
@@ -3708,23 +4095,35 @@ init_program_dir(char *argv0) {
    char *src= argv0 && *argv0 ? argv0 : ".";
    char *p;
 
+   self_exe[0]= 0;
+
 #ifdef WIN_MISC
    {
       DWORD len= GetModuleFileNameA(0, path, sizeof(path)-1);
       if (len > 0 && len < sizeof(path)) {
 	 path[len]= 0;
 	 src= path;
+	 strncpy(self_exe, path, sizeof(self_exe)-1);
+	 self_exe[sizeof(self_exe)-1]= 0;
       }
    }
 #else
-   if (src && !strchr(src, '/') && !strchr(src, '\\')) {
+   {
       ssize_t len= readlink("/proc/self/exe", path, sizeof(path)-1);
       if (len > 0 && len < sizeof(path)) {
 	 path[len]= 0;
-	 src= path;
+	 strncpy(self_exe, path, sizeof(self_exe)-1);
+	 self_exe[sizeof(self_exe)-1]= 0;
+	 if (src && !strchr(src, '/') && !strchr(src, '\\'))
+	    src= path;
       }
    }
 #endif
+
+   if (!self_exe[0] && src) {
+      strncpy(self_exe, src, sizeof(self_exe)-1);
+      self_exe[sizeof(self_exe)-1]= 0;
+   }
 
    pdir= StrDup(src);
    p= strchr(pdir, 0);
@@ -3842,6 +4241,23 @@ scanOptions(int *acp, char ***avp) {
 
    // Scan options
    while (argc > 0 && argv[0][0] == '-' && argv[0][1]) {
+      if (0 == strcmp(argv[0], "--graph-video")) {
+	 if (argc-- < 2) error("--graph-video expects output filename");
+	 argv++;
+	 opt_G_video= *argv++;
+	 opt_G= 1;
+	 argc--;
+	 continue;
+      }
+      if (0 == strcmp(argv[0], "--graph-video-fps")) {
+	 if (argc-- < 2 || 1 != sscanf(argv[1], "%d %c", &val, &dmy) || val < 1)
+	    error("--graph-video-fps expects a positive integer");
+	 argv++;
+	 opt_G_video_fps= val;
+	 argc--;
+	 argv++;
+	 continue;
+      }
       if (0 == strcmp(argv[0], "--dry-run")) {
 	 opt_dry_run= 1;
 	 argv++;
@@ -3987,6 +4403,7 @@ scanOptions(int *acp, char ***avp) {
 		 !(val == 8 || val == 16 || val == 24))
 		error("Expecting -b 8, -b 16 or -b 24");
 	     out_mode= (val == 8) ? 0 : (val == 24 ? 3 : 1);
+	     opt_b_set= 1;
 	     break;
 #endif
 	  case 'o':
@@ -9694,7 +10111,7 @@ create_drop(int ac, char **av) {
    if (opt_G || opt_P_drop) {
       opt_P_drop= 1;
       write_drop_graph_png(fmt, (200.0 - carr) / 2.0, target_tok,
-			   len0, len1, len2,
+			   len0, len1, len2, extra,
 			   beat_start, beat_target,
 			   slide, n_step, steplen,
 			   isisochronic, ismono);
@@ -10012,6 +10429,7 @@ create_sigmoid(int ac, char **av) {
 
    if (opt_G || opt_P_sigmoid) {
       write_sigmoid_graph_png(fmt, level, target_tok, len0, len1, len2,
+			      extra,
 			      beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
       return;
    }
@@ -10377,7 +10795,7 @@ create_curve(int ac, char **av) {
    if (opt_G || opt_P_curve) {
       opt_P_curve= 1;
       write_curve_graph_png(fmt, level, target_tok,
-			    len0, len1, len2,
+			    len0, len1, len2, extra,
 			    slide, n_step, steplen,
 			    isisochronic, ismono,
 			    beat_start_eval, beat_end);
