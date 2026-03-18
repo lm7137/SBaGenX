@@ -22,6 +22,12 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
   exit 0
 fi
 
+encoders="$(ffmpeg -hide_banner -encoders 2>/dev/null || true)"
+if ! printf '%s\n' "$encoders" | grep -q 'libx264'; then
+  echo "SKIP: ffmpeg without libx264 support"
+  exit 0
+fi
+
 if ! command -v ffprobe >/dev/null 2>&1; then
   echo "SKIP: ffprobe unavailable"
   exit 0
@@ -76,20 +82,10 @@ echo "$probe" | grep -q '^codec_name=alac$' || {
   exit 1
 }
 
-if command -v ffmpeg >/dev/null 2>&1 &&
-   ffmpeg -hide_banner -encoders 2>/dev/null | grep -q 'libx264'
-then
-  if [ "$video_probe" != "h264" ]; then
-    echo "FAIL: expected H.264 video stream when libx264 is available" >&2
-    echo "$probe" >&2
-    exit 1
-  fi
-else
-  if [ "$video_probe" != "mpeg4" ] && [ "$video_probe" != "h264" ]; then
-    echo "FAIL: unexpected graph MP4 video codec: $video_probe" >&2
-    echo "$probe" >&2
-    exit 1
-  fi
+if [ "$video_probe" != "h264" ]; then
+  echo "FAIL: expected H.264 video stream" >&2
+  echo "$probe" >&2
+  exit 1
 fi
 
 dur="$(printf '%s\n' "$probe" | awk -F= '/^duration=/{print $2; exit}')"

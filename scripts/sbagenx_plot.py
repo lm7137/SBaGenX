@@ -109,28 +109,25 @@ def _graph_video_encoder_args(ffmpeg_path: str):
     except Exception:
         encoders = ""
 
-    if "libx264" in encoders:
-        _GRAPH_VIDEO_ENCODER_ARGS = [
-            "-c:v",
-            "libx264",
-            "-preset",
-            "slow",
-            "-tune",
-            "animation",
-            "-crf",
-            "12",
-            "-pix_fmt",
-            "yuv444p",
-        ]
-    else:
-        _GRAPH_VIDEO_ENCODER_ARGS = [
-            "-c:v",
-            "mpeg4",
-            "-q:v",
-            "2",
-            "-pix_fmt",
-            "yuv420p",
-        ]
+    if "libx264" not in encoders:
+        raise RuntimeError(
+            "graph video export requires FFmpeg with libx264 support; "
+            "please install FFmpeg with libx264 enabled and ensure "
+            "'ffmpeg' is available on PATH"
+        )
+
+    _GRAPH_VIDEO_ENCODER_ARGS = [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "slow",
+        "-tune",
+        "animation",
+        "-crf",
+        "12",
+        "-pix_fmt",
+        "yuv444p",
+    ]
 
     return list(_GRAPH_VIDEO_ENCODER_ARGS)
 

@@ -384,6 +384,7 @@ help() {
 	  NL "                     With -G, also write an MP4 animation with"
 	  NL "                     muxed audio, a tracking cursor and"
 	  NL "                     pulsating dot"
+	  NL "                     Requires FFmpeg with libx264 support"
 	  NL "          --graph-video-fps n"
 	  NL "                     Frame rate for --graph-video (default 30)"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
@@ -2276,12 +2277,20 @@ plot_try_external_cmd(const char *script,
       if (!plot_cmd_append(cmd, sizeof(cmd), " ")) continue;
       if (!plot_cmd_append_quoted_raw(cmd, sizeof(cmd), script)) continue;
       if (!plot_cmd_append(cmd, sizeof(cmd), arg_tail)) continue;
-      if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL\"")) continue;
+      if (opt_G_video && *opt_G_video) {
+	 if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL\"")) continue;
+      } else {
+	 if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL\"")) continue;
+      }
 #else
       if (!plot_cmd_append_quoted(cmd, sizeof(cmd), py)) continue;
       if (!plot_cmd_append_quoted(cmd, sizeof(cmd), script)) continue;
       if (!plot_cmd_append(cmd, sizeof(cmd), arg_tail)) continue;
-      if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null 2>&1")) continue;
+      if (opt_G_video && *opt_G_video) {
+	 if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null")) continue;
+      } else {
+	 if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null 2>&1")) continue;
+      }
 #endif
 
       if (plot_external_debug())
@@ -2297,8 +2306,11 @@ plot_try_external_cmd(const char *script,
       }
    }
 
-   if (!ok && force_external)
+   if (!ok && force_external) {
+      if (opt_G_video && *opt_G_video)
+	 error("Graph video export requires the external Python/Cairo backend and FFmpeg with libx264 support installed and available on PATH");
       error("External Python/Cairo plot backend requested but unavailable or failed (set SBAGENX_PLOT_BACKEND=internal to force built-in plotting)");
+   }
 
    return ok;
 }
@@ -2937,7 +2949,7 @@ write_drop_graph_png(const char *fmt, double level,
    if (opt_G_video && *opt_G_video) {
       if (audio_file[0]) remove(audio_file);
       free(curve_y);
-      error("Graph video export requires the external Python/Cairo plot backend and ffmpeg");
+      error("Graph video export requires the external Python/Cairo backend and FFmpeg with libx264 support installed and available on PATH");
    }
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
@@ -3203,7 +3215,7 @@ write_curve_graph_png(const char *fmt, double level,
    if (opt_G_video && *opt_G_video) {
       if (audio_file[0]) remove(audio_file);
       free(curve_y);
-      error("Graph video export requires the external Python/Cairo plot backend and ffmpeg");
+      error("Graph video export requires the external Python/Cairo backend and FFmpeg with libx264 support installed and available on PATH");
    }
 
    if (beat_start < y_min) y_min= beat_start;
@@ -3427,7 +3439,7 @@ write_sigmoid_graph_png(const char *fmt, double level,
    if (opt_G_video && *opt_G_video) {
       if (audio_file[0]) remove(audio_file);
       free(curve_y);
-      error("Graph video export requires the external Python/Cairo plot backend and ffmpeg");
+      error("Graph video export requires the external Python/Cairo backend and FFmpeg with libx264 support installed and available on PATH");
    }
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);

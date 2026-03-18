@@ -1380,10 +1380,11 @@ a/b values) for reference.
 Windows builds).  If not available, it falls back to the built-in
 renderer.
 
-`--graph-video` requires the Python+Cairo backend plus `ffmpeg`, and
-writes an MP4 animation of the plotted drop curve with audio for the
-same plotted period.  By default the muxed audio uses the highest
-quality available for that render path.
+`--graph-video` requires the Python+Cairo backend plus `ffmpeg` with
+`libx264` support, and writes an MP4 animation of the plotted drop
+curve with audio for the same plotted period.  If `ffmpeg` or
+`libx264` is missing, SBaGenX reports that graph video export requires
+an `ffmpeg` build with `libx264` installed and available on `PATH`.
 
 Compatibility fallback: `-P` also triggers this program graph when no
 cycle-plot target is present (`-H` absent and no `mixam:<...>` extra).
@@ -2034,7 +2035,7 @@ follows:
               Supported with -p drop/-p sigmoid/-p curve.
             --graph-video file
               With -G, also write an MP4 graph animation with audio.
-              Requires Python+Cairo backend plus ffmpeg.
+              Requires Python+Cairo backend plus ffmpeg with libx264.
             --graph-video-fps n
               Frame rate for --graph-video (default 30).
   -I [spec] Customize isochronic (@) pulse envelope.
