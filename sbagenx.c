@@ -4581,6 +4581,8 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 				   int *out_have_T, int *out_T_ms,
 				   int *out_have_q, int *out_q_mult,
 				   int *out_have_r, int *out_rate,
+				   int *out_have_R, int *out_prate,
+				   int *out_have_W,
 				   int *out_have_F, int *out_fade_ms,
 				   char **out_mix_path,
 				   char **out_out_path,
@@ -4590,6 +4592,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 
    if (!line || !out_S || !out_E || !out_have_T || !out_T_ms ||
        !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
+       !out_have_R || !out_prate || !out_have_W ||
        !out_have_F || !out_fade_ms || !out_mix_path ||
        !out_out_path || !out_have_Z || !out_flac_compression)
       return 0;
@@ -4670,6 +4673,22 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     *out_have_r= 1;
 	     i++;
 	     a= strlen(tok) - 1;
+	     break;
+	  case 'R':
+	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_prate)) {
+		free(dup);
+		return 0;
+	     }
+	     if (*out_prate < 1) {
+		free(dup);
+		return 0;
+	     }
+	     *out_have_R= 1;
+	     i++;
+	     a= strlen(tok) - 1;
+	     break;
+	  case 'W':
+	     *out_have_W= 1;
 	     break;
 	  case 'F':
 	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_fade_ms)) {
@@ -4817,6 +4836,8 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 				 int *out_have_T, int *out_T_ms,
 				 int *out_have_q, int *out_q_mult,
 				 int *out_have_r, int *out_rate,
+				 int *out_have_R, int *out_prate,
+				 int *out_have_W,
 				 int *out_have_F, int *out_fade_ms,
 				 char **out_mix_path,
 				 char **out_out_path,
@@ -4826,6 +4847,7 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 
    if (!out_text || !out_S || !out_E || !out_have_T || !out_T_ms ||
        !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
+       !out_have_R || !out_prate || !out_have_W ||
        !out_have_F || !out_fade_ms || !out_mix_path ||
        !out_out_path || !out_have_Z || !out_flac_compression)
       return SBX_EINVAL;
@@ -4838,6 +4860,9 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
    *out_q_mult= 1;
    *out_have_r= 0;
    *out_rate= 44100;
+   *out_have_R= 0;
+   *out_prate= 10;
+   *out_have_W= 0;
    *out_have_F= 0;
    *out_fade_ms= 60000;
    *out_mix_path= 0;
@@ -4885,6 +4910,8 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
 						 out_have_T, out_T_ms,
 						 out_have_q, out_q_mult,
 						 out_have_r, out_rate,
+						 out_have_R, out_prate,
+						 out_have_W,
 						 out_have_F, out_fade_ms,
 						 out_mix_path,
 						 out_out_path,
@@ -8291,6 +8318,8 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    int safe_S= 0, safe_E= 0, safe_have_T= 0, safe_T_ms= -1;
    int safe_have_q= 0, safe_q_mult= 1;
    int safe_have_r= 0, safe_rate= 44100;
+   int safe_have_R= 0, safe_prate= 10;
+   int safe_have_W= 0;
    int safe_have_F= 0, safe_fade_ms= 60000;
    int safe_have_Z= 0;
    double safe_flac_compression= 5.0;
@@ -8309,6 +8338,8 @@ sbx_try_readSeq_runtime(int ac, char **av) {
 					&safe_have_T, &safe_T_ms,
 					&safe_have_q, &safe_q_mult,
 					&safe_have_r, &safe_rate,
+					&safe_have_R, &safe_prate,
+					&safe_have_W,
 					&safe_have_F, &safe_fade_ms,
 					&safe_mix_path,
 					&safe_out_path,
@@ -8322,6 +8353,10 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       out_rate= safe_rate;
       out_rate_def= 0;
    }
+   if (safe_have_R)
+      out_prate= safe_prate;
+   if (safe_have_W)
+      opt_W= 1;
    if (safe_have_F)
       fade_int= safe_fade_ms;
    if (safe_have_q) {
