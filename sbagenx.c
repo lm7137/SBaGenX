@@ -2540,8 +2540,10 @@ render_graph_video_audio_temp(const char *prog_kind,
    char h_spec[160];
    char c_spec[256];
    const char *wave_name= "sine";
+   int requested_bits;
    int bits;
    int rc;
+   int attempt;
 
    if (!out_path || out_path_sz < 16)
       return 0;
@@ -2550,12 +2552,9 @@ render_graph_video_audio_temp(const char *prog_kind,
    if (opt_M)
       error("--graph-video audio muxing is not supported with -M stdin mix input");
 
-   bits= graph_video_audio_bits();
-   tmp_ext= (bits == 16 ? ".wav" : ".flac");
-   make_plot_tmp_path_ext(out_path, out_path_sz, "gvaud", tmp_ext);
+   requested_bits= graph_video_audio_bits();
    graph_video_format_hms(len0, len_spec, sizeof(len_spec));
    snprintf(time_spec, sizeof(time_spec), "t%d,%d,%d", len0 / 60, len1 / 60, len2 / 60);
-   snprintf(bits_spec, sizeof(bits_spec), "%d", bits);
    snprintf(rate_spec, sizeof(rate_spec), "%d", out_rate);
    snprintf(vol_spec, sizeof(vol_spec), "%d", opt_V);
    snprintf(a_spec, sizeof(a_spec), "d=%g:e=%g:k=%g:E=%g", opt_A_d, opt_A_e, opt_A_k, opt_A_E);
@@ -2570,107 +2569,122 @@ render_graph_video_audio_temp(const char *prog_kind,
    else if (opt_w == 2) wave_name= "triangle";
    else if (opt_w == 3) wave_name= "sawtooth";
 
-   cmd[0]= 0;
-   if (!plot_cmd_append_quoted(cmd, sizeof(cmd), self_exe))
-      return 0;
-   if (!plot_cmd_append(cmd, sizeof(cmd), " -Q"))
-      return 0;
-   if (bits == 16) {
-      if (!plot_cmd_append(cmd, sizeof(cmd), " -W"))
+   for (attempt= 0; ; attempt++) {
+      bits= (attempt == 0 ? requested_bits : 16);
+      tmp_ext= (bits == 16 ? ".wav" : ".flac");
+      make_plot_tmp_path_ext(out_path, out_path_sz, "gvaud", tmp_ext);
+      snprintf(bits_spec, sizeof(bits_spec), "%d", bits);
+
+      cmd[0]= 0;
+      if (!plot_cmd_append_quoted(cmd, sizeof(cmd), self_exe))
 	 return 0;
-   }
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-o"))
-      return 0;
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), out_path))
-      return 0;
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-L"))
-      return 0;
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), len_spec))
-      return 0;
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-b"))
-      return 0;
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), bits_spec))
-      return 0;
-   if (!out_rate_def) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-r"))
+      if (!plot_cmd_append(cmd, sizeof(cmd), " -Q"))
 	 return 0;
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), rate_spec))
+      if (bits == 16) {
+	 if (!plot_cmd_append(cmd, sizeof(cmd), " -W"))
+	    return 0;
+      }
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-o"))
 	 return 0;
-   }
-   if (!opt_N) {
-      if (!plot_cmd_append(cmd, sizeof(cmd), " -N"))
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), out_path))
 	 return 0;
-   }
-   if (opt_V != 100) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-V"))
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-L"))
 	 return 0;
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), vol_spec))
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), len_spec))
 	 return 0;
-   }
-   if (opt_w != 0) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-w"))
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-b"))
 	 return 0;
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), wave_name))
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), bits_spec))
 	 return 0;
-   }
-   if (opt_c > 0) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-c"))
+      if (!out_rate_def) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-r"))
+	    return 0;
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), rate_spec))
+	    return 0;
+      }
+      if (!opt_N) {
+	 if (!plot_cmd_append(cmd, sizeof(cmd), " -N"))
+	    return 0;
+      }
+      if (opt_V != 100) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-V"))
+	    return 0;
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), vol_spec))
+	    return 0;
+      }
+      if (opt_w != 0) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-w"))
+	    return 0;
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), wave_name))
+	    return 0;
+      }
+      if (opt_c > 0) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-c"))
+	    return 0;
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), c_spec))
+	    return 0;
+      }
+      if (opt_m) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-m"))
+	    return 0;
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), opt_m))
+	    return 0;
+      }
+      if (opt_A) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-A"))
+	    return 0;
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), a_spec))
+	    return 0;
+      }
+      if (opt_I) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-I"))
+	    return 0;
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), i_spec))
+	    return 0;
+      }
+      if (opt_H) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-H"))
+	    return 0;
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), h_spec))
+	    return 0;
+      }
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-p"))
 	 return 0;
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), c_spec))
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), prog_kind))
 	 return 0;
-   }
-   if (opt_m) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-m"))
+      if (curve_file && *curve_file) {
+	 if (!graph_cmd_append_arg(cmd, sizeof(cmd), curve_file))
+	    return 0;
+      }
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), time_spec))
 	 return 0;
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), opt_m))
+      if (!graph_cmd_append_arg(cmd, sizeof(cmd), fmt))
 	 return 0;
-   }
-   if (opt_A) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-A"))
+      if (!append_graph_video_extra_tokens(cmd, sizeof(cmd), extra))
 	 return 0;
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), a_spec))
-	 return 0;
-   }
-   if (opt_I) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-I"))
-	 return 0;
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), i_spec))
-	 return 0;
-   }
-   if (opt_H) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-H"))
-	 return 0;
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), h_spec))
-	 return 0;
-   }
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), "-p"))
-      return 0;
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), prog_kind))
-      return 0;
-   if (curve_file && *curve_file) {
-      if (!graph_cmd_append_arg(cmd, sizeof(cmd), curve_file))
-	 return 0;
-   }
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), time_spec))
-      return 0;
-   if (!graph_cmd_append_arg(cmd, sizeof(cmd), fmt))
-      return 0;
-   if (!append_graph_video_extra_tokens(cmd, sizeof(cmd), extra))
-      return 0;
 #ifdef T_MINGW
-   if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL"))
-      return 0;
+      if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL"))
+	 return 0;
 #else
-   if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null 2>&1"))
-      return 0;
+      if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null 2>&1"))
+	 return 0;
 #endif
 
-   rc= system(cmd);
-   if (rc != 0 || !file_exists_regular(out_path)) {
+      rc= system(cmd);
+      if (rc == 0 && file_exists_regular(out_path))
+	 return 1;
+
       remove(out_path);
-      return 0;
+#ifdef T_MINGW
+      if (requested_bits == 24 && attempt == 0) {
+	 if (!opt_Q)
+	    warn("24-bit FLAC temp audio render failed; retrying graph video audio render with 16-bit WAV on Windows");
+	 continue;
+      }
+#endif
+      break;
    }
-   return 1;
+   return 0;
 }
 
 static int
@@ -8741,6 +8755,21 @@ apply_mixam_envelope_override(SbxMixFxSpec *fx) {
    fx->mixam_floor= opt_H_f;
 }
 
+static void
+apply_iso_envelope_override(SbxToneSpec *tone) {
+   if (!tone || !opt_I)
+      return;
+   if (tone->mode != SBX_TONE_ISOCHRONIC)
+      return;
+   if (tone->envelope_waveform != SBX_ENV_WAVE_NONE)
+      return;
+   tone->iso_start= opt_I_s;
+   tone->duty_cycle= opt_I_d;
+   tone->iso_attack= opt_I_a;
+   tone->iso_release= opt_I_r;
+   tone->iso_edge_mode= opt_I_e;
+}
+
 static int
 parse_legacy_voice_token(const char *tok, Voice *out, int *out_sets_mix_flag) {
    char dmy;
@@ -9520,6 +9549,7 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
 	 continue;
       }
       if (extra_type == SBX_EXTRA_TONE) {
+	 apply_iso_envelope_override(&tone_tmp);
 	 if (tone_count >= SBX_MAX_AUX_TONES + 1)
 	    return 0;
 	 tones[tone_count++]= tone_tmp;
@@ -9790,6 +9820,7 @@ sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
 		  error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_MAX_AUX_TONES);
 	       spec->mix_fx[spec->mix_fx_count++]= mix_fx;
 	    } else if (extra_type == SBX_EXTRA_TONE) {
+	       apply_iso_envelope_override(&tone);
 	       if (spec->aux_count >= SBX_MAX_AUX_TONES)
 		  error("Too many extra sbagenxlib tone-specs (max %d)", SBX_MAX_AUX_TONES);
 	       spec->aux_tones[spec->aux_count++]= tone;
