@@ -809,6 +809,32 @@ size_t sbx_runtime_i32cap= 0;
 unsigned char *sbx_runtime_bytebuf= 0;
 size_t sbx_runtime_bytecap= 0;
 SbxPcmConvertState sbx_runtime_pcm_state;
+char sbx_runtime_reject_reason[512]= "";
+
+static void
+sbx_clear_runtime_reject_reason(void) {
+   sbx_runtime_reject_reason[0]= 0;
+}
+
+static void
+sbx_set_runtime_reject_reason(const char *fmt, ...) {
+   va_list ap;
+
+   if (!fmt || !*fmt) {
+      sbx_clear_runtime_reject_reason();
+      return;
+   }
+   va_start(ap, fmt);
+   vsnprintf(sbx_runtime_reject_reason, sizeof(sbx_runtime_reject_reason), fmt, ap);
+   va_end(ap);
+}
+
+static const char *
+sbx_get_runtime_reject_reason(void) {
+   if (!sbx_runtime_reject_reason[0])
+      return "unknown reason";
+   return sbx_runtime_reject_reason;
+}
 
 int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
@@ -4594,12 +4620,15 @@ sbx_parse_safe_seqfile_option_line(const char *line,
        !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
        !out_have_R || !out_prate || !out_have_W ||
        !out_have_F || !out_fade_ms || !out_mix_path ||
-       !out_out_path || !out_have_Z || !out_flac_compression)
+       !out_out_path || !out_have_Z || !out_flac_compression) {
+      sbx_set_runtime_reject_reason("internal error while parsing safe sequence-file preamble");
       return 0;
+   }
    dup= StrDup((char *)line);
    p= dup;
    while (*p) {
       if (argc >= (int)(sizeof(argv) / sizeof(argv[0]))) {
+	 sbx_set_runtime_reject_reason("safe sequence-file preamble line is too long: %s", line);
 	 free(dup);
 	 return 0;
       }
@@ -4614,6 +4643,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
       char *tok= argv[i];
       size_t a;
       if (tok[0] != '-' || !tok[1]) {
+	 sbx_set_runtime_reject_reason("safe preamble line contains a non-option token: %s", tok);
 	 free(dup);
 	 return 0;
       }
@@ -4627,6 +4657,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     break;
 	  case 'T':
 	     if (tok[a+1] || i+1 >= argc || 0 == readTime(argv[i+1], out_T_ms)) {
+		sbx_set_runtime_reject_reason("safe preamble -T expects a valid time value");
 		free(dup);
 		return 0;
 	     }
@@ -4636,6 +4667,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     break;
 	  case 'm':
 	     if (tok[a+1] || i+1 >= argc) {
+		sbx_set_runtime_reject_reason("safe preamble -m expects a mix-input path");
 		free(dup);
 		return 0;
 	     }
@@ -4646,6 +4678,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     break;
 	  case 'o':
 	     if (tok[a+1] || i+1 >= argc) {
+		sbx_set_runtime_reject_reason("safe preamble -o expects an output path");
 		free(dup);
 		return 0;
 	     }
@@ -4656,6 +4689,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     break;
 	  case 'q':
 	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_q_mult)) {
+		sbx_set_runtime_reject_reason("safe preamble -q expects an integer multiplier");
 		free(dup);
 		return 0;
 	     }
@@ -4667,6 +4701,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     break;
 	  case 'r':
 	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_rate)) {
+		sbx_set_runtime_reject_reason("safe preamble -r expects an integer sample rate");
 		free(dup);
 		return 0;
 	     }
@@ -4676,10 +4711,12 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     break;
 	  case 'R':
 	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_prate)) {
+		sbx_set_runtime_reject_reason("safe preamble -R expects an integer parameter refresh rate");
 		free(dup);
 		return 0;
 	     }
 	     if (*out_prate < 1) {
+		sbx_set_runtime_reject_reason("safe preamble -R must be >= 1");
 		free(dup);
 		return 0;
 	     }
@@ -4692,6 +4729,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     break;
 	  case 'F':
 	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_fade_ms)) {
+		sbx_set_runtime_reject_reason("safe preamble -F expects an integer fade time in ms");
 		free(dup);
 		return 0;
 	     }
@@ -4702,6 +4740,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	  case 'Z':
 	     if (tok[a+1] || i+1 >= argc ||
 		 1 != sscanf(argv[i+1], "%lf", out_flac_compression)) {
+		sbx_set_runtime_reject_reason("safe preamble -Z expects a FLAC compression level");
 		free(dup);
 		return 0;
 	     }
@@ -4710,6 +4749,7 @@ sbx_parse_safe_seqfile_option_line(const char *line,
 	     a= strlen(tok) - 1;
 	     break;
 	  default:
+	     sbx_set_runtime_reject_reason("safe preamble option -%c is not supported by the sbagenxlib bridge", tok[a]);
 	     free(dup);
 	     return 0;
 	 }
@@ -4849,8 +4889,10 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
        !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
        !out_have_R || !out_prate || !out_have_W ||
        !out_have_F || !out_fade_ms || !out_mix_path ||
-       !out_out_path || !out_have_Z || !out_flac_compression)
+       !out_out_path || !out_have_Z || !out_flac_compression) {
+      sbx_set_runtime_reject_reason("internal error preparing sbagenxlib sequence text");
       return SBX_EINVAL;
+   }
    *out_text= 0;
    *out_S= 0;
    *out_E= 0;
@@ -4871,8 +4913,10 @@ sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
    *out_flac_compression= 5.0;
 
    rc= sbx_read_text_file_alloc_cli(fnam, &text);
-   if (rc != SBX_OK)
+   if (rc != SBX_OK) {
+      sbx_set_runtime_reject_reason("unable to read sequence file: %s", fnam ? fnam : "(null)");
       return rc;
+   }
 
    line= text;
    while (line && *line) {
@@ -8292,8 +8336,12 @@ void
 readSeqImm(int ac, char **av) {
    char *p= buf;
 
+   sbx_clear_runtime_reject_reason();
    if (sbx_try_readSeqImm_runtime(ac, av))
       return;
+   if (!opt_Q)
+      warn("Falling back to legacy immediate parser/runtime: %s",
+	   sbx_get_runtime_reject_reason());
 
    in_lin= 0;
    p += sprintf(p, "immediate:");
@@ -8324,11 +8372,17 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    int safe_have_Z= 0;
    double safe_flac_compression= 5.0;
 
-   if (ac != 1 || !av)
+   sbx_clear_runtime_reject_reason();
+
+   if (ac != 1 || !av) {
+      sbx_set_runtime_reject_reason("direct sbagenxlib sequence loading currently expects exactly one input file");
       return 0;
+   }
    fnam= av[0];
-   if (!fnam || 0 == strcmp(fnam, "-"))
+   if (!fnam || 0 == strcmp(fnam, "-")) {
+      sbx_set_runtime_reject_reason("stdin sequence input is not yet routed through the sbagenxlib direct loader");
       return 0;
+   }
 
    if (sbx_try_run_option_only_seq_wrapper(fnam))
       return 1;
@@ -8379,9 +8433,12 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    cfg.sample_rate= (double)out_rate;
    cfg.channels= 2;
    ctx= sbx_context_create(&cfg);
-   if (!ctx)
+   if (!ctx) {
+      sbx_set_runtime_reject_reason("failed to create sbagenxlib runtime context");
       goto fail;
+   }
    if (sbx_context_set_default_waveform(ctx, opt_w) != SBX_OK) {
+      sbx_set_runtime_reject_reason("failed to set sbagenxlib default waveform");
       sbx_context_destroy(ctx);
       goto fail;
    }
@@ -8390,6 +8447,7 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (rc != SBX_OK)
       rc= sbx_context_load_sequence_text(ctx, seq_text, 0);
    if (rc != SBX_OK) {
+      sbx_set_runtime_reject_reason("%s", sbx_context_last_error(ctx));
       sbx_context_destroy(ctx);
       goto fail;
    }
@@ -8437,6 +8495,8 @@ fail:
    if (seq_text) free(seq_text);
    if (safe_mix_path) free(safe_mix_path);
    if (safe_out_path) free(safe_out_path);
+   if (!sbx_runtime_reject_reason[0])
+      sbx_set_runtime_reject_reason("sequence input is not compatible with the sbagenxlib direct loader");
    return 0;
 }
 
@@ -8463,8 +8523,12 @@ readSeq(int ac, char **av) {
    if (seq_backend != 1) {
       if (sbx_try_readSeq_runtime(ac, av))
 	 return;
+      if (seq_backend == 0 && !opt_Q)
+	 warn("Falling back to legacy sequence parser/runtime: %s",
+	      sbx_get_runtime_reject_reason());
       if (seq_backend == 2)
-	 error("SBAGENX_SEQ_BACKEND=sbagenxlib requested, but sequence input is not compatible with sbagenxlib subset loader");
+	 error("SBAGENX_SEQ_BACKEND=sbagenxlib requested, but sequence input is not compatible with sbagenxlib subset loader: %s",
+	       sbx_get_runtime_reject_reason());
    }
 
    // Setup a 'now' value to use for NOW in the sequence file
@@ -9597,8 +9661,12 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
    double mix_amp_pct= 100.0;
    int i;
 
-   if (ac <= 0 || !av)
+   sbx_clear_runtime_reject_reason();
+
+   if (ac <= 0 || !av) {
+      sbx_set_runtime_reject_reason("no immediate tone tokens were provided");
       return 0;
+   }
 
    for (i= 0; i<ac; i++) {
       const char *tok= av[i];
@@ -9606,8 +9674,10 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
       SbxToneSpec tone_tmp;
       SbxMixFxSpec mix_fx_tmp;
       double mix_pct= mix_amp_pct;
-      if (SBX_OK != sbx_parse_extra_token(tok, opt_w, &extra_type, &tone_tmp, &mix_fx_tmp, &mix_pct))
+      if (SBX_OK != sbx_parse_extra_token(tok, opt_w, &extra_type, &tone_tmp, &mix_fx_tmp, &mix_pct)) {
+	 sbx_set_runtime_reject_reason("token '%s' is not compatible with the sbagenxlib immediate parser", tok);
 	 return 0;
+      }
       if (extra_type == SBX_EXTRA_MIXAMP) {
 	 have_mix= 1;
 	 mix_amp_pct= mix_pct;
@@ -9615,23 +9685,30 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
       }
       if (extra_type == SBX_EXTRA_MIXFX) {
 	 apply_mixam_envelope_override(&mix_fx_tmp);
-	 if (mix_fx_count >= SBX_MAX_AUX_TONES)
+	 if (mix_fx_count >= SBX_MAX_AUX_TONES) {
+	    sbx_set_runtime_reject_reason("too many sbagenxlib immediate mix effects (max %d)", SBX_MAX_AUX_TONES);
 	    return 0;
+	 }
 	 mix_fx[mix_fx_count++]= mix_fx_tmp;
 	 continue;
       }
       if (extra_type == SBX_EXTRA_TONE) {
 	 apply_iso_envelope_override(&tone_tmp);
-	 if (tone_count >= SBX_MAX_AUX_TONES + 1)
+	 if (tone_count >= SBX_MAX_AUX_TONES + 1) {
+	    sbx_set_runtime_reject_reason("too many sbagenxlib immediate tones (max %d)", SBX_MAX_AUX_TONES + 1);
 	    return 0;
+	 }
 	 tones[tone_count++]= tone_tmp;
 	 continue;
       }
+      sbx_set_runtime_reject_reason("token '%s' did not classify as a supported sbagenxlib immediate tone/effect", tok);
       return 0;
    }
 
-   if (tone_count == 0)
+   if (tone_count == 0) {
+      sbx_set_runtime_reject_reason("no sbagenxlib-compatible immediate tone tokens were found");
       return 0;
+   }
 
    if (have_mix && !mix_in && !opt_m && !opt_M)
       warn("mix/<amp> was specified in -i tones but no mix input stream is active");
