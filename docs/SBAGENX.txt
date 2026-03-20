@@ -295,6 +295,10 @@ try:
 
   s=0, d=0.35, a=0.12, r=0.65, e=2
 
+In copy-pasteable `-I` form:
+
+  -I s=0:d=0.35:a=0.12:r=0.65:e=2
+
 This alternative keeps a brisk onset, a longer decay, and substantial
 off-time between pulses. It should be treated as an informed experimental
 preset rather than a proven optimum. The installer ships comparison plots
