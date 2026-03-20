@@ -2544,6 +2544,7 @@ render_graph_video_audio_temp(const char *prog_kind,
    int bits;
    int rc;
    int attempt;
+   int force_wav;
 
    if (!out_path || out_path_sz < 16)
       return 0;
@@ -2570,17 +2571,46 @@ render_graph_video_audio_temp(const char *prog_kind,
    else if (opt_w == 3) wave_name= "sawtooth";
 
    for (attempt= 0; ; attempt++) {
-      bits= (attempt == 0 ? requested_bits : 16);
-      tmp_ext= (bits == 16 ? ".wav" : ".flac");
+      force_wav= 0;
+      bits= requested_bits;
+#ifdef T_MINGW
+      if (requested_bits == 24) {
+	 if (attempt == 0) {
+	    bits= 24;
+	    force_wav= 0;
+	 } else if (attempt == 1) {
+	    bits= 24;
+	    force_wav= 1;
+	 } else {
+	    bits= 16;
+	    force_wav= 1;
+	 }
+      } else {
+	 bits= 16;
+	 force_wav= 1;
+      }
+#else
+      if (attempt > 0)
+	 bits= 16;
+      force_wav= (bits == 16);
+#endif
+      tmp_ext= force_wav ? ".wav" : ".flac";
       make_plot_tmp_path_ext(out_path, out_path_sz, "gvaud", tmp_ext);
       snprintf(bits_spec, sizeof(bits_spec), "%d", bits);
 
       cmd[0]= 0;
+#ifdef T_MINGW
+      if (!plot_cmd_append(cmd, sizeof(cmd), "cmd /c \""))
+	 return 0;
+      if (!plot_cmd_append_quoted_raw(cmd, sizeof(cmd), self_exe))
+	 return 0;
+#else
       if (!plot_cmd_append_quoted(cmd, sizeof(cmd), self_exe))
 	 return 0;
+#endif
       if (!plot_cmd_append(cmd, sizeof(cmd), " -Q"))
 	 return 0;
-      if (bits == 16) {
+      if (force_wav) {
 	 if (!plot_cmd_append(cmd, sizeof(cmd), " -W"))
 	    return 0;
       }
@@ -2663,7 +2693,7 @@ render_graph_video_audio_temp(const char *prog_kind,
       if (!append_graph_video_extra_tokens(cmd, sizeof(cmd), extra))
 	 return 0;
 #ifdef T_MINGW
-      if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL"))
+      if (!plot_cmd_append(cmd, sizeof(cmd), " >NUL 2>NUL\""))
 	 return 0;
 #else
       if (!plot_cmd_append(cmd, sizeof(cmd), " >/dev/null 2>&1"))
@@ -2676,10 +2706,17 @@ render_graph_video_audio_temp(const char *prog_kind,
 
       remove(out_path);
 #ifdef T_MINGW
-      if (requested_bits == 24 && attempt == 0) {
-	 if (!opt_Q)
-	    warn("24-bit FLAC temp audio render failed; retrying graph video audio render with 16-bit WAV on Windows");
-	 continue;
+      if (requested_bits == 24) {
+	 if (attempt == 0) {
+	    if (!opt_Q)
+	       warn("24-bit FLAC temp audio render failed; retrying graph video audio render with 24-bit WAV on Windows");
+	    continue;
+	 }
+	 if (attempt == 1) {
+	    if (!opt_Q)
+	       warn("24-bit WAV temp audio render failed; retrying graph video audio render with 16-bit WAV on Windows");
+	    continue;
+	 }
       }
 #endif
       break;
