@@ -8208,6 +8208,10 @@ OSStatus mac_callback(AudioDeviceID inDevice,
 void 
 writeWAV() {
   char buf[44], *p= buf;
+  int bits_per_sample= output_pcm_bits();
+  int channels= 2;
+  int block_align= channels * (bits_per_sample / 8);
+  int byte_rate= out_rate * block_align;
 
   if (byte_count + 36 != (int)(byte_count + 36)) {
      int tmp;
@@ -8224,8 +8228,8 @@ writeWAV() {
   addU4(16);
   addU4(0x00020001);
   addU4(out_rate);
-  addU4(out_rate * out_bps);
-  addU4(0x0004 + 0x10000*(out_bps*4));	// 2,4 -> 8,16 - always assume stereo
+  addU4(byte_rate);
+  addU4(block_align + 0x10000 * bits_per_sample);
   addStr("data");
   addU4(byte_count);
   writeOut(buf, 44);
