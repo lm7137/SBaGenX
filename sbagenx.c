@@ -179,7 +179,6 @@
  #include <pthread.h>
  #include <dlfcn.h>
 #endif
-#include "libs/sndfile.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "libs/stb_image_write.h"
 #include "sbagenxlib.h"
@@ -670,6 +669,8 @@ OutEncFmt out_enc_fmt= OUT_ENC_NONE;
 int out_enc_active= 0;
 int out_enc_finished= 0;
 int out_enc_atexit= 0;
+SbxAudioWriter *out_writer= 0;
+int out_writer_bytes_mode= 0;
 int opt_mp3_bitrate= 192;	// MP3 CBR bitrate in kbps
 int opt_mp3_quality= 2;		// LAME quality (0 best .. 9 fastest)
 int opt_mp3_bitrate_set;
@@ -680,70 +681,7 @@ double opt_ogg_quality= 6.0;	// Vorbis quality scale 0..10
 int opt_ogg_quality_set;
 double opt_flac_compression= 0.0; // FLAC compression level scale 0..12
 int opt_flac_compression_set;
-
-#ifdef WIN_MISC
-typedef HMODULE DLibHandle;
-#else
-typedef void *DLibHandle;
-#endif
-
-typedef struct {
-   DLibHandle lib;
-   SNDFILE *snd;
-   SNDFILE *(*sf_open_fn)(const char*, int, SF_INFO*);
-   sf_count_t (*sf_writef_short_fn)(SNDFILE*, const short*, sf_count_t);
-   sf_count_t (*sf_writef_float_fn)(SNDFILE*, const float*, sf_count_t);
-   sf_count_t (*sf_writef_int_fn)(SNDFILE*, const int*, sf_count_t);
-   int (*sf_close_fn)(SNDFILE*);
-   const char *(*sf_strerror_fn)(SNDFILE*);
-   int (*sf_command_fn)(SNDFILE*, int, void*, int);
-} SndEncState;
-SndEncState snd_enc;
 int out_enc_pcm_bits= 16;
-
-typedef struct lame_global_flags lame_global_flags;
-typedef lame_global_flags *lame_t;
-
-#ifdef STATIC_OUTPUT_ENCODERS
-extern lame_t lame_init(void);
-extern int lame_set_in_samplerate(lame_t gfp, int in_samplerate);
-extern int lame_set_num_channels(lame_t gfp, int num_channels);
-extern int lame_set_quality(lame_t gfp, int quality);
-extern int lame_set_VBR(lame_t gfp, int vbr_mode);
-extern int lame_set_VBR_q(lame_t gfp, int quality);
-extern int lame_set_VBR_quality(lame_t gfp, float quality);
-extern int lame_set_brate(lame_t gfp, int bitrate);
-extern int lame_init_params(lame_t gfp);
-extern int lame_encode_buffer_interleaved(lame_t gfp, short int pcm[], int num_samples,
-					  unsigned char *mp3buf, int mp3buf_size);
-#if 0
-extern int lame_encode_buffer_interleaved_ieee_float(lame_t gfp, float pcm[], int num_samples,
-						     unsigned char *mp3buf, int mp3buf_size);
-#endif
-extern int lame_encode_flush(lame_t gfp, unsigned char *mp3buf, int size);
-extern int lame_close(lame_t gfp);
-#endif
-
-typedef struct {
-   DLibHandle lib;
-   lame_t gfp;
-   lame_t (*lame_init_fn)(void);
-   int (*lame_set_in_samplerate_fn)(lame_t, int);
-   int (*lame_set_num_channels_fn)(lame_t, int);
-   int (*lame_set_quality_fn)(lame_t, int);
-   int (*lame_set_VBR_fn)(lame_t, int);
-   int (*lame_set_VBR_q_fn)(lame_t, int);
-   int (*lame_set_VBR_quality_fn)(lame_t, float);
-   int (*lame_set_brate_fn)(lame_t, int);
-   int (*lame_init_params_fn)(lame_t);
-   int (*lame_encode_buffer_interleaved_fn)(lame_t, short int*, int, unsigned char*, int);
-   int (*lame_encode_buffer_interleaved_ieee_float_fn)(lame_t, float*, int, unsigned char*, int);
-   int (*lame_encode_flush_fn)(lame_t, unsigned char*, int);
-   int (*lame_close_fn)(lame_t);
-   unsigned char *buf;
-   int buflen;
-} Mp3EncState;
-Mp3EncState mp3_enc;
 
 #define CURVE_MAX_PARAMS 32
 #define CURVE_NAME_MAX 64
@@ -4602,164 +4540,6 @@ sbx_read_text_file_alloc_cli(const char *path, char **out_text) {
 }
 
 static int
-sbx_parse_safe_seqfile_option_line(const char *line,
-				   int *out_S, int *out_E,
-				   int *out_have_T, int *out_T_ms,
-				   int *out_have_q, int *out_q_mult,
-				   int *out_have_r, int *out_rate,
-				   int *out_have_R, int *out_prate,
-				   int *out_have_W,
-				   int *out_have_F, int *out_fade_ms,
-				   char **out_mix_path,
-				   char **out_out_path,
-				   int *out_have_Z, double *out_flac_compression) {
-   char *dup, *argv[64], *p;
-   int argc= 0, i;
-
-   if (!line || !out_S || !out_E || !out_have_T || !out_T_ms ||
-       !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
-       !out_have_R || !out_prate || !out_have_W ||
-       !out_have_F || !out_fade_ms || !out_mix_path ||
-       !out_out_path || !out_have_Z || !out_flac_compression) {
-      sbx_set_runtime_reject_reason("internal error while parsing safe sequence-file preamble");
-      return 0;
-   }
-   dup= StrDup((char *)line);
-   p= dup;
-   while (*p) {
-      if (argc >= (int)(sizeof(argv) / sizeof(argv[0]))) {
-	 sbx_set_runtime_reject_reason("safe sequence-file preamble line is too long: %s", line);
-	 free(dup);
-	 return 0;
-      }
-      while (isspace((unsigned char)*p)) p++;
-      if (!*p) break;
-      argv[argc++]= p;
-      while (*p && !isspace((unsigned char)*p)) p++;
-      if (*p) *p++= 0;
-   }
-
-   for (i= 0; i<argc; i++) {
-      char *tok= argv[i];
-      size_t a;
-      if (tok[0] != '-' || !tok[1]) {
-	 sbx_set_runtime_reject_reason("safe preamble line contains a non-option token: %s", tok);
-	 free(dup);
-	 return 0;
-      }
-      for (a= 1; tok[a]; a++) {
-	 switch (tok[a]) {
-	  case 'S':
-	     *out_S= 1;
-	     break;
-	  case 'E':
-	     *out_E= 1;
-	     break;
-	  case 'T':
-	     if (tok[a+1] || i+1 >= argc || 0 == readTime(argv[i+1], out_T_ms)) {
-		sbx_set_runtime_reject_reason("safe preamble -T expects a valid time value");
-		free(dup);
-		return 0;
-	     }
-	     *out_have_T= 1;
-	     i++;
-	     a= strlen(tok) - 1;
-	     break;
-	  case 'm':
-	     if (tok[a+1] || i+1 >= argc) {
-		sbx_set_runtime_reject_reason("safe preamble -m expects a mix-input path");
-		free(dup);
-		return 0;
-	     }
-	     if (!*out_mix_path)
-		*out_mix_path= StrDup(argv[i+1]);
-	     i++;
-	     a= strlen(tok) - 1;
-	     break;
-	  case 'o':
-	     if (tok[a+1] || i+1 >= argc) {
-		sbx_set_runtime_reject_reason("safe preamble -o expects an output path");
-		free(dup);
-		return 0;
-	     }
-	     if (*out_out_path) free(*out_out_path);
-	     *out_out_path= StrDup(argv[i+1]);
-	     i++;
-	     a= strlen(tok) - 1;
-	     break;
-	  case 'q':
-	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_q_mult)) {
-		sbx_set_runtime_reject_reason("safe preamble -q expects an integer multiplier");
-		free(dup);
-		return 0;
-	     }
-	     if (*out_q_mult < 1)
-		*out_q_mult= 1;
-	     *out_have_q= 1;
-	     i++;
-	     a= strlen(tok) - 1;
-	     break;
-	  case 'r':
-	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_rate)) {
-		sbx_set_runtime_reject_reason("safe preamble -r expects an integer sample rate");
-		free(dup);
-		return 0;
-	     }
-	     *out_have_r= 1;
-	     i++;
-	     a= strlen(tok) - 1;
-	     break;
-	  case 'R':
-	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_prate)) {
-		sbx_set_runtime_reject_reason("safe preamble -R expects an integer parameter refresh rate");
-		free(dup);
-		return 0;
-	     }
-	     if (*out_prate < 1) {
-		sbx_set_runtime_reject_reason("safe preamble -R must be >= 1");
-		free(dup);
-		return 0;
-	     }
-	     *out_have_R= 1;
-	     i++;
-	     a= strlen(tok) - 1;
-	     break;
-	  case 'W':
-	     *out_have_W= 1;
-	     break;
-	  case 'F':
-	     if (tok[a+1] || i+1 >= argc || 1 != sscanf(argv[i+1], "%d", out_fade_ms)) {
-		sbx_set_runtime_reject_reason("safe preamble -F expects an integer fade time in ms");
-		free(dup);
-		return 0;
-	     }
-	     *out_have_F= 1;
-	     i++;
-	     a= strlen(tok) - 1;
-	     break;
-	  case 'Z':
-	     if (tok[a+1] || i+1 >= argc ||
-		 1 != sscanf(argv[i+1], "%lf", out_flac_compression)) {
-		sbx_set_runtime_reject_reason("safe preamble -Z expects a FLAC compression level");
-		free(dup);
-		return 0;
-	     }
-	     *out_have_Z= 1;
-	     i++;
-	     a= strlen(tok) - 1;
-	     break;
-	  default:
-	     sbx_set_runtime_reject_reason("safe preamble option -%c is not supported by the sbagenxlib bridge", tok[a]);
-	     free(dup);
-	     return 0;
-	 }
-      }
-   }
-   free(dup);
-   return 1;
-}
-
-static int
 sbx_line_contains_seq_mode_option(const char *line) {
    char *dup, *argv[64], *p;
    int argc= 0, i;
@@ -4868,117 +4648,6 @@ sbx_try_run_option_only_seq_wrapper(const char *fnam) {
 
    free(text);
    return 1;
-}
-
-static int
-sbx_prepare_seqfile_runtime_text(const char *fnam, char **out_text,
-				 int *out_S, int *out_E,
-				 int *out_have_T, int *out_T_ms,
-				 int *out_have_q, int *out_q_mult,
-				 int *out_have_r, int *out_rate,
-				 int *out_have_R, int *out_prate,
-				 int *out_have_W,
-				 int *out_have_F, int *out_fade_ms,
-				 char **out_mix_path,
-				 char **out_out_path,
-				 int *out_have_Z, double *out_flac_compression) {
-   char *text, *line;
-   int rc;
-
-   if (!out_text || !out_S || !out_E || !out_have_T || !out_T_ms ||
-       !out_have_q || !out_q_mult || !out_have_r || !out_rate ||
-       !out_have_R || !out_prate || !out_have_W ||
-       !out_have_F || !out_fade_ms || !out_mix_path ||
-       !out_out_path || !out_have_Z || !out_flac_compression) {
-      sbx_set_runtime_reject_reason("internal error preparing sbagenxlib sequence text");
-      return SBX_EINVAL;
-   }
-   *out_text= 0;
-   *out_S= 0;
-   *out_E= 0;
-   *out_have_T= 0;
-   *out_T_ms= -1;
-   *out_have_q= 0;
-   *out_q_mult= 1;
-   *out_have_r= 0;
-   *out_rate= 44100;
-   *out_have_R= 0;
-   *out_prate= 10;
-   *out_have_W= 0;
-   *out_have_F= 0;
-   *out_fade_ms= 60000;
-   *out_mix_path= 0;
-   *out_out_path= 0;
-   *out_have_Z= 0;
-   *out_flac_compression= 5.0;
-
-   rc= sbx_read_text_file_alloc_cli(fnam, &text);
-   if (rc != SBX_OK) {
-      sbx_set_runtime_reject_reason("unable to read sequence file: %s", fnam ? fnam : "(null)");
-      return rc;
-   }
-
-   line= text;
-   while (line && *line) {
-      char *line_nl= strchr(line, '\n');
-      char *trim;
-      char *line_end;
-      char saved= 0;
-      char *next= 0;
-
-      if (line_nl) {
-	 line_end= line_nl;
-	 saved= *line_end;
-	 *line_end= 0;
-	 next= line_nl + 1;
-      } else {
-	 line_end= line + strlen(line);
-      }
-      if (line_end > line && line_end[-1] == '\r')
-	 line_end--;
-      trim= line;
-      while (*trim && isspace((unsigned char)*trim)) trim++;
-      if (!*trim) {
-	 if (saved) *line_nl= saved;
-	 line= next;
-	 continue;
-      }
-      if (*trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
-	 if (saved) *line_nl= saved;
-	 line= next;
-	 continue;
-      }
-      if (*trim == '-') {
-	 if (!sbx_parse_safe_seqfile_option_line(trim,
-						 out_S, out_E,
-						 out_have_T, out_T_ms,
-						 out_have_q, out_q_mult,
-						 out_have_r, out_rate,
-						 out_have_R, out_prate,
-						 out_have_W,
-						 out_have_F, out_fade_ms,
-						 out_mix_path,
-						 out_out_path,
-						 out_have_Z, out_flac_compression)) {
-	    if (*out_mix_path) free(*out_mix_path);
-	    if (*out_out_path) free(*out_out_path);
-	    *out_mix_path= 0;
-	    *out_out_path= 0;
-	    if (saved) *line_nl= saved;
-	    free(text);
-	    return SBX_EINVAL;
-	 }
-	 memset(line, ' ', (size_t)(line_end - line));
-	 if (saved) *line_nl= saved;
-	 line= next;
-	 continue;
-      }
-      if (saved) *line_nl= saved;
-      break;
-   }
-
-   *out_text= text;
-   return SBX_OK;
 }
 
 //
@@ -5977,152 +5646,6 @@ output_encoder_name() {
    }
 }
 
-static void
-write_out_fd_raw(const char *buf, int siz) {
-   int rv;
-   while (-1 != (rv= write(out_fd, buf, siz))) {
-      if (rv == 0) break;
-      siz -= rv;
-      if (!siz) return;
-      buf += rv;
-   }
-   error("Output error");
-}
-
-#ifdef WIN_MISC
-static DLibHandle
-dlib_open_one(const char *name) {
-   return LoadLibraryA(name);
-}
-static void *
-dlib_sym(DLibHandle lib, const char *name) {
-   return (void*)GetProcAddress(lib, name);
-}
-static void
-dlib_close(DLibHandle lib) {
-   if (lib) FreeLibrary(lib);
-}
-#else
-static DLibHandle
-dlib_open_one(const char *name) {
-   return dlopen(name, RTLD_LAZY);
-}
-static void *
-dlib_sym(DLibHandle lib, const char *name) {
-   return dlsym(lib, name);
-}
-static void
-dlib_close(DLibHandle lib) {
-   if (lib) dlclose(lib);
-}
-#endif
-
-#ifdef WIN_MISC
-#define DLIB_PATH_SEP '\\'
-#else
-#define DLIB_PATH_SEP '/'
-#endif
-
-static char dlib_exec_dir[1024];
-static int dlib_exec_dir_init;
-
-static void
-dlib_init_exec_dir() {
-   if (dlib_exec_dir_init) return;
-   dlib_exec_dir_init= 1;
-   dlib_exec_dir[0]= 0;
-
-#ifdef WIN_MISC
-   {
-      char path[1024];
-      DWORD len= GetModuleFileNameA(0, path, sizeof(path)-1);
-      if (len > 0 && len < sizeof(path)) {
-	 char *p1, *p2, *p;
-	 path[len]= 0;
-	 p1= strrchr(path, '/');
-	 p2= strrchr(path, '\\');
-	 p= p1 > p2 ? p1 : p2;
-	 if (p) *p= 0;
-	 else strcpy(path, ".");
-	 strncpy(dlib_exec_dir, path, sizeof(dlib_exec_dir)-1);
-	 dlib_exec_dir[sizeof(dlib_exec_dir)-1]= 0;
-      }
-   }
-#else
-   {
-      char path[PATH_MAX];
-      int ok= 0;
-#ifdef T_MACOSX
-      {
-	 uint32_t size= sizeof(path);
-	 if (_NSGetExecutablePath(path, &size) == 0)
-	    ok= 1;
-      }
-#endif
-      if (!ok) {
-	 ssize_t len= readlink("/proc/self/exe", path, sizeof(path)-1);
-	 if (len > 0 && len < sizeof(path)) {
-	    path[len]= 0;
-	    ok= 1;
-	 }
-      }
-      if (ok) {
-	 char *p1, *p2, *p;
-	 p1= strrchr(path, '/');
-	 p2= strrchr(path, '\\');
-	 p= p1 > p2 ? p1 : p2;
-	 if (p) *p= 0;
-	 else strcpy(path, ".");
-	 strncpy(dlib_exec_dir, path, sizeof(dlib_exec_dir)-1);
-	 dlib_exec_dir[sizeof(dlib_exec_dir)-1]= 0;
-      }
-   }
-#endif
-
-   if (!dlib_exec_dir[0])
-      strcpy(dlib_exec_dir, ".");
-}
-
-static DLibHandle
-dlib_open_best(const char **names) {
-   int a;
-   char cand[2048];
-
-   dlib_init_exec_dir();
-   for (a= 0; names[a]; a++) {
-      const char *name= names[a];
-      DLibHandle mod;
-
-      if (strchr(name, '/') || strchr(name, '\\')) {
-	 mod= dlib_open_one(name);
-	 if (mod) return mod;
-	 continue;
-      }
-
-      snprintf(cand, sizeof(cand), "%s%c%s%c%s", dlib_exec_dir, DLIB_PATH_SEP, "libs", DLIB_PATH_SEP, name);
-      mod= dlib_open_one(cand);
-      if (mod) return mod;
-
-      snprintf(cand, sizeof(cand), "%s%c%s", dlib_exec_dir, DLIB_PATH_SEP, name);
-      mod= dlib_open_one(cand);
-      if (mod) return mod;
-
-      snprintf(cand, sizeof(cand), ".%c%s%c%s", DLIB_PATH_SEP, "libs", DLIB_PATH_SEP, name);
-      mod= dlib_open_one(cand);
-      if (mod) return mod;
-
-      snprintf(cand, sizeof(cand), ".%c%s", DLIB_PATH_SEP, name);
-      mod= dlib_open_one(cand);
-      if (mod) return mod;
-
-      mod= dlib_open_one(name);
-      if (mod) return mod;
-   }
-   return 0;
-}
-
-#undef DLIB_PATH_SEP
-
 static int
 is_out_ext(const char *path, const char *ext) {
    const char *p= strrchr(path, '.');
@@ -6155,37 +5678,23 @@ detect_output_encoder() {
 
 static int
 output_encoder_frame_bytes(void) {
-   if (out_enc_fmt == OUT_ENC_MP3 && sbx_runtime_ctx && mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn)
-      return 8;
-   if (out_enc_fmt == OUT_ENC_OGG && sbx_runtime_ctx)
-      return 8;
-   if (out_enc_fmt == OUT_ENC_FLAC && out_enc_pcm_bits == 24)
-      return 6;
+   if (out_writer)
+      return sbx_audio_writer_frame_bytes(out_writer);
    if (out_enc_fmt == OUT_ENC_NONE && out_mode == 3)
       return 6;
    return out_mode ? 4 : 2;
 }
 
 static int
-output_encoder_needs_mp3_f32_path(void) {
-   return out_enc_active &&
-          out_enc_fmt == OUT_ENC_MP3 &&
-          sbx_runtime_ctx != 0 &&
-          mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn != 0;
-}
-
-static int
 output_encoder_needs_f32_path(void) {
-   return out_enc_active &&
-          out_enc_fmt == OUT_ENC_OGG &&
-          sbx_runtime_ctx != 0;
+   return out_enc_active && out_writer &&
+          sbx_audio_writer_input_mode(out_writer) == SBX_AUDIO_WRITER_INPUT_F32;
 }
 
 static int
 output_encoder_needs_i32_path(void) {
-   return out_enc_active &&
-          out_enc_fmt == OUT_ENC_FLAC &&
-          out_enc_pcm_bits == 24;
+   return out_enc_active && out_writer &&
+          sbx_audio_writer_input_mode(out_writer) == SBX_AUDIO_WRITER_INPUT_I32;
 }
 
 static int
@@ -6196,8 +5705,6 @@ output_needs_packed_s24_path(void) {
 
 static const char *
 output_encoder_path_desc(void) {
-   if (output_encoder_needs_mp3_f32_path())
-      return "float encoder path";
    if (output_encoder_needs_f32_path())
       return "float encoder path";
    if (output_encoder_needs_i32_path())
@@ -6228,211 +5735,46 @@ pack_s24le_from_i32(const int32_t *in, unsigned char *out, size_t sample_count) 
 }
 
 static void
-init_snd_encoder(int format) {
-#ifndef STATIC_OUTPUT_ENCODERS
-   const char *names[] = {
-#ifdef WIN_MISC
-      "libsndfile-1.dll",
-      "sndfile.dll",
-#elif defined(T_MACOSX)
-      "libsndfile.1.dylib",
-      "libsndfile.dylib",
-#else
-      "libsndfile.so.1",
-      "libsndfile.so",
-#endif
-      0
-   };
-#endif
-   SF_INFO info;
+init_output_writer(void) {
+   SbxAudioWriterConfig cfg;
 
-   memset(&snd_enc, 0, sizeof(snd_enc));
-#ifdef STATIC_OUTPUT_ENCODERS
-   snd_enc.sf_open_fn= sf_open;
-   snd_enc.sf_writef_short_fn= sf_writef_short;
-   snd_enc.sf_writef_float_fn= sf_writef_float;
-   snd_enc.sf_writef_int_fn= sf_writef_int;
-   snd_enc.sf_close_fn= sf_close;
-   snd_enc.sf_strerror_fn= sf_strerror;
-   snd_enc.sf_command_fn= sf_command;
-#else
-   snd_enc.lib= dlib_open_best(names);
-   if (!snd_enc.lib)
-      error("%s output requested, but libsndfile runtime library is not available", output_encoder_name());
+   if (!opt_o)
+      return;
 
-   snd_enc.sf_open_fn= (SNDFILE*(*)(const char*, int, SF_INFO*))dlib_sym(snd_enc.lib, "sf_open");
-   snd_enc.sf_writef_short_fn= (sf_count_t(*)(SNDFILE*, const short*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_short");
-   snd_enc.sf_writef_float_fn= (sf_count_t(*)(SNDFILE*, const float*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_float");
-   snd_enc.sf_writef_int_fn= (sf_count_t(*)(SNDFILE*, const int*, sf_count_t))dlib_sym(snd_enc.lib, "sf_writef_int");
-   snd_enc.sf_close_fn= (int(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_close");
-   snd_enc.sf_strerror_fn= (const char*(*)(SNDFILE*))dlib_sym(snd_enc.lib, "sf_strerror");
-   snd_enc.sf_command_fn= (int(*)(SNDFILE*, int, void*, int))dlib_sym(snd_enc.lib, "sf_command");
-   if (!snd_enc.sf_open_fn || !snd_enc.sf_writef_short_fn || !snd_enc.sf_close_fn ||
-       !snd_enc.sf_strerror_fn || !snd_enc.sf_command_fn)
-      error("Failed to load required libsndfile symbols for %s output", output_encoder_name());
-#endif
-   if (out_enc_fmt == OUT_ENC_OGG && sbx_runtime_ctx && !snd_enc.sf_writef_float_fn)
-      error("OGG/Vorbis float output requested, but libsndfile lacks sf_writef_float()");
-   if (out_enc_fmt == OUT_ENC_FLAC && out_enc_pcm_bits == 24 && !snd_enc.sf_writef_int_fn)
-      error("FLAC 24-bit output requested, but libsndfile lacks sf_writef_int()");
+   sbx_default_audio_writer_config(&cfg);
+   cfg.sample_rate= out_rate;
+   cfg.channels= 2;
+   cfg.pcm_bits= output_pcm_bits();
+   cfg.ogg_quality= opt_ogg_quality;
+   cfg.ogg_quality_set= opt_ogg_quality_set;
+   cfg.flac_compression= opt_flac_compression;
+   cfg.flac_compression_set= opt_flac_compression_set;
+   cfg.mp3_bitrate= opt_mp3_bitrate;
+   cfg.mp3_bitrate_set= opt_mp3_bitrate_set;
+   cfg.mp3_quality= opt_mp3_quality;
+   cfg.mp3_quality_set= opt_mp3_quality_set;
+   cfg.mp3_vbr_quality= opt_mp3_vbr_quality;
+   cfg.mp3_vbr_quality_set= opt_mp3_vbr_quality_set;
+   cfg.prefer_float_input= (sbx_runtime_ctx != 0);
 
-   memset(&info, 0, sizeof(info));
-   info.channels= 2;
-   info.samplerate= out_rate;
-   info.format= format;
+   if (out_enc_fmt == OUT_ENC_OGG)
+      cfg.format= SBX_AUDIO_FILE_OGG;
+   else if (out_enc_fmt == OUT_ENC_FLAC) {
+      cfg.format= SBX_AUDIO_FILE_FLAC;
+      cfg.pcm_bits= out_enc_pcm_bits;
+   } else if (out_enc_fmt == OUT_ENC_MP3)
+      cfg.format= SBX_AUDIO_FILE_MP3;
+   else
+      cfg.format= opt_W ? SBX_AUDIO_FILE_WAV : SBX_AUDIO_FILE_RAW;
 
-   snd_enc.snd= snd_enc.sf_open_fn(opt_o, SFM_WRITE, &info);
-   if (!snd_enc.snd)
-      error("Failed to open output file for %s encoding: %s",
-	    output_encoder_name(),
-	    snd_enc.sf_strerror_fn(0));
+   out_writer= sbx_audio_writer_create_path(opt_o, &cfg);
+   if (!out_writer)
+      error("Failed to initialize %s output writer",
+	    cfg.format == SBX_AUDIO_FILE_WAV ? "WAV" : output_encoder_name());
 
-   if (out_enc_fmt == OUT_ENC_OGG) {
-      double q= opt_ogg_quality / 10.0;
-      if (snd_enc.sf_command_fn(snd_enc.snd, SFC_SET_VBR_ENCODING_QUALITY, &q, sizeof(q)) <= 0)
-	 error("Failed to set OGG Vorbis quality to %.2f (range 0..10)", opt_ogg_quality);
-      if (!opt_Q)
-	 warn("Using OGG Vorbis quality %.2f/10", opt_ogg_quality);
-   }
-
-   if (out_enc_fmt == OUT_ENC_FLAC && opt_flac_compression_set) {
-      double c= opt_flac_compression / 12.0;
-      if (snd_enc.sf_command_fn(snd_enc.snd, SFC_SET_COMPRESSION_LEVEL, &c, sizeof(c)) <= 0)
-	 error("Failed to set FLAC compression level to %.2f (range 0..12)", opt_flac_compression);
-      if (!opt_Q)
-	 warn("Using FLAC compression level %.2f/12", opt_flac_compression);
-   }
-
-   out_enc_active= 1;
-}
-
-static void
-ensure_mp3_buf(int frames) {
-   int need= 7200 + (int)(1.25 * frames + 0.5);
-   if (need > mp3_enc.buflen) {
-      if (!mp3_enc.buf) {
-	 mp3_enc.buf= ALLOC_ARR(need, unsigned char);
-      } else {
-	 mp3_enc.buf= (unsigned char*)realloc(mp3_enc.buf, need);
-	 if (!mp3_enc.buf) error("Out of memory");
-      }
-      mp3_enc.buflen= need;
-   }
-}
-
-static void
-init_mp3_encoder() {
-   int mp3_bitrate= opt_mp3_bitrate_set ? opt_mp3_bitrate : 192;
-   int mp3_quality= opt_mp3_quality_set ? opt_mp3_quality : 2;
-   double mp3_vbr_quality= opt_mp3_vbr_quality_set ? opt_mp3_vbr_quality : 0.0;
-#ifndef STATIC_OUTPUT_ENCODERS
-   const char *names[] = {
-#ifdef WIN_MISC
-      "libmp3lame-0.dll",
-      "libmp3lame.dll",
-#elif defined(T_MACOSX)
-      "libmp3lame.0.dylib",
-      "libmp3lame.dylib",
-#else
-      "libmp3lame.so.0",
-      "libmp3lame.so",
-#endif
-      0
-   };
-#endif
-
-   memset(&mp3_enc, 0, sizeof(mp3_enc));
-#ifdef STATIC_OUTPUT_ENCODERS
-   mp3_enc.lame_init_fn= lame_init;
-   mp3_enc.lame_set_in_samplerate_fn= lame_set_in_samplerate;
-   mp3_enc.lame_set_num_channels_fn= lame_set_num_channels;
-   mp3_enc.lame_set_quality_fn= lame_set_quality;
-   mp3_enc.lame_set_VBR_fn= lame_set_VBR;
-   mp3_enc.lame_set_VBR_q_fn= lame_set_VBR_q;
-   mp3_enc.lame_set_VBR_quality_fn= lame_set_VBR_quality;
-   mp3_enc.lame_set_brate_fn= lame_set_brate;
-   mp3_enc.lame_init_params_fn= lame_init_params;
-   mp3_enc.lame_encode_buffer_interleaved_fn= lame_encode_buffer_interleaved;
-   mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn= 0;
-   mp3_enc.lame_encode_flush_fn= lame_encode_flush;
-   mp3_enc.lame_close_fn= lame_close;
-#else
-   mp3_enc.lib= dlib_open_best(names);
-   if (!mp3_enc.lib)
-      error("MP3 output requested, but libmp3lame runtime library is not available");
-
-   mp3_enc.lame_init_fn= (lame_t(*)(void))dlib_sym(mp3_enc.lib, "lame_init");
-   mp3_enc.lame_set_in_samplerate_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_in_samplerate");
-   mp3_enc.lame_set_num_channels_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_num_channels");
-   mp3_enc.lame_set_quality_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_quality");
-   mp3_enc.lame_set_VBR_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_VBR");
-   mp3_enc.lame_set_VBR_q_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_VBR_q");
-   mp3_enc.lame_set_VBR_quality_fn= (int(*)(lame_t,float))dlib_sym(mp3_enc.lib, "lame_set_VBR_quality");
-   mp3_enc.lame_set_brate_fn= (int(*)(lame_t,int))dlib_sym(mp3_enc.lib, "lame_set_brate");
-   mp3_enc.lame_init_params_fn= (int(*)(lame_t))dlib_sym(mp3_enc.lib, "lame_init_params");
-   mp3_enc.lame_encode_buffer_interleaved_fn=
-      (int(*)(lame_t, short int*, int, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_buffer_interleaved");
-   mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn=
-      (int(*)(lame_t, float*, int, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_buffer_interleaved_ieee_float");
-   mp3_enc.lame_encode_flush_fn=
-      (int(*)(lame_t, unsigned char*, int))dlib_sym(mp3_enc.lib, "lame_encode_flush");
-   mp3_enc.lame_close_fn= (int(*)(lame_t))dlib_sym(mp3_enc.lib, "lame_close");
-#endif
-   if (!mp3_enc.lame_init_fn ||
-       !mp3_enc.lame_set_in_samplerate_fn ||
-       !mp3_enc.lame_set_num_channels_fn ||
-       !mp3_enc.lame_set_quality_fn ||
-       !(opt_mp3_vbr_quality_set
-	 ? (mp3_enc.lame_set_VBR_fn && (mp3_enc.lame_set_VBR_quality_fn || mp3_enc.lame_set_VBR_q_fn))
-	 : (mp3_enc.lame_set_brate_fn != 0)) ||
-       !mp3_enc.lame_init_params_fn ||
-       !mp3_enc.lame_encode_buffer_interleaved_fn ||
-       !mp3_enc.lame_encode_flush_fn ||
-       !mp3_enc.lame_close_fn)
-      error("Failed to load required libmp3lame symbols");
-
-   mp3_enc.gfp= mp3_enc.lame_init_fn();
-   if (!mp3_enc.gfp) error("lame_init() failed");
-
-   if (mp3_enc.lame_set_num_channels_fn(mp3_enc.gfp, 2) < 0 ||
-       mp3_enc.lame_set_in_samplerate_fn(mp3_enc.gfp, out_rate) < 0 ||
-       mp3_enc.lame_set_quality_fn(mp3_enc.gfp, mp3_quality) < 0)
-      error("Failed to configure MP3 encoder");
-
-   if (opt_mp3_vbr_quality_set) {
-      // 4 = vbr_mtrh in LAME's vbr_mode enum.
-      if (mp3_enc.lame_set_VBR_fn(mp3_enc.gfp, 4) < 0)
-	 error("Failed to configure MP3 VBR mode");
-      if (mp3_enc.lame_set_VBR_quality_fn) {
-	 if (mp3_enc.lame_set_VBR_quality_fn(mp3_enc.gfp, (float)mp3_vbr_quality) < 0)
-	    error("Failed to configure MP3 VBR quality %.2f (range 0..9)", mp3_vbr_quality);
-      } else {
-	 int q_i= (int)(mp3_vbr_quality + 0.5);
-	 if (q_i < 0) q_i= 0;
-	 if (q_i > 9) q_i= 9;
-	 if (mp3_enc.lame_set_VBR_q_fn(mp3_enc.gfp, q_i) < 0)
-	    error("Failed to configure MP3 VBR quality %d (range 0..9)", q_i);
-	 if (!opt_Q && fabs(mp3_vbr_quality - q_i) > 1e-9)
-	    warn("MP3 runtime supports integer VBR quality only; -X %.2f rounded to %d", mp3_vbr_quality, q_i);
-      }
-      if (!opt_Q && opt_mp3_bitrate_set)
-	 warn("MP3 bitrate setting (-K) is ignored when MP3 VBR mode (-X) is used");
-   } else {
-      if (mp3_enc.lame_set_brate_fn(mp3_enc.gfp, mp3_bitrate) < 0)
-	 error("Failed to configure MP3 bitrate %d kbps", mp3_bitrate);
-   }
-
-   if (mp3_enc.lame_init_params_fn(mp3_enc.gfp) < 0)
-      error("Failed to initialize MP3 encoder parameters");
-
-   if (!opt_Q) {
-      if (opt_mp3_vbr_quality_set)
-	 warn("Using MP3 VBR quality %.2f (0 best .. 9 fastest), LAME quality %d", mp3_vbr_quality, mp3_quality);
-      else
-	 warn("Using MP3 bitrate %d kbps, quality %d", mp3_bitrate, mp3_quality);
-   }
-
-   out_enc_active= 1;
+   out_writer_bytes_mode=
+      (cfg.format == SBX_AUDIO_FILE_RAW || cfg.format == SBX_AUDIO_FILE_WAV);
+   out_enc_active= !out_writer_bytes_mode;
 }
 
 void
@@ -6440,7 +5782,12 @@ init_output_encoder() {
    int forced_bits= 16;
    out_enc_active= 0;
    out_enc_finished= 0;
-   if (out_enc_fmt == OUT_ENC_NONE) return;
+   out_writer_bytes_mode= 0;
+   if (out_writer) {
+      sbx_audio_writer_destroy(out_writer);
+      out_writer= 0;
+   }
+   if (out_enc_fmt == OUT_ENC_NONE && !(opt_o && !opt_O)) return;
 
    if (!opt_o)
       error("%s encoding requires -o <file>", output_encoder_name());
@@ -6449,7 +5796,7 @@ init_output_encoder() {
       forced_bits= 24;
    out_enc_pcm_bits= forced_bits;
 
-   if (out_mode != 1) {
+   if (out_enc_fmt != OUT_ENC_NONE && out_mode != 1) {
       if (!opt_Q)
 	 warn("%s output ignores -b and uses %s", output_encoder_name(), output_encoder_path_desc());
       out_mode= 1;
@@ -6462,23 +5809,19 @@ init_output_encoder() {
       warn("OGG setting (-U) is ignored unless output filename ends with .ogg");
    if (!opt_Q && out_enc_fmt != OUT_ENC_FLAC && opt_flac_compression_set)
       warn("FLAC setting (-Z) is ignored unless output filename ends with .flac");
-
-   switch (out_enc_fmt) {
-    case OUT_ENC_MP3:
-      init_mp3_encoder();
-      break;
-    case OUT_ENC_OGG:
-      init_snd_encoder(SF_FORMAT_OGG | SF_FORMAT_VORBIS);
-      break;
-    case OUT_ENC_FLAC:
-      init_snd_encoder(SF_FORMAT_FLAC |
-		       (out_enc_pcm_bits == 24 ? SF_FORMAT_PCM_24 : SF_FORMAT_PCM_16));
-      break;
-    default:
-      break;
+   if (!opt_Q && out_enc_fmt == OUT_ENC_MP3) {
+      if (opt_mp3_vbr_quality_set)
+	 warn("Using MP3 VBR quality %.2f (0 best .. 9 fastest), LAME quality %d",
+	      opt_mp3_vbr_quality, opt_mp3_quality_set ? opt_mp3_quality : 2);
+      else
+	 warn("Using MP3 bitrate %d kbps, quality %d",
+	      opt_mp3_bitrate_set ? opt_mp3_bitrate : 192,
+	      opt_mp3_quality_set ? opt_mp3_quality : 2);
    }
 
-   if (out_enc_active && !out_enc_atexit) {
+   init_output_writer();
+
+   if ((out_enc_active || out_writer) && !out_enc_atexit) {
       atexit(finish_output_encoder);
       out_enc_atexit= 1;
    }
@@ -6486,27 +5829,18 @@ init_output_encoder() {
    if (!opt_Q && out_enc_active)
       warn("Outputting %s encoded audio at %d Hz (%s)",
 	   output_encoder_name(), out_rate, output_encoder_path_desc());
+   else if (!opt_Q && out_writer && out_writer_bytes_mode)
+      warn("Outputting %d-bit %s data at %d Hz",
+	   output_pcm_bits(), opt_W ? "WAV" : "raw", out_rate);
 }
 
 void
 output_encoder_write(short *pcm, int frames) {
    if (!out_enc_active || !frames) return;
-
-   if (out_enc_fmt == OUT_ENC_MP3) {
-      int rv;
-      ensure_mp3_buf(frames);
-      rv= mp3_enc.lame_encode_buffer_interleaved_fn(mp3_enc.gfp, pcm, frames, mp3_enc.buf, mp3_enc.buflen);
-      if (rv < 0)
-	 error("MP3 encoding failed with error code %d", rv);
-      if (rv > 0)
-	 write_out_fd_raw((char*)mp3_enc.buf, rv);
-      return;
-   }
-
-   if (out_enc_fmt == OUT_ENC_OGG || out_enc_fmt == OUT_ENC_FLAC) {
-      sf_count_t wr= snd_enc.sf_writef_short_fn(snd_enc.snd, pcm, frames);
-      if (wr != (sf_count_t)frames)
-	 error("%s encoding failed while writing frame data", output_encoder_name());
+   if (out_writer) {
+      int rc= sbx_audio_writer_write_s16(out_writer, (const int16_t *)pcm, (size_t)frames);
+      if (rc != SBX_OK)
+	 error("%s", sbx_audio_writer_last_error(out_writer));
       return;
    }
 }
@@ -6514,26 +5848,10 @@ output_encoder_write(short *pcm, int frames) {
 void
 output_encoder_write_f32(float *pcm, int frames) {
    if (!out_enc_active || !frames) return;
-   if (!output_encoder_needs_f32_path() && !output_encoder_needs_mp3_f32_path())
+   if (!output_encoder_needs_f32_path())
       error("Internal error: float encoder write requested for unsupported output path");
-   if (output_encoder_needs_mp3_f32_path()) {
-      int rv;
-      ensure_mp3_buf(frames);
-      rv= mp3_enc.lame_encode_buffer_interleaved_ieee_float_fn(mp3_enc.gfp, pcm, frames, mp3_enc.buf, mp3_enc.buflen);
-      if (rv < 0)
-	 error("MP3 float encoding failed with error code %d", rv);
-      if (rv > 0)
-	 write_out_fd_raw((char*)mp3_enc.buf, rv);
-      return;
-   }
-   if (!snd_enc.sf_writef_float_fn)
-      error("OGG/Vorbis float output requested, but libsndfile lacks sf_writef_float()");
-
-   {
-      sf_count_t wr= snd_enc.sf_writef_float_fn(snd_enc.snd, (const float *)pcm, frames);
-      if (wr != (sf_count_t)frames)
-	 error("%s encoding failed while writing float frame data", output_encoder_name());
-   }
+   if (sbx_audio_writer_write_f32(out_writer, pcm, (size_t)frames) != SBX_OK)
+      error("%s", sbx_audio_writer_last_error(out_writer));
 }
 
 void
@@ -6541,48 +5859,20 @@ output_encoder_write_i32(int32_t *pcm, int frames) {
    if (!out_enc_active || !frames) return;
    if (!output_encoder_needs_i32_path())
       error("Internal error: 32-bit encoder write requested for unsupported output path");
-   if (!snd_enc.sf_writef_int_fn)
-      error("FLAC 24-bit output requested, but libsndfile lacks sf_writef_int()");
-
-   {
-      sf_count_t wr= snd_enc.sf_writef_int_fn(snd_enc.snd, (const int *)pcm, frames);
-      if (wr != (sf_count_t)frames)
-	 error("%s encoding failed while writing 24-bit frame data", output_encoder_name());
-   }
+   if (sbx_audio_writer_write_i32(out_writer, pcm, (size_t)frames) != SBX_OK)
+      error("%s", sbx_audio_writer_last_error(out_writer));
 }
 
 void
 finish_output_encoder() {
-   if (!out_enc_active || out_enc_finished) return;
+   if (!(out_enc_active || out_writer) || out_enc_finished) return;
    out_enc_finished= 1;
 
-   if (out_enc_fmt == OUT_ENC_MP3) {
-      int rv;
-      ensure_mp3_buf(4096);
-      rv= mp3_enc.lame_encode_flush_fn(mp3_enc.gfp, mp3_enc.buf, mp3_enc.buflen);
-      if (rv < 0)
-	 error("MP3 encoder flush failed with error code %d", rv);
-      if (rv > 0)
-	 write_out_fd_raw((char*)mp3_enc.buf, rv);
-      if (mp3_enc.gfp) {
-	 mp3_enc.lame_close_fn(mp3_enc.gfp);
-	 mp3_enc.gfp= 0;
-      }
-      if (mp3_enc.buf) { free(mp3_enc.buf); mp3_enc.buf= 0; }
-      mp3_enc.buflen= 0;
-      dlib_close(mp3_enc.lib);
-      mp3_enc.lib= 0;
-      return;
-   }
-
-   if (out_enc_fmt == OUT_ENC_OGG || out_enc_fmt == OUT_ENC_FLAC) {
-      if (snd_enc.snd) {
-	 snd_enc.sf_close_fn(snd_enc.snd);
-	 snd_enc.snd= 0;
-      }
-      dlib_close(snd_enc.lib);
-      snd_enc.lib= 0;
-      return;
+   if (out_writer) {
+      if (sbx_audio_writer_close(out_writer) != SBX_OK)
+	 error("%s", sbx_audio_writer_last_error(out_writer));
+      sbx_audio_writer_destroy(out_writer);
+      out_writer= 0;
    }
 }
 
@@ -6804,7 +6094,7 @@ loop() {
       out_mode == 1 && bigendian)
      out_mode= 2;
 
-  if (opt_W)
+  if (opt_W && !out_writer)
     writeWAV();
 
   if (!opt_Q) fprintf(stderr, "\n");
@@ -7212,7 +6502,7 @@ outChunkSbx() {
    int rc;
    double t0;
    double sr= (double)out_rate;
-   int use_f32_encoder= output_encoder_needs_f32_path() || output_encoder_needs_mp3_f32_path();
+   int use_f32_encoder= output_encoder_needs_f32_path();
    int use_i32_encoder= output_encoder_needs_i32_path();
 
    if (!sbx_runtime_ctx)
@@ -7394,6 +6684,12 @@ outChunkSbx() {
 void 
 writeOut(char *buf, int siz) {
   int rv;
+
+  if (out_writer && out_writer_bytes_mode) {
+     if (sbx_audio_writer_write_bytes(out_writer, buf, (size_t)siz) != SBX_OK)
+	error("%s", sbx_audio_writer_last_error(out_writer));
+     return;
+  }
 
   if (out_enc_active) {
      if (siz & 3)
@@ -7817,22 +7113,14 @@ setup_device(void) {
       error("24-bit raw/WAV output currently requires an sbagenxlib-backed runtime path");
     if (opt_O)
       out_fd= 1;		// stdout
-    else {
-      if (out_enc_fmt == OUT_ENC_OGG || out_enc_fmt == OUT_ENC_FLAC) {
-	 out_fd= -1;		// libsndfile opens and manages the file internally
-      } else {
-	 FILE *out;		// Need to create a stream to set binary mode for DOS
-	 if (!(out= fopen(opt_o, "wb")))
-	    error("Can't open \"%s\", errno %d", opt_o, errno);
-	 out_fd= fileno(out);
-      }
-    }
+    else
+      out_fd= -1;		// library writer opens and manages the file internally
 
     init_output_encoder();
 
     out_blen= out_rate * 2 / out_prate;		// 10 fragments a second by default
     while (out_blen & (out_blen-1)) out_blen &= out_blen-1;		// Make power of two
-    out_bps= output_encoder_frame_bytes();
+    out_bps= out_writer ? sbx_audio_writer_frame_bytes(out_writer) : output_encoder_frame_bytes();
     out_bsiz= (out_blen / 2) * out_bps;
     out_buf= (short*)Alloc(out_blen * sizeof(short));
     out_buf_lo= (int)(0x10000 * 1000.0 * 0.5 * out_blen / out_rate);
@@ -7840,7 +7128,7 @@ setup_device(void) {
     out_buf_lo &= 0xFFFF;
     tmp_buf= (int*)Alloc(out_blen * sizeof(int));
 
-    if (!opt_Q && !opt_W && !out_enc_active)		// Informational message for opt_W/encoded is written later
+    if (!opt_Q && !opt_W && !out_enc_active && !out_writer)		// Informational message for opt_W/encoded is written later
        warn("Outputting %d-bit raw audio data at %d Hz with %d-sample blocks, %d ms per block",
 	    output_pcm_bits(), out_rate, out_blen/2, out_buf_ms);
     return;
@@ -8365,18 +7653,12 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    SbxContext *ctx;
    int rc;
    char *seq_text= 0;
-   char *safe_mix_path= 0;
-   char *safe_out_path= 0;
-   int safe_S= 0, safe_E= 0, safe_have_T= 0, safe_T_ms= -1;
-   int safe_have_q= 0, safe_q_mult= 1;
-   int safe_have_r= 0, safe_rate= 44100;
-   int safe_have_R= 0, safe_prate= 10;
-   int safe_have_W= 0;
-   int safe_have_F= 0, safe_fade_ms= 60000;
-   int safe_have_Z= 0;
-   double safe_flac_compression= 5.0;
+   char prep_err[256];
+   SbxSafeSeqfilePreamble safe_cfg;
 
    sbx_clear_runtime_reject_reason();
+   sbx_default_safe_seqfile_preamble(&safe_cfg);
+   prep_err[0]= 0;
 
    if (ac != 1 || !av) {
       sbx_set_runtime_reject_reason("direct sbagenxlib sequence loading currently expects exactly one input file");
@@ -8391,46 +7673,40 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (sbx_try_run_option_only_seq_wrapper(fnam))
       return 1;
 
-   rc= sbx_prepare_seqfile_runtime_text(fnam, &seq_text,
-					&safe_S, &safe_E,
-					&safe_have_T, &safe_T_ms,
-					&safe_have_q, &safe_q_mult,
-					&safe_have_r, &safe_rate,
-					&safe_have_R, &safe_prate,
-					&safe_have_W,
-					&safe_have_F, &safe_fade_ms,
-					&safe_mix_path,
-					&safe_out_path,
-					&safe_have_Z, &safe_flac_compression);
+   rc= sbx_prepare_safe_seqfile_text(fnam, &seq_text, &safe_cfg,
+				     prep_err, sizeof(prep_err));
    if (rc == SBX_ENOMEM)
       error("Out of memory preparing sequence file for sbagenxlib runtime");
-   if (rc != SBX_OK)
+   if (rc != SBX_OK) {
+      if (prep_err[0])
+	 sbx_set_runtime_reject_reason("%s", prep_err);
       return 0;
+   }
 
-   if (safe_have_r) {
-      out_rate= safe_rate;
+   if (safe_cfg.have_r) {
+      out_rate= safe_cfg.rate;
       out_rate_def= 0;
    }
-   if (safe_have_R)
-      out_prate= safe_prate;
-   if (safe_have_W)
+   if (safe_cfg.have_R)
+      out_prate= safe_cfg.prate;
+   if (safe_cfg.have_W)
       opt_W= 1;
-   if (safe_have_F)
-      fade_int= safe_fade_ms;
-   if (safe_have_q) {
+   if (safe_cfg.have_F)
+      fade_int= safe_cfg.fade_ms;
+   if (safe_cfg.have_q) {
       opt_S= 1;
-      fast_mult= safe_q_mult;
+      fast_mult= safe_cfg.q_mult;
    }
-   if (safe_out_path) {
-      opt_o= StrDup(safe_out_path);
+   if (safe_cfg.out_path) {
+      opt_o= StrDup(safe_cfg.out_path);
       if (!fast_mult) fast_mult= 1;
    }
-   if (safe_have_Z) {
-      opt_flac_compression= safe_flac_compression;
+   if (safe_cfg.have_Z) {
+      opt_flac_compression= safe_cfg.flac_compression;
       opt_flac_compression_set= 1;
    }
-   if (safe_mix_path && !opt_m)
-      opt_m= StrDup(safe_mix_path);
+   if (safe_cfg.mix_path && !opt_m)
+      opt_m= StrDup(safe_cfg.mix_path);
    open_mix_input_stream_if_requested();
 
    sbx_default_engine_config(&cfg);
@@ -8456,15 +7732,15 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       goto fail;
    }
 
-   if (safe_S) {
+   if (safe_cfg.opt_S) {
       opt_S= 1;
       if (!fast_mult) fast_mult= 1;
    }
-   if (safe_E)
+   if (safe_cfg.opt_E)
       opt_E= 1;
 
-   if (safe_have_T && opt_T == -1) {
-      opt_T= safe_T_ms;
+   if (safe_cfg.have_T && opt_T == -1) {
+      opt_T= safe_cfg.T_ms;
       if (!fast_mult) fast_mult= 1;
    }
 
@@ -8472,7 +7748,7 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       emit_periods_from_sbx_context(ctx, 0);
       sbx_context_destroy(ctx);
       free(seq_text);
-      if (safe_mix_path) free(safe_mix_path);
+      sbx_free_safe_seqfile_preamble(&safe_cfg);
       return 1;
    }
 
@@ -8491,14 +7767,12 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (!opt_Q)
       warn("Using sbagenxlib runtime for sequence file subset: %s", fnam);
    free(seq_text);
-   if (safe_mix_path) free(safe_mix_path);
-   if (safe_out_path) free(safe_out_path);
+   sbx_free_safe_seqfile_preamble(&safe_cfg);
    return 1;
 
 fail:
    if (seq_text) free(seq_text);
-   if (safe_mix_path) free(safe_mix_path);
-   if (safe_out_path) free(safe_out_path);
+   sbx_free_safe_seqfile_preamble(&safe_cfg);
    if (!sbx_runtime_reject_reason[0])
       sbx_set_runtime_reject_reason("sequence input is not compatible with the sbagenxlib direct loader");
    return 0;

@@ -10,13 +10,14 @@ Scope
 - Core engine creation and float rendering.
 - Dedicated `.sbgf` curve program loading, solving, and evaluation.
 - Context API for tone loading, keyframes, sequence loading, and runtime extras.
+- Optional file/container writer API for raw/WAV/OGG/FLAC/MP3 export.
 - Parser/formatter helpers used by front-ends.
 
 Out of scope
 ------------
 
-- Audio device I/O (ALSA/WASAPI/CoreAudio). The library renders samples; host
-  applications own device playback.
+- Audio device I/O (ALSA/WASAPI/CoreAudio). The library renders samples and
+  can write files, but host applications still own live device playback.
 - PNG image rendering. `sbagenxlib` exposes sampling APIs; frontends own
   plotting/visualization implementation.
 - Package manager policy details. Build scripts now emit shared libraries and
@@ -84,6 +85,12 @@ Core Concepts
 - `SbxPcm16DitherState`: caller-owned RNG state for TPDF dither when converting
   normalized float render output to signed 16-bit PCM.
 - `SbxPcmConvertState`: generic PCM conversion state with explicit dither mode.
+- `SbxAudioWriterConfig` / `SbxAudioWriter`: optional library-owned file writer
+  surface for raw/WAV/OGG/FLAC/MP3 export. This now owns WAV header emission,
+  libsndfile-backed OGG/FLAC container writing, and LAME-backed MP3 writing.
+- `SbxSafeSeqfilePreamble`: structured result for the safe `-SE` wrapper
+  subset (`-S/-E/-T/-m/-o/-q/-r/-R/-W/-F/-Z`) when front-ends want the library
+  to strip and interpret those preamble lines before loading sequence text.
 - `SbxProgramKeyframe`: timestamp + tone + interpolation mode to next keyframe.
 - `SbxMixAmpKeyframe`: explicit `mix/<amp>` timeline point.
 - `SbxTimedMixFxKeyframeInfo`: timestamp/interp metadata for one native timed
@@ -210,7 +217,37 @@ dither policy explicit:
 host-side exporters and GUI tooling even though the render source remains
 32-bit float.
 
-4) Curve program API
+4) Optional file/container writer API
+
+- `sbx_default_audio_writer_config(SbxAudioWriterConfig *cfg)`
+- `sbx_audio_writer_create_path(const char *path, const SbxAudioWriterConfig *cfg)`
+- `sbx_audio_writer_close(SbxAudioWriter *writer)`
+- `sbx_audio_writer_destroy(SbxAudioWriter *writer)`
+- `sbx_audio_writer_last_error(const SbxAudioWriter *writer)`
+- `sbx_audio_writer_frame_bytes(const SbxAudioWriter *writer)`
+- `sbx_audio_writer_input_mode(const SbxAudioWriter *writer)`
+- `sbx_audio_writer_write_bytes(SbxAudioWriter *writer, const void *buf, size_t byte_count)`
+- `sbx_audio_writer_write_s16(SbxAudioWriter *writer, const int16_t *pcm, size_t frame_count)`
+- `sbx_audio_writer_write_f32(SbxAudioWriter *writer, const float *pcm, size_t frame_count)`
+- `sbx_audio_writer_write_i32(SbxAudioWriter *writer, const int32_t *pcm, size_t frame_count)`
+- `sbx_default_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg)`
+- `sbx_free_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg)`
+- `sbx_prepare_safe_seq_text(const char *text, char **out_text, SbxSafeSeqfilePreamble *cfg, char *errbuf, size_t errbuf_sz)`
+- `sbx_prepare_safe_seqfile_text(const char *path, char **out_text, SbxSafeSeqfilePreamble *cfg, char *errbuf, size_t errbuf_sz)`
+
+This is the first library-owned export/container layer. It covers:
+
+- raw file output
+- WAV container writing, including header finalization on close
+- OGG/Vorbis via libsndfile
+- FLAC via libsndfile
+- MP3 via libmp3lame
+- safe `-SE` preamble stripping/parsing for native sequence loading
+
+The current CLI still owns live device output, but raw/WAV/OGG/FLAC/MP3 file
+writing no longer needs to live in `sbagenx.c`.
+
+5) Curve program API
 
 - `sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg)`
 - `sbx_default_curve_source_config(SbxCurveSourceConfig *cfg)`
@@ -274,7 +311,7 @@ The curve is then evaluated at sample time through the normal context render
 path, and the context reports `SBX_SOURCE_CURVE` from
 `sbx_context_source_mode()`.
 
-5) Parser/formatter helpers
+6) Parser/formatter helpers
 
 - `sbx_parse_tone_spec(const char *spec, SbxToneSpec *out_tone)`
 - `sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *out_tone)`
@@ -286,7 +323,7 @@ path, and the context reports `SBX_SOURCE_CURVE` from
 
 These are designed so front-ends can share parser semantics with CLI code.
 
-6) Context lifecycle and basic load/render
+7) Context lifecycle and basic load/render
 
 - `sbx_context_create(const SbxEngineConfig *cfg)`
 - `sbx_context_destroy(SbxContext *ctx)`
@@ -305,7 +342,7 @@ It resets internal oscillator/effect phase/state and restarts playback from the
 requested timeline time. That gives deterministic behavior for GUI scrubbing
 and preview playback.
 
-7) Keyframes and sequence loading
+8) Keyframes and sequence loading
 
 - `sbx_context_load_keyframes(SbxContext *ctx, const SbxProgramKeyframe *frames, size_t frame_count, int loop)`
 - `sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop)`
@@ -347,7 +384,7 @@ casing static tones as “zero lanes”.
 Use `sbx_context_is_looping` to decide whether keyframed transport/plotting UI
 should treat the program timeline as wrapping.
 
-7) Runtime extras (aux tones, mix effects, mix amp profile)
+9) Runtime extras (aux tones, mix effects, mix amp profile)
 
 - `sbx_context_set_aux_tones(...)`
 - `sbx_context_aux_tone_count(...)`
@@ -420,7 +457,7 @@ applied to those returned specs at the requested time.
 
 Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
 
-8) Plot/data sampling support
+10) Plot/data sampling support
 
 - `sbx_context_sample_tones(...)`
 - `sbx_context_sample_tones_voice(...)`

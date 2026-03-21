@@ -5,7 +5,8 @@
  * sbagenxlib public C API.
  *
  * The library renders stereo float audio from tone specs or loaded keyframed
- * programs. Device I/O and container encoding remain host responsibilities.
+ * programs. Device I/O remains a host responsibility. The library also offers
+ * optional file/container writers for raw/WAV/OGG/FLAC/MP3 export.
  */
 
 #include <stddef.h>
@@ -15,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 22  /* public API contract revision */
+#define SBX_API_VERSION 24  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -161,6 +162,7 @@ typedef struct {
 typedef struct SbxEngine SbxEngine;
 typedef struct SbxContext SbxContext;
 typedef struct SbxCurveProgram SbxCurveProgram;
+typedef struct SbxAudioWriter SbxAudioWriter;
 
 typedef struct {
   double carrier_start_hz;
@@ -217,10 +219,63 @@ typedef enum {
   SBX_PCM_DITHER_TPDF = 1
 } SbxPcmDitherMode;
 
+typedef enum {
+  SBX_AUDIO_FILE_RAW = 0,
+  SBX_AUDIO_FILE_WAV = 1,
+  SBX_AUDIO_FILE_OGG = 2,
+  SBX_AUDIO_FILE_FLAC = 3,
+  SBX_AUDIO_FILE_MP3 = 4
+} SbxAudioFileFormat;
+
+typedef enum {
+  SBX_AUDIO_WRITER_INPUT_BYTES = 0,
+  SBX_AUDIO_WRITER_INPUT_S16 = 1,
+  SBX_AUDIO_WRITER_INPUT_F32 = 2,
+  SBX_AUDIO_WRITER_INPUT_I32 = 3
+} SbxAudioWriterInputMode;
+
 typedef struct {
   unsigned int rng_state; /* caller-owned RNG state for quantization helpers */
   int dither_mode;        /* SBX_PCM_DITHER_* */
 } SbxPcmConvertState;
+
+typedef struct {
+  double sample_rate;          /* Hz, e.g. 44100 */
+  int channels;                /* currently 2 (stereo) */
+  int format;                  /* SBX_AUDIO_FILE_* */
+  int pcm_bits;                /* raw/WAV/FLAC PCM depth: 8, 16, 24 */
+  double ogg_quality;          /* Vorbis q scale 0..10 */
+  int ogg_quality_set;         /* 1 => apply ogg_quality */
+  double flac_compression;     /* FLAC level 0..12 */
+  int flac_compression_set;    /* 1 => apply flac_compression */
+  int mp3_bitrate;             /* MP3 CBR bitrate in kbps */
+  int mp3_bitrate_set;         /* 1 => apply mp3_bitrate */
+  int mp3_quality;             /* LAME quality 0 best .. 9 fastest */
+  int mp3_quality_set;         /* 1 => apply mp3_quality */
+  double mp3_vbr_quality;      /* LAME VBR quality 0 best .. 9 fastest */
+  int mp3_vbr_quality_set;     /* 1 => prefer VBR using mp3_vbr_quality */
+  int prefer_float_input;      /* 1 => use float MP3 path if runtime supports it */
+} SbxAudioWriterConfig;
+
+typedef struct {
+  int opt_S;                   /* safe preamble -S */
+  int opt_E;                   /* safe preamble -E */
+  int have_T;                  /* safe preamble -T present */
+  int T_ms;                    /* safe preamble -T value in ms */
+  int have_q;                  /* safe preamble -q present */
+  int q_mult;                  /* safe preamble -q multiplier */
+  int have_r;                  /* safe preamble -r present */
+  int rate;                    /* safe preamble -r sample rate */
+  int have_R;                  /* safe preamble -R present */
+  int prate;                   /* safe preamble -R parameter refresh rate */
+  int have_W;                  /* safe preamble -W present */
+  int have_F;                  /* safe preamble -F present */
+  int fade_ms;                 /* safe preamble -F fade time in ms */
+  int have_Z;                  /* safe preamble -Z present */
+  double flac_compression;     /* safe preamble -Z compression level */
+  char *mix_path;              /* safe preamble -m path (caller frees via helper) */
+  char *out_path;              /* safe preamble -o path (caller frees via helper) */
+} SbxSafeSeqfilePreamble;
 
 typedef struct {
   double time_sec;            /* context timeline time at snapshot */
@@ -276,6 +331,15 @@ void sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed);
 /* Fill generic PCM conversion state with default seed + TPDF dither. */
 void sbx_default_pcm_convert_state(SbxPcmConvertState *state);
 
+/* Fill cfg with default file-writer settings (44.1k stereo 16-bit WAV). */
+void sbx_default_audio_writer_config(SbxAudioWriterConfig *cfg);
+
+/* Fill cfg with default safe sequence-file preamble values. */
+void sbx_default_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg);
+
+/* Free heap-owned fields populated by safe sequence-file helpers. */
+void sbx_free_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg);
+
 /* Set explicit seed and dither mode for generic PCM conversion helpers. */
 void sbx_seed_pcm_convert_state(SbxPcmConvertState *state,
                                 unsigned int seed,
@@ -329,6 +393,83 @@ int sbx_convert_f32_to_s32(const float *in,
                            int32_t *out,
                            size_t sample_count,
                            SbxPcmConvertState *state);
+
+/* ----- Optional file/container writer API ----- */
+
+/*
+ * Create a file writer for raw/WAV/OGG/FLAC/MP3 output.
+ * - `path` must name a writable filesystem path.
+ * - WAV headers are finalized on close using the actual byte count written.
+ * - OGG/FLAC use libsndfile dynamically by default.
+ * - MP3 uses libmp3lame dynamically by default.
+ */
+SbxAudioWriter *sbx_audio_writer_create_path(const char *path,
+                                             const SbxAudioWriterConfig *cfg);
+
+/* Close/finalize the writer. Safe to call more than once. */
+int sbx_audio_writer_close(SbxAudioWriter *writer);
+
+/* Destroy a writer created by sbx_audio_writer_create_path(). */
+void sbx_audio_writer_destroy(SbxAudioWriter *writer);
+
+/* Last writer-local error text. */
+const char *sbx_audio_writer_last_error(const SbxAudioWriter *writer);
+
+/*
+ * Return the host-side frame byte budget used by this writer.
+ * - raw/WAV: output PCM frame bytes
+ * - OGG/Vorbis: 8 (float stereo frame)
+ * - FLAC 24-bit: 6
+ * - FLAC 16-bit: 4
+ * - MP3: 8 for float input, otherwise 4
+ */
+int sbx_audio_writer_frame_bytes(const SbxAudioWriter *writer);
+
+/* Return the preferred input mode for writes through this writer. */
+int sbx_audio_writer_input_mode(const SbxAudioWriter *writer);
+
+/* Write raw byte data (used for raw/WAV output paths only). */
+int sbx_audio_writer_write_bytes(SbxAudioWriter *writer,
+                                 const void *buf,
+                                 size_t byte_count);
+
+/* Write interleaved stereo PCM16 frames (used by FLAC16 / legacy OGG paths). */
+int sbx_audio_writer_write_s16(SbxAudioWriter *writer,
+                               const int16_t *pcm,
+                               size_t frame_count);
+
+/* Write interleaved stereo float frames (used by OGG runtime path). */
+int sbx_audio_writer_write_f32(SbxAudioWriter *writer,
+                               const float *pcm,
+                               size_t frame_count);
+
+/* Write interleaved stereo PCM32 frames holding 24-bit FLAC values. */
+int sbx_audio_writer_write_i32(SbxAudioWriter *writer,
+                               const int32_t *pcm,
+                               size_t frame_count);
+
+/*
+ * Parse/strip a safe `-SE`-style sequence preamble from in-memory text.
+ * On success:
+ * - `*out_text` receives a heap-owned copy with option-only preamble lines
+ *   blanked out so downstream line numbers remain stable.
+ * - `out_cfg` receives the parsed wrapper settings.
+ * On failure:
+ * - returns `SBX_E*`
+ * - `errbuf` receives a short explanation when provided.
+ */
+int sbx_prepare_safe_seq_text(const char *text,
+                              char **out_text,
+                              SbxSafeSeqfilePreamble *out_cfg,
+                              char *errbuf,
+                              size_t errbuf_sz);
+
+/* File-based convenience wrapper around sbx_prepare_safe_seq_text(). */
+int sbx_prepare_safe_seqfile_text(const char *path,
+                                  char **out_text,
+                                  SbxSafeSeqfilePreamble *out_cfg,
+                                  char *errbuf,
+                                  size_t errbuf_sz);
 
 /*
  * ----- Parser/formatter helpers -----

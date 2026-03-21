@@ -1244,6 +1244,12 @@ Notes:
 - Immediate mode (`-i`) now uses sbagenxlib runtime when all provided tone-specs
   are sbagenxlib-parseable, including adapter-handled mix effects
   (`mixspin`/`mixpulse`/`mixbeat`).
+- Raw/WAV/OGG/FLAC/MP3 file writing now has a library-owned surface via
+  `SbxAudioWriter`, so container/header/encoder logic no longer has to live
+  only in `sbagenx.c`. Live device output remains host-owned for now.
+- Safe `-SE` sequence-file preamble parsing/stripping also now has a
+  library-owned helper surface, so the native sequence loader no longer depends
+  on a CLI-private bridge for that wrapper subset.
 
 Developer docs:
 
