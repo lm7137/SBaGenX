@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 25  /* public API contract revision */
+#define SBX_API_VERSION 26  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -280,6 +280,29 @@ typedef struct {
 typedef int (*SbxSeqOptionLineCallback)(const char *line, void *user);
 
 typedef struct {
+  int default_waveform;         /* default waveform for unprefixed tone/effect tokens */
+  int have_iso_override;        /* apply to isochronic tones without custom env waveform */
+  SbxIsoEnvelopeSpec iso_env;   /* explicit `-I`-style override */
+  int have_mixam_override;      /* apply to mixam/mixpulse:beat tokens */
+  int mixam_mode;               /* SbxMixamMode */
+  double mixam_start;
+  double mixam_duty;
+  double mixam_attack;
+  double mixam_release;
+  int mixam_edge_mode;
+  double mixam_floor;
+} SbxImmediateParseConfig;
+
+typedef struct {
+  SbxToneSpec tones[SBX_MAX_AUX_TONES + 1];
+  size_t tone_count;
+  SbxMixFxSpec mix_fx[SBX_MAX_AUX_TONES];
+  size_t mix_fx_count;
+  int have_mix;
+  double mix_amp_pct;
+} SbxImmediateSpec;
+
+typedef struct {
   double time_sec;            /* context timeline time at snapshot */
   int source_mode;            /* SBX_SOURCE_* */
   SbxToneSpec primary_tone;   /* evaluated primary tone at time_sec */
@@ -492,6 +515,17 @@ int sbx_run_option_only_seq_wrapper_file(const char *path,
                                          void *user,
                                          char *errbuf,
                                          size_t errbuf_sz);
+
+/* Fill cfg with defaults for immediate-token parsing (`-i`). */
+void sbx_default_immediate_parse_config(SbxImmediateParseConfig *cfg);
+
+/* Parse a token list into tones/mix amp/mix effects for immediate runtime use. */
+int sbx_parse_immediate_tokens(const char *const *tokens,
+                               size_t token_count,
+                               const SbxImmediateParseConfig *cfg,
+                               SbxImmediateSpec *out_spec,
+                               char *errbuf,
+                               size_t errbuf_sz);
 
 /*
  * ----- Parser/formatter helpers -----

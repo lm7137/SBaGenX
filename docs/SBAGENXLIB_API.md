@@ -94,6 +94,9 @@ Core Concepts
 - `SbxSeqOptionLineCallback`: host callback used when the library recognizes
   and iterates a historical option-only `.sbg` wrapper whose payload consists
   of CLI option lines such as `-p ...` or `-i ...`.
+- `SbxImmediateParseConfig` / `SbxImmediateSpec`: library-owned immediate
+  token-list parsing surface for `-i` style token lists, including optional
+  `-I`/`-H` style normalization overrides.
 - `SbxProgramKeyframe`: timestamp + tone + interpolation mode to next keyframe.
 - `SbxMixAmpKeyframe`: explicit `mix/<amp>` timeline point.
 - `SbxTimedMixFxKeyframeInfo`: timestamp/interp metadata for one native timed
@@ -239,6 +242,8 @@ host-side exporters and GUI tooling even though the render source remains
 - `sbx_prepare_safe_seqfile_text(const char *path, char **out_text, SbxSafeSeqfilePreamble *cfg, char *errbuf, size_t errbuf_sz)`
 - `sbx_run_option_only_seq_wrapper_text(const char *text, SbxSeqOptionLineCallback cb, void *user, char *errbuf, size_t errbuf_sz)`
 - `sbx_run_option_only_seq_wrapper_file(const char *path, SbxSeqOptionLineCallback cb, void *user, char *errbuf, size_t errbuf_sz)`
+- `sbx_default_immediate_parse_config(SbxImmediateParseConfig *cfg)`
+- `sbx_parse_immediate_tokens(const char *const *tokens, size_t token_count, const SbxImmediateParseConfig *cfg, SbxImmediateSpec *out_spec, char *errbuf, size_t errbuf_sz)`
 
 This is the first library-owned export/container layer. It covers:
 
@@ -250,6 +255,9 @@ This is the first library-owned export/container layer. It covers:
 - safe `-SE` preamble stripping/parsing for native sequence loading
 - classification and iteration of historical option-only wrapper files, while
   leaving actual option semantics in the host callback
+- immediate token-list classification/normalization for `-i` frontends, while
+  leaving host policy checks (for example active mix-input requirements) in the
+  frontend
 
 The current CLI still owns live device output, but raw/WAV/OGG/FLAC/MP3 file
 writing no longer needs to live in `sbagenx.c`.

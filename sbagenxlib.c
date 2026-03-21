@@ -338,6 +338,10 @@ static int sbx_parse_safe_seqfile_option_line_lib(const char *line,
                                                   char *errbuf,
                                                   size_t errbuf_sz);
 static int sbx_line_contains_seq_mode_option_lib(const char *line);
+static void sbx_apply_immediate_iso_override(SbxToneSpec *tone,
+                                             const SbxImmediateParseConfig *cfg);
+static void sbx_apply_immediate_mixam_override(SbxMixFxSpec *fx,
+                                               const SbxImmediateParseConfig *cfg);
 static int sbx_audio_writer_init_mp3(SbxAudioWriter *writer, const char *path);
 static int sbx_audio_writer_ensure_mp3_buf(SbxAudioWriter *writer, int frames);
 
@@ -1809,6 +1813,38 @@ sbx_line_contains_seq_mode_option_lib(const char *line) {
   }
   free(dup);
   return 0;
+}
+
+static void
+sbx_apply_immediate_iso_override(SbxToneSpec *tone,
+                                 const SbxImmediateParseConfig *cfg) {
+  if (!tone || !cfg || !cfg->have_iso_override)
+    return;
+  if (tone->mode != SBX_TONE_ISOCHRONIC)
+    return;
+  if (tone->envelope_waveform != SBX_ENV_WAVE_NONE)
+    return;
+  tone->iso_start = cfg->iso_env.start;
+  tone->duty_cycle = cfg->iso_env.duty;
+  tone->iso_attack = cfg->iso_env.attack;
+  tone->iso_release = cfg->iso_env.release;
+  tone->iso_edge_mode = cfg->iso_env.edge_mode;
+}
+
+static void
+sbx_apply_immediate_mixam_override(SbxMixFxSpec *fx,
+                                   const SbxImmediateParseConfig *cfg) {
+  if (!fx || !cfg || !cfg->have_mixam_override)
+    return;
+  if (fx->type != SBX_MIXFX_AM)
+    return;
+  fx->mixam_mode = cfg->mixam_mode;
+  fx->mixam_start = cfg->mixam_start;
+  fx->mixam_duty = cfg->mixam_duty;
+  fx->mixam_attack = cfg->mixam_attack;
+  fx->mixam_release = cfg->mixam_release;
+  fx->mixam_edge_mode = cfg->mixam_edge_mode;
+  fx->mixam_floor = cfg->mixam_floor;
 }
 
 int
@@ -3371,6 +3407,94 @@ sbx_parse_extra_token(const char *tok,
   return SBX_EINVAL;
 }
 
+int
+sbx_parse_immediate_tokens(const char *const *tokens,
+                           size_t token_count,
+                           const SbxImmediateParseConfig *cfg,
+                           SbxImmediateSpec *out_spec,
+                           char *errbuf,
+                           size_t errbuf_sz) {
+  SbxImmediateParseConfig local_cfg;
+  size_t i;
+
+  if (errbuf && errbuf_sz) errbuf[0] = 0;
+  if (!tokens || token_count == 0 || !out_spec) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "no immediate tone tokens were provided");
+    return SBX_EINVAL;
+  }
+
+  sbx_default_immediate_parse_config(&local_cfg);
+  if (cfg)
+    local_cfg = *cfg;
+
+  memset(out_spec, 0, sizeof(*out_spec));
+  out_spec->mix_amp_pct = 100.0;
+
+  for (i = 0; i < token_count; i++) {
+    const char *tok = tokens[i];
+    int extra_type = SBX_EXTRA_INVALID;
+    SbxToneSpec tone_tmp;
+    SbxMixFxSpec mix_fx_tmp;
+    double mix_pct = out_spec->mix_amp_pct;
+
+    if (SBX_OK != sbx_parse_extra_token(tok,
+                                        local_cfg.default_waveform,
+                                        &extra_type,
+                                        &tone_tmp,
+                                        &mix_fx_tmp,
+                                        &mix_pct)) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "token '%s' is not compatible with the sbagenxlib immediate parser",
+                        tok ? tok : "");
+      return SBX_EINVAL;
+    }
+
+    if (extra_type == SBX_EXTRA_MIXAMP) {
+      out_spec->have_mix = 1;
+      out_spec->mix_amp_pct = mix_pct;
+      continue;
+    }
+
+    if (extra_type == SBX_EXTRA_MIXFX) {
+      sbx_apply_immediate_mixam_override(&mix_fx_tmp, &local_cfg);
+      if (out_spec->mix_fx_count >= SBX_MAX_AUX_TONES) {
+        sbx_set_api_error(errbuf, errbuf_sz,
+                          "too many sbagenxlib immediate mix effects (max %d)",
+                          SBX_MAX_AUX_TONES);
+        return SBX_EINVAL;
+      }
+      out_spec->mix_fx[out_spec->mix_fx_count++] = mix_fx_tmp;
+      continue;
+    }
+
+    if (extra_type == SBX_EXTRA_TONE) {
+      sbx_apply_immediate_iso_override(&tone_tmp, &local_cfg);
+      if (out_spec->tone_count >= SBX_MAX_AUX_TONES + 1) {
+        sbx_set_api_error(errbuf, errbuf_sz,
+                          "too many sbagenxlib immediate tones (max %d)",
+                          SBX_MAX_AUX_TONES + 1);
+        return SBX_EINVAL;
+      }
+      out_spec->tones[out_spec->tone_count++] = tone_tmp;
+      continue;
+    }
+
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "token '%s' did not classify as a supported sbagenxlib immediate tone/effect",
+                      tok ? tok : "");
+    return SBX_EINVAL;
+  }
+
+  if (out_spec->tone_count == 0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "no sbagenxlib-compatible immediate tone tokens were found");
+    return SBX_EINVAL;
+  }
+
+  return SBX_OK;
+}
+
 static const char *
 wave_name_for_tone(int waveform) {
   switch (waveform) {
@@ -3653,6 +3777,21 @@ sbx_default_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg) {
   cfg->prate = 10;
   cfg->fade_ms = 60000;
   cfg->flac_compression = 5.0;
+}
+
+void
+sbx_default_immediate_parse_config(SbxImmediateParseConfig *cfg) {
+  if (!cfg) return;
+  memset(cfg, 0, sizeof(*cfg));
+  cfg->default_waveform = SBX_WAVE_SINE;
+  sbx_default_iso_envelope_spec(&cfg->iso_env);
+  cfg->mixam_mode = SBX_MIXAM_MODE_COS;
+  cfg->mixam_start = 0.05;
+  cfg->mixam_duty = 0.4;
+  cfg->mixam_attack = 0.5;
+  cfg->mixam_release = 0.5;
+  cfg->mixam_edge_mode = 2;
+  cfg->mixam_floor = 0.5;
 }
 
 void

@@ -8808,91 +8808,70 @@ sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double 
 
 int
 sbx_try_readSeqImm_runtime(int ac, char **av) {
-   SbxToneSpec tones[SBX_MAX_AUX_TONES + 1];
-   SbxMixFxSpec mix_fx[SBX_MAX_AUX_TONES];
-   size_t tone_count= 0;
-   size_t mix_fx_count= 0;
-   int have_mix= 0;
-   double mix_amp_pct= 100.0;
+   SbxImmediateParseConfig parse_cfg;
+   SbxImmediateSpec imm;
+   char errbuf[256];
    int i;
 
    sbx_clear_runtime_reject_reason();
 
-   if (ac <= 0 || !av) {
-      sbx_set_runtime_reject_reason("no immediate tone tokens were provided");
+   sbx_default_immediate_parse_config(&parse_cfg);
+   parse_cfg.default_waveform= opt_w;
+   if (opt_I) {
+      parse_cfg.have_iso_override= 1;
+      parse_cfg.iso_env.start= opt_I_s;
+      parse_cfg.iso_env.duty= opt_I_d;
+      parse_cfg.iso_env.attack= opt_I_a;
+      parse_cfg.iso_env.release= opt_I_r;
+      parse_cfg.iso_env.edge_mode= opt_I_e;
+   }
+   if (opt_H) {
+      parse_cfg.have_mixam_override= 1;
+      parse_cfg.mixam_mode= opt_H_m;
+      parse_cfg.mixam_start= opt_H_s;
+      parse_cfg.mixam_duty= opt_H_d;
+      parse_cfg.mixam_attack= opt_H_a;
+      parse_cfg.mixam_release= opt_H_r;
+      parse_cfg.mixam_edge_mode= opt_H_e;
+      parse_cfg.mixam_floor= opt_H_f;
+   }
+
+   errbuf[0]= 0;
+   if (SBX_OK != sbx_parse_immediate_tokens((const char *const *)av, (size_t)ac,
+					    &parse_cfg, &imm, errbuf, sizeof(errbuf))) {
+      sbx_set_runtime_reject_reason("%s", errbuf[0] ? errbuf : "immediate token list is not compatible with the sbagenxlib immediate parser");
       return 0;
    }
 
-   for (i= 0; i<ac; i++) {
-      const char *tok= av[i];
-      int extra_type= SBX_EXTRA_INVALID;
-      SbxToneSpec tone_tmp;
-      SbxMixFxSpec mix_fx_tmp;
-      double mix_pct= mix_amp_pct;
-      if (SBX_OK != sbx_parse_extra_token(tok, opt_w, &extra_type, &tone_tmp, &mix_fx_tmp, &mix_pct)) {
-	 sbx_set_runtime_reject_reason("token '%s' is not compatible with the sbagenxlib immediate parser", tok);
-	 return 0;
-      }
-      if (extra_type == SBX_EXTRA_MIXAMP) {
-	 have_mix= 1;
-	 mix_amp_pct= mix_pct;
-	 continue;
-      }
-      if (extra_type == SBX_EXTRA_MIXFX) {
-	 apply_mixam_envelope_override(&mix_fx_tmp);
-	 if (mix_fx_count >= SBX_MAX_AUX_TONES) {
-	    sbx_set_runtime_reject_reason("too many sbagenxlib immediate mix effects (max %d)", SBX_MAX_AUX_TONES);
-	    return 0;
-	 }
-	 mix_fx[mix_fx_count++]= mix_fx_tmp;
-	 continue;
-      }
-      if (extra_type == SBX_EXTRA_TONE) {
-	 apply_iso_envelope_override(&tone_tmp);
-	 if (tone_count >= SBX_MAX_AUX_TONES + 1) {
-	    sbx_set_runtime_reject_reason("too many sbagenxlib immediate tones (max %d)", SBX_MAX_AUX_TONES + 1);
-	    return 0;
-	 }
-	 tones[tone_count++]= tone_tmp;
-	 continue;
-      }
-      sbx_set_runtime_reject_reason("token '%s' did not classify as a supported sbagenxlib immediate tone/effect", tok);
-      return 0;
-   }
-
-   if (tone_count == 0) {
-      sbx_set_runtime_reject_reason("no sbagenxlib-compatible immediate tone tokens were found");
-      return 0;
-   }
-
-   if (have_mix && !mix_in && !opt_m && !opt_M)
+   if (imm.have_mix && !mix_in && !opt_m && !opt_M)
       warn("mix/<amp> was specified in -i tones but no mix input stream is active");
-   if (mix_fx_count > 0 && !mix_in && !opt_m && !opt_M)
+   if (imm.mix_fx_count > 0 && !mix_in && !opt_m && !opt_M)
       error("-i mix effects require a mix input stream (-m / -M)");
-   if (mix_fx_count > 0 && !have_mix)
+   if (imm.mix_fx_count > 0 && !imm.have_mix)
       error("-i mix effects require mix/<amp> in tones");
 
    if (opt_D) {
-      printf("# sbagenxlib immediate tones (%d)\n", (int)tone_count);
-      if (have_mix)
-	 printf("# mix/%g\n", mix_amp_pct);
-      for (i= 0; i<(int)tone_count; i++) {
+      printf("# sbagenxlib immediate tones (%d)\n", (int)imm.tone_count);
+      if (imm.have_mix)
+	 printf("# mix/%g\n", imm.mix_amp_pct);
+      for (i= 0; i<(int)imm.tone_count; i++) {
 	 char spec[256];
-	 if (sbx_format_tone_spec(&tones[i], spec, sizeof(spec)) != SBX_OK)
+	 if (sbx_format_tone_spec(&imm.tones[i], spec, sizeof(spec)) != SBX_OK)
 	    error("Failed formatting sbagenxlib immediate tone %d", i);
 	 printf("%s\n", spec);
       }
-      for (i= 0; i<(int)mix_fx_count; i++) {
+      for (i= 0; i<(int)imm.mix_fx_count; i++) {
 	 char spec[256];
-	 if (sbx_format_mix_fx_spec(&mix_fx[i], spec, sizeof(spec)) == SBX_OK)
+	 if (sbx_format_mix_fx_spec(&imm.mix_fx[i], spec, sizeof(spec)) == SBX_OK)
 	    printf("%s\n", spec);
       }
       fflush(stdout);
       exit(0);
    }
 
-   sbx_runtime_activate_immediate_tones(tones, tone_count, have_mix ? mix_amp_pct : 100.0,
-					mix_fx, mix_fx_count);
+   sbx_runtime_activate_immediate_tones(imm.tones, imm.tone_count,
+					imm.have_mix ? imm.mix_amp_pct : 100.0,
+					imm.mix_fx, imm.mix_fx_count);
    return 1;
 }
 

@@ -1254,6 +1254,10 @@ Notes:
   library-owned. Frontends provide a callback for each trimmed option line,
   which keeps CLI-specific option execution outside the library while removing
   wrapper classification/orchestration from `sbagenx.c`.
+- Immediate `-i` token-list parsing/normalization is now also library-owned via
+  `SbxImmediateParseConfig` / `SbxImmediateSpec`, so frontends no longer need
+  to iterate and classify tone/mix/mixfx tokens themselves before activating a
+  runtime context.
 
 Developer docs:
 
