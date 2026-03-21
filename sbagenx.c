@@ -4505,6 +4505,51 @@ sbx_handle_option_wrapper_line_cb(const char *line, void *user) {
 }
 
 static int
+sbx_read_text_stream_alloc_cli(FILE *fp, char **out_text) {
+   char *buf= 0;
+   size_t len= 0, cap= 0;
+
+   if (!fp || !out_text)
+      return SBX_EINVAL;
+   *out_text= 0;
+
+   while (1) {
+      size_t need;
+      size_t got;
+      if (len == cap) {
+	 size_t ncap= cap ? cap * 2 : 4096;
+	 char *tmp= (char *)realloc(buf, ncap + 1);
+	 if (!tmp) {
+	    if (buf) free(buf);
+	    return SBX_ENOMEM;
+	 }
+	 buf= tmp;
+	 cap= ncap;
+      }
+      need= cap - len;
+      got= fread(buf + len, 1, need, fp);
+      len += got;
+      if (got < need) {
+	 if (ferror(fp)) {
+	    free(buf);
+	    return SBX_ENOTREADY;
+	 }
+	 if (feof(fp))
+	    break;
+      }
+   }
+
+   if (!buf) {
+      buf= (char *)malloc(1);
+      if (!buf)
+	 return SBX_ENOMEM;
+   }
+   buf[len]= 0;
+   *out_text= buf;
+   return SBX_OK;
+}
+
+static int
 sbx_try_run_option_only_seq_wrapper(const char *fnam) {
    char errbuf[256];
    int rc;
@@ -7530,6 +7575,7 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    SbxContext *ctx;
    int rc;
    char *seq_text= 0;
+   char *stdin_text= 0;
    char prep_err[256];
    SbxSafeSeqfilePreamble safe_cfg;
 
@@ -7542,16 +7588,36 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       return 0;
    }
    fnam= av[0];
-   if (!fnam || 0 == strcmp(fnam, "-")) {
-      sbx_set_runtime_reject_reason("stdin sequence input is not yet routed through the sbagenxlib direct loader");
+   if (!fnam)
       return 0;
-   }
 
-   if (sbx_try_run_option_only_seq_wrapper(fnam))
+   if (0 != strcmp(fnam, "-") && sbx_try_run_option_only_seq_wrapper(fnam))
       return 1;
 
-   rc= sbx_prepare_safe_seqfile_text(fnam, &seq_text, &safe_cfg,
-				     prep_err, sizeof(prep_err));
+   if (0 == strcmp(fnam, "-")) {
+      rc= sbx_read_text_stream_alloc_cli(stdin, &stdin_text);
+      if (rc == SBX_ENOMEM)
+	 error("Out of memory reading stdin for sbagenxlib runtime");
+      if (rc != SBX_OK) {
+	 sbx_set_runtime_reject_reason("unable to read sequence text from stdin");
+	 return 0;
+      }
+      if (sbx_run_option_only_seq_wrapper_text(stdin_text,
+					       sbx_handle_option_wrapper_line_cb,
+					       0,
+					       prep_err, sizeof(prep_err)) == SBX_OK) {
+	 free(stdin_text);
+	 sbx_free_safe_seqfile_preamble(&safe_cfg);
+	 return 1;
+      }
+      rc= sbx_prepare_safe_seq_text(stdin_text, &seq_text, &safe_cfg,
+				    prep_err, sizeof(prep_err));
+      free(stdin_text);
+      stdin_text= 0;
+   } else {
+      rc= sbx_prepare_safe_seqfile_text(fnam, &seq_text, &safe_cfg,
+					prep_err, sizeof(prep_err));
+   }
    if (rc == SBX_ENOMEM)
       error("Out of memory preparing sequence file for sbagenxlib runtime");
    if (rc != SBX_OK) {
@@ -7648,6 +7714,7 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    return 1;
 
 fail:
+   if (stdin_text) free(stdin_text);
    if (seq_text) free(seq_text);
    sbx_free_safe_seqfile_preamble(&safe_cfg);
    if (!sbx_runtime_reject_reason[0])

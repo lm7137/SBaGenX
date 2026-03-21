@@ -14,11 +14,27 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
 out="$tmpdir/out.txt"
+seq="$tmpdir/unsupported-safe-preamble.sbg"
 
-printf 'tone: 200+4/20\n00:00 tone\n' | "$bin" -D - >"$out" 2>&1
+cat >"$seq" <<'EOF'
+-X 1
+tone: 200+4/20
+00:00 tone
+EOF
 
-if ! grep -q "Falling back to legacy sequence parser/runtime: stdin sequence input is not yet routed through the sbagenxlib direct loader" "$out"; then
-  echo "FAIL: expected explicit sbagenxlib fallback reason for stdin sequence input" >&2
+set +e
+"$bin" -D "$seq" >"$out" 2>&1
+rc=$?
+set -e
+
+if [[ $rc -ne 0 ]]; then
+  echo "FAIL: expected unsupported safe preamble fixture to continue under legacy fallback" >&2
+  cat "$out" >&2
+  exit 1
+fi
+
+if ! grep -q "Falling back to legacy sequence parser/runtime: safe preamble option -X is not supported by the sbagenxlib bridge" "$out"; then
+  echo "FAIL: expected explicit sbagenxlib fallback reason for unsupported safe preamble option" >&2
   cat "$out" >&2
   exit 1
 fi
