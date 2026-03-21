@@ -16,14 +16,16 @@
 #define PATH_MAX 4096
 #endif
 
-#if defined(T_MSVC)
+#if defined(_WIN32) || defined(T_MSVC)
 #include <io.h>
+#if defined(T_MSVC)
 #define write _write
-#elif !defined(T_MINGW)
+#endif
+#else
 #include <unistd.h>
 #endif
 
-#if defined(T_MINGW) || defined(T_MSVC)
+#if defined(_WIN32) || defined(T_MINGW) || defined(T_MSVC)
 #include <windows.h>
 #elif defined(T_MACOSX)
 #include <mach-o/dyld.h>
@@ -246,7 +248,7 @@ struct SbxCurveProgram {
   SbxCurveEvalConfig cfg;
 };
 
-#if defined(T_MINGW) || defined(T_MSVC)
+#if defined(_WIN32) || defined(T_MINGW) || defined(T_MSVC)
 typedef HMODULE SbxDLibHandle;
 #else
 typedef void *SbxDLibHandle;
@@ -383,7 +385,7 @@ sbx_set_api_error(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
   va_end(ap);
 }
 
-#if defined(T_MINGW) || defined(T_MSVC)
+#if defined(_WIN32) || defined(T_MINGW) || defined(T_MSVC)
 static SbxDLibHandle
 sbx_dlib_open_one(const char *name) {
   return LoadLibraryA(name);

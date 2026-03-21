@@ -757,7 +757,7 @@ section_header "Building sbagenxlib static libraries..."
 create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
 create_dir_if_not_exists "dist/pkgconfig"
-SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_LIB_CFLAGS="-DT_MINGW -DFLAC_DECODE -Wall -O3 -I. -Ilibs -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
 
 i686-w64-mingw32-gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win32.o
 if [ $? -eq 0 ]; then
