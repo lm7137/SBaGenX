@@ -276,6 +276,8 @@ writing no longer needs to live in `sbagenx.c`.
 
 - `sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg)`
 - `sbx_default_curve_source_config(SbxCurveSourceConfig *cfg)`
+- `sbx_default_curve_file_program_config(SbxCurveFileProgramConfig *cfg)`
+- `sbx_default_curve_timeline_config(SbxCurveTimelineConfig *cfg)`
 - `sbx_curve_create(void)`
 - `sbx_curve_destroy(SbxCurveProgram *curve)`
 - `sbx_curve_reset(SbxCurveProgram *curve)`
@@ -285,12 +287,15 @@ writing no longer needs to live in `sbagenx.c`.
 - `sbx_curve_prepare(SbxCurveProgram *curve, const SbxCurveEvalConfig *cfg)`
 - `sbx_curve_eval(SbxCurveProgram *curve, double t_sec, SbxCurveEvalPoint *out_point)`
 - `sbx_curve_sample_program_beat(SbxCurveProgram *curve, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, double *out_hz)`
+- `sbx_prepare_curve_file_program(const SbxCurveFileProgramConfig *cfg, SbxCurveProgram **out_curve)`
 - `sbx_compute_sigmoid_coefficients(...)`
 - `sbx_build_drop_curve_program(...)`
 - `sbx_build_sigmoid_curve_program(...)`
 - `sbx_build_drop_keyframes(...)`
 - `sbx_build_sigmoid_keyframes(...)`
 - `sbx_build_slide_keyframes(...)`
+- `sbx_build_curve_timeline(SbxCurveProgram *curve, const SbxCurveTimelineConfig *cfg, SbxCurveTimeline *out_timeline)`
+- `sbx_free_curve_timeline(SbxCurveTimeline *timeline)`
 - `sbx_curve_get_info(const SbxCurveProgram *curve, SbxCurveInfo *out_info)`
 - `sbx_curve_param_count(const SbxCurveProgram *curve)`
 - `sbx_curve_get_param(const SbxCurveProgram *curve, size_t index, const char **out_name, double *out_value)`
@@ -327,6 +332,15 @@ request either exact runtime curves (`sbx_build_drop_curve_program`,
 `sbx_build_sigmoid_curve_program`) or native keyframed programs for step-mode
 and `-D` output (`sbx_build_drop_keyframes`, `sbx_build_sigmoid_keyframes`,
 `sbx_build_slide_keyframes`).
+
+For custom `.sbgf` programs, the remaining reusable host adapter is now in the
+library too:
+
+- `sbx_prepare_curve_file_program(...)` handles load + override + prepare
+- `sbx_build_curve_timeline(...)` extracts keyframed tone/mix-amp timelines
+
+That lets CLI/GUI hosts keep exact runtime curve activation for slide mode
+while sharing the stepped/keyframed fallback construction in one place.
 
 In addition to `beat`, `carrier`, `amp`, and `mixamp`, `.sbgf` can also
 define runtime mix-effect parameter targets:

@@ -27,6 +27,10 @@ grep -q "^ Parameters: l=0.2 h=0$" "$tmpdir/sigmoid_like.txt" || {
   echo "FAIL: curve parameter overrides were not reflected in CLI summary" >&2
   exit 1
 }
+grep -q "^ Using function-driven curve from .sbgf for sliding mode$" "$tmpdir/sigmoid_like.txt" || {
+  echo "FAIL: curve slide mode no longer reports exact function-driven runtime" >&2
+  exit 1
+}
 grep -q "^1800.000000 sine:200+0.323984/1 linear$" "$tmpdir/sigmoid_like.txt" || {
   echo "FAIL: sigmoid-like .sbgf end keyframe mismatch" >&2
   exit 1

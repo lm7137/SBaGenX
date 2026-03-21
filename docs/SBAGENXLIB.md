@@ -712,17 +712,22 @@ Public header: `sbagenxlib.h`
 - Curve program API:
   - `sbx_default_curve_eval_config()`
   - `sbx_default_curve_source_config()`
+  - `sbx_default_curve_file_program_config()`
+  - `sbx_default_curve_timeline_config()`
   - `sbx_curve_create()` / `sbx_curve_destroy()` / `sbx_curve_reset()`
   - `sbx_curve_load_text()` / `sbx_curve_load_file()`
   - `sbx_curve_set_param()`
   - `sbx_curve_prepare()`
   - `sbx_curve_eval()`
+  - `sbx_prepare_curve_file_program()`
   - `sbx_compute_sigmoid_coefficients()`
   - `sbx_build_drop_curve_program()`
   - `sbx_build_sigmoid_curve_program()`
   - `sbx_build_drop_keyframes()`
   - `sbx_build_sigmoid_keyframes()`
   - `sbx_build_slide_keyframes()`
+  - `sbx_build_curve_timeline()`
+  - `sbx_free_curve_timeline()`
   - `sbx_curve_get_info()`
   - `sbx_curve_param_count()` / `sbx_curve_get_param()`
   - `sbx_curve_source_name()`

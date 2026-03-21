@@ -3938,6 +3938,26 @@ sbx_default_builtin_slide_config(SbxBuiltinSlideConfig *cfg) {
 }
 
 void
+sbx_default_curve_file_program_config(SbxCurveFileProgramConfig *cfg) {
+  if (!cfg) return;
+  memset(cfg, 0, sizeof(*cfg));
+  sbx_default_curve_eval_config(&cfg->eval_config);
+}
+
+void
+sbx_default_curve_timeline_config(SbxCurveTimelineConfig *cfg) {
+  if (!cfg) return;
+  memset(cfg, 0, sizeof(*cfg));
+  sbx_default_tone_spec(&cfg->start_tone);
+  cfg->start_tone.mode = SBX_TONE_BINAURAL;
+  cfg->sample_span_sec = 1800;
+  cfg->main_span_sec = 1800;
+  cfg->step_len_sec = 180;
+  cfg->slide = 1;
+  cfg->fade_sec = 10;
+}
+
+void
 sbx_free_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg) {
   if (!cfg) return;
   if (cfg->mix_path) free(cfg->mix_path);
@@ -4462,6 +4482,241 @@ done:
   }
   *out_frames = b.v;
   *out_frame_count = b.n;
+  return SBX_OK;
+}
+
+typedef struct {
+  SbxMixAmpKeyframe *v;
+  size_t n;
+  size_t cap;
+} SbxCurveMixKfBuilder;
+
+static int
+sbx_curve_mixkfb_add(SbxCurveMixKfBuilder *b,
+                     double t_sec,
+                     double amp_pct,
+                     int interp) {
+  SbxMixAmpKeyframe *tmp;
+  size_t ncap;
+  if (!b) return SBX_EINVAL;
+  if (b->n == b->cap) {
+    ncap = b->cap ? b->cap * 2 : 32;
+    tmp = (SbxMixAmpKeyframe *)realloc(b->v, ncap * sizeof(*tmp));
+    if (!tmp) return SBX_ENOMEM;
+    b->v = tmp;
+    b->cap = ncap;
+  }
+  b->v[b->n].time_sec = t_sec;
+  b->v[b->n].amp_pct = amp_pct;
+  b->v[b->n].interp = interp;
+  b->n++;
+  return SBX_OK;
+}
+
+static int
+sbx_curve_timeline_supported_mode(int mode) {
+  return mode == SBX_TONE_BINAURAL ||
+         mode == SBX_TONE_MONAURAL ||
+         mode == SBX_TONE_ISOCHRONIC;
+}
+
+static void
+sbx_curve_timeline_fill_tone(SbxToneSpec *out,
+                             const SbxToneSpec *base,
+                             const SbxCurveEvalPoint *pt,
+                             double amplitude,
+                             int mute_program_tone) {
+  *out = *base;
+  out->carrier_hz = pt->carrier_hz;
+  out->beat_hz = pt->beat_hz;
+  if (out->mode == SBX_TONE_MONAURAL || out->mode == SBX_TONE_ISOCHRONIC)
+    out->beat_hz = fabs(out->beat_hz);
+  out->amplitude = mute_program_tone ? 0.0 : amplitude;
+}
+
+int
+sbx_prepare_curve_file_program(const SbxCurveFileProgramConfig *cfg,
+                               SbxCurveProgram **out_curve) {
+  SbxCurveProgram *curve = 0;
+  size_t i;
+  int rc;
+
+  if (!cfg || !out_curve || !cfg->path || !cfg->path[0]) return SBX_EINVAL;
+  *out_curve = 0;
+
+  curve = sbx_curve_create();
+  if (!curve) return SBX_ENOMEM;
+
+  rc = sbx_curve_load_file(curve, cfg->path);
+  if (rc == SBX_OK) {
+    for (i = 0; i < cfg->override_count; i++) {
+      const char *name = cfg->overrides[i].name;
+      if (!name || !*name) {
+        rc = SBX_EINVAL;
+        break;
+      }
+      rc = sbx_curve_set_param(curve, name, cfg->overrides[i].value);
+      if (rc != SBX_OK) break;
+    }
+  }
+  if (rc == SBX_OK)
+    rc = sbx_curve_prepare(curve, &cfg->eval_config);
+  if (rc != SBX_OK) {
+    *out_curve = curve;
+    return rc;
+  }
+
+  *out_curve = curve;
+  return SBX_OK;
+}
+
+void
+sbx_free_curve_timeline(SbxCurveTimeline *timeline) {
+  if (!timeline) return;
+  if (timeline->program_frames) free(timeline->program_frames);
+  if (timeline->mix_frames) free(timeline->mix_frames);
+  memset(timeline, 0, sizeof(*timeline));
+}
+
+int
+sbx_build_curve_timeline(SbxCurveProgram *curve,
+                         const SbxCurveTimelineConfig *cfg,
+                         SbxCurveTimeline *out_timeline) {
+  SbxBuiltinKfBuilder kb = {0};
+  SbxCurveMixKfBuilder mb = {0};
+  SbxCurveInfo info;
+  SbxToneSpec tone;
+  SbxCurveEvalPoint pt;
+  int rc = SBX_OK;
+  int n_step, a, lim, end_sec;
+  int have_amp_curve, have_mixamp_curve;
+
+  if (!curve || !cfg || !out_timeline) return SBX_EINVAL;
+  memset(out_timeline, 0, sizeof(*out_timeline));
+
+  if (!curve->prepared ||
+      !sbx_curve_timeline_supported_mode(cfg->start_tone.mode) ||
+      !isfinite(cfg->start_tone.carrier_hz) ||
+      !isfinite(cfg->start_tone.beat_hz) ||
+      !isfinite(cfg->start_tone.amplitude) ||
+      cfg->start_tone.amplitude < 0.0 ||
+      cfg->sample_span_sec <= 0 ||
+      cfg->main_span_sec < cfg->sample_span_sec ||
+      cfg->wake_sec < 0 ||
+      cfg->step_len_sec <= 0 ||
+      cfg->fade_sec < 0) {
+    return SBX_EINVAL;
+  }
+
+  rc = sbx_curve_get_info(curve, &info);
+  if (rc != SBX_OK) return rc;
+  have_amp_curve = info.has_amp_expr || info.amp_piece_count > 0;
+  have_mixamp_curve = info.has_mixamp_expr || info.mixamp_piece_count > 0;
+
+  n_step = 1 + (cfg->sample_span_sec - 1) / cfg->step_len_sec;
+  if (n_step < 2) n_step = 2;
+
+  if (cfg->slide) {
+    for (a = 0; a < n_step; a++) {
+      double tim = a * cfg->sample_span_sec / (double)(n_step - 1);
+      double amp = cfg->start_tone.amplitude;
+      rc = sbx_curve_eval(curve, tim, &pt);
+      if (rc != SBX_OK) goto done;
+      if (have_amp_curve) amp = pt.beat_amp_pct / 100.0;
+      sbx_curve_timeline_fill_tone(&tone, &cfg->start_tone, &pt, amp, cfg->mute_program_tone);
+      rc = sbx_builtin_kfb_add(&kb, tim, &tone, SBX_INTERP_LINEAR);
+      if (rc != SBX_OK) goto done;
+      if (have_mixamp_curve) {
+        rc = sbx_curve_mixkfb_add(&mb, tim, pt.mix_amp_pct, SBX_INTERP_LINEAR);
+        if (rc != SBX_OK) goto done;
+      }
+    }
+    if (cfg->main_span_sec > cfg->sample_span_sec) {
+      double amp = cfg->start_tone.amplitude;
+      rc = sbx_curve_eval(curve, (double)cfg->main_span_sec, &pt);
+      if (rc != SBX_OK) goto done;
+      if (have_amp_curve) amp = pt.beat_amp_pct / 100.0;
+      sbx_curve_timeline_fill_tone(&tone, &cfg->start_tone, &pt, amp, cfg->mute_program_tone);
+      rc = sbx_builtin_kfb_add(&kb, (double)cfg->main_span_sec, &tone, SBX_INTERP_LINEAR);
+      if (rc != SBX_OK) goto done;
+      if (have_mixamp_curve) {
+        rc = sbx_curve_mixkfb_add(&mb, (double)cfg->main_span_sec, pt.mix_amp_pct, SBX_INTERP_LINEAR);
+        if (rc != SBX_OK) goto done;
+      }
+    }
+    end_sec = cfg->main_span_sec;
+  } else {
+    lim = cfg->main_span_sec / cfg->step_len_sec;
+    for (a = 0; a < lim; a++) {
+      double tim0 = (double)(a * cfg->step_len_sec);
+      double tim1 = (double)((a + 1) * cfg->step_len_sec);
+      double amp = cfg->start_tone.amplitude;
+      rc = sbx_curve_eval(curve, tim1, &pt);
+      if (rc != SBX_OK) goto done;
+      if (have_amp_curve) amp = pt.beat_amp_pct / 100.0;
+      sbx_curve_timeline_fill_tone(&tone, &cfg->start_tone, &pt, amp, cfg->mute_program_tone);
+      rc = sbx_builtin_kfb_add(&kb, tim0, &tone, SBX_INTERP_STEP);
+      if (rc != SBX_OK) goto done;
+      if (have_mixamp_curve) {
+        rc = sbx_curve_mixkfb_add(&mb, tim0, pt.mix_amp_pct, SBX_INTERP_STEP);
+        if (rc != SBX_OK) goto done;
+      }
+    }
+    {
+      double amp = cfg->start_tone.amplitude;
+      rc = sbx_curve_eval(curve, (double)cfg->main_span_sec, &pt);
+      if (rc != SBX_OK) goto done;
+      if (have_amp_curve) amp = pt.beat_amp_pct / 100.0;
+      sbx_curve_timeline_fill_tone(&tone, &cfg->start_tone, &pt, amp, cfg->mute_program_tone);
+      rc = sbx_builtin_kfb_add(&kb, (double)cfg->main_span_sec, &tone, SBX_INTERP_STEP);
+      if (rc != SBX_OK) goto done;
+      if (have_mixamp_curve) {
+        rc = sbx_curve_mixkfb_add(&mb, (double)cfg->main_span_sec, pt.mix_amp_pct, SBX_INTERP_STEP);
+        if (rc != SBX_OK) goto done;
+      }
+    }
+    end_sec = cfg->main_span_sec;
+  }
+
+  if (cfg->wake_sec > 0) {
+    double amp = cfg->start_tone.amplitude;
+    rc = sbx_curve_eval(curve, 0.0, &pt);
+    if (rc != SBX_OK) goto done;
+    if (have_amp_curve) amp = pt.beat_amp_pct / 100.0;
+    sbx_curve_timeline_fill_tone(&tone, &cfg->start_tone, &pt, amp, cfg->mute_program_tone);
+    rc = sbx_builtin_kfb_add(&kb, (double)(end_sec + cfg->wake_sec), &tone, SBX_INTERP_LINEAR);
+    if (rc != SBX_OK) goto done;
+    if (have_mixamp_curve) {
+      rc = sbx_curve_mixkfb_add(&mb, (double)(end_sec + cfg->wake_sec), pt.mix_amp_pct, SBX_INTERP_LINEAR);
+      if (rc != SBX_OK) goto done;
+    }
+    end_sec += cfg->wake_sec;
+  }
+
+  if (cfg->fade_sec > 0) {
+    double amp = 0.0;
+    double eval_t = cfg->wake_sec > 0 ? 0.0 : (double)cfg->main_span_sec;
+    rc = sbx_curve_eval(curve, eval_t, &pt);
+    if (rc != SBX_OK) goto done;
+    sbx_curve_timeline_fill_tone(&tone, &cfg->start_tone, &pt, amp, 0);
+    rc = sbx_builtin_kfb_add(&kb, (double)(end_sec + cfg->fade_sec), &tone, SBX_INTERP_LINEAR);
+    if (rc != SBX_OK) goto done;
+    if (have_mixamp_curve) {
+      rc = sbx_curve_mixkfb_add(&mb, (double)(end_sec + cfg->fade_sec), pt.mix_amp_pct, SBX_INTERP_LINEAR);
+      if (rc != SBX_OK) goto done;
+    }
+  }
+
+done:
+  if (rc != SBX_OK) {
+    if (kb.v) free(kb.v);
+    if (mb.v) free(mb.v);
+    return rc;
+  }
+  out_timeline->program_frames = kb.v;
+  out_timeline->program_frame_count = kb.n;
+  out_timeline->mix_frames = mb.v;
+  out_timeline->mix_frame_count = mb.n;
   return SBX_OK;
 }
 

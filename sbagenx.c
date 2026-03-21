@@ -287,7 +287,9 @@ void write_drop_graph_png(const char *fmt, double level,
 			  double beat_start, double beat_target,
 			  int slide, int n_step, int steplen,
 			  int isisochronic, int ismono);
-void write_curve_graph_png(const char *fmt, double level,
+void write_curve_graph_png(SbxCurveProgram *curve,
+			   const char *curve_source,
+			   const char *fmt, double level,
 			   const char *target_tok, int len0, int len1, int len2,
 			   const char *extra,
 			   int slide, int n_step, int steplen,
@@ -685,38 +687,6 @@ int out_enc_pcm_bits= 16;
 
 #define CURVE_MAX_PARAMS 32
 #define CURVE_NAME_MAX 64
-#define CURVE_FILE_MAX 1024
-
-typedef struct {
-   int active;			// Function-driven modulation enabled?
-   int mode;			// 1 exponential drop, 2 sigmoid, 3 custom expression
-   int chan;			// Channel index to apply to
-   int chan2;			// Optional second channel (used for monaural twin)
-   int typ;			// Voice type to apply to (1 binaural, 8 isochronic)
-   int monaural;		// 1 => chan/chan2 are f1/f2 mono components
-   int start_ms;		// Start time (ms from midnight)
-   int end_ms;			// End time for function-driven carrier path
-   double carr0, carr1;	// Carrier start/end (Hz)
-   double carr_span_s;		// Carrier transition time in seconds
-   double beat0, beat1;	// Beat/pulse start/end (Hz)
-   double beat_span_s;		// Beat transition time in seconds
-   double beat_log_ratio;	// Precomputed log(beat1/beat0)
-   double sig_a, sig_b;	// Sigmoid coefficients (beat = a*tanh(..)+b)
-   double sig_l, sig_h;	// Sigmoid shape parameters
-   double sig_d_min;		// Sigmoid drop duration (minutes)
-   double beat_amp0_pct;	// Base beat/iso/mono amplitude (%)
-   double mix_amp0_pct;	// Base mix amplitude (%) from mix/<amp>
-   char src_file[CURVE_FILE_MAX];	// Source .sbgf file for mode 3
-   int have_carr_expr;
-   int have_amp_expr;
-   int have_mixamp_expr;
-   int param_count;
-   char param_names[CURVE_MAX_PARAMS][CURVE_NAME_MAX];
-   double param_values[CURVE_MAX_PARAMS];
-   SbxCurveProgram *prog;	// Library-owned .sbgf program
-   SbxCurveEvalConfig cfg;	// Prepared runtime evaluation config
-} FuncCurve;
-FuncCurve func_curve;		// Runtime function curve for pre-programmed sequences
 
 static void sbx_runtime_clear(void);
 static void sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
@@ -1039,131 +1009,16 @@ curve_report_error(SbxCurveProgram *curve, const char *fallback) {
 }
 
 static void
-curve_refresh_metadata(void) {
-   SbxCurveInfo info;
-   size_t i, n;
-
-   func_curve.src_file[0]= 0;
-   func_curve.have_carr_expr= 0;
-   func_curve.have_amp_expr= 0;
-   func_curve.have_mixamp_expr= 0;
-   func_curve.param_count= 0;
-   memset(func_curve.param_names, 0, sizeof(func_curve.param_names));
-   memset(func_curve.param_values, 0, sizeof(func_curve.param_values));
-
-   if (!func_curve.prog) return;
-
-   strncpy(func_curve.src_file, sbx_curve_source_name(func_curve.prog), sizeof(func_curve.src_file)-1);
-   func_curve.src_file[sizeof(func_curve.src_file)-1]= 0;
-
-   if (sbx_curve_get_info(func_curve.prog, &info) == SBX_OK) {
-      func_curve.have_carr_expr= info.has_carrier_expr || info.carrier_piece_count > 0;
-      func_curve.have_amp_expr= info.has_amp_expr || info.amp_piece_count > 0;
-      func_curve.have_mixamp_expr= info.has_mixamp_expr || info.mixamp_piece_count > 0;
-   }
-
-   n= sbx_curve_param_count(func_curve.prog);
-   if (n > CURVE_MAX_PARAMS)
-      error("Too many .sbgf parameters in %s (max %d)", func_curve.src_file, CURVE_MAX_PARAMS);
-   func_curve.param_count= (int)n;
-   for (i= 0; i<n; i++) {
-      const char *name= 0;
-      double value= 0.0;
-      if (sbx_curve_get_param(func_curve.prog, i, &name, &value) != SBX_OK || !name)
-	 curve_report_error(func_curve.prog, "Unable to inspect .sbgf parameters");
-      strncpy(func_curve.param_names[i], name, CURVE_NAME_MAX-1);
-      func_curve.param_names[i][CURVE_NAME_MAX-1]= 0;
-      func_curve.param_values[i]= value;
-   }
-}
-
-static void
-curve_set_param_value(const char *name, double value, int allow_new) {
-   int rc;
-   (void)allow_new;
-   if (!func_curve.prog)
-      error("No .sbgf curve is loaded");
-   rc= sbx_curve_set_param(func_curve.prog, name, value);
-   if (rc != SBX_OK)
-      curve_report_error(func_curve.prog, "Failed to override .sbgf parameter");
-   curve_refresh_metadata();
-}
-
-static void
-load_curve_file(const char *path) {
-   if (!curve_has_sbgf_ext(path))
-      error("Curve file must use .sbgf extension: %s", path);
-   if (!func_curve.prog) {
-      func_curve.prog= sbx_curve_create();
-      if (!func_curve.prog)
-	 error("Out of memory creating .sbgf curve program");
-   }
-   if (sbx_curve_load_file(func_curve.prog, path) != SBX_OK)
-      curve_report_error(func_curve.prog, "Failed to load .sbgf curve");
-   curve_refresh_metadata();
-}
-
-static int
-setup_custom_func_curve(int chan, int typ, int start_ms,
-			double carr0, double carr1, double carr_span_s,
-			double beat0, double beat1, double beat_span_s,
-			double hold_min, double total_min, double wake_min,
-			double beat_amp0_pct, double mix_amp0_pct) {
-   if (carr_span_s <= 0 || beat_span_s <= 0 || !func_curve.prog)
-      return 0;
-
-   sbx_default_curve_eval_config(&func_curve.cfg);
-   func_curve.cfg.carrier_start_hz= carr0;
-   func_curve.cfg.carrier_end_hz= carr1;
-   func_curve.cfg.carrier_span_sec= carr_span_s;
-   func_curve.cfg.beat_start_hz= beat0;
-   func_curve.cfg.beat_target_hz= beat1;
-   func_curve.cfg.beat_span_sec= beat_span_s;
-   func_curve.cfg.hold_min= hold_min;
-   func_curve.cfg.total_min= total_min;
-   func_curve.cfg.wake_min= wake_min;
-   func_curve.cfg.beat_amp0_pct= beat_amp0_pct;
-   func_curve.cfg.mix_amp0_pct= mix_amp0_pct;
-
-   if (sbx_curve_prepare(func_curve.prog, &func_curve.cfg) != SBX_OK)
-      curve_report_error(func_curve.prog, "Failed to prepare .sbgf curve");
-
-   func_curve.active= 1;
-   func_curve.mode= 3;
-   func_curve.chan= chan;
-   func_curve.chan2= -1;
-   func_curve.typ= typ;
-   func_curve.monaural= 0;
-   func_curve.start_ms= start_ms;
-   func_curve.end_ms= (start_ms + (int)(1000.0 * carr_span_s + 0.5)) % H24;
-   func_curve.carr0= carr0;
-   func_curve.carr1= carr1;
-   func_curve.carr_span_s= carr_span_s;
-   func_curve.beat0= beat0;
-   func_curve.beat1= beat1;
-   func_curve.beat_span_s= beat_span_s;
-   func_curve.beat_amp0_pct= beat_amp0_pct;
-   func_curve.mix_amp0_pct= mix_amp0_pct;
-
-   curve_refresh_metadata();
-   return 1;
-}
-
-static int
-eval_custom_curve_point(double pos_s,
-			double *beat_out, double *carr_out,
-			double *amp_pct_out, double *mixamp_pct_out) {
+curve_eval_or_die(SbxCurveProgram *curve, double pos_s,
+		  double *beat_out, double *carr_out,
+		  double *amp_pct_out, double *mixamp_pct_out) {
    SbxCurveEvalPoint pt;
-
-   if (!func_curve.prog) return 0;
-   if (sbx_curve_eval(func_curve.prog, pos_s, &pt) != SBX_OK)
-      return 0;
-
+   if (!curve || sbx_curve_eval(curve, pos_s, &pt) != SBX_OK)
+      curve_report_error(curve, "Custom curve evaluation failed");
    if (beat_out) *beat_out= pt.beat_hz;
    if (carr_out) *carr_out= pt.carrier_hz;
-   if (amp_pct_out) *amp_pct_out= pt.beat_amp_pct;
+   if (amp_pct_out) *amp_pct_out = pt.beat_amp_pct;
    if (mixamp_pct_out) *mixamp_pct_out= pt.mix_amp_pct;
-   return 1;
 }
 
 static int
@@ -1198,15 +1053,6 @@ curve_find_mix_amp_in_extra(const char *extra, double *amp_out) {
       p= e;
    }
    return 0;
-}
-
-// Clear any runtime function-driven curve override.
-static void
-clear_func_curve() {
-   if (func_curve.prog)
-      sbx_curve_destroy(func_curve.prog);
-   memset(&func_curve, 0, sizeof(func_curve));
-   func_curve.chan2= -1;
 }
 
 void
@@ -1534,100 +1380,6 @@ isochronic_mod_factor(Channel *ch) {
    if (opt_I)
       return isochronic_mod_factor_phase_custom(phase, opt_I_s, opt_I_d, opt_I_a, opt_I_r, opt_I_e);
    return isochronic_mod_factor_phase_default(phase);
-}
-
-// Configure monaural twin routing for the registered curve.
-// Each ear receives both tones: carr-beat/2 and carr+beat/2.
-static void
-setup_func_curve_monaural_pair(int chan0, int chan1) {
-   if (!func_curve.active) return;
-   func_curve.monaural= 1;
-   func_curve.chan= chan0;
-   func_curve.chan2= chan1;
-   func_curve.typ= 1;		// Monaural is built from two plain sine tones
-}
-
-// Apply the registered curve at the current runtime position.
-static void
-apply_func_curve(int now_ms, int chan, Voice *vv) {
-   double pos_s, carr_s, pos_min;
-   double beat= 0.0, carr= 0.0;
-   double amp_pct= 0.0, mixamp_pct= 0.0;
-   int elapsed_ms, total_ms;
-   int have_amp_curve, have_mixamp_curve;
-
-   if (!func_curve.active) return;
-   elapsed_ms= t_per0(func_curve.start_ms, now_ms);
-   total_ms= t_per0(func_curve.start_ms, func_curve.end_ms);
-   if (elapsed_ms > total_ms) return;
-
-   pos_s= elapsed_ms * 0.001;
-   carr_s= pos_s;
-   if (carr_s > func_curve.carr_span_s) carr_s= func_curve.carr_span_s;
-
-   have_amp_curve= func_curve.have_amp_expr;
-   have_mixamp_curve= func_curve.have_mixamp_expr;
-
-   if (func_curve.mode == 3) {
-      if (!eval_custom_curve_point(pos_s, &beat, &carr, &amp_pct, &mixamp_pct))
-	 return;
-
-      // mixamp targets mix/<amp> voices only.
-      if (vv->typ == 5) {
-	 if (have_mixamp_curve)
-	    vv->amp= AMP_DA(mixamp_pct);
-	 return;
-      }
-
-      if (func_curve.monaural) {
-	 if ((chan != func_curve.chan && chan != func_curve.chan2) || vv->typ != 1) return;
-      } else {
-	 if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
-      }
-
-      if (func_curve.typ == 8 || func_curve.monaural) {
-	 if (beat < 0.0) beat= -beat;
-	 if (beat < 1e-6) beat= 1e-6;
-      }
-
-      if (have_amp_curve)
-	 vv->amp= AMP_DA(amp_pct);
-   } else if (func_curve.mode == 2) {
-      if (func_curve.monaural) {
-	 if ((chan != func_curve.chan && chan != func_curve.chan2) || vv->typ != 1) return;
-      } else {
-	 if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
-      }
-      if (pos_s >= func_curve.beat_span_s) beat= func_curve.beat1;
-      else {
-	 pos_min= pos_s / 60.0;
-	 beat= func_curve.sig_a *
-	       tanh(func_curve.sig_l * (pos_min - func_curve.sig_d_min/2 - func_curve.sig_h)) +
-	       func_curve.sig_b;
-      }
-      carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) * carr_s / func_curve.carr_span_s;
-   } else {
-      if (func_curve.monaural) {
-	 if ((chan != func_curve.chan && chan != func_curve.chan2) || vv->typ != 1) return;
-      } else {
-	 if (chan != func_curve.chan || vv->typ != func_curve.typ) return;
-      }
-      if (pos_s >= func_curve.beat_span_s) beat= func_curve.beat1;
-      else beat= func_curve.beat0 * exp(func_curve.beat_log_ratio * pos_s / func_curve.beat_span_s);
-      carr= func_curve.carr0 + (func_curve.carr1 - func_curve.carr0) * carr_s / func_curve.carr_span_s;
-   }
-
-   if (func_curve.monaural) {
-      if (chan == func_curve.chan) {
-	 vv->carr= carr - beat/2.0;
-      } else {
-	 vv->carr= carr + beat/2.0;
-      }
-      vv->res= 0.0;
-   } else {
-      vv->carr= carr;
-      vv->res= beat;
-   }
 }
 
 static void
@@ -3104,12 +2856,14 @@ write_drop_graph_png(const char *fmt, double level,
 }
 
 void
-write_curve_graph_png(const char *fmt, double level,
-		      const char *target_tok, int len0, int len1, int len2,
-		      const char *extra,
-		      int slide, int n_step, int steplen,
-		      int isisochronic, int ismono,
-		      double beat_start, double beat_target) {
+write_curve_graph_png(SbxCurveProgram *curve,
+		      const char *curve_source,
+		      const char *fmt, double level,
+		   const char *target_tok, int len0, int len1, int len2,
+		   const char *extra,
+		   int slide, int n_step, int steplen,
+		   int isisochronic, int ismono,
+		   double beat_start, double beat_target) {
    int w= 1200, h= 700, ss= 4;
    int hw= w * ss, hh= h * ss;
    int ml= 150 * ss, mr= 40 * ss, mt= 40 * ss, mb= 120 * ss;
@@ -3150,10 +2904,10 @@ write_curve_graph_png(const char *fmt, double level,
    curve_y= ALLOC_ARR(n_curve, double);
    audio_file[0]= 0;
    if (slide) {
-      if (sbx_curve_sample_program_beat(func_curve.prog, 0.0, (double)len0,
+      if (sbx_curve_sample_program_beat(curve, 0.0, (double)len0,
 					n_curve, 0, curve_y) != SBX_OK) {
 	 free(curve_y);
-	 curve_report_error(func_curve.prog, "Failed to sample .sbgf beat curve");
+	 curve_report_error(curve, "Failed to sample .sbgf beat curve");
       }
    } else {
       for (a= 0; a<n_curve; a++) {
@@ -3166,9 +2920,9 @@ write_curve_graph_png(const char *fmt, double level,
 	    if (idx > n_step-1) idx= n_step-1;
 	    tim_eval= idx * len0 / (double)(n_step-1);
 	 }
-	 if (sbx_curve_sample_program_beat(func_curve.prog, tim_eval, tim_eval, 1, 0, &beatv) != SBX_OK) {
+	 if (sbx_curve_sample_program_beat(curve, tim_eval, tim_eval, 1, 0, &beatv) != SBX_OK) {
 	    free(curve_y);
-	    curve_report_error(func_curve.prog, "Failed to sample stepped .sbgf beat curve");
+	    curve_report_error(curve, "Failed to sample stepped .sbgf beat curve");
 	 }
 	 curve_y[a]= beatv;
       }
@@ -3190,7 +2944,7 @@ write_curve_graph_png(const char *fmt, double level,
 	    len0/60, len1/60, len2/60, mode_ch, curve_ch);
 
    if (opt_G_video && *opt_G_video &&
-       !render_graph_video_audio_temp("curve", func_curve.src_file, fmt, len0, len1, len2,
+       !render_graph_video_audio_temp("curve", curve_source, fmt, len0, len1, len2,
 				      extra, audio_file, sizeof(audio_file))) {
       free(curve_y);
       error("Failed to render temporary audio track for graph video");
@@ -6867,10 +6621,6 @@ corrVal(int running) {
           vv->waveform= v0->waveform;
           break;
       }
-
-      // For selected built-in modes, evaluate carrier/beat directly
-      // from a function instead of segment-to-segment interpolation.
-      apply_func_curve(now, a, vv);
    }
    
    // Check and limit amplitudes if -c option in use
@@ -8530,7 +8280,6 @@ void sinc_interpolate(double *dp, int np, int *arr) {
 
 void 
 readPreProg(int ac, char **av) {
-   clear_func_curve();
    clear_mix_mod_curve();
    sbx_runtime_clear();
    opt_P_sigmoid= 0;
@@ -9068,48 +8817,6 @@ sbx_handle_runtime_unsupported_extra(const char *prog_name, const SbxRuntimeExtr
 	spec->bad_token);
 }
 
-typedef struct {
-   SbxProgramKeyframe *v;
-   size_t n;
-   size_t cap;
-} SbxKfBuilder;
-
-typedef struct {
-   SbxMixAmpKeyframe *v;
-   size_t n;
-   size_t cap;
-} SbxMixKfBuilder;
-
-static void
-sbx_kfb_add(SbxKfBuilder *b, double t_sec, const SbxToneSpec *tone, int interp) {
-   if (b->n == b->cap) {
-      size_t ncap= b->cap ? b->cap * 2 : 64;
-      SbxProgramKeyframe *tmp= (SbxProgramKeyframe*)realloc(b->v, ncap * sizeof(*tmp));
-      if (!tmp) error("Out of memory");
-      b->v= tmp;
-      b->cap= ncap;
-   }
-   b->v[b->n].time_sec= t_sec;
-   b->v[b->n].tone= *tone;
-   b->v[b->n].interp= interp;
-   b->n++;
-}
-
-static void
-sbx_mixkfb_add(SbxMixKfBuilder *b, double t_sec, double amp_pct, int interp) {
-   if (b->n == b->cap) {
-      size_t ncap= b->cap ? b->cap * 2 : 64;
-      SbxMixAmpKeyframe *tmp= (SbxMixAmpKeyframe*)realloc(b->v, ncap * sizeof(*tmp));
-      if (!tmp) error("Out of memory");
-      b->v= tmp;
-      b->cap= ncap;
-   }
-   b->v[b->n].time_sec= t_sec;
-   b->v[b->n].amp_pct= amp_pct;
-   b->v[b->n].interp= interp;
-   b->n++;
-}
-
 static void
 sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
 		   double carr_hz, double beat_hz, double amp_pct) {
@@ -9362,7 +9069,8 @@ create_drop(int ac, char **av) {
       beat[a]= beat_start * exp(log(beat_target/beat_start) * a / (n_step-1));
 
    {
-      SbxKfBuilder kfb= {0};
+      SbxProgramKeyframe *frames= 0;
+      size_t frame_count= 0;
       SbxBuiltinDropConfig prog_cfg;
       int end_sec;
 
@@ -9432,7 +9140,7 @@ create_drop(int ac, char **av) {
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
 						 0, 0);
       } else {
-	 if (sbx_build_drop_keyframes(&prog_cfg, &kfb.v, &kfb.n) != SBX_OK)
+	 if (sbx_build_drop_keyframes(&prog_cfg, &frames, &frame_count) != SBX_OK)
 	    error("Failed to build built-in drop keyframes");
 	 end_sec= len + (wakeup ? len2 : 0);
       }
@@ -9443,16 +9151,16 @@ create_drop(int ac, char **av) {
       if (slide && !opt_D) {
 	 /* exact runtime already activated above */
       } else if (opt_D) {
-	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+	 sbx_emit_periods_from_keyframes_with_extra(frames, frame_count, 0, extra);
       } else {
-	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
+	 sbx_runtime_activate_from_keyframes(frames, frame_count, 0,
 					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 					     extra_spec.aux_tones, extra_spec.aux_count,
 					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);
       }
 
-      if (kfb.v) free(kfb.v);
+      if (frames) free(frames);
    }
 }
 
@@ -9654,7 +9362,8 @@ create_sigmoid(int ac, char **av) {
    }
 
    {
-      SbxKfBuilder kfb= {0};
+      SbxProgramKeyframe *frames= 0;
+      size_t frame_count= 0;
       SbxBuiltinSigmoidConfig prog_cfg;
       int end_sec;
 
@@ -9727,7 +9436,7 @@ create_sigmoid(int ac, char **av) {
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
 						 0, 0);
       } else {
-	 if (sbx_build_sigmoid_keyframes(&prog_cfg, &kfb.v, &kfb.n) != SBX_OK)
+	 if (sbx_build_sigmoid_keyframes(&prog_cfg, &frames, &frame_count) != SBX_OK)
 	    error("Failed to build built-in sigmoid keyframes");
 	 end_sec= len + (wakeup ? len2 : 0);
       }
@@ -9738,16 +9447,16 @@ create_sigmoid(int ac, char **av) {
       if (slide && !opt_D) {
 	 /* exact runtime already activated above */
       } else if (opt_D) {
-	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+	 sbx_emit_periods_from_keyframes_with_extra(frames, frame_count, 0, extra);
       } else {
-	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
+	 sbx_runtime_activate_from_keyframes(frames, frame_count, 0,
 					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 					     extra_spec.aux_tones, extra_spec.aux_count,
 					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);
       }
 
-      if (kfb.v) free(kfb.v);
+      if (frames) free(frames);
    }
 }
 
@@ -9809,6 +9518,13 @@ create_curve(int ac, char **av) {
    int have_amp_curve= 0, have_mixamp_curve= 0;
    char extra[256];
    SbxRuntimeExtraSpec extra_spec;
+   SbxCurveProgram *curve= 0;
+   SbxCurveEvalConfig curve_cfg;
+   SbxCurveFileProgramConfig curve_prog_cfg;
+   SbxCurveTimelineConfig tl_cfg;
+   SbxCurveTimeline tl;
+   SbxCurveInfo curve_info;
+   SbxCurveParamOverride overrides[CURVE_MAX_PARAMS];
    char target_tok[32];
 
 #define BAD bad_curve()
@@ -9943,58 +9659,65 @@ create_curve(int ac, char **av) {
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
 
-   load_curve_file(curve_file);
-   for (a= 0; a<ov_count; a++)
-      curve_set_param_value(ov_name[a], ov_val[a], 1);
+   sbx_default_curve_eval_config(&curve_cfg);
+   curve_cfg.carrier_start_hz= c0;
+   curve_cfg.carrier_end_hz= c2;
+   curve_cfg.carrier_span_sec= len;
+   curve_cfg.beat_start_hz= beat_start;
+   curve_cfg.beat_target_hz= beat_target;
+   curve_cfg.beat_span_sec= len0;
+   curve_cfg.hold_min= islong ? len1/60.0 : 0.0;
+   curve_cfg.total_min= len/60.0;
+   curve_cfg.wake_min= wakeup ? len2/60.0 : 0.0;
+   curve_cfg.beat_amp0_pct= amp;
+   curve_cfg.mix_amp0_pct= base_mix_amp;
 
-   if (!setup_custom_func_curve(0, isisochronic ? 8 : 1, 0,
-				c0, c2, len,
-				beat_start, beat_target, len0,
-				islong ? len1/60.0 : 0.0,
-				len/60.0,
-				wakeup ? len2/60.0 : 0.0,
-				amp, base_mix_amp))
-      error("Unable to setup custom curve from %s", curve_file);
-   if (ismono)
-      setup_func_curve_monaural_pair(0, 1);
+   for (a= 0; a<ov_count; a++) {
+      overrides[a].name= ov_name[a];
+      overrides[a].value= ov_val[a];
+   }
+   sbx_default_curve_file_program_config(&curve_prog_cfg);
+   curve_prog_cfg.path= curve_file;
+   curve_prog_cfg.overrides= overrides;
+   curve_prog_cfg.override_count= ov_count;
+   curve_prog_cfg.eval_config= curve_cfg;
 
-   have_amp_curve= func_curve.have_amp_expr;
-   have_mixamp_curve= func_curve.have_mixamp_expr;
+   if (sbx_prepare_curve_file_program(&curve_prog_cfg, &curve) != SBX_OK) {
+      curve_report_error(curve, "Unable to setup custom curve program");
+   }
+   if (sbx_curve_get_info(curve, &curve_info) != SBX_OK)
+      curve_report_error(curve, "Unable to inspect prepared .sbgf curve");
+   have_amp_curve= curve_info.has_amp_expr || curve_info.amp_piece_count > 0;
+   have_mixamp_curve= curve_info.has_mixamp_expr || curve_info.mixamp_piece_count > 0;
 
    for (a= 0; a<n_step; a++) {
       double tim= a * len0 / (double)(n_step-1);
-      if (!eval_custom_curve_point(tim, &beat[a], &carr_sam[a], &amp_sam[a], &mix_sam[a]))
-	 error("Custom curve evaluation failed at t=%g seconds", tim);
+      curve_eval_or_die(curve, tim, &beat[a], &carr_sam[a], &amp_sam[a], &mix_sam[a]);
    }
-   if (!eval_custom_curve_point(len, &beat_end, &carr_end, &amp_end, &mix_end))
-      error("Custom curve evaluation failed at end of main session");
-   if (!eval_custom_curve_point(0.0, &beat_start_eval, &carr_start_eval, &amp_start_eval, &mix_start_eval))
-      error("Custom curve evaluation failed at session start");
+   curve_eval_or_die(curve, len, &beat_end, &carr_end, &amp_end, &mix_end);
+   curve_eval_or_die(curve, 0.0, &beat_start_eval, &carr_start_eval, &amp_start_eval, &mix_start_eval);
 
    sbx_parse_runtime_extra_or_die(extra, &extra_spec);
 
    if (opt_P && !opt_G && !opt_H && sbx_runtime_extra_has_mixam(&extra_spec)) {
-      clear_func_curve();
+      if (curve) sbx_curve_destroy(curve);
       write_mixam_cycle_graph_png();
       return;
    }
 
    if (opt_G || opt_P_curve) {
       opt_P_curve= 1;
-      write_curve_graph_png(fmt, level, target_tok,
+      write_curve_graph_png(curve, curve_file, fmt, level, target_tok,
 			    len0, len1, len2, extra,
 			    slide, n_step, steplen,
 			    isisochronic, ismono,
 			    beat_start_eval, beat_end);
-      clear_func_curve();
+      if (curve) sbx_curve_destroy(curve);
       return;
    }
 
    {
-      int end_sec;
-      SbxKfBuilder kfb= {0};
-      SbxMixKfBuilder mkfb= {0};
-      SbxToneSpec tone;
+      size_t curve_param_count;
 
       have_mix_in_extra= extra_spec.have_mix;
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
@@ -10003,7 +9726,7 @@ create_curve(int ac, char **av) {
 
       // Display summary
       warn("CURVE summary:");
-      warn(" Source file: %s", func_curve.src_file);
+      warn(" Source file: %s", sbx_curve_source_name(curve));
       if (slide) {
 	 warn(" Carrier follows custom curve from %gHz to %gHz over %d minutes",
 	      carr_sam[0], carr_end, len/60);
@@ -10025,7 +9748,7 @@ create_curve(int ac, char **av) {
 	 for (a= 0; a<n_step; a++) fprintf(stderr, " %.2f", beat[a]);
 	 fprintf(stderr, "\n");
       }
-      if (func_curve.have_carr_expr)
+      if (curve_info.has_carrier_expr || curve_info.carrier_piece_count > 0)
 	 warn(" Carrier expression enabled from .sbgf");
       if (have_amp_curve)
 	 warn(" Beat amplitude expression enabled from .sbgf");
@@ -10037,10 +9760,16 @@ create_curve(int ac, char **av) {
 	 else
 	    warn(" mixamp expression is defined, but no mix/<amp> tone-spec was provided");
       }
-      if (func_curve.param_count > 0) {
+      curve_param_count= sbx_curve_param_count(curve);
+      if (curve_param_count > 0) {
 	 fprintf(stderr, " Parameters:");
-	 for (a= 0; a<func_curve.param_count; a++)
-	    fprintf(stderr, " %s=%g", func_curve.param_names[a], func_curve.param_values[a]);
+	 for (a= 0; a<(int)curve_param_count; a++) {
+	    const char *pname= 0;
+	    double pval= 0.0;
+	    if (sbx_curve_get_param(curve, (size_t)a, &pname, &pval) != SBX_OK || !pname)
+	       curve_report_error(curve, "Unable to inspect .sbgf parameters");
+	    fprintf(stderr, " %s=%g", pname, pval);
+	 }
 	 fprintf(stderr, "\n");
       }
       if (ismono)
@@ -10058,98 +9787,48 @@ create_curve(int ac, char **av) {
       if (slide && !opt_D) {
 	 double duration_sec= (double)(len + (wakeup ? len2 : 0) + 10);
 	 sbx_handle_runtime_unsupported_extra("-p curve", &extra_spec);
-	 sbx_runtime_activate_from_curve_program(&func_curve.prog,
+	 sbx_runtime_activate_from_curve_program(&curve,
 						 isisochronic, ismono,
 						 duration_sec,
 						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 						 extra_spec.aux_tones, extra_spec.aux_count,
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
 						 0, 0);
-	 clear_func_curve();
 	 return;
-      } else if (slide) {
-	 for (a= 0; a<n_step; a++) {
-	    double amp_t= have_amp_curve ? amp_sam[a] : amp;
-	    if (mute_prog_tone) amp_t= 0.0;
-	    double tim= a * len0 / (double)(n_step-1);
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_sam[a], beat[a], amp_t);
-	    sbx_kfb_add(&kfb, tim, &tone, SBX_INTERP_LINEAR);
-	    if (have_mixamp_curve && have_mix_in_extra)
-	       sbx_mixkfb_add(&mkfb, tim, mix_sam[a], SBX_INTERP_LINEAR);
-	 }
-	 if (islong) {
-	    double amp_t= have_amp_curve ? amp_end : amp;
-	    if (mute_prog_tone) amp_t= 0.0;
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, amp_t);
-	    sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
-	    if (have_mixamp_curve && have_mix_in_extra)
-	       sbx_mixkfb_add(&mkfb, (double)len, mix_end, SBX_INTERP_LINEAR);
-	 }
-	 end_sec= len;
-      } else {
-	 int lim= len / steplen;
-	 for (a= 0; a<lim; a++) {
-	    int tim0= a * steplen;
-	    int tim1= (a+1) * steplen;
-	    double beat_t, carr_t, amp_t, mix_t;
-	    if (!eval_custom_curve_point(tim1, &beat_t, &carr_t, &amp_t, &mix_t))
-	       error("Custom curve evaluation failed at t=%d seconds", tim1);
-	    if (!have_amp_curve) amp_t= amp;
-	    if (mute_prog_tone) amp_t= 0.0;
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat_t, amp_t);
-	    sbx_kfb_add(&kfb, (double)tim0, &tone, SBX_INTERP_STEP);
-	    if (have_mixamp_curve && have_mix_in_extra)
-	       sbx_mixkfb_add(&mkfb, (double)tim0, mix_t, SBX_INTERP_STEP);
-	 }
-	 {
-	    double amp_t= have_amp_curve ? amp_end : amp;
-	    if (mute_prog_tone) amp_t= 0.0;
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_end, beat_end, amp_t);
-	 }
-	 sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_STEP);
-	 if (have_mixamp_curve && have_mix_in_extra)
-	    sbx_mixkfb_add(&mkfb, (double)len, mix_end, SBX_INTERP_STEP);
-	 end_sec= len;
       }
 
-      if (wakeup) {
-	 double amp_t= have_amp_curve ? amp_start_eval : amp;
-	 if (mute_prog_tone) amp_t= 0.0;
-	 sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_start_eval, beat_start_eval, amp_t);
-	 sbx_kfb_add(&kfb, (double)(end_sec + len2), &tone, SBX_INTERP_LINEAR);
-	 if (have_mixamp_curve && have_mix_in_extra)
-	    sbx_mixkfb_add(&mkfb, (double)(end_sec + len2), mix_start_eval, SBX_INTERP_LINEAR);
-	 end_sec += len2;
-      }
+      sbx_default_curve_timeline_config(&tl_cfg);
+      sbx_fill_tone_spec(&tl_cfg.start_tone, isisochronic, ismono, c0, beat_start, amp);
+      tl_cfg.sample_span_sec= len0;
+      tl_cfg.main_span_sec= len;
+      tl_cfg.wake_sec= wakeup ? len2 : 0;
+      tl_cfg.step_len_sec= steplen;
+      tl_cfg.slide= slide;
+      tl_cfg.mute_program_tone= mute_prog_tone;
+      tl_cfg.fade_sec= 10;
 
-      sbx_fill_tone_spec(&tone, isisochronic, ismono,
-			 wakeup ? carr_start_eval : carr_end,
-			 wakeup ? beat_start_eval : beat_end,
-			 0.0);
-      sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
-      if (have_mixamp_curve && have_mix_in_extra)
-	 sbx_mixkfb_add(&mkfb, (double)(end_sec + 10), wakeup ? mix_start_eval : mix_end, SBX_INTERP_LINEAR);
+      memset(&tl, 0, sizeof(tl));
+      if (sbx_build_curve_timeline(curve, &tl_cfg, &tl) != SBX_OK)
+	 curve_report_error(curve, "Failed to build .sbgf curve timeline");
 
       sbx_handle_runtime_unsupported_extra("-p curve", &extra_spec);
       if (opt_D && have_mixamp_curve && have_mix_in_extra)
 	 warn("Curve mixamp expression is ignored in -D keyframe dump output");
 
       if (opt_D) {
-	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+	 sbx_emit_periods_from_keyframes_with_extra(tl.program_frames, tl.program_frame_count, 0, extra);
       } else {
-	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
+	 sbx_runtime_activate_from_keyframes(tl.program_frames, tl.program_frame_count, 0,
 					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 					     extra_spec.aux_tones, extra_spec.aux_count,
 					     extra_spec.mix_fx, extra_spec.mix_fx_count,
-					     (have_mixamp_curve && have_mix_in_extra) ? mkfb.v : 0,
-					     (have_mixamp_curve && have_mix_in_extra) ? mkfb.n : 0);
+					     (have_mixamp_curve && have_mix_in_extra) ? tl.mix_frames : 0,
+					     (have_mixamp_curve && have_mix_in_extra) ? tl.mix_frame_count : 0);
       }
 
-      if (kfb.v) free(kfb.v);
-      if (mkfb.v) free(mkfb.v);
+      sbx_free_curve_timeline(&tl);
    }
-
-   clear_func_curve();
+   if (curve) sbx_curve_destroy(curve);
 }
 
 //
@@ -10214,7 +9893,8 @@ create_slide(int ac, char **av) {
 
    {
       SbxRuntimeExtraSpec extra_spec;
-      SbxKfBuilder kfb= {0};
+      SbxProgramKeyframe *frames= 0;
+      size_t frame_count= 0;
       SbxBuiltinSlideConfig prog_cfg;
 
       sbx_parse_runtime_extra_or_die(extra, &extra_spec);
@@ -10239,22 +9919,22 @@ create_slide(int ac, char **av) {
       prog_cfg.carrier_end_hz= c1;
       prog_cfg.slide_sec= len;
       prog_cfg.fade_sec= 10;
-      if (sbx_build_slide_keyframes(&prog_cfg, &kfb.v, &kfb.n) != SBX_OK)
+      if (sbx_build_slide_keyframes(&prog_cfg, &frames, &frame_count) != SBX_OK)
 	 error("Failed to build built-in slide keyframes");
 
       sbx_handle_runtime_unsupported_extra("-p slide", &extra_spec);
 
       if (opt_D) {
-	 sbx_emit_periods_from_keyframes_with_extra(kfb.v, kfb.n, 0, extra);
+	 sbx_emit_periods_from_keyframes_with_extra(frames, frame_count, 0, extra);
       } else {
-	 sbx_runtime_activate_from_keyframes(kfb.v, kfb.n, 0,
+	 sbx_runtime_activate_from_keyframes(frames, frame_count, 0,
 					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 					     extra_spec.aux_tones, extra_spec.aux_count,
 					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);
       }
 
-      if (kfb.v) free(kfb.v);
+      if (frames) free(frames);
    }
 }   
 

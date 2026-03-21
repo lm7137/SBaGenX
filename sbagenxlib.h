@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 28  /* public API contract revision */
+#define SBX_API_VERSION 29  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -244,6 +244,36 @@ typedef struct {
 } SbxBuiltinSlideConfig;
 
 typedef struct {
+  const char *name;
+  double value;
+} SbxCurveParamOverride;
+
+typedef struct {
+  const char *path;
+  const SbxCurveParamOverride *overrides;
+  size_t override_count;
+  SbxCurveEvalConfig eval_config;
+} SbxCurveFileProgramConfig;
+
+typedef struct {
+  SbxToneSpec start_tone;
+  int sample_span_sec;
+  int main_span_sec;
+  int wake_sec;
+  int step_len_sec;
+  int slide;
+  int mute_program_tone;
+  int fade_sec;
+} SbxCurveTimelineConfig;
+
+typedef struct {
+  SbxProgramKeyframe *program_frames;
+  size_t program_frame_count;
+  SbxMixAmpKeyframe *mix_frames;
+  size_t mix_frame_count;
+} SbxCurveTimeline;
+
+typedef struct {
   unsigned int rng_state; /* caller-owned RNG state for TPDF dithering */
 } SbxPcm16DitherState;
 
@@ -392,6 +422,8 @@ void sbx_default_curve_source_config(SbxCurveSourceConfig *cfg);
 void sbx_default_builtin_drop_config(SbxBuiltinDropConfig *cfg);
 void sbx_default_builtin_sigmoid_config(SbxBuiltinSigmoidConfig *cfg);
 void sbx_default_builtin_slide_config(SbxBuiltinSlideConfig *cfg);
+void sbx_default_curve_file_program_config(SbxCurveFileProgramConfig *cfg);
+void sbx_default_curve_timeline_config(SbxCurveTimelineConfig *cfg);
 
 /* Fill dither state with library-default seed. */
 void sbx_default_pcm16_dither_state(SbxPcm16DitherState *state);
@@ -672,6 +704,10 @@ int sbx_build_drop_curve_program(const SbxBuiltinDropConfig *cfg,
 int sbx_build_sigmoid_curve_program(const SbxBuiltinSigmoidConfig *cfg,
                                     SbxCurveProgram **out_curve);
 
+/* Load, override, and prepare a `.sbgf` file program in one step. */
+int sbx_prepare_curve_file_program(const SbxCurveFileProgramConfig *cfg,
+                                   SbxCurveProgram **out_curve);
+
 /* Build keyframed programs for the built-in drop / sigmoid / slide generators. */
 int sbx_build_drop_keyframes(const SbxBuiltinDropConfig *cfg,
                              SbxProgramKeyframe **out_frames,
@@ -682,6 +718,12 @@ int sbx_build_sigmoid_keyframes(const SbxBuiltinSigmoidConfig *cfg,
 int sbx_build_slide_keyframes(const SbxBuiltinSlideConfig *cfg,
                               SbxProgramKeyframe **out_frames,
                               size_t *out_frame_count);
+
+/* Build program and optional mix-amplitude timelines from a prepared curve. */
+int sbx_build_curve_timeline(SbxCurveProgram *curve,
+                             const SbxCurveTimelineConfig *cfg,
+                             SbxCurveTimeline *out_timeline);
+void sbx_free_curve_timeline(SbxCurveTimeline *timeline);
 
 /* Curve introspection. */
 int sbx_curve_get_info(const SbxCurveProgram *curve, SbxCurveInfo *out_info);
