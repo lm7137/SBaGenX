@@ -166,6 +166,10 @@ def _maybe_write_graph_video(
     video_args = _graph_video_encoder_args(ffmpeg)
     cmd = [
         ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostats",
         "-y",
         "-f",
         "rawvideo",
