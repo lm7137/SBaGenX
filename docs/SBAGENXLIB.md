@@ -1250,6 +1250,10 @@ Notes:
 - Safe `-SE` sequence-file preamble parsing/stripping also now has a
   library-owned helper surface, so the native sequence loader no longer depends
   on a CLI-private bridge for that wrapper subset.
+- Historical option-only `.sbg` wrapper recognition/iteration is now also
+  library-owned. Frontends provide a callback for each trimmed option line,
+  which keeps CLI-specific option execution outside the library while removing
+  wrapper classification/orchestration from `sbagenx.c`.
 
 Developer docs:
 

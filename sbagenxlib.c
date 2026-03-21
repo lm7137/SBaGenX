@@ -337,6 +337,7 @@ static int sbx_parse_safe_seqfile_option_line_lib(const char *line,
                                                   SbxSafeSeqfilePreamble *out_cfg,
                                                   char *errbuf,
                                                   size_t errbuf_sz);
+static int sbx_line_contains_seq_mode_option_lib(const char *line);
 static int sbx_audio_writer_init_mp3(SbxAudioWriter *writer, const char *path);
 static int sbx_audio_writer_ensure_mp3_buf(SbxAudioWriter *writer, int frames);
 
@@ -1778,6 +1779,164 @@ sbx_prepare_safe_seqfile_text(const char *path,
   }
 
   rc = sbx_prepare_safe_seq_text(text, out_text, out_cfg, errbuf, errbuf_sz);
+  free(text);
+  return rc;
+}
+
+static int
+sbx_line_contains_seq_mode_option_lib(const char *line) {
+  char *dup, *argv[64], *p;
+  int argc = 0, i;
+
+  if (!line) return 0;
+  dup = strdup(line);
+  if (!dup) return 0;
+  p = dup;
+  while (*p) {
+    if (argc >= (int)(sizeof(argv) / sizeof(argv[0])))
+      break;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (!*p) break;
+    argv[argc++] = p;
+    while (*p && !isspace((unsigned char)*p)) p++;
+    if (*p) *p++ = 0;
+  }
+  for (i = 0; i < argc; i++) {
+    if ((0 == strcmp(argv[i], "-p")) || (0 == strcmp(argv[i], "-i"))) {
+      free(dup);
+      return 1;
+    }
+  }
+  free(dup);
+  return 0;
+}
+
+int
+sbx_run_option_only_seq_wrapper_text(const char *text,
+                                     SbxSeqOptionLineCallback cb,
+                                     void *user,
+                                     char *errbuf,
+                                     size_t errbuf_sz) {
+  char *work, *line;
+  int saw_mode = 0;
+
+  if (errbuf && errbuf_sz) errbuf[0] = 0;
+  if (!text || !cb) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "internal error preparing sequence wrapper text");
+    return SBX_EINVAL;
+  }
+
+  work = strdup(text);
+  if (!work) {
+    sbx_set_api_error(errbuf, errbuf_sz, "out of memory preparing sequence wrapper text");
+    return SBX_ENOMEM;
+  }
+
+  line = work;
+  while (line && *line) {
+    char *next = strchr(line, '\n');
+    char *trim = line;
+    char *end;
+
+    if (next)
+      next++;
+    while (*trim && isspace((unsigned char)*trim)) trim++;
+    if (!*trim || *trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
+      line = next;
+      continue;
+    }
+    if (*trim != '-') {
+      free(work);
+      sbx_set_api_error(errbuf, errbuf_sz, "not an option-only sequence wrapper");
+      return SBX_EINVAL;
+    }
+    end = line + strlen(line);
+    if (next)
+      end = next - 1;
+    if (end > line && end[-1] == '\r')
+      end--;
+    while (end > trim && isspace((unsigned char)end[-1]))
+      end--;
+    {
+      char saved = *end;
+      *end = 0;
+      if (sbx_line_contains_seq_mode_option_lib(trim))
+        saw_mode = 1;
+      *end = saved;
+    }
+    line = next;
+  }
+
+  if (!saw_mode) {
+    free(work);
+    sbx_set_api_error(errbuf, errbuf_sz, "not an option-only sequence wrapper");
+    return SBX_EINVAL;
+  }
+
+  line = work;
+  while (line && *line) {
+    char *next = strchr(line, '\n');
+    char *trim = line;
+    char *end;
+
+    if (next)
+      next++;
+    while (*trim && isspace((unsigned char)*trim)) trim++;
+    if (!*trim || *trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
+      line = next;
+      continue;
+    }
+    end = line + strlen(line);
+    if (next)
+      end = next - 1;
+    if (end > line && end[-1] == '\r')
+      end--;
+    while (end > trim && isspace((unsigned char)end[-1]))
+      end--;
+    {
+      char saved = *end;
+      int cb_rc;
+      *end = 0;
+      cb_rc = cb(trim, user);
+      *end = saved;
+      if (cb_rc != 0) {
+        free(work);
+        sbx_set_api_error(errbuf, errbuf_sz,
+                          "option-only sequence wrapper callback failed");
+        return SBX_ENOTREADY;
+      }
+    }
+    line = next;
+  }
+
+  free(work);
+  return SBX_OK;
+}
+
+int
+sbx_run_option_only_seq_wrapper_file(const char *path,
+                                     SbxSeqOptionLineCallback cb,
+                                     void *user,
+                                     char *errbuf,
+                                     size_t errbuf_sz) {
+  char *text = 0;
+  int rc;
+
+  if (errbuf && errbuf_sz) errbuf[0] = 0;
+  if (!path || !cb) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "internal error preparing sequence wrapper file");
+    return SBX_EINVAL;
+  }
+
+  rc = read_text_file_alloc(path, &text);
+  if (rc != SBX_OK) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "unable to read sequence wrapper file: %s", path);
+    return rc;
+  }
+  rc = sbx_run_option_only_seq_wrapper_text(text, cb, user, errbuf, errbuf_sz);
   free(text);
   return rc;
 }

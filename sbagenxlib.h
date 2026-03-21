@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 24  /* public API contract revision */
+#define SBX_API_VERSION 25  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -277,6 +277,8 @@ typedef struct {
   char *out_path;              /* safe preamble -o path (caller frees via helper) */
 } SbxSafeSeqfilePreamble;
 
+typedef int (*SbxSeqOptionLineCallback)(const char *line, void *user);
+
 typedef struct {
   double time_sec;            /* context timeline time at snapshot */
   int source_mode;            /* SBX_SOURCE_* */
@@ -470,6 +472,26 @@ int sbx_prepare_safe_seqfile_text(const char *path,
                                   SbxSafeSeqfilePreamble *out_cfg,
                                   char *errbuf,
                                   size_t errbuf_sz);
+
+/*
+ * Recognize/execute an option-only historical `.sbg` wrapper.
+ * Success requires:
+ * - every non-comment payload line begins with '-'
+ * - at least one option line contains `-p` or `-i`
+ * On success the callback is invoked once per trimmed option line.
+ */
+int sbx_run_option_only_seq_wrapper_text(const char *text,
+                                         SbxSeqOptionLineCallback cb,
+                                         void *user,
+                                         char *errbuf,
+                                         size_t errbuf_sz);
+
+/* File-based convenience wrapper around sbx_run_option_only_seq_wrapper_text(). */
+int sbx_run_option_only_seq_wrapper_file(const char *path,
+                                         SbxSeqOptionLineCallback cb,
+                                         void *user,
+                                         char *errbuf,
+                                         size_t errbuf_sz);
 
 /*
  * ----- Parser/formatter helpers -----

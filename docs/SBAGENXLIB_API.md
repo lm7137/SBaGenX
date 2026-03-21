@@ -91,6 +91,9 @@ Core Concepts
 - `SbxSafeSeqfilePreamble`: structured result for the safe `-SE` wrapper
   subset (`-S/-E/-T/-m/-o/-q/-r/-R/-W/-F/-Z`) when front-ends want the library
   to strip and interpret those preamble lines before loading sequence text.
+- `SbxSeqOptionLineCallback`: host callback used when the library recognizes
+  and iterates a historical option-only `.sbg` wrapper whose payload consists
+  of CLI option lines such as `-p ...` or `-i ...`.
 - `SbxProgramKeyframe`: timestamp + tone + interpolation mode to next keyframe.
 - `SbxMixAmpKeyframe`: explicit `mix/<amp>` timeline point.
 - `SbxTimedMixFxKeyframeInfo`: timestamp/interp metadata for one native timed
@@ -234,6 +237,8 @@ host-side exporters and GUI tooling even though the render source remains
 - `sbx_free_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg)`
 - `sbx_prepare_safe_seq_text(const char *text, char **out_text, SbxSafeSeqfilePreamble *cfg, char *errbuf, size_t errbuf_sz)`
 - `sbx_prepare_safe_seqfile_text(const char *path, char **out_text, SbxSafeSeqfilePreamble *cfg, char *errbuf, size_t errbuf_sz)`
+- `sbx_run_option_only_seq_wrapper_text(const char *text, SbxSeqOptionLineCallback cb, void *user, char *errbuf, size_t errbuf_sz)`
+- `sbx_run_option_only_seq_wrapper_file(const char *path, SbxSeqOptionLineCallback cb, void *user, char *errbuf, size_t errbuf_sz)`
 
 This is the first library-owned export/container layer. It covers:
 
@@ -243,6 +248,8 @@ This is the first library-owned export/container layer. It covers:
 - FLAC via libsndfile
 - MP3 via libmp3lame
 - safe `-SE` preamble stripping/parsing for native sequence loading
+- classification and iteration of historical option-only wrapper files, while
+  leaving actual option semantics in the host callback
 
 The current CLI still owns live device output, but raw/WAV/OGG/FLAC/MP3 file
 writing no longer needs to live in `sbagenx.c`.

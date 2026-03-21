@@ -34,7 +34,7 @@ run_one() {
   rm -f "$out"
 }
 
-run_one "examples/basics/prog-drop-00d.sbg" "^0.000000 sine:205+10/1 mix/100 linear$" "^# extras: mix/100$"
-run_one "examples/basics/prog-slide-alpha-10.sbg" "^0.000000 sine:200+10/1 mix/100 linear$" "^# extras: mix/100$"
+run_one "examples/basics/prog-drop-00d.sbg" "^0.000000 205+10/1 mix/100 linear$" "^# extras: mix/100$"
+run_one "examples/basics/prog-slide-alpha-10.sbg" "^0.000000 200+10/1 mix/100 linear$" "^# extras: mix/100$"
 
 echo "PASS: seq backend option-wrapper example smoke test"

@@ -4498,155 +4498,32 @@ scanOptions(int *acp, char ***avp) {
 }
 
 static int
-sbx_read_text_file_alloc_cli(const char *path, char **out_text) {
-   FILE *fp;
-   long len;
-   char *buf;
-   size_t got;
-
-   if (!path || !out_text)
-      return SBX_EINVAL;
-   *out_text= 0;
-   fp= fopen(path, "rb");
-   if (!fp)
-      return SBX_EINVAL;
-   if (0 != fseek(fp, 0, SEEK_END)) {
-      fclose(fp);
-      return SBX_EINVAL;
-   }
-   len= ftell(fp);
-   if (len < 0) {
-      fclose(fp);
-      return SBX_EINVAL;
-   }
-   if (0 != fseek(fp, 0, SEEK_SET)) {
-      fclose(fp);
-      return SBX_EINVAL;
-   }
-   buf= (char *)malloc((size_t)len + 1);
-   if (!buf) {
-      fclose(fp);
-      return SBX_ENOMEM;
-   }
-   got= fread(buf, 1, (size_t)len, fp);
-   fclose(fp);
-   if (got != (size_t)len) {
-      free(buf);
-      return SBX_EINVAL;
-   }
-   buf[len]= 0;
-   *out_text= buf;
-   return SBX_OK;
-}
-
-static int
-sbx_line_contains_seq_mode_option(const char *line) {
-   char *dup, *argv[64], *p;
-   int argc= 0, i;
-
-   if (!line)
-      return 0;
-   dup= StrDup((char *)line);
-   p= dup;
-   while (*p) {
-      if (argc >= (int)(sizeof(argv) / sizeof(argv[0])))
-	 break;
-      while (isspace((unsigned char)*p)) p++;
-      if (!*p) break;
-      argv[argc++]= p;
-      while (*p && !isspace((unsigned char)*p)) p++;
-      if (*p) *p++= 0;
-   }
-   for (i= 0; i<argc; i++) {
-      if ((0 == strcmp(argv[i], "-p")) || (0 == strcmp(argv[i], "-i"))) {
-	 free(dup);
-	 return 1;
-      }
-   }
-   free(dup);
+sbx_handle_option_wrapper_line_cb(const char *line, void *user) {
+   (void)user;
+   handleOptions((char *)line);
    return 0;
 }
 
 static int
 sbx_try_run_option_only_seq_wrapper(const char *fnam) {
-   char *text, *line;
-   int rc, saw_mode= 0;
+   char errbuf[256];
+   int rc;
 
    if (!fnam || 0 == strcmp(fnam, "-"))
       return 0;
-   rc= sbx_read_text_file_alloc_cli(fnam, &text);
+   errbuf[0]= 0;
+   rc= sbx_run_option_only_seq_wrapper_file(fnam,
+					    sbx_handle_option_wrapper_line_cb,
+					    0,
+					    errbuf, sizeof(errbuf));
    if (rc == SBX_ENOMEM)
       error("Out of memory preparing sequence wrapper file");
-   if (rc != SBX_OK)
-      return 0;
-
-   /* Pass 1: classify the file without executing options. */
-   line= text;
-   while (line && *line) {
-      char *next= strchr(line, '\n');
-      char *trim= line;
-      char *end;
-
-      if (next)
-	 next++;
-      while (*trim && isspace((unsigned char)*trim)) trim++;
-      if (!*trim || *trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
-	 line= next;
-	 continue;
-      }
-      if (*trim != '-') {
-	 free(text);
-	 return 0;
-      }
-      end= line + strlen(line);
-      if (next)
-	 end= next - 1;
-      if (end > line && end[-1] == '\r')
-	 end--;
-      {
-	 char saved= *end;
-	 *end= 0;
-	 if (sbx_line_contains_seq_mode_option(trim))
-	    saw_mode= 1;
-	 *end= saved;
-      }
-      line= next;
-   }
-
-   if (!saw_mode) {
-      free(text);
+   if (rc != SBX_OK) {
+      if (errbuf[0] && 0 != strcmp(errbuf, "not an option-only sequence wrapper") &&
+	  !opt_Q)
+	 warn("Ignoring option-only wrapper on sbagenxlib path: %s", errbuf);
       return 0;
    }
-
-   /* Pass 2: execute the wrapper now that it is confirmed to be option-only. */
-   line= text;
-   while (line && *line) {
-      char *next= strchr(line, '\n');
-      char *trim= line;
-      char *end;
-
-      if (next)
-	 next++;
-      while (*trim && isspace((unsigned char)*trim)) trim++;
-      if (!*trim || *trim == '#' || *trim == ';' || (*trim == '/' && trim[1] == '/')) {
-	 line= next;
-	 continue;
-      }
-      end= line + strlen(line);
-      if (next)
-	 end= next - 1;
-      if (end > line && end[-1] == '\r')
-	 end--;
-      {
-	 char saved= *end;
-	 *end= 0;
-	 handleOptions(trim);
-	 *end= saved;
-      }
-      line= next;
-   }
-
-   free(text);
    return 1;
 }
 
