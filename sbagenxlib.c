@@ -3495,6 +3495,102 @@ sbx_parse_immediate_tokens(const char *const *tokens,
   return SBX_OK;
 }
 
+int
+sbx_parse_runtime_extra_text(const char *extra,
+                             const SbxImmediateParseConfig *cfg,
+                             SbxRuntimeExtraSpec *out_spec,
+                             char *errbuf,
+                             size_t errbuf_sz) {
+  SbxImmediateParseConfig local_cfg;
+  const char *p = extra;
+
+  if (errbuf && errbuf_sz) errbuf[0] = 0;
+  if (!out_spec) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "internal error parsing runtime extra token text");
+    return SBX_EINVAL;
+  }
+
+  sbx_default_immediate_parse_config(&local_cfg);
+  if (cfg)
+    local_cfg = *cfg;
+
+  sbx_default_runtime_extra_spec(out_spec);
+  while (p && *p) {
+    const char *s = p;
+    const char *e;
+    int n;
+    char tok[256];
+    int extra_type = SBX_EXTRA_INVALID;
+    SbxToneSpec tone;
+    SbxMixFxSpec mix_fx;
+    double mix_pct = out_spec->mix_amp_pct;
+
+    while (*s && isspace((unsigned char)*s)) s++;
+    if (!*s) break;
+    e = s;
+    while (*e && !isspace((unsigned char)*e)) e++;
+    n = (int)(e - s);
+    if (n >= (int)sizeof(tok)) n = (int)sizeof(tok) - 1;
+    memcpy(tok, s, (size_t)n);
+    tok[n] = 0;
+
+    if (SBX_OK == sbx_parse_extra_token(tok,
+                                        local_cfg.default_waveform,
+                                        &extra_type,
+                                        &tone,
+                                        &mix_fx,
+                                        &mix_pct)) {
+      if (extra_type == SBX_EXTRA_MIXAMP) {
+        out_spec->have_mix = 1;
+        out_spec->mix_amp_pct = mix_pct;
+      } else if (extra_type == SBX_EXTRA_MIXFX) {
+        sbx_apply_immediate_mixam_override(&mix_fx, &local_cfg);
+        if (out_spec->mix_fx_count >= SBX_MAX_AUX_TONES) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "too many extra sbagenxlib mix effect specs (max %d)",
+                            SBX_MAX_AUX_TONES);
+          return SBX_EINVAL;
+        }
+        out_spec->mix_fx[out_spec->mix_fx_count++] = mix_fx;
+      } else if (extra_type == SBX_EXTRA_TONE) {
+        sbx_apply_immediate_iso_override(&tone, &local_cfg);
+        if (out_spec->aux_count >= SBX_MAX_AUX_TONES) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "too many extra sbagenxlib tone-specs (max %d)",
+                            SBX_MAX_AUX_TONES);
+          return SBX_EINVAL;
+        }
+        out_spec->aux_tones[out_spec->aux_count++] = tone;
+      }
+    } else {
+      out_spec->unsupported = 1;
+      if (!out_spec->bad_token[0]) {
+        size_t copy_n = strlen(tok);
+        if (copy_n >= sizeof(out_spec->bad_token))
+          copy_n = sizeof(out_spec->bad_token) - 1;
+        memcpy(out_spec->bad_token, tok, copy_n);
+        out_spec->bad_token[copy_n] = 0;
+      }
+    }
+
+    p = e;
+  }
+
+  return SBX_OK;
+}
+
+int
+sbx_runtime_extra_has_mixam(const SbxRuntimeExtraSpec *spec) {
+  size_t i;
+  if (!spec) return 0;
+  for (i = 0; i < spec->mix_fx_count; i++) {
+    if (spec->mix_fx[i].type == SBX_MIXFX_AM)
+      return 1;
+  }
+  return 0;
+}
+
 static const char *
 wave_name_for_tone(int waveform) {
   switch (waveform) {
@@ -3792,6 +3888,13 @@ sbx_default_immediate_parse_config(SbxImmediateParseConfig *cfg) {
   cfg->mixam_release = 0.5;
   cfg->mixam_edge_mode = 2;
   cfg->mixam_floor = 0.5;
+}
+
+void
+sbx_default_runtime_extra_spec(SbxRuntimeExtraSpec *spec) {
+  if (!spec) return;
+  memset(spec, 0, sizeof(*spec));
+  spec->mix_amp_pct = 100.0;
 }
 
 void

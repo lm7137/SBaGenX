@@ -718,24 +718,12 @@ typedef struct {
 } FuncCurve;
 FuncCurve func_curve;		// Runtime function curve for pre-programmed sequences
 
-typedef struct {
-   int have_mix;
-   double mix_amp_pct;
-   SbxToneSpec aux_tones[SBX_MAX_AUX_TONES];
-   size_t aux_count;
-   SbxMixFxSpec mix_fx[SBX_MAX_AUX_TONES];
-   size_t mix_fx_count;
-   int unsupported;
-   char bad_token[128];
-} SbxRuntimeExtraSpec;
-
 static void sbx_runtime_clear(void);
 static void sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
 						double mix_amp_pct,
 						const SbxToneSpec *aux_tones, size_t aux_count,
 						const SbxMixFxSpec *mix_fx, size_t mix_fx_count,
 						const SbxMixAmpKeyframe *mkf, size_t mkf_n);
-static int sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec);
 
 int sbx_runtime_active= 0;
 double sbx_runtime_total_sec= 0.0;
@@ -8114,18 +8102,29 @@ apply_mixam_envelope_override(SbxMixFxSpec *fx) {
 }
 
 static void
-apply_iso_envelope_override(SbxToneSpec *tone) {
-   if (!tone || !opt_I)
+sbx_fill_immediate_parse_cfg(SbxImmediateParseConfig *cfg) {
+   if (!cfg)
       return;
-   if (tone->mode != SBX_TONE_ISOCHRONIC)
-      return;
-   if (tone->envelope_waveform != SBX_ENV_WAVE_NONE)
-      return;
-   tone->iso_start= opt_I_s;
-   tone->duty_cycle= opt_I_d;
-   tone->iso_attack= opt_I_a;
-   tone->iso_release= opt_I_r;
-   tone->iso_edge_mode= opt_I_e;
+   sbx_default_immediate_parse_config(cfg);
+   cfg->default_waveform= opt_w;
+   if (opt_I) {
+      cfg->have_iso_override= 1;
+      cfg->iso_env.start= opt_I_s;
+      cfg->iso_env.duty= opt_I_d;
+      cfg->iso_env.attack= opt_I_a;
+      cfg->iso_env.release= opt_I_r;
+      cfg->iso_env.edge_mode= opt_I_e;
+   }
+   if (opt_H) {
+      cfg->have_mixam_override= 1;
+      cfg->mixam_mode= opt_H_m;
+      cfg->mixam_start= opt_H_s;
+      cfg->mixam_duty= opt_H_d;
+      cfg->mixam_attack= opt_H_a;
+      cfg->mixam_release= opt_H_r;
+      cfg->mixam_edge_mode= opt_H_e;
+      cfg->mixam_floor= opt_H_f;
+   }
 }
 
 static int
@@ -8882,26 +8881,7 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
 
    sbx_clear_runtime_reject_reason();
 
-   sbx_default_immediate_parse_config(&parse_cfg);
-   parse_cfg.default_waveform= opt_w;
-   if (opt_I) {
-      parse_cfg.have_iso_override= 1;
-      parse_cfg.iso_env.start= opt_I_s;
-      parse_cfg.iso_env.duty= opt_I_d;
-      parse_cfg.iso_env.attack= opt_I_a;
-      parse_cfg.iso_env.release= opt_I_r;
-      parse_cfg.iso_env.edge_mode= opt_I_e;
-   }
-   if (opt_H) {
-      parse_cfg.have_mixam_override= 1;
-      parse_cfg.mixam_mode= opt_H_m;
-      parse_cfg.mixam_start= opt_H_s;
-      parse_cfg.mixam_duty= opt_H_d;
-      parse_cfg.mixam_attack= opt_H_a;
-      parse_cfg.mixam_release= opt_H_r;
-      parse_cfg.mixam_edge_mode= opt_H_e;
-      parse_cfg.mixam_floor= opt_H_f;
-   }
+   sbx_fill_immediate_parse_cfg(&parse_cfg);
 
    errbuf[0]= 0;
    if (SBX_OK != sbx_parse_immediate_tokens((const char *const *)av, (size_t)ac,
@@ -9136,56 +9116,18 @@ sbx_emit_periods_from_keyframes_with_extra(const SbxProgramKeyframe *kfs, size_t
    sbx_context_destroy(ctx);
 }
 
-static int
-sbx_parse_runtime_extra_tokens(const char *extra, SbxRuntimeExtraSpec *spec) {
-   const char *p= extra;
-   if (!spec) return 0;
-   memset(spec, 0, sizeof(*spec));
-   spec->mix_amp_pct= 100.0;
-   while (p && *p) {
-      const char *s= p;
-      const char *e;
-      int n;
-      char tok[256];
-      while (*s && isspace((unsigned char)*s)) s++;
-      if (!*s) break;
-      e= s;
-      while (*e && !isspace((unsigned char)*e)) e++;
-      n= (int)(e-s);
-      if (n >= (int)sizeof(tok)) n= sizeof(tok)-1;
-      memcpy(tok, s, n);
-      tok[n]= 0;
-      {
-	 int extra_type= SBX_EXTRA_INVALID;
-	 SbxMixFxSpec mix_fx;
-	 SbxToneSpec tone;
-	 double mix_pct= spec->mix_amp_pct;
-	 if (SBX_OK == sbx_parse_extra_token(tok, opt_w, &extra_type, &tone, &mix_fx, &mix_pct)) {
-	    if (extra_type == SBX_EXTRA_MIXAMP) {
-	       spec->have_mix= 1;
-	       spec->mix_amp_pct= mix_pct;
-	    } else if (extra_type == SBX_EXTRA_MIXFX) {
-	       apply_mixam_envelope_override(&mix_fx);
-	       if (spec->mix_fx_count >= SBX_MAX_AUX_TONES)
-		  error("Too many extra sbagenxlib mix effect specs (max %d)", SBX_MAX_AUX_TONES);
-	       spec->mix_fx[spec->mix_fx_count++]= mix_fx;
-	    } else if (extra_type == SBX_EXTRA_TONE) {
-	       apply_iso_envelope_override(&tone);
-	       if (spec->aux_count >= SBX_MAX_AUX_TONES)
-		  error("Too many extra sbagenxlib tone-specs (max %d)", SBX_MAX_AUX_TONES);
-	       spec->aux_tones[spec->aux_count++]= tone;
-	    }
-	 } else {
-	    spec->unsupported= 1;
-	    if (!spec->bad_token[0]) {
-	       strncpy(spec->bad_token, tok, sizeof(spec->bad_token)-1);
-	       spec->bad_token[sizeof(spec->bad_token)-1]= 0;
-	    }
-	 }
-      }
-      p= e;
-   }
-   return 1;
+static void
+sbx_parse_runtime_extra_or_die(const char *extra, SbxRuntimeExtraSpec *spec) {
+   SbxImmediateParseConfig cfg;
+   char errbuf[256];
+
+   if (!spec)
+      error("Internal error parsing runtime extra token list");
+   sbx_fill_immediate_parse_cfg(&cfg);
+   errbuf[0]= 0;
+   if (SBX_OK != sbx_parse_runtime_extra_text(extra ? extra : "", &cfg,
+					      spec, errbuf, sizeof(errbuf)))
+      error("%s", errbuf[0] ? errbuf : "Failed to parse runtime extra token list");
 }
 
 static void
@@ -9196,17 +9138,6 @@ sbx_validate_runtime_extra_mix_fx(const char *prog_name, const SbxRuntimeExtraSp
       error("%s mix effects require a mix input stream (-m / -M)", prog_name ? prog_name : "sbagenx");
    if (!spec->have_mix)
       error("%s mix effects require mix/<amp> in extra tone-specs", prog_name ? prog_name : "sbagenx");
-}
-
-static int
-sbx_runtime_extra_has_mixam(const SbxRuntimeExtraSpec *spec) {
-   size_t i;
-   if (!spec) return 0;
-   for (i= 0; i<spec->mix_fx_count; i++) {
-      if (spec->mix_fx[i].type == SBX_MIXFX_AM)
-	 return 1;
-   }
-   return 0;
 }
 
 static void
@@ -9493,8 +9424,7 @@ create_drop(int ac, char **av) {
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
 
-   if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
-      error("Internal error parsing -p drop extra tone-specs");
+   sbx_parse_runtime_extra_or_die(extra, &extra_spec);
 
    if (opt_P && !opt_G && !opt_H && sbx_runtime_extra_has_mixam(&extra_spec)) {
       write_mixam_cycle_graph_png();
@@ -9812,8 +9742,7 @@ create_sigmoid(int ac, char **av) {
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
 
-   if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
-      error("Internal error parsing -p sigmoid extra tone-specs");
+   sbx_parse_runtime_extra_or_die(extra, &extra_spec);
 
    if (opt_P && !opt_G && !opt_H && sbx_runtime_extra_has_mixam(&extra_spec)) {
       write_mixam_cycle_graph_png();
@@ -10176,8 +10105,7 @@ create_curve(int ac, char **av) {
    if (!eval_custom_curve_point(0.0, &beat_start_eval, &carr_start_eval, &amp_start_eval, &mix_start_eval))
       error("Custom curve evaluation failed at session start");
 
-   if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
-      error("Internal error parsing -p curve extra tone-specs");
+   sbx_parse_runtime_extra_or_die(extra, &extra_spec);
 
    if (opt_P && !opt_G && !opt_H && sbx_runtime_extra_has_mixam(&extra_spec)) {
       clear_func_curve();
@@ -10423,8 +10351,7 @@ create_slide(int ac, char **av) {
       SbxKfBuilder kfb= {0};
       SbxToneSpec tone;
 
-      if (!sbx_parse_runtime_extra_tokens(extra, &extra_spec))
-	 error("Internal error parsing -p slide extra tone-specs");
+      sbx_parse_runtime_extra_or_die(extra, &extra_spec);
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
 	 warn("mix/<amp> was specified in -p slide extras but no mix input stream is active");
       sbx_validate_runtime_extra_mix_fx("-p slide", &extra_spec);

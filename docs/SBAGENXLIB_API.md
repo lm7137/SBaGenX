@@ -97,6 +97,8 @@ Core Concepts
 - `SbxImmediateParseConfig` / `SbxImmediateSpec`: library-owned immediate
   token-list parsing surface for `-i` style token lists, including optional
   `-I`/`-H` style normalization overrides.
+- `SbxRuntimeExtraSpec`: parsed extra-token list used by built-in/runtime
+  program paths (`-p drop`, `-p sigmoid`, `-p curve`, `-p slide`).
 - `SbxProgramKeyframe`: timestamp + tone + interpolation mode to next keyframe.
 - `SbxMixAmpKeyframe`: explicit `mix/<amp>` timeline point.
 - `SbxTimedMixFxKeyframeInfo`: timestamp/interp metadata for one native timed
@@ -244,6 +246,9 @@ host-side exporters and GUI tooling even though the render source remains
 - `sbx_run_option_only_seq_wrapper_file(const char *path, SbxSeqOptionLineCallback cb, void *user, char *errbuf, size_t errbuf_sz)`
 - `sbx_default_immediate_parse_config(SbxImmediateParseConfig *cfg)`
 - `sbx_parse_immediate_tokens(const char *const *tokens, size_t token_count, const SbxImmediateParseConfig *cfg, SbxImmediateSpec *out_spec, char *errbuf, size_t errbuf_sz)`
+- `sbx_default_runtime_extra_spec(SbxRuntimeExtraSpec *spec)`
+- `sbx_parse_runtime_extra_text(const char *extra, const SbxImmediateParseConfig *cfg, SbxRuntimeExtraSpec *out_spec, char *errbuf, size_t errbuf_sz)`
+- `sbx_runtime_extra_has_mixam(const SbxRuntimeExtraSpec *spec)`
 
 This is the first library-owned export/container layer. It covers:
 
@@ -258,6 +263,8 @@ This is the first library-owned export/container layer. It covers:
 - immediate token-list classification/normalization for `-i` frontends, while
   leaving host policy checks (for example active mix-input requirements) in the
   frontend
+- built-in/runtime extra-token parsing for host paths that accept a
+  whitespace-delimited tail of extra tones/effects after a generated program
 
 The current CLI still owns live device output, but raw/WAV/OGG/FLAC/MP3 file
 writing no longer needs to live in `sbagenx.c`.

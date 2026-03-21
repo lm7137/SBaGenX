@@ -1258,6 +1258,9 @@ Notes:
   `SbxImmediateParseConfig` / `SbxImmediateSpec`, so frontends no longer need
   to iterate and classify tone/mix/mixfx tokens themselves before activating a
   runtime context.
+- Built-in/runtime extra-token parsing is now also library-owned via
+  `SbxRuntimeExtraSpec`, so `-p drop` / `-p sigmoid` / `-p curve` / `-p slide`
+  no longer depend on a CLI-private token walker for their extra tail.
 
 Developer docs:
 

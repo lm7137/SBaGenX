@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 26  /* public API contract revision */
+#define SBX_API_VERSION 27  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -303,6 +303,17 @@ typedef struct {
 } SbxImmediateSpec;
 
 typedef struct {
+  int have_mix;
+  double mix_amp_pct;
+  SbxToneSpec aux_tones[SBX_MAX_AUX_TONES];
+  size_t aux_count;
+  SbxMixFxSpec mix_fx[SBX_MAX_AUX_TONES];
+  size_t mix_fx_count;
+  int unsupported;
+  char bad_token[128];
+} SbxRuntimeExtraSpec;
+
+typedef struct {
   double time_sec;            /* context timeline time at snapshot */
   int source_mode;            /* SBX_SOURCE_* */
   SbxToneSpec primary_tone;   /* evaluated primary tone at time_sec */
@@ -526,6 +537,23 @@ int sbx_parse_immediate_tokens(const char *const *tokens,
                                SbxImmediateSpec *out_spec,
                                char *errbuf,
                                size_t errbuf_sz);
+
+/* Fill extra-spec with defaults for built-in/runtime extra-token parsing. */
+void sbx_default_runtime_extra_spec(SbxRuntimeExtraSpec *spec);
+
+/*
+ * Parse a whitespace-delimited extra-token list used by built-in/runtime paths.
+ * Unsupported tokens are recorded in out_spec->unsupported/bad_token without
+ * failing the call so frontends can decide how to surface them.
+ */
+int sbx_parse_runtime_extra_text(const char *extra,
+                                 const SbxImmediateParseConfig *cfg,
+                                 SbxRuntimeExtraSpec *out_spec,
+                                 char *errbuf,
+                                 size_t errbuf_sz);
+
+/* Convenience helper for front-ends that need to detect AM/mixam extras. */
+int sbx_runtime_extra_has_mixam(const SbxRuntimeExtraSpec *spec);
 
 /*
  * ----- Parser/formatter helpers -----
