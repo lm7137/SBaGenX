@@ -1106,6 +1106,7 @@ parse_sbg_timeline_time_token(const char *tok,
                               double *out_sec) {
   const char *p;
   double tim = -1.0;
+  double anchor_sec = -1.0;
   double seg = 0.0;
   size_t used = 0;
   const double day_sec = 24.0 * 60.0 * 60.0;
@@ -1116,6 +1117,7 @@ parse_sbg_timeline_time_token(const char *tok,
 
   if (strncasecmp(p, "NOW", 3) == 0) {
     tim = 0.0;
+    anchor_sec = 0.0;
     p += 3;
   }
 
@@ -1128,6 +1130,7 @@ parse_sbg_timeline_time_token(const char *tok,
         if (*inout_last_abs_sec < 0.0)
           return SBX_EINVAL;
         tim = *inout_last_abs_sec;
+        anchor_sec = *inout_last_abs_sec;
       }
       tim += seg;
       p += used;
@@ -1142,6 +1145,7 @@ parse_sbg_timeline_time_token(const char *tok,
         while (tim < *inout_last_abs_sec)
           tim += day_sec;
       }
+      anchor_sec = tim;
       p += used;
       continue;
     }
@@ -1150,7 +1154,8 @@ parse_sbg_timeline_time_token(const char *tok,
   }
 
   if (tim < 0.0) return SBX_EINVAL;
-  *inout_last_abs_sec = tim;
+  if (anchor_sec >= 0.0)
+    *inout_last_abs_sec = anchor_sec;
   *out_sec = tim;
   return SBX_OK;
 }

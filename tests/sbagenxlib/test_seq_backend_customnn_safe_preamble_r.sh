@@ -41,8 +41,8 @@ if ! grep -q "# sbagenxlib keyframes" "$tmpdir/debug.txt"; then
   exit 1
 fi
 
-if ! grep -q "780.000000 - linear" "$tmpdir/debug.txt"; then
-  echo "FAIL: expected final keyframe at 780s for relative +00:08:00 syntax" >&2
+if ! grep -q "480.000000 - linear" "$tmpdir/debug.txt"; then
+  echo "FAIL: expected final keyframe at 480s for legacy-relative +00:08:00 syntax" >&2
   cat "$tmpdir/debug.txt" >&2
   exit 1
 fi
@@ -78,4 +78,4 @@ if abs(dur - 480.0) > 0.01:
     raise SystemExit(f"unexpected duration {dur}")
 PY
 
-echo "PASS: customNN safe preamble accepts -R/-W and preserves expected duration semantics"
+echo "PASS: customNN safe preamble accepts -R/-W and matches legacy relative timing semantics"
