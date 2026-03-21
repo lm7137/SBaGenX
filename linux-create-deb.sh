@@ -282,16 +282,15 @@ if [ -n "$STATIC_ARCHIVE" ]; then
     cp "$STATIC_ARCHIVE" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/libsbagenx.a"
 fi
 
+SO_MAJOR="${RAW_VERSION%%.*}"
 if [ -L "dist/libsbagenx.so" ] || [ -f "dist/libsbagenx.so" ]; then
     cp -a "dist/libsbagenx.so" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/"
 fi
-SO_MAJOR_LINK=$(find dist -maxdepth 1 -type l -name 'libsbagenx.so.*' | head -n 1)
-if [ -n "$SO_MAJOR_LINK" ]; then
-    cp -a "$SO_MAJOR_LINK" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/"
+if [ -L "dist/libsbagenx.so.${SO_MAJOR}" ] || [ -f "dist/libsbagenx.so.${SO_MAJOR}" ]; then
+    cp -a "dist/libsbagenx.so.${SO_MAJOR}" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/"
 fi
-SO_REAL=$(find dist -maxdepth 1 -type f -name 'libsbagenx.so.*' | head -n 1)
-if [ -n "$SO_REAL" ]; then
-    cp "$SO_REAL" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/"
+if [ -f "dist/libsbagenx.so.${RAW_VERSION}" ]; then
+    cp "dist/libsbagenx.so.${RAW_VERSION}" "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/"
 fi
 
 if [ -f "dist/pkgconfig/sbagenxlib.pc" ]; then

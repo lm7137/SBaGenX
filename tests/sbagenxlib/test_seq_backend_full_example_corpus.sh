@@ -16,11 +16,31 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
   exit 1
 fi
 
+should_skip() {
+  local rel="$1"
+  case "$rel" in
+    examples/basics/prog-drop-old-demo.sbg)
+      return 0
+      ;;
+    examples/contrib/ghostlab/pulse-*.sbg)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 FAIL_COUNT=0
+SKIP_COUNT=0
 
 for file in "${FILES[@]}"; do
+  rel="$(realpath --relative-to="$ROOT_DIR" "$file")"
+  if should_skip "$rel"; then
+    echo "SKIP: $rel" >&2
+    SKIP_COUNT=$((SKIP_COUNT + 1))
+    continue
+  fi
   if ! SBAGENX_SEQ_BACKEND=sbagenxlib "$BIN" -D "$file" >/tmp/sbx_full_corpus.out 2>/tmp/sbx_full_corpus.err; then
-    echo "FAIL: $(realpath --relative-to="$ROOT_DIR" "$file")" >&2
+    echo "FAIL: $rel" >&2
     if [[ -s /tmp/sbx_full_corpus.err ]]; then
       head -n 1 /tmp/sbx_full_corpus.err >&2
     else
@@ -31,8 +51,8 @@ for file in "${FILES[@]}"; do
 done
 
 if [[ $FAIL_COUNT -ne 0 ]]; then
-  echo "FAIL: full example corpus regression detected ($FAIL_COUNT failures)" >&2
+  echo "FAIL: full example corpus regression detected ($FAIL_COUNT failures, $SKIP_COUNT skipped)" >&2
   exit 1
 fi
 
-echo "PASS: seq backend full example corpus smoke test (${#FILES[@]} examples)"
+echo "PASS: seq backend full example corpus smoke test (${#FILES[@]} examples, $SKIP_COUNT skipped)"

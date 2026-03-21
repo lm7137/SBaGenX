@@ -29,13 +29,13 @@ SEQ
 
 "$BIN" -D "$seq_file" > "$out_file"
 
-grep -q "triangle:300.00@4.00" "$out_file"
-grep -q "square:bell280.00/10.00" "$out_file"
-grep -q "sine:spin:60.00+1.50" "$out_file"
-grep -q "sine:bspin:80.00-1.00" "$out_file"
-grep -q "sine:wspin:70.00+0.50" "$out_file"
-grep -q "sine:mixbeat:2.00/10.00" "$out_file"
-grep -q "pink/10.00" "$out_file"
-grep -q "brown/10.00" "$out_file"
+grep -q "triangle:300@4/10" "$out_file"
+grep -q "square:bell280/10" "$out_file"
+grep -q "sine:spin:60+1.5/10" "$out_file"
+grep -q "sine:bspin:80-1/10" "$out_file"
+grep -q "sine:wspin:70+0.5/10" "$out_file"
+grep -q "sine:mixbeat:2/10" "$out_file"
+grep -q "pink/10" "$out_file"
+grep -q "brown/10" "$out_file"
 
 echo "PASS: legacy sequence parser bridge smoke test"

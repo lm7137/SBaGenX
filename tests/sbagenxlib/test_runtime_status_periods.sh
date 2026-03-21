@@ -57,12 +57,12 @@ grep -Fq "  00:00:02" "$tmpdir/err.txt" || {
   exit 1
 }
 
-grep -Fq "* 00:00:00 180+0/20 mix/70.00" "$tmpdir/err.txt" || {
+grep -Fq "* 00:00:00 sine:180+0/20 mix/70.00" "$tmpdir/err.txt" || {
   echo "FAIL: initial keyframe period header is missing mix state" >&2
   exit 1
 }
 
-grep -Fq "  00:00:02 260+0/20 mix/40.00" "$tmpdir/err.txt" || {
+grep -Fq "  00:00:02 sine:260+0/20 mix/40.00" "$tmpdir/err.txt" || {
   echo "FAIL: next-period keyframe line is missing mix state" >&2
   exit 1
 }

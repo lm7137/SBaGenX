@@ -22,7 +22,7 @@ grep -q "^# sbagenxlib keyframes" "$out" || {
   exit 1
 }
 
-grep -q "^0.000000 200+4/20 linear$" "$out" || {
+grep -q "^0.000000 sine:200+4/20 linear$" "$out" || {
   echo "FAIL: stdin native sequence missing expected keyframe content" >&2
   cat "$out" >&2
   exit 1
