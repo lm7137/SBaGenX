@@ -9013,90 +9013,6 @@ sbx_runtime_activate_from_curve_program(SbxCurveProgram **curvep,
    sbx_runtime_apply_mix_mod();
 }
 
-static SbxCurveProgram *
-sbx_build_drop_curve_program(double c0, double c1,
-			     double beat_start, double beat_target,
-			     double drop_sec, double hold_sec, double wake_sec,
-			     double amp_pct) {
-   SbxCurveProgram *curve;
-   SbxCurveEvalConfig cfg;
-   char text[2048];
-
-   curve= sbx_curve_create();
-   if (!curve)
-      error("Out of memory creating built-in drop curve");
-
-   sbx_default_curve_eval_config(&cfg);
-   cfg.carrier_start_hz= c0;
-   cfg.carrier_end_hz= c1;
-   cfg.carrier_span_sec= drop_sec + hold_sec;
-   cfg.beat_start_hz= beat_start;
-   cfg.beat_target_hz= beat_target;
-   cfg.beat_span_sec= drop_sec;
-   cfg.hold_min= hold_sec / 60.0;
-   cfg.total_min= (drop_sec + hold_sec) / 60.0;
-   cfg.wake_min= wake_sec / 60.0;
-   cfg.beat_amp0_pct= amp_pct;
-   cfg.mix_amp0_pct= 100.0;
-
-   snprintf(text, sizeof(text),
-	    "beat = ifelse(lt(m,D), b0*exp(ln(b1/b0)*(m/D)), "
-	    "ifelse(gt(U,0), ifelse(lt(m,T), b1, seg(m,T,T+U,b1,b0)), b1))\n"
-	    "carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), "
-	    "ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))\n"
-	    "amp = ifelse(lt(t,(T+U)*60), a0, "
-	    "ifelse(lt(t,(T+U)*60+10), a0*(1-ramp(t,(T+U)*60,(T+U)*60+10)), 0))\n");
-   if (sbx_curve_load_text(curve, text, "<built-in-drop>") != SBX_OK ||
-       sbx_curve_prepare(curve, &cfg) != SBX_OK)
-      curve_report_error(curve, "Failed to prepare built-in drop curve");
-   return curve;
-}
-
-static SbxCurveProgram *
-sbx_build_sigmoid_curve_program(double c0, double c1,
-				double beat_start, double beat_target,
-				double drop_sec, double hold_sec, double wake_sec,
-				double amp_pct,
-				double sig_l, double sig_h, double sig_a, double sig_b) {
-   SbxCurveProgram *curve;
-   SbxCurveEvalConfig cfg;
-   char text[4096];
-
-   curve= sbx_curve_create();
-   if (!curve)
-      error("Out of memory creating built-in sigmoid curve");
-
-   sbx_default_curve_eval_config(&cfg);
-   cfg.carrier_start_hz= c0;
-   cfg.carrier_end_hz= c1;
-   cfg.carrier_span_sec= drop_sec + hold_sec;
-   cfg.beat_start_hz= beat_start;
-   cfg.beat_target_hz= beat_target;
-   cfg.beat_span_sec= drop_sec;
-   cfg.hold_min= hold_sec / 60.0;
-   cfg.total_min= (drop_sec + hold_sec) / 60.0;
-   cfg.wake_min= wake_sec / 60.0;
-   cfg.beat_amp0_pct= amp_pct;
-   cfg.mix_amp0_pct= 100.0;
-
-   snprintf(text, sizeof(text),
-	    "param l = %.17g\n"
-	    "param h = %.17g\n"
-	    "param A = %.17g\n"
-	    "param B = %.17g\n"
-	    "beat = ifelse(lt(m,D), A*tanh(l*(m-D/2-h))+B, "
-	    "ifelse(gt(U,0), ifelse(lt(m,T), b1, seg(m,T,T+U,b1,b0)), b1))\n"
-	    "carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), "
-	    "ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))\n"
-	    "amp = ifelse(lt(t,(T+U)*60), a0, "
-	    "ifelse(lt(t,(T+U)*60+10), a0*(1-ramp(t,(T+U)*60,(T+U)*60+10)), 0))\n",
-	    sig_l, sig_h, sig_a, sig_b);
-   if (sbx_curve_load_text(curve, text, "<built-in-sigmoid>") != SBX_OK ||
-       sbx_curve_prepare(curve, &cfg) != SBX_OK)
-      curve_report_error(curve, "Failed to prepare built-in sigmoid curve");
-   return curve;
-}
-
 static void
 sbx_emit_periods_from_keyframes_with_extra(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
 					   const char *extra) {
@@ -9447,7 +9363,7 @@ create_drop(int ac, char **av) {
 
    {
       SbxKfBuilder kfb= {0};
-      SbxToneSpec tone;
+      SbxBuiltinDropConfig prog_cfg;
       int end_sec;
 
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
@@ -9491,13 +9407,21 @@ create_drop(int ac, char **av) {
 	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
       }
 
+      sbx_default_builtin_drop_config(&prog_cfg);
+      sbx_fill_tone_spec(&prog_cfg.start_tone, isisochronic, ismono, c0, beat_start, amp);
+      prog_cfg.carrier_end_hz= c2;
+      prog_cfg.beat_target_hz= beat_target;
+      prog_cfg.drop_sec= len0;
+      prog_cfg.hold_sec= islong ? len1 : 0;
+      prog_cfg.wake_sec= wakeup ? len2 : 0;
+      prog_cfg.slide= slide;
+      prog_cfg.step_len_sec= steplen;
+      prog_cfg.fade_sec= 10;
+
       if (slide && !opt_D) {
-	 SbxCurveProgram *curve=
-	    sbx_build_drop_curve_program(c0, c2,
-					 beat_start, beat_target,
-					 (double)len0, islong ? (double)len1 : 0.0,
-					 wakeup ? (double)len2 : 0.0,
-					 amp);
+	 SbxCurveProgram *curve= 0;
+	 if (sbx_build_drop_curve_program(&prog_cfg, &curve) != SBX_OK)
+	    error("Failed to prepare built-in drop curve");
 	 end_sec= len + (wakeup ? len2 : 0);
 	 sbx_handle_runtime_unsupported_extra("-p drop", &extra_spec);
 	 sbx_runtime_activate_from_curve_program(&curve,
@@ -9507,41 +9431,11 @@ create_drop(int ac, char **av) {
 						 extra_spec.aux_tones, extra_spec.aux_count,
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
 						 0, 0);
-      } else if (slide) {
-	 for (a= 0; a<n_step; a++) {
-	    double tim= a * len0 / (double)(n_step-1);
-	    double carr_t= c0 + (c2-c0) * tim / len;
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat[a], amp);
-	    sbx_kfb_add(&kfb, tim, &tone, SBX_INTERP_LINEAR);
-	 }
-	 if (islong) {
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, c2, beat[n_step-1], amp);
-	    sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
-	 }
-	 end_sec= len;
       } else {
-	 int lim= len / steplen;
-	 for (a= 0; a<lim; a++) {
-	    int tim0= a * steplen;
-	    int tim1= (a+1) * steplen;
-	    double carr_t= c0 + (c2-c0) * tim1/len;
-	    double beat_t= beat[(a>=n_step) ? n_step-1 : a];
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat_t, amp);
-	    sbx_kfb_add(&kfb, (double)tim0, &tone, SBX_INTERP_STEP);
-	 }
-	 sbx_fill_tone_spec(&tone, isisochronic, ismono, c2, beat[n_step-1], amp);
-	 sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_STEP);
-	 end_sec= len;
+	 if (sbx_build_drop_keyframes(&prog_cfg, &kfb.v, &kfb.n) != SBX_OK)
+	    error("Failed to build built-in drop keyframes");
+	 end_sec= len + (wakeup ? len2 : 0);
       }
-
-      if (wakeup) {
-	 sbx_fill_tone_spec(&tone, isisochronic, ismono, c0, beat[0], amp);
-	 sbx_kfb_add(&kfb, (double)(end_sec + len2), &tone, SBX_INTERP_LINEAR);
-	 end_sec += len2;
-      }
-
-      sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
-      sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
       if (!slide || opt_D)
 	 sbx_handle_runtime_unsupported_extra("-p drop", &extra_spec);
@@ -9606,7 +9500,7 @@ create_sigmoid(int ac, char **av) {
    int len, len0= 1800, len1= 1800, len2= 180;
    int steplen;
    double sig_l= 0.125, sig_h= 0.0;
-   double d_min, u0, u1, den, sig_a, sig_b;
+   double sig_a, sig_b;
 
 #define BAD bad_sigmoid()
 
@@ -9730,14 +9624,9 @@ create_sigmoid(int ac, char **av) {
    // Keep the same linear carrier drop rate in hold as in drop.
    // Drop phase always drops 5Hz over len0 seconds.
    c2= islong ? (carr - (5.0 * len1 / len0)) : carr;
-   d_min= len0 / 60.0;
-   u0= tanh(sig_l * (0.0 - d_min/2 - sig_h));
-   u1= tanh(sig_l * (d_min - d_min/2 - sig_h));
-   den= u1 - u0;
-   if (fabs(den) < 1e-9)
+   if (sbx_compute_sigmoid_coefficients(len0, beat_start, beat_target,
+					sig_l, sig_h, &sig_a, &sig_b) != SBX_OK)
       error("Sigmoid parameters produce an invalid curve (try different l/h values)");
-   sig_a= (beat_target - beat_start) / den;
-   sig_b= beat_start - sig_a * u0;
 
    if (opt_A)
       setup_mix_mod_curve(opt_A_d, opt_A_e, opt_A_k, opt_A_E, len/60.0, len2/60.0, wakeup);
@@ -9759,16 +9648,14 @@ create_sigmoid(int ac, char **av) {
    // Calculate display/checkpoint beat values
    for (a= 0; a<n_step; a++) {
       double tim= a * len0 / (double)(n_step-1);
-      double t_min= tim / 60.0;
-      if (t_min >= d_min)
-	 beat[a]= beat_target;
-      else
-	 beat[a]= sig_a * tanh(sig_l * (t_min - d_min/2 - sig_h)) + sig_b;
+      beat[a]= (tim >= len0)
+	 ? beat_target
+	 : sig_a * tanh(sig_l * (tim / 60.0 - (len0 / 120.0) - sig_h)) + sig_b;
    }
 
    {
       SbxKfBuilder kfb= {0};
-      SbxToneSpec tone;
+      SbxBuiltinSigmoidConfig prog_cfg;
       int end_sec;
 
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
@@ -9813,14 +9700,23 @@ create_sigmoid(int ac, char **av) {
 	 warn(" Note: status line shows runtime-effective mix/<amp> when -A is active.");
       }
 
+      sbx_default_builtin_sigmoid_config(&prog_cfg);
+      sbx_fill_tone_spec(&prog_cfg.start_tone, isisochronic, ismono, c0, beat_start, amp);
+      prog_cfg.carrier_end_hz= c2;
+      prog_cfg.beat_target_hz= beat_target;
+      prog_cfg.drop_sec= len0;
+      prog_cfg.hold_sec= islong ? len1 : 0;
+      prog_cfg.wake_sec= wakeup ? len2 : 0;
+      prog_cfg.slide= slide;
+      prog_cfg.step_len_sec= steplen;
+      prog_cfg.fade_sec= 10;
+      prog_cfg.sig_l= sig_l;
+      prog_cfg.sig_h= sig_h;
+
       if (slide && !opt_D) {
-	 SbxCurveProgram *curve=
-	    sbx_build_sigmoid_curve_program(c0, c2,
-					    beat_start, beat_target,
-					    (double)len0, islong ? (double)len1 : 0.0,
-					    wakeup ? (double)len2 : 0.0,
-					    amp,
-					    sig_l, sig_h, sig_a, sig_b);
+	 SbxCurveProgram *curve= 0;
+	 if (sbx_build_sigmoid_curve_program(&prog_cfg, &curve) != SBX_OK)
+	    error("Failed to prepare built-in sigmoid curve");
 	 end_sec= len + (wakeup ? len2 : 0);
 	 sbx_handle_runtime_unsupported_extra("-p sigmoid", &extra_spec);
 	 sbx_runtime_activate_from_curve_program(&curve,
@@ -9830,41 +9726,11 @@ create_sigmoid(int ac, char **av) {
 						 extra_spec.aux_tones, extra_spec.aux_count,
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
 						 0, 0);
-      } else if (slide) {
-	 for (a= 0; a<n_step; a++) {
-	    double tim= a * len0 / (double)(n_step-1);
-	    double carr_t= c0 + (c2-c0) * tim / len;
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat[a], amp);
-	    sbx_kfb_add(&kfb, tim, &tone, SBX_INTERP_LINEAR);
-	 }
-	 if (islong) {
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, c2, beat[n_step-1], amp);
-	    sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
-	 }
-	 end_sec= len;
       } else {
-	 int lim= len / steplen;
-	 for (a= 0; a<lim; a++) {
-	    int tim0= a * steplen;
-	    int tim1= (a+1) * steplen;
-	    double carr_t= c0 + (c2-c0) * tim1/len;
-	    double beat_t= beat[(a>=n_step) ? n_step-1 : a];
-	    sbx_fill_tone_spec(&tone, isisochronic, ismono, carr_t, beat_t, amp);
-	    sbx_kfb_add(&kfb, (double)tim0, &tone, SBX_INTERP_STEP);
-	 }
-	 sbx_fill_tone_spec(&tone, isisochronic, ismono, c2, beat[n_step-1], amp);
-	 sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_STEP);
-	 end_sec= len;
+	 if (sbx_build_sigmoid_keyframes(&prog_cfg, &kfb.v, &kfb.n) != SBX_OK)
+	    error("Failed to build built-in sigmoid keyframes");
+	 end_sec= len + (wakeup ? len2 : 0);
       }
-
-      if (wakeup) {
-	 sbx_fill_tone_spec(&tone, isisochronic, ismono, c0, beat[0], amp);
-	 sbx_kfb_add(&kfb, (double)(end_sec + len2), &tone, SBX_INTERP_LINEAR);
-	 end_sec += len2;
-      }
-
-      sbx_fill_tone_spec(&tone, isisochronic, ismono, wakeup ? c0 : c2, wakeup ? beat[0] : beat[n_step-1], 0.0);
-      sbx_kfb_add(&kfb, (double)(end_sec + 10), &tone, SBX_INTERP_LINEAR);
 
       if (!slide || opt_D)
 	 sbx_handle_runtime_unsupported_extra("-p sigmoid", &extra_spec);
@@ -10349,7 +10215,7 @@ create_slide(int ac, char **av) {
    {
       SbxRuntimeExtraSpec extra_spec;
       SbxKfBuilder kfb= {0};
-      SbxToneSpec tone;
+      SbxBuiltinSlideConfig prog_cfg;
 
       sbx_parse_runtime_extra_or_die(extra, &extra_spec);
       if (extra_spec.have_mix && !mix_in && !opt_m && !opt_M)
@@ -10367,12 +10233,14 @@ create_slide(int ac, char **av) {
 	 warn(" Holding %s constant at %gHz", signal == '@' ? "pulse" : "beat", beat);
       }
 
-      sbx_fill_tone_spec(&tone, signal == '@', ismono, c0, signal == '-' ? -beat_abs : beat_abs, amp);
-      sbx_kfb_add(&kfb, 0.0, &tone, SBX_INTERP_LINEAR);
-      sbx_fill_tone_spec(&tone, signal == '@', ismono, c1, signal == '-' ? -beat_abs : beat_abs, amp);
-      sbx_kfb_add(&kfb, (double)len, &tone, SBX_INTERP_LINEAR);
-      sbx_fill_tone_spec(&tone, signal == '@', ismono, c1, signal == '-' ? -beat_abs : beat_abs, 0.0);
-      sbx_kfb_add(&kfb, (double)len + 10.0, &tone, SBX_INTERP_LINEAR);
+      sbx_default_builtin_slide_config(&prog_cfg);
+      sbx_fill_tone_spec(&prog_cfg.start_tone, signal == '@', ismono,
+			 c0, signal == '-' ? -beat_abs : beat_abs, amp);
+      prog_cfg.carrier_end_hz= c1;
+      prog_cfg.slide_sec= len;
+      prog_cfg.fade_sec= 10;
+      if (sbx_build_slide_keyframes(&prog_cfg, &kfb.v, &kfb.n) != SBX_OK)
+	 error("Failed to build built-in slide keyframes");
 
       sbx_handle_runtime_unsupported_extra("-p slide", &extra_spec);
 

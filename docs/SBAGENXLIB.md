@@ -703,6 +703,9 @@ Public header: `sbagenxlib.h`
   - `sbx_engine_reset()`
 - Tone setup and rendering:
   - `sbx_default_tone_spec()`
+  - `sbx_default_builtin_drop_config()`
+  - `sbx_default_builtin_sigmoid_config()`
+  - `sbx_default_builtin_slide_config()`
   - `sbx_format_tone_spec()`
   - `sbx_engine_set_tone()`
   - `sbx_engine_render_f32()`
@@ -714,6 +717,12 @@ Public header: `sbagenxlib.h`
   - `sbx_curve_set_param()`
   - `sbx_curve_prepare()`
   - `sbx_curve_eval()`
+  - `sbx_compute_sigmoid_coefficients()`
+  - `sbx_build_drop_curve_program()`
+  - `sbx_build_sigmoid_curve_program()`
+  - `sbx_build_drop_keyframes()`
+  - `sbx_build_sigmoid_keyframes()`
+  - `sbx_build_slide_keyframes()`
   - `sbx_curve_get_info()`
   - `sbx_curve_param_count()` / `sbx_curve_get_param()`
   - `sbx_curve_source_name()`
@@ -758,6 +767,11 @@ Public header: `sbagenxlib.h`
   - `sbx_context_get_timed_mix_effect_slot()`
   - `sbx_context_sample_mix_effects()`
   - `sbx_context_eval_active_tones()`
+
+This moves another significant generated-program slice out of `sbagenx.c`:
+the built-in `-p drop`, `-p sigmoid`, and `-p slide` builders can now be
+constructed natively in `sbagenxlib`, either as exact runtime curves or as
+native keyframe sequences for step-mode and `-D` output.
   - `sbx_context_keyframe_count()`
   - `sbx_context_voice_count()`
   - `sbx_context_source_mode()`

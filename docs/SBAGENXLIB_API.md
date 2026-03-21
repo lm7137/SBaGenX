@@ -187,6 +187,9 @@ API Groups
 - `sbx_status_string(int status)`
 - `sbx_default_engine_config(SbxEngineConfig *cfg)`
 - `sbx_default_tone_spec(SbxToneSpec *tone)`
+- `sbx_default_builtin_drop_config(SbxBuiltinDropConfig *cfg)`
+- `sbx_default_builtin_sigmoid_config(SbxBuiltinSigmoidConfig *cfg)`
+- `sbx_default_builtin_slide_config(SbxBuiltinSlideConfig *cfg)`
 - `sbx_default_pcm16_dither_state(SbxPcm16DitherState *state)`
 - `sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed)`
 - `sbx_default_pcm_convert_state(SbxPcmConvertState *state)`
@@ -282,6 +285,12 @@ writing no longer needs to live in `sbagenx.c`.
 - `sbx_curve_prepare(SbxCurveProgram *curve, const SbxCurveEvalConfig *cfg)`
 - `sbx_curve_eval(SbxCurveProgram *curve, double t_sec, SbxCurveEvalPoint *out_point)`
 - `sbx_curve_sample_program_beat(SbxCurveProgram *curve, double t0_sec, double t1_sec, size_t sample_count, double *out_t_sec, double *out_hz)`
+- `sbx_compute_sigmoid_coefficients(...)`
+- `sbx_build_drop_curve_program(...)`
+- `sbx_build_sigmoid_curve_program(...)`
+- `sbx_build_drop_keyframes(...)`
+- `sbx_build_sigmoid_keyframes(...)`
+- `sbx_build_slide_keyframes(...)`
 - `sbx_curve_get_info(const SbxCurveProgram *curve, SbxCurveInfo *out_info)`
 - `sbx_curve_param_count(const SbxCurveProgram *curve)`
 - `sbx_curve_get_param(const SbxCurveProgram *curve, size_t index, const char **out_name, double *out_value)`
@@ -311,6 +320,13 @@ syntax themselves.
 `sbx_curve_sample_program_beat` is the backend-neutral plot/data helper for
 custom `.sbgf` beat graphs. It samples the prepared curve directly over a time
 range without requiring the CLI or a GUI host to reimplement the curve math.
+
+The same API layer now also owns the reusable builders for the built-in
+generated programs used by `-p drop`, `-p sigmoid`, and `-p slide`. Hosts can
+request either exact runtime curves (`sbx_build_drop_curve_program`,
+`sbx_build_sigmoid_curve_program`) or native keyframed programs for step-mode
+and `-D` output (`sbx_build_drop_keyframes`, `sbx_build_sigmoid_keyframes`,
+`sbx_build_slide_keyframes`).
 
 In addition to `beat`, `carrier`, `amp`, and `mixamp`, `.sbgf` can also
 define runtime mix-effect parameter targets:

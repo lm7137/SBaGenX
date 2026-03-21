@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 27  /* public API contract revision */
+#define SBX_API_VERSION 28  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -211,6 +211,39 @@ typedef struct {
 } SbxCurveSourceConfig;
 
 typedef struct {
+  SbxToneSpec start_tone;
+  double carrier_end_hz;
+  double beat_target_hz;
+  int drop_sec;
+  int hold_sec;
+  int wake_sec;
+  int slide;
+  int step_len_sec;
+  int fade_sec;
+} SbxBuiltinDropConfig;
+
+typedef struct {
+  SbxToneSpec start_tone;
+  double carrier_end_hz;
+  double beat_target_hz;
+  int drop_sec;
+  int hold_sec;
+  int wake_sec;
+  int slide;
+  int step_len_sec;
+  int fade_sec;
+  double sig_l;
+  double sig_h;
+} SbxBuiltinSigmoidConfig;
+
+typedef struct {
+  SbxToneSpec start_tone;
+  double carrier_end_hz;
+  int slide_sec;
+  int fade_sec;
+} SbxBuiltinSlideConfig;
+
+typedef struct {
   unsigned int rng_state; /* caller-owned RNG state for TPDF dithering */
 } SbxPcm16DitherState;
 
@@ -354,6 +387,11 @@ void sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg);
 
 /* Fill cfg with default curve-backed context source settings. */
 void sbx_default_curve_source_config(SbxCurveSourceConfig *cfg);
+
+/* Fill cfg with library-default built-in drop/sigmoid/slide settings. */
+void sbx_default_builtin_drop_config(SbxBuiltinDropConfig *cfg);
+void sbx_default_builtin_sigmoid_config(SbxBuiltinSigmoidConfig *cfg);
+void sbx_default_builtin_slide_config(SbxBuiltinSlideConfig *cfg);
 
 /* Fill dither state with library-default seed. */
 void sbx_default_pcm16_dither_state(SbxPcm16DitherState *state);
@@ -618,6 +656,32 @@ int sbx_curve_sample_program_beat(SbxCurveProgram *curve,
                                   size_t sample_count,
                                   double *out_t_sec,
                                   double *out_hz);
+
+/* Compute the internal coefficients used by the built-in sigmoid program. */
+int sbx_compute_sigmoid_coefficients(int drop_sec,
+                                     double beat_start_hz,
+                                     double beat_target_hz,
+                                     double sig_l,
+                                     double sig_h,
+                                     double *out_a,
+                                     double *out_b);
+
+/* Build exact runtime curve programs for -p drop / -p sigmoid. */
+int sbx_build_drop_curve_program(const SbxBuiltinDropConfig *cfg,
+                                 SbxCurveProgram **out_curve);
+int sbx_build_sigmoid_curve_program(const SbxBuiltinSigmoidConfig *cfg,
+                                    SbxCurveProgram **out_curve);
+
+/* Build keyframed programs for the built-in drop / sigmoid / slide generators. */
+int sbx_build_drop_keyframes(const SbxBuiltinDropConfig *cfg,
+                             SbxProgramKeyframe **out_frames,
+                             size_t *out_frame_count);
+int sbx_build_sigmoid_keyframes(const SbxBuiltinSigmoidConfig *cfg,
+                                SbxProgramKeyframe **out_frames,
+                                size_t *out_frame_count);
+int sbx_build_slide_keyframes(const SbxBuiltinSlideConfig *cfg,
+                              SbxProgramKeyframe **out_frames,
+                              size_t *out_frame_count);
 
 /* Curve introspection. */
 int sbx_curve_get_info(const SbxCurveProgram *curve, SbxCurveInfo *out_info);

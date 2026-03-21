@@ -3722,7 +3722,8 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
         return SBX_EINVAL;
     }
   } else if (norm.waveform == SBX_WAVE_SINE) {
-    prefix[0] = 0;
+    if (!snprintf_checked(prefix, sizeof(prefix), "%s:", wprefix))
+      return SBX_EINVAL;
   } else if (!snprintf_checked(prefix, sizeof(prefix), "%s:", wprefix)) {
     return SBX_EINVAL;
   }
@@ -3898,6 +3899,45 @@ sbx_default_runtime_extra_spec(SbxRuntimeExtraSpec *spec) {
 }
 
 void
+sbx_default_builtin_drop_config(SbxBuiltinDropConfig *cfg) {
+  if (!cfg) return;
+  memset(cfg, 0, sizeof(*cfg));
+  sbx_default_tone_spec(&cfg->start_tone);
+  cfg->start_tone.mode = SBX_TONE_BINAURAL;
+  cfg->carrier_end_hz = cfg->start_tone.carrier_hz - 5.0;
+  cfg->beat_target_hz = 2.5;
+  cfg->drop_sec = 1800;
+  cfg->step_len_sec = 180;
+  cfg->fade_sec = 10;
+}
+
+void
+sbx_default_builtin_sigmoid_config(SbxBuiltinSigmoidConfig *cfg) {
+  if (!cfg) return;
+  memset(cfg, 0, sizeof(*cfg));
+  sbx_default_tone_spec(&cfg->start_tone);
+  cfg->start_tone.mode = SBX_TONE_BINAURAL;
+  cfg->carrier_end_hz = cfg->start_tone.carrier_hz - 5.0;
+  cfg->beat_target_hz = 2.5;
+  cfg->drop_sec = 1800;
+  cfg->step_len_sec = 180;
+  cfg->fade_sec = 10;
+  cfg->sig_l = 0.125;
+  cfg->sig_h = 0.0;
+}
+
+void
+sbx_default_builtin_slide_config(SbxBuiltinSlideConfig *cfg) {
+  if (!cfg) return;
+  memset(cfg, 0, sizeof(*cfg));
+  sbx_default_tone_spec(&cfg->start_tone);
+  cfg->start_tone.mode = SBX_TONE_BINAURAL;
+  cfg->carrier_end_hz = 5.0;
+  cfg->slide_sec = 1800;
+  cfg->fade_sec = 10;
+}
+
+void
 sbx_free_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg) {
   if (!cfg) return;
   if (cfg->mix_path) free(cfg->mix_path);
@@ -3916,6 +3956,514 @@ sbx_seed_pcm_convert_state(SbxPcmConvertState *state,
 }
 
 #include "sbagenxlib_curve_impl.h"
+
+typedef struct {
+  SbxProgramKeyframe *v;
+  size_t n;
+  size_t cap;
+} SbxBuiltinKfBuilder;
+
+static int
+sbx_builtin_kfb_add(SbxBuiltinKfBuilder *b,
+                    double t_sec,
+                    const SbxToneSpec *tone,
+                    int interp) {
+  SbxProgramKeyframe *tmp;
+  size_t ncap;
+  if (!b || !tone) return SBX_EINVAL;
+  if (b->n == b->cap) {
+    ncap = b->cap ? b->cap * 2 : 32;
+    tmp = (SbxProgramKeyframe *)realloc(b->v, ncap * sizeof(*tmp));
+    if (!tmp) return SBX_ENOMEM;
+    b->v = tmp;
+    b->cap = ncap;
+  }
+  b->v[b->n].time_sec = t_sec;
+  b->v[b->n].tone = *tone;
+  b->v[b->n].interp = interp;
+  b->n++;
+  return SBX_OK;
+}
+
+static int
+sbx_builtin_supported_mode(int mode) {
+  return mode == SBX_TONE_BINAURAL ||
+         mode == SBX_TONE_MONAURAL ||
+         mode == SBX_TONE_ISOCHRONIC;
+}
+
+static void
+sbx_builtin_fill_tone(SbxToneSpec *out,
+                      const SbxToneSpec *base,
+                      double carrier_hz,
+                      double beat_hz,
+                      double amplitude) {
+  *out = *base;
+  out->carrier_hz = carrier_hz;
+  out->beat_hz = beat_hz;
+  out->amplitude = amplitude;
+}
+
+static double
+sbx_builtin_drop_beat(double beat_start_hz,
+                      double beat_target_hz,
+                      int index,
+                      int n_step) {
+  return beat_start_hz *
+         exp(log(beat_target_hz / beat_start_hz) * index / (double)(n_step - 1));
+}
+
+static int
+sbx_validate_builtin_drop_like(const SbxToneSpec *tone,
+                               double carrier_end_hz,
+                               double beat_target_hz,
+                               int drop_sec,
+                               int hold_sec,
+                               int wake_sec,
+                               int step_len_sec,
+                               int fade_sec) {
+  if (!tone || !sbx_builtin_supported_mode(tone->mode)) return SBX_EINVAL;
+  if (!(tone->carrier_hz >= 0.0) || !isfinite(tone->carrier_hz)) return SBX_EINVAL;
+  if (!(carrier_end_hz >= 0.0) || !isfinite(carrier_end_hz)) return SBX_EINVAL;
+  if (!(tone->beat_hz > 0.0) || !isfinite(tone->beat_hz)) return SBX_EINVAL;
+  if (!(beat_target_hz > 0.0) || !isfinite(beat_target_hz)) return SBX_EINVAL;
+  if (!(tone->amplitude >= 0.0) || !isfinite(tone->amplitude)) return SBX_EINVAL;
+  if (drop_sec <= 0 || hold_sec < 0 || wake_sec < 0 || step_len_sec <= 0 || fade_sec < 0)
+    return SBX_EINVAL;
+  return SBX_OK;
+}
+
+int
+sbx_compute_sigmoid_coefficients(int drop_sec,
+                                 double beat_start_hz,
+                                 double beat_target_hz,
+                                 double sig_l,
+                                 double sig_h,
+                                 double *out_a,
+                                 double *out_b) {
+  double d_min, u0, u1, den;
+  if (!out_a || !out_b || drop_sec <= 0 ||
+      !(beat_start_hz > 0.0) || !(beat_target_hz > 0.0) ||
+      !isfinite(beat_start_hz) || !isfinite(beat_target_hz) ||
+      !isfinite(sig_l) || !isfinite(sig_h))
+    return SBX_EINVAL;
+  d_min = drop_sec / 60.0;
+  u0 = tanh(sig_l * (0.0 - d_min / 2.0 - sig_h));
+  u1 = tanh(sig_l * (d_min - d_min / 2.0 - sig_h));
+  den = u1 - u0;
+  if (fabs(den) < 1e-9) return SBX_EINVAL;
+  *out_a = (beat_target_hz - beat_start_hz) / den;
+  *out_b = beat_start_hz - (*out_a) * u0;
+  return SBX_OK;
+}
+
+static double
+sbx_builtin_sigmoid_beat(int drop_sec,
+                         double beat_target_hz,
+                         double sig_l,
+                         double sig_h,
+                         double sig_a,
+                         double sig_b,
+                         double t_sec) {
+  double d_min = drop_sec / 60.0;
+  double t_min = t_sec / 60.0;
+  if (t_min >= d_min) return beat_target_hz;
+  return sig_a * tanh(sig_l * (t_min - d_min / 2.0 - sig_h)) + sig_b;
+}
+
+int
+sbx_build_drop_curve_program(const SbxBuiltinDropConfig *cfg,
+                             SbxCurveProgram **out_curve) {
+  SbxCurveProgram *curve = 0;
+  SbxCurveEvalConfig eval_cfg;
+  char text[4096];
+  int rc;
+
+  if (!cfg || !out_curve) return SBX_EINVAL;
+  *out_curve = 0;
+  rc = sbx_validate_builtin_drop_like(&cfg->start_tone,
+                                      cfg->carrier_end_hz,
+                                      cfg->beat_target_hz,
+                                      cfg->drop_sec,
+                                      cfg->hold_sec,
+                                      cfg->wake_sec,
+                                      cfg->step_len_sec,
+                                      cfg->fade_sec);
+  if (rc != SBX_OK) return rc;
+
+  curve = sbx_curve_create();
+  if (!curve) return SBX_ENOMEM;
+
+  sbx_default_curve_eval_config(&eval_cfg);
+  eval_cfg.carrier_start_hz = cfg->start_tone.carrier_hz;
+  eval_cfg.carrier_end_hz = cfg->carrier_end_hz;
+  eval_cfg.carrier_span_sec = cfg->drop_sec + cfg->hold_sec;
+  eval_cfg.beat_start_hz = cfg->start_tone.beat_hz;
+  eval_cfg.beat_target_hz = cfg->beat_target_hz;
+  eval_cfg.beat_span_sec = cfg->drop_sec;
+  eval_cfg.hold_min = cfg->hold_sec / 60.0;
+  eval_cfg.total_min = (cfg->drop_sec + cfg->hold_sec) / 60.0;
+  eval_cfg.wake_min = cfg->wake_sec / 60.0;
+  eval_cfg.beat_amp0_pct = cfg->start_tone.amplitude * 100.0;
+  eval_cfg.mix_amp0_pct = 100.0;
+
+  snprintf(text, sizeof(text),
+           "beat = ifelse(lt(m,D), b0*exp(ln(b1/b0)*(m/D)), "
+           "ifelse(gt(U,0), ifelse(lt(m,T), b1, seg(m,T,T+U,b1,b0)), b1))\n"
+           "carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), "
+           "ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))\n"
+           "amp = ifelse(lt(t,(T+U)*60), a0, "
+           "ifelse(lt(t,(T+U)*60+%d), a0*(1-ramp(t,(T+U)*60,(T+U)*60+%d)), 0))\n",
+           cfg->fade_sec, cfg->fade_sec);
+  rc = sbx_curve_load_text(curve, text, "<built-in-drop>");
+  if (rc == SBX_OK) rc = sbx_curve_prepare(curve, &eval_cfg);
+  if (rc != SBX_OK) {
+    sbx_curve_destroy(curve);
+    return rc;
+  }
+  *out_curve = curve;
+  return SBX_OK;
+}
+
+int
+sbx_build_sigmoid_curve_program(const SbxBuiltinSigmoidConfig *cfg,
+                                SbxCurveProgram **out_curve) {
+  SbxCurveProgram *curve = 0;
+  SbxCurveEvalConfig eval_cfg;
+  char text[4096];
+  double sig_a, sig_b;
+  int rc;
+
+  if (!cfg || !out_curve) return SBX_EINVAL;
+  *out_curve = 0;
+  rc = sbx_validate_builtin_drop_like(&cfg->start_tone,
+                                      cfg->carrier_end_hz,
+                                      cfg->beat_target_hz,
+                                      cfg->drop_sec,
+                                      cfg->hold_sec,
+                                      cfg->wake_sec,
+                                      cfg->step_len_sec,
+                                      cfg->fade_sec);
+  if (rc != SBX_OK) return rc;
+  rc = sbx_compute_sigmoid_coefficients(cfg->drop_sec,
+                                        cfg->start_tone.beat_hz,
+                                        cfg->beat_target_hz,
+                                        cfg->sig_l,
+                                        cfg->sig_h,
+                                        &sig_a,
+                                        &sig_b);
+  if (rc != SBX_OK) return rc;
+
+  curve = sbx_curve_create();
+  if (!curve) return SBX_ENOMEM;
+
+  sbx_default_curve_eval_config(&eval_cfg);
+  eval_cfg.carrier_start_hz = cfg->start_tone.carrier_hz;
+  eval_cfg.carrier_end_hz = cfg->carrier_end_hz;
+  eval_cfg.carrier_span_sec = cfg->drop_sec + cfg->hold_sec;
+  eval_cfg.beat_start_hz = cfg->start_tone.beat_hz;
+  eval_cfg.beat_target_hz = cfg->beat_target_hz;
+  eval_cfg.beat_span_sec = cfg->drop_sec;
+  eval_cfg.hold_min = cfg->hold_sec / 60.0;
+  eval_cfg.total_min = (cfg->drop_sec + cfg->hold_sec) / 60.0;
+  eval_cfg.wake_min = cfg->wake_sec / 60.0;
+  eval_cfg.beat_amp0_pct = cfg->start_tone.amplitude * 100.0;
+  eval_cfg.mix_amp0_pct = 100.0;
+
+  snprintf(text, sizeof(text),
+           "param l = %.17g\n"
+           "param h = %.17g\n"
+           "param A = %.17g\n"
+           "param B = %.17g\n"
+           "beat = ifelse(lt(m,D), A*tanh(l*(m-D/2-h))+B, "
+           "ifelse(gt(U,0), ifelse(lt(m,T), b1, seg(m,T,T+U,b1,b0)), b1))\n"
+           "carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), "
+           "ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))\n"
+           "amp = ifelse(lt(t,(T+U)*60), a0, "
+           "ifelse(lt(t,(T+U)*60+%d), a0*(1-ramp(t,(T+U)*60,(T+U)*60+%d)), 0))\n",
+           cfg->sig_l, cfg->sig_h, sig_a, sig_b,
+           cfg->fade_sec, cfg->fade_sec);
+  rc = sbx_curve_load_text(curve, text, "<built-in-sigmoid>");
+  if (rc == SBX_OK) rc = sbx_curve_prepare(curve, &eval_cfg);
+  if (rc != SBX_OK) {
+    sbx_curve_destroy(curve);
+    return rc;
+  }
+  *out_curve = curve;
+  return SBX_OK;
+}
+
+int
+sbx_build_drop_keyframes(const SbxBuiltinDropConfig *cfg,
+                         SbxProgramKeyframe **out_frames,
+                         size_t *out_frame_count) {
+  SbxBuiltinKfBuilder b = {0};
+  SbxToneSpec tone;
+  int n_step, a, end_sec, lim;
+  int rc = SBX_OK;
+  double len_main;
+
+  if (!cfg || !out_frames || !out_frame_count) return SBX_EINVAL;
+  *out_frames = 0;
+  *out_frame_count = 0;
+  rc = sbx_validate_builtin_drop_like(&cfg->start_tone,
+                                      cfg->carrier_end_hz,
+                                      cfg->beat_target_hz,
+                                      cfg->drop_sec,
+                                      cfg->hold_sec,
+                                      cfg->wake_sec,
+                                      cfg->step_len_sec,
+                                      cfg->fade_sec);
+  if (rc != SBX_OK) return rc;
+
+  n_step = 1 + (cfg->drop_sec - 1) / cfg->step_len_sec;
+  if (n_step < 2) n_step = 2;
+  len_main = (double)(cfg->drop_sec + cfg->hold_sec);
+
+  if (cfg->slide) {
+    for (a = 0; a < n_step; a++) {
+      double tim = a * cfg->drop_sec / (double)(n_step - 1);
+      double carr = cfg->start_tone.carrier_hz +
+                    (cfg->carrier_end_hz - cfg->start_tone.carrier_hz) * tim / len_main;
+      double beat = sbx_builtin_drop_beat(cfg->start_tone.beat_hz,
+                                          cfg->beat_target_hz,
+                                          a,
+                                          n_step);
+      sbx_builtin_fill_tone(&tone, &cfg->start_tone, carr, beat, cfg->start_tone.amplitude);
+      rc = sbx_builtin_kfb_add(&b, tim, &tone, SBX_INTERP_LINEAR);
+      if (rc != SBX_OK) goto done;
+    }
+    if (cfg->hold_sec > 0) {
+      sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                            cfg->carrier_end_hz,
+                            cfg->beat_target_hz,
+                            cfg->start_tone.amplitude);
+      rc = sbx_builtin_kfb_add(&b, len_main, &tone, SBX_INTERP_LINEAR);
+      if (rc != SBX_OK) goto done;
+    }
+    end_sec = (int)len_main;
+  } else {
+    lim = (int)len_main / cfg->step_len_sec;
+    for (a = 0; a < lim; a++) {
+      int idx = (a >= n_step) ? (n_step - 1) : a;
+      double tim0 = (double)(a * cfg->step_len_sec);
+      double tim1 = (double)((a + 1) * cfg->step_len_sec);
+      double carr = cfg->start_tone.carrier_hz +
+                    (cfg->carrier_end_hz - cfg->start_tone.carrier_hz) * tim1 / len_main;
+      double beat = sbx_builtin_drop_beat(cfg->start_tone.beat_hz,
+                                          cfg->beat_target_hz,
+                                          idx,
+                                          n_step);
+      sbx_builtin_fill_tone(&tone, &cfg->start_tone, carr, beat, cfg->start_tone.amplitude);
+      rc = sbx_builtin_kfb_add(&b, tim0, &tone, SBX_INTERP_STEP);
+      if (rc != SBX_OK) goto done;
+    }
+    sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                          cfg->carrier_end_hz,
+                          cfg->beat_target_hz,
+                          cfg->start_tone.amplitude);
+    rc = sbx_builtin_kfb_add(&b, len_main, &tone, SBX_INTERP_STEP);
+    if (rc != SBX_OK) goto done;
+    end_sec = (int)len_main;
+  }
+
+  if (cfg->wake_sec > 0) {
+    sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                          cfg->start_tone.carrier_hz,
+                          cfg->start_tone.beat_hz,
+                          cfg->start_tone.amplitude);
+    rc = sbx_builtin_kfb_add(&b, (double)(end_sec + cfg->wake_sec), &tone, SBX_INTERP_LINEAR);
+    if (rc != SBX_OK) goto done;
+    end_sec += cfg->wake_sec;
+  }
+
+  if (cfg->fade_sec > 0) {
+    sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                          cfg->wake_sec > 0 ? cfg->start_tone.carrier_hz : cfg->carrier_end_hz,
+                          cfg->wake_sec > 0 ? cfg->start_tone.beat_hz : cfg->beat_target_hz,
+                          0.0);
+    rc = sbx_builtin_kfb_add(&b, (double)(end_sec + cfg->fade_sec), &tone, SBX_INTERP_LINEAR);
+    if (rc != SBX_OK) goto done;
+  }
+
+done:
+  if (rc != SBX_OK) {
+    if (b.v) free(b.v);
+    return rc;
+  }
+  *out_frames = b.v;
+  *out_frame_count = b.n;
+  return SBX_OK;
+}
+
+int
+sbx_build_sigmoid_keyframes(const SbxBuiltinSigmoidConfig *cfg,
+                            SbxProgramKeyframe **out_frames,
+                            size_t *out_frame_count) {
+  SbxBuiltinKfBuilder b = {0};
+  SbxToneSpec tone;
+  int n_step, a, end_sec, lim;
+  int rc = SBX_OK;
+  double len_main, sig_a, sig_b;
+
+  if (!cfg || !out_frames || !out_frame_count) return SBX_EINVAL;
+  *out_frames = 0;
+  *out_frame_count = 0;
+  rc = sbx_validate_builtin_drop_like(&cfg->start_tone,
+                                      cfg->carrier_end_hz,
+                                      cfg->beat_target_hz,
+                                      cfg->drop_sec,
+                                      cfg->hold_sec,
+                                      cfg->wake_sec,
+                                      cfg->step_len_sec,
+                                      cfg->fade_sec);
+  if (rc != SBX_OK) return rc;
+  rc = sbx_compute_sigmoid_coefficients(cfg->drop_sec,
+                                        cfg->start_tone.beat_hz,
+                                        cfg->beat_target_hz,
+                                        cfg->sig_l,
+                                        cfg->sig_h,
+                                        &sig_a,
+                                        &sig_b);
+  if (rc != SBX_OK) return rc;
+
+  n_step = 1 + (cfg->drop_sec - 1) / cfg->step_len_sec;
+  if (n_step < 2) n_step = 2;
+  len_main = (double)(cfg->drop_sec + cfg->hold_sec);
+
+  if (cfg->slide) {
+    for (a = 0; a < n_step; a++) {
+      double tim = a * cfg->drop_sec / (double)(n_step - 1);
+      double carr = cfg->start_tone.carrier_hz +
+                    (cfg->carrier_end_hz - cfg->start_tone.carrier_hz) * tim / len_main;
+      double beat = sbx_builtin_sigmoid_beat(cfg->drop_sec,
+                                             cfg->beat_target_hz,
+                                             cfg->sig_l,
+                                             cfg->sig_h,
+                                             sig_a,
+                                             sig_b,
+                                             tim);
+      sbx_builtin_fill_tone(&tone, &cfg->start_tone, carr, beat, cfg->start_tone.amplitude);
+      rc = sbx_builtin_kfb_add(&b, tim, &tone, SBX_INTERP_LINEAR);
+      if (rc != SBX_OK) goto done;
+    }
+    if (cfg->hold_sec > 0) {
+      sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                            cfg->carrier_end_hz,
+                            cfg->beat_target_hz,
+                            cfg->start_tone.amplitude);
+      rc = sbx_builtin_kfb_add(&b, len_main, &tone, SBX_INTERP_LINEAR);
+      if (rc != SBX_OK) goto done;
+    }
+    end_sec = (int)len_main;
+  } else {
+    lim = (int)len_main / cfg->step_len_sec;
+    for (a = 0; a < lim; a++) {
+      double tim0 = (double)(a * cfg->step_len_sec);
+      double tim1 = (double)((a + 1) * cfg->step_len_sec);
+      double carr = cfg->start_tone.carrier_hz +
+                    (cfg->carrier_end_hz - cfg->start_tone.carrier_hz) * tim1 / len_main;
+      double beat = sbx_builtin_sigmoid_beat(cfg->drop_sec,
+                                             cfg->beat_target_hz,
+                                             cfg->sig_l,
+                                             cfg->sig_h,
+                                             sig_a,
+                                             sig_b,
+                                             (a >= n_step) ? (double)cfg->drop_sec : tim0);
+      sbx_builtin_fill_tone(&tone, &cfg->start_tone, carr, beat, cfg->start_tone.amplitude);
+      rc = sbx_builtin_kfb_add(&b, tim0, &tone, SBX_INTERP_STEP);
+      if (rc != SBX_OK) goto done;
+    }
+    sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                          cfg->carrier_end_hz,
+                          cfg->beat_target_hz,
+                          cfg->start_tone.amplitude);
+    rc = sbx_builtin_kfb_add(&b, len_main, &tone, SBX_INTERP_STEP);
+    if (rc != SBX_OK) goto done;
+    end_sec = (int)len_main;
+  }
+
+  if (cfg->wake_sec > 0) {
+    sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                          cfg->start_tone.carrier_hz,
+                          cfg->start_tone.beat_hz,
+                          cfg->start_tone.amplitude);
+    rc = sbx_builtin_kfb_add(&b, (double)(end_sec + cfg->wake_sec), &tone, SBX_INTERP_LINEAR);
+    if (rc != SBX_OK) goto done;
+    end_sec += cfg->wake_sec;
+  }
+
+  if (cfg->fade_sec > 0) {
+    sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                          cfg->wake_sec > 0 ? cfg->start_tone.carrier_hz : cfg->carrier_end_hz,
+                          cfg->wake_sec > 0 ? cfg->start_tone.beat_hz : cfg->beat_target_hz,
+                          0.0);
+    rc = sbx_builtin_kfb_add(&b, (double)(end_sec + cfg->fade_sec), &tone, SBX_INTERP_LINEAR);
+    if (rc != SBX_OK) goto done;
+  }
+
+done:
+  if (rc != SBX_OK) {
+    if (b.v) free(b.v);
+    return rc;
+  }
+  *out_frames = b.v;
+  *out_frame_count = b.n;
+  return SBX_OK;
+}
+
+int
+sbx_build_slide_keyframes(const SbxBuiltinSlideConfig *cfg,
+                          SbxProgramKeyframe **out_frames,
+                          size_t *out_frame_count) {
+  SbxBuiltinKfBuilder b = {0};
+  SbxToneSpec tone;
+  int rc;
+
+  if (!cfg || !out_frames || !out_frame_count ||
+      !sbx_builtin_supported_mode(cfg->start_tone.mode) ||
+      !(cfg->start_tone.carrier_hz >= 0.0) || !isfinite(cfg->start_tone.carrier_hz) ||
+      !(cfg->carrier_end_hz >= 0.0) || !isfinite(cfg->carrier_end_hz) ||
+      cfg->slide_sec <= 0 || cfg->fade_sec < 0 ||
+      !isfinite(cfg->start_tone.beat_hz) || cfg->start_tone.beat_hz == 0.0 ||
+      !(cfg->start_tone.amplitude >= 0.0) || !isfinite(cfg->start_tone.amplitude))
+    return SBX_EINVAL;
+
+  *out_frames = 0;
+  *out_frame_count = 0;
+
+  sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                        cfg->start_tone.carrier_hz,
+                        cfg->start_tone.beat_hz,
+                        cfg->start_tone.amplitude);
+  rc = sbx_builtin_kfb_add(&b, 0.0, &tone, SBX_INTERP_LINEAR);
+  if (rc != SBX_OK) goto done;
+
+  sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                        cfg->carrier_end_hz,
+                        cfg->start_tone.beat_hz,
+                        cfg->start_tone.amplitude);
+  rc = sbx_builtin_kfb_add(&b, (double)cfg->slide_sec, &tone, SBX_INTERP_LINEAR);
+  if (rc != SBX_OK) goto done;
+
+  if (cfg->fade_sec > 0) {
+    sbx_builtin_fill_tone(&tone, &cfg->start_tone,
+                          cfg->carrier_end_hz,
+                          cfg->start_tone.beat_hz,
+                          0.0);
+    rc = sbx_builtin_kfb_add(&b, (double)(cfg->slide_sec + cfg->fade_sec), &tone, SBX_INTERP_LINEAR);
+    if (rc != SBX_OK) goto done;
+  }
+
+done:
+  if (rc != SBX_OK) {
+    if (b.v) free(b.v);
+    return rc;
+  }
+  *out_frames = b.v;
+  *out_frame_count = b.n;
+  return SBX_OK;
+}
 
 SbxEngine *
 sbx_engine_create(const SbxEngineConfig *cfg_in) {
