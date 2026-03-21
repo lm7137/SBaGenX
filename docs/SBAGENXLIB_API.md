@@ -252,6 +252,11 @@ host-side exporters and GUI tooling even though the render source remains
 - `sbx_default_runtime_extra_spec(SbxRuntimeExtraSpec *spec)`
 - `sbx_parse_runtime_extra_text(const char *extra, const SbxImmediateParseConfig *cfg, SbxRuntimeExtraSpec *out_spec, char *errbuf, size_t errbuf_sz)`
 - `sbx_runtime_extra_has_mixam(const SbxRuntimeExtraSpec *spec)`
+- `sbx_validate_runtime_mix_fx_requirements(...)`
+- `sbx_default_runtime_context_config(SbxRuntimeContextConfig *cfg)`
+- `sbx_runtime_context_create_from_immediate(...)`
+- `sbx_runtime_context_create_from_keyframes(...)`
+- `sbx_runtime_context_create_from_curve_program(...)`
 
 This is the first library-owned export/container layer. It covers:
 
@@ -268,6 +273,11 @@ This is the first library-owned export/container layer. It covers:
   frontend
 - built-in/runtime extra-token parsing for host paths that accept a
   whitespace-delimited tail of extra tones/effects after a generated program
+- reusable runtime-context activation for:
+  - immediate tone lists
+  - native keyframe programs
+  - exact curve-backed programs
+- generic mix-effect requirement validation shared by immediate/native paths
 
 The current CLI still owns live device output, but raw/WAV/OGG/FLAC/MP3 file
 writing no longer needs to live in `sbagenx.c`.
@@ -341,6 +351,16 @@ library too:
 
 That lets CLI/GUI hosts keep exact runtime curve activation for slide mode
 while sharing the stepped/keyframed fallback construction in one place.
+
+The same library surface now also owns the reusable activation wrappers that
+turn already-parsed native inputs into a configured runtime context:
+
+- `sbx_runtime_context_create_from_immediate(...)`
+- `sbx_runtime_context_create_from_keyframes(...)`
+- `sbx_runtime_context_create_from_curve_program(...)`
+
+This keeps exact function-driven slide mode native while also removing the old
+host-side context-setup duplication from `sbagenx.c`.
 
 In addition to `beat`, `carrier`, `amp`, and `mixamp`, `.sbgf` can also
 define runtime mix-effect parameter targets:

@@ -8565,66 +8565,107 @@ static void
 }
 
 static void
-sbx_runtime_apply_mix_mod(void) {
-   int rc;
-
-   if (!sbx_runtime_ctx)
+sbx_fill_runtime_context_cfg(SbxRuntimeContextConfig *cfg) {
+   if (!cfg)
       return;
-
-   if (!mix_mod_curve.active) {
-      rc= sbx_context_set_mix_mod(sbx_runtime_ctx, 0);
-      if (rc != SBX_OK)
-	 error("Failed to clear sbagenxlib mix modulation: %s",
-	       sbx_context_last_error(sbx_runtime_ctx));
-      return;
-   }
-
-   rc= sbx_context_set_mix_mod(sbx_runtime_ctx, &mix_mod_curve);
-   if (rc != SBX_OK)
-      error("Failed to configure sbagenxlib mix modulation: %s",
-	    sbx_context_last_error(sbx_runtime_ctx));
+   sbx_default_runtime_context_config(cfg);
+   cfg->engine.sample_rate= (double)out_rate;
+   cfg->engine.channels= 2;
+   cfg->mix_mod= mix_mod_curve.active ? &mix_mod_curve : 0;
 }
 
 static void
-sbx_runtime_activate_immediate_tones(const SbxToneSpec *tones, size_t n, double mix_amp_pct,
-				     const SbxMixFxSpec *mix_fx, size_t mix_fx_count) {
-   SbxEngineConfig cfg;
-   int rc;
+sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
+				    double mix_amp_pct,
+				    const SbxToneSpec *aux_tones, size_t aux_count,
+				    const SbxMixFxSpec *mix_fx, size_t mix_fx_count,
+				    const SbxMixAmpKeyframe *mkf, size_t mkf_n) {
+   SbxRuntimeContextConfig cfg;
+   SbxContext *ctx= 0;
+   double total_sec= 0.0;
 
-   if (!tones || n == 0)
-      error("internal error: empty immediate tone list for sbagenxlib runtime");
+   if (!kfs || n == 0)
+      error("internal error: empty sbagenxlib runtime keyframe list");
 
    sbx_runtime_clear();
+   sbx_fill_runtime_context_cfg(&cfg);
+   cfg.mix_kfs= mkf;
+   cfg.mix_kf_count= mkf_n;
+   cfg.default_mix_amp_pct= mix_amp_pct;
+   cfg.mix_fx= mix_fx;
+   cfg.mix_fx_count= mix_fx_count;
+   cfg.aux_tones= aux_tones;
+   cfg.aux_count= aux_count;
 
-   sbx_default_engine_config(&cfg);
-   cfg.sample_rate= (double)out_rate;
-   cfg.channels= 2;
-   sbx_runtime_ctx= sbx_context_create(&cfg);
-   if (!sbx_runtime_ctx)
-      error("Failed to create sbagenxlib runtime context");
+   if (sbx_runtime_context_create_from_keyframes(kfs, n, loop_flag, &cfg, &total_sec, &ctx) != SBX_OK) {
+      const char *msg= (ctx ? sbx_context_last_error(ctx) : 0);
+      if (ctx) sbx_context_destroy(ctx);
+      error("Failed to activate sbagenxlib keyframed runtime: %s",
+	    (msg && *msg) ? msg : "unknown error");
+   }
 
-   rc= sbx_context_set_tone(sbx_runtime_ctx, &tones[0]);
-   if (rc != SBX_OK)
-      error("Failed to load sbagenxlib immediate tone: %s",
-	    sbx_context_last_error(sbx_runtime_ctx));
-
+   sbx_runtime_ctx= ctx;
    sbx_runtime_active= 1;
-   sbx_runtime_total_sec= 0.0;
-   rc= sbx_context_configure_runtime(sbx_runtime_ctx,
-				     0, 0, mix_amp_pct,
-				     mix_fx, mix_fx_count,
-				     (n > 1) ? (tones + 1) : 0,
-				     (n > 1) ? (n - 1) : 0);
-   if (rc != SBX_OK)
-      error("Failed to configure sbagenxlib runtime extras: %s",
-	    sbx_context_last_error(sbx_runtime_ctx));
-   sbx_runtime_apply_mix_mod();
+   sbx_runtime_total_sec= total_sec;
+}
+
+static void
+sbx_runtime_activate_from_curve_program(SbxCurveProgram **curvep,
+					int isisochronic, int ismono,
+					double duration_sec,
+					double mix_amp_pct,
+					const SbxToneSpec *aux_tones, size_t aux_count,
+					const SbxMixFxSpec *mix_fx, size_t mix_fx_count,
+					const SbxMixAmpKeyframe *mkf, size_t mkf_n) {
+   SbxRuntimeContextConfig cfg;
+   SbxCurveSourceConfig csrc;
+   SbxContext *ctx= 0;
+   double total_sec= 0.0;
+
+   if (!curvep || !*curvep)
+      error("internal error: empty sbagenxlib runtime curve program");
+
+   sbx_runtime_clear();
+   sbx_fill_runtime_context_cfg(&cfg);
+   cfg.mix_kfs= mkf;
+   cfg.mix_kf_count= mkf_n;
+   cfg.default_mix_amp_pct= mix_amp_pct;
+   cfg.mix_fx= mix_fx;
+   cfg.mix_fx_count= mix_fx_count;
+   cfg.aux_tones= aux_tones;
+   cfg.aux_count= aux_count;
+
+   sbx_default_curve_source_config(&csrc);
+   csrc.mode= isisochronic ? SBX_TONE_ISOCHRONIC : (ismono ? SBX_TONE_MONAURAL : SBX_TONE_BINAURAL);
+   csrc.waveform= opt_w;
+   csrc.duty_cycle= opt_I ? opt_I_d : 0.403014;
+   csrc.iso_start= opt_I ? opt_I_s : 0.048493;
+   csrc.iso_attack= opt_I ? opt_I_a : 0.5;
+   csrc.iso_release= opt_I ? opt_I_r : 0.5;
+   csrc.iso_edge_mode= opt_I ? opt_I_e : 2;
+   csrc.amplitude= 1.0;
+   csrc.duration_sec= duration_sec;
+   csrc.loop= 0;
+
+   if (sbx_runtime_context_create_from_curve_program(*curvep, &csrc, &cfg, &total_sec, &ctx) != SBX_OK) {
+      const char *msg= (ctx ? sbx_context_last_error(ctx) : 0);
+      if (ctx) sbx_context_destroy(ctx);
+      error("Failed to activate sbagenxlib curve runtime: %s",
+	    (msg && *msg) ? msg : "unknown error");
+   }
+   *curvep= 0;
+
+   sbx_runtime_ctx= ctx;
+   sbx_runtime_active= 1;
+   sbx_runtime_total_sec= total_sec;
 }
 
 int
 sbx_try_readSeqImm_runtime(int ac, char **av) {
    SbxImmediateParseConfig parse_cfg;
    SbxImmediateSpec imm;
+   SbxRuntimeContextConfig rt_cfg;
+   SbxContext *ctx;
    char errbuf[256];
    int i;
 
@@ -8641,10 +8682,13 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
 
    if (imm.have_mix && !mix_in && !opt_m && !opt_M)
       warn("mix/<amp> was specified in -i tones but no mix input stream is active");
-   if (imm.mix_fx_count > 0 && !mix_in && !opt_m && !opt_M)
-      error("-i mix effects require a mix input stream (-m / -M)");
-   if (imm.mix_fx_count > 0 && !imm.have_mix)
-      error("-i mix effects require mix/<amp> in tones");
+   errbuf[0]= 0;
+   if (sbx_validate_runtime_mix_fx_requirements((mix_in || opt_m || opt_M) ? 1 : 0,
+						imm.have_mix,
+						imm.mix_fx_count,
+						"-i", "tones",
+						errbuf, sizeof(errbuf)) != SBX_OK)
+      error("%s", errbuf[0] ? errbuf : "-i runtime extras are invalid");
 
    if (opt_D) {
       printf("# sbagenxlib immediate tones (%d)\n", (int)imm.tone_count);
@@ -8665,101 +8709,19 @@ sbx_try_readSeqImm_runtime(int ac, char **av) {
       exit(0);
    }
 
-   sbx_runtime_activate_immediate_tones(imm.tones, imm.tone_count,
-					imm.have_mix ? imm.mix_amp_pct : 100.0,
-					imm.mix_fx, imm.mix_fx_count);
+   sbx_runtime_clear();
+   sbx_fill_runtime_context_cfg(&rt_cfg);
+   ctx= 0;
+   if (sbx_runtime_context_create_from_immediate(&imm, &rt_cfg, &ctx) != SBX_OK) {
+      const char *msg= (ctx ? sbx_context_last_error(ctx) : 0);
+      if (ctx) sbx_context_destroy(ctx);
+      error("Failed to activate sbagenxlib immediate runtime: %s",
+	    (msg && *msg) ? msg : "unknown error");
+   }
+   sbx_runtime_ctx= ctx;
+   sbx_runtime_active= 1;
+   sbx_runtime_total_sec= 0.0;
    return 1;
-}
-
-static void
-sbx_runtime_activate_from_keyframes(const SbxProgramKeyframe *kfs, size_t n, int loop_flag,
-				    double mix_amp_pct,
-				    const SbxToneSpec *aux_tones, size_t aux_count,
-				    const SbxMixFxSpec *mix_fx, size_t mix_fx_count,
-				    const SbxMixAmpKeyframe *mkf, size_t mkf_n) {
-   SbxEngineConfig cfg;
-   int rc;
-   if (!kfs || n == 0)
-      error("internal error: empty sbagenxlib runtime keyframe list");
-
-   sbx_runtime_clear();
-
-   sbx_default_engine_config(&cfg);
-   cfg.sample_rate= (double)out_rate;
-   cfg.channels= 2;
-   sbx_runtime_ctx= sbx_context_create(&cfg);
-   if (!sbx_runtime_ctx)
-      error("Failed to create sbagenxlib runtime context");
-
-   rc= sbx_context_load_keyframes(sbx_runtime_ctx, kfs, n, loop_flag);
-   if (rc != SBX_OK)
-      error("Failed to load sbagenxlib runtime keyframes: %s",
-	    sbx_context_last_error(sbx_runtime_ctx));
-
-   sbx_runtime_active= 1;
-   sbx_runtime_total_sec= kfs[n-1].time_sec;
-	  rc= sbx_context_configure_runtime(sbx_runtime_ctx,
-					     mkf, mkf_n, mix_amp_pct,
-					     mix_fx, mix_fx_count,
-					     aux_tones, aux_count);
-	   if (rc != SBX_OK)
-	      error("Failed to configure sbagenxlib runtime extras: %s",
-		    sbx_context_last_error(sbx_runtime_ctx));
-   sbx_runtime_apply_mix_mod();
-}
-
-static void
-sbx_runtime_activate_from_curve_program(SbxCurveProgram **curvep,
-					int isisochronic, int ismono,
-					double duration_sec,
-					double mix_amp_pct,
-					const SbxToneSpec *aux_tones, size_t aux_count,
-					const SbxMixFxSpec *mix_fx, size_t mix_fx_count,
-					const SbxMixAmpKeyframe *mkf, size_t mkf_n) {
-   SbxEngineConfig cfg;
-   SbxCurveSourceConfig csrc;
-   int rc;
-
-   if (!curvep || !*curvep)
-      error("internal error: empty sbagenxlib runtime curve program");
-
-   sbx_runtime_clear();
-
-   sbx_default_engine_config(&cfg);
-   cfg.sample_rate= (double)out_rate;
-   cfg.channels= 2;
-   sbx_runtime_ctx= sbx_context_create(&cfg);
-   if (!sbx_runtime_ctx)
-      error("Failed to create sbagenxlib runtime context");
-
-   sbx_default_curve_source_config(&csrc);
-   csrc.mode= isisochronic ? SBX_TONE_ISOCHRONIC : (ismono ? SBX_TONE_MONAURAL : SBX_TONE_BINAURAL);
-   csrc.waveform= opt_w;
-   csrc.duty_cycle= opt_I ? opt_I_d : 0.403014;
-   csrc.iso_start= opt_I ? opt_I_s : 0.048493;
-   csrc.iso_attack= opt_I ? opt_I_a : 0.5;
-   csrc.iso_release= opt_I ? opt_I_r : 0.5;
-   csrc.iso_edge_mode= opt_I ? opt_I_e : 2;
-   csrc.amplitude= 1.0;
-   csrc.duration_sec= duration_sec;
-   csrc.loop= 0;
-
-   rc= sbx_context_load_curve_program(sbx_runtime_ctx, *curvep, &csrc);
-   if (rc != SBX_OK)
-      error("Failed to load sbagenxlib runtime curve: %s",
-	    sbx_context_last_error(sbx_runtime_ctx));
-   *curvep= 0;
-
-   sbx_runtime_active= 1;
-   sbx_runtime_total_sec= duration_sec;
-   rc= sbx_context_configure_runtime(sbx_runtime_ctx,
-				     mkf, mkf_n, mix_amp_pct,
-				     mix_fx, mix_fx_count,
-				     aux_tones, aux_count);
-   if (rc != SBX_OK)
-      error("Failed to configure sbagenxlib runtime extras: %s",
-	    sbx_context_last_error(sbx_runtime_ctx));
-   sbx_runtime_apply_mix_mod();
 }
 
 static void
@@ -8797,12 +8759,17 @@ sbx_parse_runtime_extra_or_die(const char *extra, SbxRuntimeExtraSpec *spec) {
 
 static void
 sbx_validate_runtime_extra_mix_fx(const char *prog_name, const SbxRuntimeExtraSpec *spec) {
-   if (!spec || spec->mix_fx_count == 0)
+   char errbuf[256];
+
+   if (!spec)
       return;
-   if (!mix_in && !opt_m && !opt_M)
-      error("%s mix effects require a mix input stream (-m / -M)", prog_name ? prog_name : "sbagenx");
-   if (!spec->have_mix)
-      error("%s mix effects require mix/<amp> in extra tone-specs", prog_name ? prog_name : "sbagenx");
+   errbuf[0]= 0;
+   if (sbx_validate_runtime_mix_fx_requirements((mix_in || opt_m || opt_M) ? 1 : 0,
+						spec->have_mix,
+						spec->mix_fx_count,
+						prog_name, "extra tone-specs",
+						errbuf, sizeof(errbuf)) != SBX_OK)
+      error("%s", errbuf[0] ? errbuf : "Invalid sbagenxlib runtime mix-effect configuration");
 }
 
 static void

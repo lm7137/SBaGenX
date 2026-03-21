@@ -3591,6 +3591,36 @@ sbx_runtime_extra_has_mixam(const SbxRuntimeExtraSpec *spec) {
   return 0;
 }
 
+int
+sbx_validate_runtime_mix_fx_requirements(int mix_input_active,
+                                         int have_mix_amp,
+                                         size_t mix_fx_count,
+                                         const char *prog_name,
+                                         const char *mix_scope_desc,
+                                         char *errbuf,
+                                         size_t errbuf_sz) {
+  const char *scope = prog_name ? prog_name : "sbagenx";
+  const char *mix_scope = mix_scope_desc ? mix_scope_desc : "tones";
+
+  if (errbuf && errbuf_sz)
+    errbuf[0] = 0;
+  if (mix_fx_count == 0)
+    return SBX_OK;
+  if (!mix_input_active) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "%s mix effects require a mix input stream (-m / -M)",
+                      scope);
+    return SBX_EINVAL;
+  }
+  if (!have_mix_amp) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "%s mix effects require mix/<amp> in %s",
+                      scope, mix_scope);
+    return SBX_EINVAL;
+  }
+  return SBX_OK;
+}
+
 static const char *
 wave_name_for_tone(int waveform) {
   switch (waveform) {
@@ -3955,6 +3985,14 @@ sbx_default_curve_timeline_config(SbxCurveTimelineConfig *cfg) {
   cfg->step_len_sec = 180;
   cfg->slide = 1;
   cfg->fade_sec = 10;
+}
+
+void
+sbx_default_runtime_context_config(SbxRuntimeContextConfig *cfg) {
+  if (!cfg) return;
+  memset(cfg, 0, sizeof(*cfg));
+  sbx_default_engine_config(&cfg->engine);
+  cfg->default_mix_amp_pct = 100.0;
 }
 
 void
@@ -7579,6 +7617,147 @@ sbx_context_configure_runtime(SbxContext *ctx,
   rc = sbx_context_set_aux_tones(ctx, aux_tones, aux_count);
   if (rc != SBX_OK) return rc;
   set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+static int
+sbx_runtime_context_config_copy(const SbxRuntimeContextConfig *cfg_in,
+                                SbxRuntimeContextConfig *out_cfg) {
+  if (!out_cfg) return SBX_EINVAL;
+  sbx_default_runtime_context_config(out_cfg);
+  if (cfg_in)
+    *out_cfg = *cfg_in;
+  return SBX_OK;
+}
+
+static int
+sbx_runtime_context_apply_config(SbxContext *ctx,
+                                 const SbxRuntimeContextConfig *cfg) {
+  int rc;
+
+  if (!ctx || !cfg) return SBX_EINVAL;
+  rc = sbx_context_configure_runtime(ctx,
+                                     cfg->mix_kfs, cfg->mix_kf_count,
+                                     cfg->default_mix_amp_pct,
+                                     cfg->mix_fx, cfg->mix_fx_count,
+                                     cfg->aux_tones, cfg->aux_count);
+  if (rc != SBX_OK)
+    return rc;
+  rc = sbx_context_set_mix_mod(ctx, cfg->mix_mod);
+  if (rc != SBX_OK)
+    return rc;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
+sbx_runtime_context_create_from_immediate(const SbxImmediateSpec *imm,
+                                          const SbxRuntimeContextConfig *cfg,
+                                          SbxContext **out_ctx) {
+  SbxRuntimeContextConfig local_cfg;
+  SbxContext *ctx = 0;
+  int rc;
+
+  if (!imm || !out_ctx) return SBX_EINVAL;
+  if (imm->tone_count == 0)
+    return SBX_EINVAL;
+  *out_ctx = 0;
+
+  sbx_runtime_context_config_copy(cfg, &local_cfg);
+  ctx = sbx_context_create(&local_cfg.engine);
+  if (!ctx)
+    return SBX_ENOMEM;
+
+  rc = sbx_context_set_tone(ctx, &imm->tones[0]);
+  if (rc == SBX_OK) {
+    local_cfg.default_mix_amp_pct = imm->have_mix ? imm->mix_amp_pct : 100.0;
+    local_cfg.mix_fx = imm->mix_fx;
+    local_cfg.mix_fx_count = imm->mix_fx_count;
+    local_cfg.aux_tones = (imm->tone_count > 1) ? (imm->tones + 1) : 0;
+    local_cfg.aux_count = (imm->tone_count > 1) ? (imm->tone_count - 1) : 0;
+    rc = sbx_runtime_context_apply_config(ctx, &local_cfg);
+  }
+
+  if (rc != SBX_OK) {
+    *out_ctx = ctx;
+    return rc;
+  }
+
+  *out_ctx = ctx;
+  return SBX_OK;
+}
+
+int
+sbx_runtime_context_create_from_keyframes(const SbxProgramKeyframe *kfs,
+                                          size_t n,
+                                          int loop_flag,
+                                          const SbxRuntimeContextConfig *cfg,
+                                          double *out_total_sec,
+                                          SbxContext **out_ctx) {
+  SbxRuntimeContextConfig local_cfg;
+  SbxContext *ctx = 0;
+  int rc;
+
+  if (!kfs || n == 0 || !out_ctx) return SBX_EINVAL;
+  *out_ctx = 0;
+  if (out_total_sec) *out_total_sec = 0.0;
+
+  sbx_runtime_context_config_copy(cfg, &local_cfg);
+  ctx = sbx_context_create(&local_cfg.engine);
+  if (!ctx)
+    return SBX_ENOMEM;
+
+  rc = sbx_context_load_keyframes(ctx, kfs, n, loop_flag);
+  if (rc == SBX_OK)
+    rc = sbx_runtime_context_apply_config(ctx, &local_cfg);
+
+  if (rc != SBX_OK) {
+    *out_ctx = ctx;
+    return rc;
+  }
+
+  if (out_total_sec)
+    *out_total_sec = kfs[n - 1].time_sec;
+  *out_ctx = ctx;
+  return SBX_OK;
+}
+
+int
+sbx_runtime_context_create_from_curve_program(SbxCurveProgram *curve,
+                                              const SbxCurveSourceConfig *curve_cfg,
+                                              const SbxRuntimeContextConfig *cfg,
+                                              double *out_total_sec,
+                                              SbxContext **out_ctx) {
+  SbxRuntimeContextConfig local_cfg;
+  SbxCurveSourceConfig local_curve_cfg;
+  SbxContext *ctx = 0;
+  int rc;
+
+  if (!curve || !out_ctx) return SBX_EINVAL;
+  *out_ctx = 0;
+  if (out_total_sec) *out_total_sec = 0.0;
+
+  sbx_runtime_context_config_copy(cfg, &local_cfg);
+  sbx_default_curve_source_config(&local_curve_cfg);
+  if (curve_cfg)
+    local_curve_cfg = *curve_cfg;
+
+  ctx = sbx_context_create(&local_cfg.engine);
+  if (!ctx)
+    return SBX_ENOMEM;
+
+  rc = sbx_context_load_curve_program(ctx, curve, &local_curve_cfg);
+  if (rc == SBX_OK)
+    rc = sbx_runtime_context_apply_config(ctx, &local_cfg);
+
+  if (rc != SBX_OK) {
+    *out_ctx = ctx;
+    return rc;
+  }
+
+  if (out_total_sec)
+    *out_total_sec = local_curve_cfg.duration_sec;
+  *out_ctx = ctx;
   return SBX_OK;
 }
 

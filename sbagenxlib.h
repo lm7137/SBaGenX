@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 29  /* public API contract revision */
+#define SBX_API_VERSION 30  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -390,6 +390,18 @@ typedef struct {
 
 typedef void (*SbxTelemetryCallback)(const SbxRuntimeTelemetry *telem, void *user);
 
+typedef struct {
+  SbxEngineConfig engine;               /* sample rate/channels for new context */
+  const SbxMixAmpKeyframe *mix_kfs;     /* optional mix amp keyframes */
+  size_t mix_kf_count;
+  double default_mix_amp_pct;           /* runtime default when no keyframes */
+  const SbxMixFxSpec *mix_fx;           /* optional static mix effects */
+  size_t mix_fx_count;
+  const SbxToneSpec *aux_tones;         /* optional aux runtime overlays */
+  size_t aux_count;
+  const SbxMixModSpec *mix_mod;         /* optional host mix modulation */
+} SbxRuntimeContextConfig;
+
 /* ----- Version and status ----- */
 
 /* Runtime library version string (human-readable). */
@@ -424,6 +436,7 @@ void sbx_default_builtin_sigmoid_config(SbxBuiltinSigmoidConfig *cfg);
 void sbx_default_builtin_slide_config(SbxBuiltinSlideConfig *cfg);
 void sbx_default_curve_file_program_config(SbxCurveFileProgramConfig *cfg);
 void sbx_default_curve_timeline_config(SbxCurveTimelineConfig *cfg);
+void sbx_default_runtime_context_config(SbxRuntimeContextConfig *cfg);
 
 /* Fill dither state with library-default seed. */
 void sbx_default_pcm16_dither_state(SbxPcm16DitherState *state);
@@ -621,6 +634,14 @@ int sbx_parse_runtime_extra_text(const char *extra,
                                  SbxRuntimeExtraSpec *out_spec,
                                  char *errbuf,
                                  size_t errbuf_sz);
+
+int sbx_validate_runtime_mix_fx_requirements(int mix_input_active,
+                                             int have_mix_amp,
+                                             size_t mix_fx_count,
+                                             const char *prog_name,
+                                             const char *mix_scope_desc,
+                                             char *errbuf,
+                                             size_t errbuf_sz);
 
 /* Convenience helper for front-ends that need to detect AM/mixam extras. */
 int sbx_runtime_extra_has_mixam(const SbxRuntimeExtraSpec *spec);
@@ -854,6 +875,21 @@ int sbx_context_configure_runtime(SbxContext *ctx,
                                   size_t mix_fx_count,
                                   const SbxToneSpec *aux_tones,
                                   size_t aux_count);
+
+int sbx_runtime_context_create_from_immediate(const SbxImmediateSpec *imm,
+                                              const SbxRuntimeContextConfig *cfg,
+                                              SbxContext **out_ctx);
+int sbx_runtime_context_create_from_keyframes(const SbxProgramKeyframe *kfs,
+                                              size_t n,
+                                              int loop_flag,
+                                              const SbxRuntimeContextConfig *cfg,
+                                              double *out_total_sec,
+                                              SbxContext **out_ctx);
+int sbx_runtime_context_create_from_curve_program(SbxCurveProgram *curve,
+                                                  const SbxCurveSourceConfig *curve_cfg,
+                                                  const SbxRuntimeContextConfig *cfg,
+                                                  double *out_total_sec,
+                                                  SbxContext **out_ctx);
 
 /* Evaluate mix amplitude percentage at context time t_sec. */
 double sbx_context_mix_amp_at(SbxContext *ctx, double t_sec);

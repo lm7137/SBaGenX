@@ -714,6 +714,7 @@ Public header: `sbagenxlib.h`
   - `sbx_default_curve_source_config()`
   - `sbx_default_curve_file_program_config()`
   - `sbx_default_curve_timeline_config()`
+  - `sbx_default_runtime_context_config()`
   - `sbx_curve_create()` / `sbx_curve_destroy()` / `sbx_curve_reset()`
   - `sbx_curve_load_text()` / `sbx_curve_load_file()`
   - `sbx_curve_set_param()`
@@ -728,6 +729,10 @@ Public header: `sbagenxlib.h`
   - `sbx_build_slide_keyframes()`
   - `sbx_build_curve_timeline()`
   - `sbx_free_curve_timeline()`
+  - `sbx_runtime_context_create_from_immediate()`
+  - `sbx_runtime_context_create_from_keyframes()`
+  - `sbx_runtime_context_create_from_curve_program()`
+  - `sbx_validate_runtime_mix_fx_requirements()`
   - `sbx_curve_get_info()`
   - `sbx_curve_param_count()` / `sbx_curve_get_param()`
   - `sbx_curve_source_name()`
@@ -777,6 +782,11 @@ This moves another significant generated-program slice out of `sbagenx.c`:
 the built-in `-p drop`, `-p sigmoid`, and `-p slide` builders can now be
 constructed natively in `sbagenxlib`, either as exact runtime curves or as
 native keyframe sequences for step-mode and `-D` output.
+
+The remaining reusable host-side runtime activation layer is now moving in the
+same direction: native immediate tones, keyframes, and curve sources can be
+turned into configured runtime contexts directly in `sbagenxlib`, leaving the
+CLI to keep only user-facing policy/error presentation and host concerns.
   - `sbx_context_keyframe_count()`
   - `sbx_context_voice_count()`
   - `sbx_context_source_mode()`
