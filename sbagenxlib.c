@@ -1918,6 +1918,35 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
           if (!inline_arg) i++;
           a = strlen(tok) - 1;
           break;
+#ifdef T_MACOSX
+        case 'B':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->buffer_samples)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -B expects buffer size in samples");
+              free(dup);
+              return 0;
+            }
+          }
+          if (out_cfg->buffer_samples < 1024 || out_cfg->buffer_samples > BUFFER_SIZE / 2) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "safe preamble -B must be between 1024 and %d samples",
+                              BUFFER_SIZE / 2);
+            free(dup);
+            return 0;
+          }
+          if ((out_cfg->buffer_samples & (out_cfg->buffer_samples - 1)) != 0) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "safe preamble -B must be a power of 2");
+            free(dup);
+            return 0;
+          }
+          out_cfg->have_B = 1;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
+#endif
         case 'Z':
           {
             const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
@@ -1932,6 +1961,26 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
           if (!inline_arg) i++;
           a = strlen(tok) - 1;
           break;
+#ifdef T_LINUX
+        case 'd':
+          if (inline_arg || i + 1 >= argc) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "safe preamble -d expects an ALSA device name");
+            free(dup);
+            return 0;
+          }
+          if (out_cfg->device_path) free(out_cfg->device_path);
+          out_cfg->device_path = strdup(argv[i+1]);
+          if (!out_cfg->device_path) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "out of memory parsing safe preamble -d");
+            free(dup);
+            return 0;
+          }
+          i++;
+          a = strlen(tok) - 1;
+          break;
+#endif
         default:
           sbx_set_api_error(errbuf, errbuf_sz,
                             "safe preamble option -%c is not supported by the sbagenxlib bridge",
@@ -4674,6 +4723,9 @@ sbx_default_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg) {
   cfg->mp3_vbr_quality = 0.0;
   cfg->ogg_quality = 6.0;
   cfg->flac_compression = 5.0;
+#ifdef T_MACOSX
+  cfg->buffer_samples = -1;
+#endif
 }
 
 void
@@ -4768,6 +4820,10 @@ sbx_default_runtime_context_config(SbxRuntimeContextConfig *cfg) {
 void
 sbx_free_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg) {
   if (!cfg) return;
+#ifdef T_LINUX
+  if (cfg->device_path) free(cfg->device_path);
+  cfg->device_path = 0;
+#endif
   if (cfg->mix_path) free(cfg->mix_path);
   if (cfg->out_path) free(cfg->out_path);
   cfg->mix_path = 0;

@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 34  /* public API contract revision */
+#define SBX_API_VERSION 35  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_PLOT_MAX_TICKS 64
 #define SBX_PLOT_TEXT_MAX 256
@@ -351,6 +351,10 @@ typedef struct {
   int have_W;                  /* safe preamble -W present */
   int have_F;                  /* safe preamble -F present */
   int fade_ms;                 /* safe preamble -F fade time in ms */
+#ifdef T_MACOSX
+  int have_B;                  /* safe preamble -B present */
+  int buffer_samples;          /* safe preamble -B size in samples */
+#endif
   int have_K;                  /* safe preamble -K present */
   int mp3_bitrate;             /* safe preamble -K bitrate */
   int have_J;                  /* safe preamble -J present */
@@ -361,6 +365,9 @@ typedef struct {
   double ogg_quality;          /* safe preamble -U quality */
   int have_Z;                  /* safe preamble -Z present */
   double flac_compression;     /* safe preamble -Z compression level */
+#ifdef T_LINUX
+  char *device_path;           /* safe preamble -d ALSA device path */
+#endif
   char *mix_path;              /* safe preamble -m path (caller frees via helper) */
   char *out_path;              /* safe preamble -o path (caller frees via helper) */
 } SbxSafeSeqfilePreamble;

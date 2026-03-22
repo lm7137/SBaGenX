@@ -29,6 +29,9 @@ int main(void) {
         "-N\n"
         "-V 75\n"
         "-w triangle\n"
+#ifdef ALSA_AUDIO
+        "-d hw:1\n"
+#endif
         "-A d=0.2:e=0.4:k=5:E=0.6\n"
         "-I s=0:d=1:e=3\n"
         "-H d=0.2:a=0.1:r=0.3:e=2:f=0.25\n"
@@ -68,6 +71,10 @@ int main(void) {
     fail("global volume mismatch");
   if (!cfg.have_w || cfg.waveform != SBX_WAVE_TRIANGLE)
     fail("waveform mismatch");
+#ifdef ALSA_AUDIO
+  if (!cfg.device_path || strcmp(cfg.device_path, "hw:1") != 0)
+    fail("ALSA device mismatch");
+#endif
   if (!cfg.have_A ||
       fabs(cfg.mix_mod.delta - 0.2) > 1e-9 ||
       fabs(cfg.mix_mod.epsilon - 0.4) > 1e-9 ||

@@ -7202,6 +7202,14 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       fade_int= safe_cfg.fade_ms;
       fade_int_set= 1;
    }
+#ifdef MAC_AUDIO
+   if (safe_cfg.have_B)
+      opt_B= safe_cfg.buffer_samples * 2;
+#endif
+#ifdef ALSA_AUDIO
+   if (safe_cfg.device_path)
+      opt_d= StrDup(safe_cfg.device_path);
+#endif
    if (safe_cfg.have_K) {
       opt_mp3_bitrate= safe_cfg.mp3_bitrate;
       opt_mp3_bitrate_set= 1;

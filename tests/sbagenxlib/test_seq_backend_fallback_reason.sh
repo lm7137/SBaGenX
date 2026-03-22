@@ -17,7 +17,7 @@ out="$tmpdir/out.txt"
 seq="$tmpdir/unsupported-safe-preamble.sbg"
 
 cat >"$seq" <<'EOF'
--d /tmp
+-c 100=0.8
 tone: 200+4/20
 00:00 tone
 EOF
@@ -33,7 +33,7 @@ if [[ $rc -ne 0 ]]; then
   exit 1
 fi
 
-if ! grep -q "Falling back to legacy sequence parser/runtime: safe preamble option -d is not supported by the sbagenxlib bridge" "$out"; then
+if ! grep -q "Falling back to legacy sequence parser/runtime: safe preamble option -c is not supported by the sbagenxlib bridge" "$out"; then
   echo "FAIL: expected explicit sbagenxlib fallback reason for unsupported safe preamble option" >&2
   cat "$out" >&2
   exit 1

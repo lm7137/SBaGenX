@@ -35,6 +35,7 @@ cat > "$seq" <<EOF2
 -N
 -V 75
 -w triangle
+-d default
 
 base: mix/100 200@4/20 mixam:beat
 NOW base
