@@ -400,539 +400,42 @@ def _build_wave_env_table(samples, table_size: int = 16384):
     return env
 
 
-def _sigmoid_eval(t_min, d_min, beat_target, sig_l, sig_h, sig_a, sig_b):
-    if t_min >= d_min:
-        return beat_target
-    return sig_a * math.tanh(sig_l * (t_min - d_min / 2.0 - sig_h)) + sig_b
+def _parse_tick_list(text: str):
+    text = (text or "").strip()
+    if not text:
+        return []
+    return [float(item) for item in text.split(",") if item.strip()]
 
 
-def _drop_eval(t_min, d_min, beat_start, beat_target, slide, n_step, step_len_sec):
-    if d_min <= 0:
-        return beat_target
-    t_min = min(max(t_min, 0.0), d_min)
-    if beat_start <= 0.0:
-        beat_start = 10.0
-
-    if not slide and n_step > 1 and step_len_sec > 0:
-        idx = int((t_min * 60.0) / step_len_sec)
-        idx = max(0, min(idx, n_step - 1))
-        return beat_start * math.exp(math.log(beat_target / beat_start) * idx / (n_step - 1))
-
-    return beat_start * math.exp(math.log(beat_target / beat_start) * (t_min / d_min))
+def _load_desc_file(path: str):
+    out = {}
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if not line or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            out[key.strip()] = value
+    return out
 
 
-def render_sigmoid(args):
-    width, height = 1200, 700
-    ml, mr, mt, mb = 150, 40, 40, 120
-    pw, ph = width - ml - mr, height - mt - mb
-
-    d_min = args.drop_min
-    if d_min <= 0:
-        raise ValueError("drop-min must be > 0")
-
-    # determine y range
-    y_min = float("inf")
-    y_max = float("-inf")
-    for i in range(2001):
-        t = d_min * i / 2000.0
-        y = _sigmoid_eval(t, d_min, args.beat_target, args.sig_l, args.sig_h, args.sig_a, args.sig_b)
-        y_min = min(y_min, y)
-        y_max = max(y_max, y)
-    y_min = min(y_min, args.beat_start, args.beat_target)
-    y_max = max(y_max, args.beat_start, args.beat_target)
-
-    if abs(y_max - y_min) < 1e-6:
-        y_min -= 1.0
-        y_max += 1.0
-
-    y_pad = max((y_max - y_min) * 0.08, 0.1)
-    y_min -= y_pad
-    y_max += y_pad
-    y_span = y_max - y_min
-
-    # Use whole-number Y ticks for readability.
-    y_tick_step = max(1.0, round(y_span / 8.0))
-
-    y_tick_first = math.ceil((y_min - 1e-9) / y_tick_step) * y_tick_step
-    y_ticks = []
-    yv = y_tick_first
-    while yv <= y_max + y_tick_step * 0.25:
-        y_ticks.append(yv)
-        yv += y_tick_step
-    x_ticks = _build_integer_ticks(d_min)
-
-    surface, ctx = _setup_canvas(width, height)
-
-    def x_map(t):
-        return ml + (pw - 1) * (t / d_min)
-
-    def y_map(v):
-        return mt + (y_max - v) * (ph - 1) / y_span
-
-    _draw_grid_box(ctx, ml, mt, pw, ph, 10, y_ticks, y_map)
-
-    curve_vals = []
-    y_pixels = []
-    # curve
-    ctx.set_source_rgb(0.13, 0.37, 0.88)
-    ctx.set_line_width(2.0)
-    first = True
-    for i in range(2001):
-        t = d_min * i / 2000.0
-        y = _sigmoid_eval(t, d_min, args.beat_target, args.sig_l, args.sig_h, args.sig_a, args.sig_b)
-        curve_vals.append(y)
-        px = x_map(t)
-        py = y_map(y)
-        y_pixels.append(py)
-        if first:
-            ctx.move_to(px, py)
-            first = False
-        else:
-            ctx.line_to(px, py)
-    ctx.stroke()
-
-    # endpoint markers
-    for t in (0.0, d_min):
-        y = _sigmoid_eval(t, d_min, args.beat_target, args.sig_l, args.sig_h, args.sig_a, args.sig_b)
-        px = x_map(t)
-        py = y_map(y)
-        ctx.set_source_rgb(0.86, 0.16, 0.16)
-        ctx.arc(px, py, 2.8, 0.0, 2.0 * PI)
-        ctx.fill()
-
-    # tick marks + labels
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(16)
-    ctx.set_source_rgb(0.15, 0.15, 0.15)
-
-    # x ticks
-    for t in x_ticks:
-        x = x_map(t)
-        ctx.set_source_rgb(0.35, 0.35, 0.35)
-        ctx.set_line_width(1.0)
-        ctx.move_to(x, mt + ph - 1)
-        ctx.line_to(x, mt + ph + 4)
-        ctx.stroke()
-        txt = _fmt_tick(t)
-        ext = ctx.text_extents(txt)
-        ctx.set_source_rgb(0.15, 0.15, 0.15)
-        ctx.move_to(x - ext.width / 2, mt + ph + 22)
-        ctx.show_text(txt)
-
-    # y ticks
-    for yv in y_ticks:
-        y = y_map(yv)
-        txt = _fmt_tick(yv)
-        ext = ctx.text_extents(txt)
-        ctx.set_source_rgb(0.35, 0.35, 0.35)
-        ctx.move_to(ml - 4, y)
-        ctx.line_to(ml, y)
-        ctx.stroke()
-        ctx.set_source_rgb(0.15, 0.15, 0.15)
-        ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
-        ctx.show_text(txt)
-
-    # axis labels
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-    ctx.set_font_size(18)
-    x_label = "TIME MIN"
-    y_label = "FREQ HZ"
-
-    ext = ctx.text_extents(x_label)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 70)
-    ctx.show_text(x_label)
-
-    ctx.save()
-    ctx.translate(38, mt + ph / 2)
-    ctx.rotate(-PI / 2.0)
-    ext = ctx.text_extents(y_label)
-    ctx.move_to(-ext.width / 2, 0)
-    ctx.show_text(y_label)
-    ctx.restore()
-
-    # parameter lines (bottom)
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(14)
-    line1 = (
-        f"start={args.beat_start:.3f}Hz  target={args.beat_target:.3f}Hz  "
-        f"D={args.drop_min:.1f}min"
-    )
-    line2 = (
-        f"l={args.sig_l:.4f}  h={args.sig_h:.4f}  "
-        f"a={args.sig_a:.4f}  b={args.sig_b:.4f}"
-    )
-    ext = ctx.text_extents(line1)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 40)
-    ctx.show_text(line1)
-    ext = ctx.text_extents(line2)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 18)
-    ctx.show_text(line2)
-
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    surface.write_to_png(args.out)
-    _maybe_write_graph_video(
-        surface,
-        args.video_out,
-        args.video_fps,
-        d_min * 60.0,
-        width,
-        height,
-        ml,
-        mt,
-        pw,
-        ph,
-        y_pixels,
-        curve_vals,
-        args.audio_file,
-    )
-
-
-def render_drop(args):
-    width, height = 1200, 700
-    ml, mr, mt, mb = 150, 40, 40, 120
-    pw, ph = width - ml - mr, height - mt - mb
-
-    d_min = args.drop_min
-    if d_min <= 0:
-        raise ValueError("drop-min must be > 0")
-
-    slide = bool(args.slide)
-    n_step = int(args.n_step)
-    step_len_sec = int(args.step_len_sec)
-
-    # determine y range
-    y_min = float("inf")
-    y_max = float("-inf")
-    for i in range(2001):
-        t = d_min * i / 2000.0
-        y = _drop_eval(t, d_min, args.beat_start, args.beat_target, slide, n_step, step_len_sec)
-        y_min = min(y_min, y)
-        y_max = max(y_max, y)
-    y_min = min(y_min, args.beat_start, args.beat_target)
-    y_max = max(y_max, args.beat_start, args.beat_target)
-
-    if abs(y_max - y_min) < 1e-6:
-        y_min -= 1.0
-        y_max += 1.0
-
-    y_pad = max((y_max - y_min) * 0.08, 0.1)
-    y_min -= y_pad
-    y_max += y_pad
-    y_span = y_max - y_min
-
-    y_tick_step = max(1.0, round(y_span / 8.0))
-    y_tick_first = math.ceil((y_min - 1e-9) / y_tick_step) * y_tick_step
-    y_ticks = []
-    yv = y_tick_first
-    while yv <= y_max + y_tick_step * 0.25:
-        y_ticks.append(yv)
-        yv += y_tick_step
-    x_ticks = _build_integer_ticks(d_min)
-
-    surface, ctx = _setup_canvas(width, height)
-
-    def x_map(t):
-        return ml + (pw - 1) * (t / d_min)
-
-    def y_map(v):
-        return mt + (y_max - v) * (ph - 1) / y_span
-
-    _draw_grid_box(ctx, ml, mt, pw, ph, 10, y_ticks, y_map)
-
-    curve_vals = []
-    y_pixels = []
-    # curve
-    ctx.set_source_rgb(0.13, 0.37, 0.88)
-    ctx.set_line_width(2.0)
-    first = True
-    for i in range(2001):
-        t = d_min * i / 2000.0
-        y = _drop_eval(t, d_min, args.beat_start, args.beat_target, slide, n_step, step_len_sec)
-        curve_vals.append(y)
-        px = x_map(t)
-        py = y_map(y)
-        y_pixels.append(py)
-        if first:
-            ctx.move_to(px, py)
-            first = False
-        else:
-            ctx.line_to(px, py)
-    ctx.stroke()
-
-    # endpoint markers
-    for t in (0.0, d_min):
-        y = _drop_eval(t, d_min, args.beat_start, args.beat_target, slide, n_step, step_len_sec)
-        px = x_map(t)
-        py = y_map(y)
-        ctx.set_source_rgb(0.86, 0.16, 0.16)
-        ctx.arc(px, py, 2.8, 0.0, 2.0 * PI)
-        ctx.fill()
-
-    # tick marks + labels
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(16)
-    ctx.set_source_rgb(0.15, 0.15, 0.15)
-
-    for t in x_ticks:
-        x = x_map(t)
-        ctx.set_source_rgb(0.35, 0.35, 0.35)
-        ctx.set_line_width(1.0)
-        ctx.move_to(x, mt + ph - 1)
-        ctx.line_to(x, mt + ph + 4)
-        ctx.stroke()
-        txt = _fmt_tick(t)
-        ext = ctx.text_extents(txt)
-        ctx.set_source_rgb(0.15, 0.15, 0.15)
-        ctx.move_to(x - ext.width / 2, mt + ph + 22)
-        ctx.show_text(txt)
-
-    for yv in y_ticks:
-        y = y_map(yv)
-        txt = _fmt_tick(yv)
-        ext = ctx.text_extents(txt)
-        ctx.set_source_rgb(0.35, 0.35, 0.35)
-        ctx.move_to(ml - 4, y)
-        ctx.line_to(ml, y)
-        ctx.stroke()
-        ctx.set_source_rgb(0.15, 0.15, 0.15)
-        ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
-        ctx.show_text(txt)
-
-    # axis labels
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-    ctx.set_font_size(18)
-    x_label = "TIME MIN"
-    y_label = "FREQ HZ"
-
-    ext = ctx.text_extents(x_label)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 70)
-    ctx.show_text(x_label)
-
-    ctx.save()
-    ctx.translate(38, mt + ph / 2)
-    ctx.rotate(-PI / 2.0)
-    ext = ctx.text_extents(y_label)
-    ctx.move_to(-ext.width / 2, 0)
-    ctx.show_text(y_label)
-    ctx.restore()
-
-    # parameter lines (bottom)
-    mode_map = {0: "binaural beat", 1: "pulse", 2: "monaural beat"}
-    mode_label = mode_map.get(int(args.mode_kind), "binaural beat")
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(14)
-    line1 = (
-        f"start={args.beat_start:.3f}Hz  target={args.beat_target:.3f}Hz  "
-        f"D={args.drop_min:.1f}min"
-    )
-    if slide:
-        line2 = f"{mode_label} mode: continuous exponential (s)"
-    else:
-        line2 = (
-            f"{mode_label} mode: stepped exponential (k/default), "
-            f"step={step_len_sec}s n={n_step}"
-        )
-
-    ext = ctx.text_extents(line1)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 40)
-    ctx.show_text(line1)
-    ext = ctx.text_extents(line2)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 18)
-    ctx.show_text(line2)
-
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    surface.write_to_png(args.out)
-    _maybe_write_graph_video(
-        surface,
-        args.video_out,
-        args.video_fps,
-        d_min * 60.0,
-        width,
-        height,
-        ml,
-        mt,
-        pw,
-        ph,
-        y_pixels,
-        curve_vals,
-        args.audio_file,
-    )
-
-
-def render_curve(args):
-    width, height = 1200, 700
-    ml, mr, mt, mb = 150, 40, 40, 120
-    pw, ph = width - ml - mr, height - mt - mb
-
-    d_min = args.drop_min
-    if d_min <= 0:
-        raise ValueError("drop-min must be > 0")
-
-    samples = []
-    with open(args.sample_file, "r", encoding="utf-8") as fh:
+def _load_scalar_samples(path: str):
+    values = []
+    with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line:
                 continue
-            samples.append(float(line))
-    if len(samples) < 2:
+            values.append(float(line))
+    if len(values) < 2:
         raise ValueError("sample-file must contain at least two numeric values")
-
-    slide = bool(args.slide)
-    n_step = int(args.n_step)
-    step_len_sec = int(args.step_len_sec)
-
-    y_min = min(samples + [args.beat_start, args.beat_target])
-    y_max = max(samples + [args.beat_start, args.beat_target])
-    if abs(y_max - y_min) < 1e-6:
-        y_min -= 1.0
-        y_max += 1.0
-
-    y_pad = max((y_max - y_min) * 0.08, 0.1)
-    y_min -= y_pad
-    y_max += y_pad
-    y_span = y_max - y_min
-
-    y_tick_step = max(1.0, round(y_span / 8.0))
-    y_tick_first = math.ceil((y_min - 1e-9) / y_tick_step) * y_tick_step
-    y_ticks = []
-    yv = y_tick_first
-    while yv <= y_max + y_tick_step * 0.25:
-        y_ticks.append(yv)
-        yv += y_tick_step
-    x_ticks = _build_integer_ticks(d_min)
-
-    surface, ctx = _setup_canvas(width, height)
-
-    def x_map(t):
-        return ml + (pw - 1) * (t / d_min)
-
-    def y_map(v):
-        return mt + (y_max - v) * (ph - 1) / y_span
-
-    _draw_grid_box(ctx, ml, mt, pw, ph, 10, y_ticks, y_map)
-
-    y_pixels = []
-    # curve
-    ctx.set_source_rgb(0.13, 0.37, 0.88)
-    ctx.set_line_width(2.0)
-    first = True
-    n = len(samples)
-    for i, y in enumerate(samples):
-        t = d_min * i / (n - 1)
-        px = x_map(t)
-        py = y_map(y)
-        y_pixels.append(py)
-        if first:
-            ctx.move_to(px, py)
-            first = False
-        else:
-            ctx.line_to(px, py)
-    ctx.stroke()
-
-    # endpoint markers
-    for t, y in ((0.0, samples[0]), (d_min, samples[-1])):
-        px = x_map(t)
-        py = y_map(y)
-        ctx.set_source_rgb(0.86, 0.16, 0.16)
-        ctx.arc(px, py, 2.8, 0.0, 2.0 * PI)
-        ctx.fill()
-
-    # tick marks + labels
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(16)
-    ctx.set_source_rgb(0.15, 0.15, 0.15)
-
-    for t in x_ticks:
-        x = x_map(t)
-        ctx.set_source_rgb(0.35, 0.35, 0.35)
-        ctx.set_line_width(1.0)
-        ctx.move_to(x, mt + ph - 1)
-        ctx.line_to(x, mt + ph + 4)
-        ctx.stroke()
-        txt = _fmt_tick(t)
-        ext = ctx.text_extents(txt)
-        ctx.set_source_rgb(0.15, 0.15, 0.15)
-        ctx.move_to(x - ext.width / 2, mt + ph + 22)
-        ctx.show_text(txt)
-
-    for yv in y_ticks:
-        y = y_map(yv)
-        txt = _fmt_tick(yv)
-        ext = ctx.text_extents(txt)
-        ctx.set_source_rgb(0.35, 0.35, 0.35)
-        ctx.move_to(ml - 4, y)
-        ctx.line_to(ml, y)
-        ctx.stroke()
-        ctx.set_source_rgb(0.15, 0.15, 0.15)
-        ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
-        ctx.show_text(txt)
-
-    # axis labels
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-    ctx.set_font_size(18)
-    x_label = "TIME MIN"
-    y_label = "FREQ HZ"
-
-    ext = ctx.text_extents(x_label)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 70)
-    ctx.show_text(x_label)
-
-    ctx.save()
-    ctx.translate(38, mt + ph / 2)
-    ctx.rotate(-PI / 2.0)
-    ext = ctx.text_extents(y_label)
-    ctx.move_to(-ext.width / 2, 0)
-    ctx.show_text(y_label)
-    ctx.restore()
-
-    # parameter lines (bottom)
-    mode_map = {0: "binaural beat", 1: "pulse", 2: "monaural beat"}
-    mode_label = mode_map.get(int(args.mode_kind), "binaural beat")
-    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-    ctx.set_font_size(14)
-    line1 = (
-        f"start={args.beat_start:.3f}Hz  target={args.beat_target:.3f}Hz  "
-        f"D={args.drop_min:.1f}min"
-    )
-    if slide:
-        line2 = f"{mode_label} mode: custom function curve (.sbgf), continuous (s)"
-    else:
-        line2 = (
-            f"{mode_label} mode: sampled custom curve (k/default), "
-            f"step={step_len_sec}s n={n_step}"
-        )
-
-    ext = ctx.text_extents(line1)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 40)
-    ctx.show_text(line1)
-    ext = ctx.text_extents(line2)
-    ctx.move_to(ml + (pw - ext.width) / 2, height - 18)
-    ctx.show_text(line2)
-
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    surface.write_to_png(args.out)
-    _maybe_write_graph_video(
-        surface,
-        args.video_out,
-        args.video_fps,
-        d_min * 60.0,
-        width,
-        height,
-        ml,
-        mt,
-        pw,
-        ph,
-        y_pixels,
-        samples,
-        args.audio_file,
-    )
+    return values
 
 
-def _load_iso_cycle_samples(path: str):
-    ts = []
-    env = []
-    wave = []
+def _load_triplet_samples(path: str, label: str):
+    xs = []
+    a_vals = []
+    b_vals = []
     with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -940,13 +443,165 @@ def _load_iso_cycle_samples(path: str):
                 continue
             cols = line.split()
             if len(cols) != 3:
-                raise ValueError("iso-cycle sample-file must contain three numeric columns")
-            ts.append(float(cols[0]))
-            env.append(float(cols[1]))
-            wave.append(float(cols[2]))
-    if len(ts) < 2:
-        raise ValueError("iso-cycle sample-file must contain at least two rows")
-    return ts, env, wave
+                raise ValueError(f"{label} sample-file must contain three numeric columns")
+            xs.append(float(cols[0]))
+            a_vals.append(float(cols[1]))
+            b_vals.append(float(cols[2]))
+    if len(xs) < 2:
+        raise ValueError(f"{label} sample-file must contain at least two rows")
+    return xs, a_vals, b_vals
+
+
+def _render_program_plot(args):
+    width, height = 1200, 700
+    ml, mr, mt, mb = 150, 40, 40, 120
+    pw, ph = width - ml - mr, height - mt - mb
+
+    samples = _load_scalar_samples(args.sample_file)
+    desc = _load_desc_file(args.desc_file)
+    x_min = float(desc["x_min"])
+    x_max = float(desc["x_max"])
+    y_min = float(desc["y_min"])
+    y_max = float(desc["y_max"])
+    x_ticks = _parse_tick_list(desc.get("x_ticks", ""))
+    y_ticks = _parse_tick_list(desc.get("y_ticks", ""))
+    x_label = desc.get("x_label", "TIME MIN")
+    y_label = desc.get("y_label", "FREQ HZ")
+    title = desc.get("title", "")
+    line1 = desc.get("line1", "")
+    line2 = desc.get("line2", "")
+    x_span = x_max - x_min
+    y_span = y_max - y_min
+    if x_span <= 0.0 or y_span <= 0.0:
+        raise ValueError("program plot description has invalid axis ranges")
+
+    surface, ctx = _setup_canvas(width, height)
+
+    def x_map(t):
+        return ml + (pw - 1) * ((t - x_min) / x_span)
+
+    def y_map(v):
+        return mt + (y_max - v) * (ph - 1) / y_span
+
+    _draw_grid_box(ctx, ml, mt, pw, ph, 10, y_ticks, y_map)
+
+    curve_vals = []
+    y_pixels = []
+    ctx.set_source_rgb(0.13, 0.37, 0.88)
+    ctx.set_line_width(2.0)
+    first = True
+    n = len(samples)
+    for i, y in enumerate(samples):
+        t = x_min + x_span * i / (n - 1)
+        curve_vals.append(y)
+        px = x_map(t)
+        py = y_map(y)
+        y_pixels.append(py)
+        if first:
+            ctx.move_to(px, py)
+            first = False
+        else:
+            ctx.line_to(px, py)
+    ctx.stroke()
+
+    for t, y in ((x_min, samples[0]), (x_max, samples[-1])):
+        px = x_map(t)
+        py = y_map(y)
+        ctx.set_source_rgb(0.86, 0.16, 0.16)
+        ctx.arc(px, py, 2.8, 0.0, 2.0 * PI)
+        ctx.fill()
+
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(16)
+    ctx.set_source_rgb(0.15, 0.15, 0.15)
+
+    for t in x_ticks:
+        x = x_map(t)
+        ctx.set_source_rgb(0.35, 0.35, 0.35)
+        ctx.set_line_width(1.0)
+        ctx.move_to(x, mt + ph - 1)
+        ctx.line_to(x, mt + ph + 4)
+        ctx.stroke()
+        txt = _fmt_tick(t)
+        ext = ctx.text_extents(txt)
+        ctx.set_source_rgb(0.15, 0.15, 0.15)
+        ctx.move_to(x - ext.width / 2, mt + ph + 22)
+        ctx.show_text(txt)
+
+    for yv in y_ticks:
+        y = y_map(yv)
+        txt = _fmt_tick(yv)
+        ext = ctx.text_extents(txt)
+        ctx.set_source_rgb(0.35, 0.35, 0.35)
+        ctx.move_to(ml - 4, y)
+        ctx.line_to(ml, y)
+        ctx.stroke()
+        ctx.set_source_rgb(0.15, 0.15, 0.15)
+        ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
+        ctx.show_text(txt)
+
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_font_size(18)
+    ext = ctx.text_extents(x_label)
+    ctx.move_to(ml + (pw - ext.width) / 2, height - 70)
+    ctx.show_text(x_label)
+
+    ctx.save()
+    ctx.translate(38, mt + ph / 2)
+    ctx.rotate(-PI / 2.0)
+    ext = ctx.text_extents(y_label)
+    ctx.move_to(-ext.width / 2, 0)
+    ctx.show_text(y_label)
+    ctx.restore()
+
+    if title:
+        ctx.set_font_size(17)
+        ext = ctx.text_extents(title)
+        ctx.move_to(ml + (pw - ext.width) / 2, 28)
+        ctx.show_text(title)
+
+    ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+    ctx.set_font_size(14)
+    ext = ctx.text_extents(line1)
+    ctx.move_to(ml + (pw - ext.width) / 2, height - 40)
+    ctx.show_text(line1)
+    ext = ctx.text_extents(line2)
+    ctx.move_to(ml + (pw - ext.width) / 2, height - 18)
+    ctx.show_text(line2)
+
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    surface.write_to_png(args.out)
+    _maybe_write_graph_video(
+        surface,
+        args.video_out,
+        args.video_fps,
+        x_span * 60.0,
+        width,
+        height,
+        ml,
+        mt,
+        pw,
+        ph,
+        y_pixels,
+        curve_vals,
+        args.audio_file,
+    )
+
+
+def render_sigmoid(args):
+    _render_program_plot(args)
+
+
+def render_drop(args):
+    _render_program_plot(args)
+
+
+def render_curve(args):
+    _render_program_plot(args)
+
+
+def _load_iso_cycle_samples(path: str):
+    return _load_triplet_samples(path, "iso-cycle")
 
 
 def _wave_sample(waveform: int, phase01: float) -> float:
@@ -1012,48 +667,51 @@ def render_mixam_cycle(args):
     panel_h = (height - mt - mb - gap) / 2.0
     top_y0 = mt
     bot_y0 = mt + panel_h + gap
-
-    h_m = str(getattr(args, "h_m", "pulse") or "pulse").strip().lower()
-    h_s = float(args.h_s)
-    h_d = float(args.h_d)
-    h_a = float(args.h_a)
-    h_r = float(args.h_r)
-    h_e = int(args.h_e)
-    h_f = float(args.h_f)
-    if h_m in ("0",):
-        h_m = "pulse"
-    elif h_m in ("1",):
-        h_m = "cos"
-    if h_m not in ("pulse", "cos"):
-        raise ValueError("h-m must be pulse|cos (or 0|1)")
+    desc = _load_desc_file(args.desc_file)
+    ts, env_vals, gain_vals = _load_triplet_samples(args.sample_file, "mixam-cycle")
+    x_min = float(desc["x_min"])
+    x_max = float(desc["x_max"])
+    top_y_min = float(desc["top_y_min"])
+    top_y_max = float(desc["top_y_max"])
+    bottom_y_min = float(desc["bottom_y_min"])
+    bottom_y_max = float(desc["bottom_y_max"])
+    x_ticks = _parse_tick_list(desc.get("x_ticks", ""))
+    top_y_ticks = _parse_tick_list(desc.get("top_y_ticks", ""))
+    bottom_y_ticks = _parse_tick_list(desc.get("bottom_y_ticks", ""))
+    x_label = desc.get("x_label", "CYCLE")
+    top_y_label = desc.get("top_y_label", "ENVELOPE")
+    bottom_y_label = desc.get("bottom_y_label", "GAIN")
+    title = desc.get("title", "")
+    line1 = desc.get("line1", "")
+    line2 = desc.get("line2", "")
+    x_span = x_max - x_min
+    top_y_span = top_y_max - top_y_min
+    bottom_y_span = bottom_y_max - bottom_y_min
+    if x_span <= 0.0 or top_y_span <= 0.0 or bottom_y_span <= 0.0:
+        raise ValueError("mixam-cycle description has invalid axis ranges")
 
     surface, ctx = _setup_canvas(width, height)
 
-    def x_map(u):
-        return ml + (pw - 1) * u
+    def x_map(t):
+        return ml + (pw - 1) * ((t - x_min) / x_span)
 
-    def y_map(v, y0):
-        return y0 + (1.0 - v) * (panel_h - 1)
+    def y_top(v):
+        return top_y0 + (top_y_max - v) * (panel_h - 1) / top_y_span
 
-    y_ticks = [1.0 - 0.1 * i for i in range(11)]
-    x_ticks = _build_linear_ticks(1.0, 10)
-    _draw_grid_box(ctx, ml, top_y0, pw, panel_h, 10, y_ticks, lambda v: y_map(v, top_y0))
-    _draw_grid_box(ctx, ml, bot_y0, pw, panel_h, 10, y_ticks, lambda v: y_map(v, bot_y0))
+    def y_bottom(v):
+        return bot_y0 + (bottom_y_max - v) * (panel_h - 1) / bottom_y_span
+
+    x_divs = max(1, len(x_ticks) - 1)
+    _draw_grid_box(ctx, ml, top_y0, pw, panel_h, x_divs, top_y_ticks, y_top)
+    _draw_grid_box(ctx, ml, bot_y0, pw, panel_h, x_divs, bottom_y_ticks, y_bottom)
 
     # envelope line
     ctx.set_source_rgb(0.86, 0.16, 0.16)
     ctx.set_line_width(2.0)
     first = True
-    samples = 8000
-    for i in range(samples + 1):
-        u = i / float(samples)
-        if h_m == "cos":
-            phase = (u + h_s) - math.floor(u + h_s)
-            env = 0.5 * (1.0 + math.cos(2.0 * PI * phase))
-        else:
-            env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
-        px = x_map(u)
-        py = y_map(env, top_y0)
+    for t, env in zip(ts, env_vals):
+        px = x_map(t)
+        py = y_top(env)
         if first:
             ctx.move_to(px, py)
             first = False
@@ -1065,16 +723,9 @@ def render_mixam_cycle(args):
     ctx.set_source_rgb(0.13, 0.37, 0.88)
     ctx.set_line_width(2.0)
     first = True
-    for i in range(samples + 1):
-        u = i / float(samples)
-        if h_m == "cos":
-            phase = (u + h_s) - math.floor(u + h_s)
-            env = 0.5 * (1.0 + math.cos(2.0 * PI * phase))
-        else:
-            env = _iso_mod_custom(u, h_s, h_d, h_a, h_r, h_e)
-        gain = h_f + (1.0 - h_f) * env
-        px = x_map(u)
-        py = y_map(gain, bot_y0)
+    for t, gain in zip(ts, gain_vals):
+        px = x_map(t)
+        py = y_bottom(gain)
         if first:
             ctx.move_to(px, py)
             first = False
@@ -1087,49 +738,56 @@ def render_mixam_cycle(args):
     ctx.set_font_size(16)
     ctx.set_source_rgb(0.15, 0.15, 0.15)
 
-    for u in x_ticks:
-        x = x_map(u)
+    for t in x_ticks:
+        x = x_map(t)
         ctx.set_source_rgb(0.35, 0.35, 0.35)
         ctx.move_to(x, bot_y0 + panel_h - 1)
         ctx.line_to(x, bot_y0 + panel_h + 4)
         ctx.stroke()
-        txt = _fmt_tick(u)
+        txt = _fmt_tick(t)
         ext = ctx.text_extents(txt)
         ctx.set_source_rgb(0.15, 0.15, 0.15)
         ctx.move_to(x - ext.width / 2, bot_y0 + panel_h + 22)
         ctx.show_text(txt)
 
-    for yv in y_ticks:
-        for y0 in (top_y0, bot_y0):
-            y = y_map(yv, y0)
-            txt = _fmt_tick(yv)
-            ext = ctx.text_extents(txt)
-            ctx.set_source_rgb(0.35, 0.35, 0.35)
-            ctx.move_to(ml - 4, y)
-            ctx.line_to(ml, y)
-            ctx.stroke()
-            ctx.set_source_rgb(0.15, 0.15, 0.15)
-            ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
-            ctx.show_text(txt)
+    for yv in top_y_ticks:
+        y = y_top(yv)
+        txt = _fmt_tick(yv)
+        ext = ctx.text_extents(txt)
+        ctx.set_source_rgb(0.35, 0.35, 0.35)
+        ctx.move_to(ml - 4, y)
+        ctx.line_to(ml, y)
+        ctx.stroke()
+        ctx.set_source_rgb(0.15, 0.15, 0.15)
+        ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
+        ctx.show_text(txt)
+
+    for yv in bottom_y_ticks:
+        y = y_bottom(yv)
+        txt = _fmt_tick(yv)
+        ext = ctx.text_extents(txt)
+        ctx.set_source_rgb(0.35, 0.35, 0.35)
+        ctx.move_to(ml - 4, y)
+        ctx.line_to(ml, y)
+        ctx.stroke()
+        ctx.set_source_rgb(0.15, 0.15, 0.15)
+        ctx.move_to(ml - 8 - ext.width, y + ext.height / 2)
+        ctx.show_text(txt)
 
     # titles
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
     ctx.set_font_size(17)
-    if h_m == "cos":
-        title = "MIXAM SINGLE-CYCLE CONTINUOUS-AM PLOT"
-    else:
-        title = "MIXAM SINGLE-CYCLE ENVELOPE PLOT"
-    ext = ctx.text_extents(title)
-    ctx.set_source_rgb(0.12, 0.12, 0.12)
-    ctx.move_to(ml + (pw - ext.width) / 2, 28)
-    ctx.show_text(title)
+    if title:
+        ext = ctx.text_extents(title)
+        ctx.set_source_rgb(0.12, 0.12, 0.12)
+        ctx.move_to(ml + (pw - ext.width) / 2, 28)
+        ctx.show_text(title)
 
-    x_label = "CYCLE"
     ext = ctx.text_extents(x_label)
     ctx.move_to(ml + (pw - ext.width) / 2, bot_y0 + panel_h + 56)
     ctx.show_text(x_label)
 
-    for label, y0 in (("ENVELOPE", top_y0 + panel_h / 2), ("GAIN", bot_y0 + panel_h / 2)):
+    for label, y0 in ((top_y_label, top_y0 + panel_h / 2), (bottom_y_label, bot_y0 + panel_h / 2)):
         ctx.save()
         ctx.translate(28, y0)
         ctx.rotate(-PI / 2.0)
@@ -1141,12 +799,6 @@ def render_mixam_cycle(args):
     # parameter lines
     ctx.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
     ctx.set_font_size(14)
-    if h_m == "cos":
-        line1 = f"H:m=cos s={h_s:.4f} f={h_f:.3f}"
-    else:
-        line1 = f"H:m=pulse s={h_s:.4f} d={h_d:.4f} a={h_a:.2f} r={h_r:.2f} e={h_e} f={h_f:.3f}"
-    line2 = "mixam cycle gain = f + (1-f)*envelope"
-
     ext = ctx.text_extents(line1)
     ctx.move_to(ml + (pw - ext.width) / 2, height - 40)
     ctx.show_text(line1)
@@ -1563,36 +1215,20 @@ def main():
 
     sp = sub.add_parser("sigmoid", help="Render sigmoid curve plot")
     sp.add_argument("--out", required=True)
-    sp.add_argument("--drop-min", type=float, required=True)
-    sp.add_argument("--beat-start", type=float, required=True)
-    sp.add_argument("--beat-target", type=float, required=True)
-    sp.add_argument("--sig-l", type=float, required=True)
-    sp.add_argument("--sig-h", type=float, required=True)
-    sp.add_argument("--sig-a", type=float, required=True)
-    sp.add_argument("--sig-b", type=float, required=True)
+    sp.add_argument("--sample-file", required=True)
+    sp.add_argument("--desc-file", required=True)
     _add_graph_video_args(sp)
 
     dp = sub.add_parser("drop", help="Render drop curve plot")
     dp.add_argument("--out", required=True)
-    dp.add_argument("--drop-min", type=float, required=True)
-    dp.add_argument("--beat-start", type=float, required=True)
-    dp.add_argument("--beat-target", type=float, required=True)
-    dp.add_argument("--slide", type=int, required=True)
-    dp.add_argument("--n-step", type=int, required=True)
-    dp.add_argument("--step-len-sec", type=int, required=True)
-    dp.add_argument("--mode-kind", type=int, required=True)
+    dp.add_argument("--sample-file", required=True)
+    dp.add_argument("--desc-file", required=True)
     _add_graph_video_args(dp)
 
     cp = sub.add_parser("curve", help="Render custom .sbgf beat/pulse curve plot")
     cp.add_argument("--out", required=True)
-    cp.add_argument("--drop-min", type=float, required=True)
-    cp.add_argument("--beat-start", type=float, required=True)
-    cp.add_argument("--beat-target", type=float, required=True)
-    cp.add_argument("--mode-kind", type=int, required=True)
-    cp.add_argument("--slide", type=int, required=True)
-    cp.add_argument("--n-step", type=int, required=True)
-    cp.add_argument("--step-len-sec", type=int, required=True)
     cp.add_argument("--sample-file", required=True)
+    cp.add_argument("--desc-file", required=True)
     _add_graph_video_args(cp)
 
     ip = sub.add_parser("iso-cycle", help="Render isochronic single-cycle plot")
@@ -1612,13 +1248,8 @@ def main():
 
     mp = sub.add_parser("mixam-cycle", help="Render mixam single-cycle envelope/gain plot")
     mp.add_argument("--out", required=True)
-    mp.add_argument("--h-m", type=str, default="pulse")
-    mp.add_argument("--h-s", type=float, required=True)
-    mp.add_argument("--h-d", type=float, required=True)
-    mp.add_argument("--h-a", type=float, required=True)
-    mp.add_argument("--h-r", type=float, required=True)
-    mp.add_argument("--h-e", type=int, required=True)
-    mp.add_argument("--h-f", type=float, required=True)
+    mp.add_argument("--sample-file", required=True)
+    mp.add_argument("--desc-file", required=True)
 
     wp = sub.add_parser("wave-lr", help="Render custom waveNN left/right plot")
     wp.add_argument("--out", required=True)

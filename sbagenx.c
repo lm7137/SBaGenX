@@ -298,23 +298,16 @@ void write_curve_graph_png(SbxCurveProgram *curve,
 void write_iso_cycle_graph_png_from_sequence(void);
 void write_mixam_cycle_graph_png(void);
 int try_external_sigmoid_graph_png(const char *out_fname,
-				   int len0_sec,
-				   double beat_start, double beat_target,
-				   double sig_l, double sig_h,
-				   double sig_a, double sig_b,
+				   const char *sample_file,
+				   const char *desc_file,
 				   const char *audio_file);
 int try_external_drop_graph_png(const char *out_fname,
-				int len0_sec,
-				double beat_start, double beat_target,
-				int slide, int n_step, int steplen_sec,
-				int mode_kind,
+				const char *sample_file,
+				const char *desc_file,
 				const char *audio_file);
 int try_external_curve_graph_png(const char *out_fname,
-				 int len0_sec,
-				 double beat_start, double beat_target,
-				 int mode_kind,
-				 int slide, int n_step, int steplen_sec,
 				 const char *sample_file,
+				 const char *desc_file,
 				 const char *audio_file);
 int try_external_iso_cycle_graph_png(const char *out_fname,
 				     double carr_hz, double pulse_hz,
@@ -322,8 +315,8 @@ int try_external_iso_cycle_graph_png(const char *out_fname,
 				     const char *sample_file,
 				     const char *line2);
 int try_external_mixam_cycle_graph_png(const char *out_fname,
-				       int m, double s, double d, double a, double r,
-				       int e, double f);
+				       const char *sample_file,
+				       const char *desc_file);
 static int render_graph_video_audio_temp(const char *prog_kind,
 					 const char *curve_file,
 					 const char *fmt,
@@ -2022,10 +2015,8 @@ plot_try_external_cmd(const char *script,
 
 int
 try_external_sigmoid_graph_png(const char *out_fname,
-			       int len0_sec,
-			       double beat_start, double beat_target,
-			       double sig_l, double sig_h,
-			       double sig_a, double sig_b,
+			       const char *sample_file,
+			       const char *desc_file,
 			       const char *audio_file) {
    char script[PATH_MAX];
    char args[2048];
@@ -2037,9 +2028,13 @@ try_external_sigmoid_graph_png(const char *out_fname,
       return 0;
    }
 
+   if (!sample_file || !*sample_file || !file_exists_regular(sample_file) ||
+       !desc_file || !*desc_file || !file_exists_regular(desc_file))
+      return 0;
+
    snprintf(args, sizeof(args),
-	    " sigmoid --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --sig-l %.12g --sig-h %.12g --sig-a %.12g --sig-b %.12g",
-	    out_fname, len0_sec / 60.0, beat_start, beat_target, sig_l, sig_h, sig_a, sig_b);
+	    " sigmoid --out \"%s\" --sample-file \"%s\" --desc-file \"%s\"",
+	    out_fname, sample_file, desc_file);
    if (opt_G_video && *opt_G_video) {
       char fps_txt[64];
       snprintf(fps_txt, sizeof(fps_txt), "%d", opt_G_video_fps);
@@ -2064,10 +2059,8 @@ try_external_sigmoid_graph_png(const char *out_fname,
 
 int
 try_external_drop_graph_png(const char *out_fname,
-			    int len0_sec,
-			    double beat_start, double beat_target,
-			    int slide, int n_step, int steplen_sec,
-			    int mode_kind,
+			    const char *sample_file,
+			    const char *desc_file,
 			    const char *audio_file) {
    char script[PATH_MAX];
    char args[2048];
@@ -2079,10 +2072,13 @@ try_external_drop_graph_png(const char *out_fname,
       return 0;
    }
 
+   if (!sample_file || !*sample_file || !file_exists_regular(sample_file) ||
+       !desc_file || !*desc_file || !file_exists_regular(desc_file))
+      return 0;
+
    snprintf(args, sizeof(args),
-	    " drop --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --slide %d --n-step %d --step-len-sec %d --mode-kind %d",
-	    out_fname, len0_sec / 60.0, beat_start, beat_target,
-	    slide ? 1 : 0, n_step, steplen_sec, mode_kind);
+	    " drop --out \"%s\" --sample-file \"%s\" --desc-file \"%s\"",
+	    out_fname, sample_file, desc_file);
    if (opt_G_video && *opt_G_video) {
       char fps_txt[64];
       snprintf(fps_txt, sizeof(fps_txt), "%d", opt_G_video_fps);
@@ -2457,24 +2453,25 @@ write_curve_plot_samples_file(const double *samples, int n,
 }
 
 static int
-write_iso_cycle_plot_samples_file(const double *ts,
-				  const double *env,
-				  const double *wave,
-				  int n,
-				  char *out_path, int out_path_sz) {
+write_dual_cycle_plot_samples_file(const double *ts,
+				   const double *top,
+				   const double *bottom,
+				   int n,
+				   char *out_path, int out_path_sz,
+				   const char *prefix) {
    FILE *fp;
    int i;
 
-   if (!ts || !env || !wave || n < 2 || !out_path || out_path_sz < 8)
+   if (!ts || !top || !bottom || n < 2 || !out_path || out_path_sz < 8)
       return 0;
 
-   make_plot_tmp_path(out_path, out_path_sz, "iso");
+   make_plot_tmp_path(out_path, out_path_sz, prefix ? prefix : "dual");
    fp= fopen(out_path, "w");
    if (!fp)
       return 0;
 
    for (i= 0; i<n; i++) {
-      if (fprintf(fp, "%.12g %.12g %.12g\n", ts[i], env[i], wave[i]) < 0) {
+      if (fprintf(fp, "%.12g %.12g %.12g\n", ts[i], top[i], bottom[i]) < 0) {
 	 fclose(fp);
 	 remove(out_path);
 	 return 0;
@@ -2487,13 +2484,110 @@ write_iso_cycle_plot_samples_file(const double *ts,
    return 1;
 }
 
+static int
+write_iso_cycle_plot_samples_file(const double *ts,
+				  const double *env,
+				  const double *wave,
+				  int n,
+				  char *out_path, int out_path_sz) {
+   return write_dual_cycle_plot_samples_file(ts, env, wave, n,
+					     out_path, out_path_sz, "iso");
+}
+
+static int
+write_tick_list(FILE *fp, const char *key, const double *ticks, int tick_count) {
+   int i;
+   if (!fp || !key || !ticks || tick_count < 0)
+      return 0;
+   if (fprintf(fp, "%s=", key) < 0)
+      return 0;
+   for (i= 0; i<tick_count; i++) {
+      if (fprintf(fp, "%s%.12g", (i ? "," : ""), ticks[i]) < 0)
+	 return 0;
+   }
+   if (fputc('\n', fp) == EOF)
+      return 0;
+   return 1;
+}
+
+static int
+write_program_plot_desc_file(const SbxProgramPlotDesc *desc,
+			     char *out_path, int out_path_sz) {
+   FILE *fp;
+
+   if (!desc || !out_path || out_path_sz < 8)
+      return 0;
+
+   make_plot_tmp_path_ext(out_path, out_path_sz, "plotd", ".meta");
+   fp= fopen(out_path, "w");
+   if (!fp)
+      return 0;
+
+   if (fprintf(fp, "title=%s\n", desc->title) < 0 ||
+       fprintf(fp, "x_label=%s\n", desc->x_label) < 0 ||
+       fprintf(fp, "y_label=%s\n", desc->y_label) < 0 ||
+       fprintf(fp, "x_min=%.12g\n", desc->x_min) < 0 ||
+       fprintf(fp, "x_max=%.12g\n", desc->x_max) < 0 ||
+       fprintf(fp, "y_min=%.12g\n", desc->y_min) < 0 ||
+       fprintf(fp, "y_max=%.12g\n", desc->y_max) < 0 ||
+       fprintf(fp, "line1=%s\n", desc->line1) < 0 ||
+       fprintf(fp, "line2=%s\n", desc->line2) < 0 ||
+       !write_tick_list(fp, "x_ticks", desc->x_ticks, desc->x_tick_count) ||
+       !write_tick_list(fp, "y_ticks", desc->y_ticks, desc->y_tick_count)) {
+      fclose(fp);
+      remove(out_path);
+      return 0;
+   }
+   if (fclose(fp) != 0) {
+      remove(out_path);
+      return 0;
+   }
+   return 1;
+}
+
+static int
+write_dual_panel_plot_desc_file(const SbxDualPanelPlotDesc *desc,
+				char *out_path, int out_path_sz) {
+   FILE *fp;
+
+   if (!desc || !out_path || out_path_sz < 8)
+      return 0;
+
+   make_plot_tmp_path_ext(out_path, out_path_sz, "plotd", ".meta");
+   fp= fopen(out_path, "w");
+   if (!fp)
+      return 0;
+
+   if (fprintf(fp, "title=%s\n", desc->title) < 0 ||
+       fprintf(fp, "x_label=%s\n", desc->x_label) < 0 ||
+       fprintf(fp, "top_y_label=%s\n", desc->top_y_label) < 0 ||
+       fprintf(fp, "bottom_y_label=%s\n", desc->bottom_y_label) < 0 ||
+       fprintf(fp, "x_min=%.12g\n", desc->x_min) < 0 ||
+       fprintf(fp, "x_max=%.12g\n", desc->x_max) < 0 ||
+       fprintf(fp, "top_y_min=%.12g\n", desc->top_y_min) < 0 ||
+       fprintf(fp, "top_y_max=%.12g\n", desc->top_y_max) < 0 ||
+       fprintf(fp, "bottom_y_min=%.12g\n", desc->bottom_y_min) < 0 ||
+       fprintf(fp, "bottom_y_max=%.12g\n", desc->bottom_y_max) < 0 ||
+       fprintf(fp, "line1=%s\n", desc->line1) < 0 ||
+       fprintf(fp, "line2=%s\n", desc->line2) < 0 ||
+       !write_tick_list(fp, "x_ticks", desc->x_ticks, desc->x_tick_count) ||
+       !write_tick_list(fp, "top_y_ticks", desc->top_y_ticks, desc->top_y_tick_count) ||
+       !write_tick_list(fp, "bottom_y_ticks", desc->bottom_y_ticks, desc->bottom_y_tick_count)) {
+      fclose(fp);
+      remove(out_path);
+      return 0;
+   }
+   if (fclose(fp) != 0) {
+      remove(out_path);
+      return 0;
+   }
+   return 1;
+}
+
 int
 try_external_curve_graph_png(const char *out_fname,
-			     int len0_sec,
-			     double beat_start, double beat_target,
-			     int mode_kind,
-			     int slide, int n_step, int steplen_sec,
 			     const char *sample_file,
+			     const char *desc_file,
 			     const char *audio_file) {
    char script[PATH_MAX];
    char args[2048];
@@ -2505,13 +2599,13 @@ try_external_curve_graph_png(const char *out_fname,
       return 0;
    }
 
-   if (!sample_file || !*sample_file || !file_exists_regular(sample_file))
+   if (!sample_file || !*sample_file || !file_exists_regular(sample_file) ||
+       !desc_file || !*desc_file || !file_exists_regular(desc_file))
       return 0;
 
    snprintf(args, sizeof(args),
-	    " curve --out \"%s\" --drop-min %.12g --beat-start %.12g --beat-target %.12g --mode-kind %d --slide %d --n-step %d --step-len-sec %d --sample-file \"%s\"",
-	    out_fname, len0_sec / 60.0, beat_start, beat_target, mode_kind,
-	    slide ? 1 : 0, n_step, steplen_sec, sample_file);
+	    " curve --out \"%s\" --sample-file \"%s\" --desc-file \"%s\"",
+	    out_fname, sample_file, desc_file);
    if (opt_G_video && *opt_G_video) {
       char fps_txt[64];
       snprintf(fps_txt, sizeof(fps_txt), "%d", opt_G_video_fps);
@@ -2572,8 +2666,8 @@ try_external_iso_cycle_graph_png(const char *out_fname,
 
 int
 try_external_mixam_cycle_graph_png(const char *out_fname,
-				   int m, double s, double d, double a, double r,
-				   int e, double f) {
+				   const char *sample_file,
+				   const char *desc_file) {
    char script[PATH_MAX];
    char args[2048];
    int force_external= plot_external_force();
@@ -2584,41 +2678,15 @@ try_external_mixam_cycle_graph_png(const char *out_fname,
       return 0;
    }
 
+   if (!sample_file || !*sample_file || !file_exists_regular(sample_file) ||
+       !desc_file || !*desc_file || !file_exists_regular(desc_file))
+      return 0;
+
    snprintf(args, sizeof(args),
-	    " mixam-cycle --out \"%s\" --h-m %d --h-s %.12g --h-d %.12g --h-a %.12g --h-r %.12g --h-e %d --h-f %.12g",
-	    out_fname, m, s, d, a, r, e, f);
+	    " mixam-cycle --out \"%s\" --sample-file \"%s\" --desc-file \"%s\"",
+	    out_fname, sample_file, desc_file);
 
    return plot_try_external_cmd(script, out_fname, args);
-}
-
-static int
-build_integer_axis_ticks(double max_v, double *ticks, int max_ticks) {
-   double step, xv;
-   int n= 0;
-   if (max_ticks < 2) return 0;
-   if (max_v <= 0.0) {
-      ticks[0]= 0.0;
-      ticks[1]= 1.0;
-      return 2;
-   }
-   step= floor(max_v / 10.0 + 0.5);
-   if (step < 1.0) step= 1.0;
-   xv= 0.0;
-   while (xv <= max_v + 1e-9 && n < max_ticks) {
-      ticks[n++]= xv;
-      xv += step;
-   }
-   if (n < 1) ticks[n++]= 0.0;
-   if (n < max_ticks && fabs(ticks[n-1] - max_v) > 1e-9)
-      ticks[n++]= max_v;
-   return n;
-}
-
-static const char *
-drop_mode_label(int mode_kind) {
-   if (mode_kind == 2) return "monaural beat";
-   if (mode_kind == 1) return "pulse";
-   return "binaural beat";
 }
 
 void
@@ -2636,9 +2704,7 @@ write_drop_graph_png(const char *fmt, double level,
    unsigned char *img_hi;
    unsigned char *img;
    double d_min= len0 / 60.0;
-   double y_min= 1e30, y_max= -1e30;
-   double y_pad, y_span;
-   double y_tick_step, y_tick_first, y_tick_last;
+   double y_span;
    int start_y= -1, end_y= -1;
    int label_scale= 3 * ss;
    int tick_scale= 2 * ss;
@@ -2646,18 +2712,15 @@ write_drop_graph_png(const char *fmt, double level,
    int prev_x= -1, prev_y= -1;
    char fmt_tok[256], lvl_tok[64], depth_tok[64];
    char tick_txt[64];
-   char ptxt1[256], ptxt2[256];
    char fname[1024];
    char mode_ch, curve_ch;
    int mode_kind= ismono ? 2 : (isisochronic ? 1 : 0);
-   const char *mode_label= drop_mode_label(mode_kind);
-   double x_ticks[64];
-   int nx;
-   const char *x_label= "TIME MIN";
-   const char *y_label= "FREQ HZ";
    int n_curve= 2001;
    double *curve_y= 0;
+   char sample_file[PATH_MAX];
+   char desc_file[PATH_MAX];
    char audio_file[PATH_MAX];
+   SbxProgramPlotDesc desc;
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
@@ -2671,6 +2734,14 @@ write_drop_graph_png(const char *fmt, double level,
 			     n_curve, 0, curve_y) != SBX_OK) {
       free(curve_y);
       error("Failed to sample drop graph through sbagenxlib");
+   }
+   if (sbx_build_program_plot_desc(SBX_PROGRAM_PLOT_DROP,
+				   len0, beat_start, beat_target,
+				   mode_kind, slide, n_step, steplen,
+				   0.0, 0.0, 0.0, 0.0,
+				   curve_y, n_curve, &desc) != SBX_OK) {
+      free(curve_y);
+      error("Failed to build drop plot description through sbagenxlib");
    }
 
    sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
@@ -2690,17 +2761,25 @@ write_drop_graph_png(const char *fmt, double level,
       error("Failed to render temporary audio track for graph video");
    }
 
-   if (try_external_drop_graph_png(fname, len0, beat_start, beat_target,
-				   slide, n_step, steplen, mode_kind,
-				   audio_file[0] ? audio_file : 0)) {
-      if (!opt_Q) {
-	 warn("Drop graph saved to: %s (Python/Cairo)", fname);
-	 if (opt_G_video && *opt_G_video)
-	    warn("Drop graph video saved to: %s", opt_G_video);
+   sample_file[0]= 0;
+   desc_file[0]= 0;
+   if (write_curve_plot_samples_file(curve_y, n_curve, sample_file, sizeof(sample_file)) &&
+       write_program_plot_desc_file(&desc, desc_file, sizeof(desc_file))) {
+      if (try_external_drop_graph_png(fname, sample_file, desc_file,
+				      audio_file[0] ? audio_file : 0)) {
+	 if (!opt_Q) {
+	    warn("Drop graph saved to: %s (Python/Cairo)", fname);
+	    if (opt_G_video && *opt_G_video)
+	       warn("Drop graph video saved to: %s", opt_G_video);
+	 }
+	 remove(sample_file);
+	 remove(desc_file);
+	 if (audio_file[0]) remove(audio_file);
+	 free(curve_y);
+	 return;
       }
-      if (audio_file[0]) remove(audio_file);
-      free(curve_y);
-      return;
+      remove(sample_file);
+      remove(desc_file);
    }
    if (opt_G_video && *opt_G_video) {
       if (audio_file[0]) remove(audio_file);
@@ -2711,47 +2790,15 @@ write_drop_graph_png(const char *fmt, double level,
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
    plot_fill(img_hi, hw, hh, 255, 255, 255);
 
-   nx= build_integer_axis_ticks(d_min, x_ticks, sizeof(x_ticks)/sizeof(x_ticks[0]));
-   if (nx < 2) {
-      x_ticks[0]= 0.0;
-      x_ticks[1]= d_min;
-      nx= 2;
-   }
-   for (a= 0; a<nx; a++) {
-      int gx= ml + (int)((pw-1) * x_ticks[a] / d_min + 0.5);
+   y_span= desc.y_max - desc.y_min;
+   for (a= 0; a<desc.x_tick_count; a++) {
+      int gx= ml + (int)((pw-1) * desc.x_ticks[a] / d_min + 0.5);
       plot_vline(img_hi, hw, hh, gx, mt, mt+ph-1, 236, 236, 236);
    }
 
-   for (a= 0; a<n_curve; a++) {
-      double y= curve_y[a];
-      if (y < y_min) y_min= y;
-      if (y > y_max) y_max= y;
-   }
-   if (beat_start < y_min) y_min= beat_start;
-   if (beat_start > y_max) y_max= beat_start;
-   if (beat_target < y_min) y_min= beat_target;
-   if (beat_target > y_max) y_max= beat_target;
-
-   if (y_max - y_min < 1e-6) {
-      y_min -= 1.0;
-      y_max += 1.0;
-   }
-   y_pad= (y_max - y_min) * 0.08;
-   if (y_pad < 0.1) y_pad= 0.1;
-   y_min -= y_pad;
-   y_max += y_pad;
-   y_span= y_max - y_min;
-   y_tick_step= floor(y_span / 8.0 + 0.5);
-   if (y_tick_step < 1.0) y_tick_step= 1.0;
-   y_tick_first= ceil((y_min - 1e-9) / y_tick_step) * y_tick_step;
-   y_tick_last= floor((y_max + 1e-9) / y_tick_step) * y_tick_step;
-
-   {
-      double yv;
-      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
-	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
-	 plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
-      }
+   for (a= 0; a<desc.y_tick_count; a++) {
+      gy= mt + (int)((desc.y_max - desc.y_ticks[a]) * (ph-1) / y_span + 0.5);
+      plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
    }
 
    plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt, 90, 90, 90);
@@ -2770,7 +2817,7 @@ write_drop_graph_png(const char *fmt, double level,
       if (i1 >= n_curve) i1= n_curve-1;
       rat= pos - i0;
       y= curve_y[i0] + (curve_y[i1] - curve_y[i0]) * rat;
-      py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
+      py= mt + (int)((desc.y_max - y) * (ph-1) / y_span + 0.5);
       if (a == 0) start_y= py;
       if (a == pw-1) end_y= py;
       if (prev_x >= 0)
@@ -2779,10 +2826,10 @@ write_drop_graph_png(const char *fmt, double level,
       prev_y= py;
    }
 
-   for (a= 0; a<nx; a++) {
-      int gx= ml + (int)((pw-1) * x_ticks[a] / d_min + 0.5);
+   for (a= 0; a<desc.x_tick_count; a++) {
+      int gx= ml + (int)((pw-1) * desc.x_ticks[a] / d_min + 0.5);
       int tw, tx, ty;
-      format_tick_value(x_ticks[a], tick_txt, sizeof(tick_txt));
+      format_tick_value(desc.x_ticks[a], tick_txt, sizeof(tick_txt));
       plot_vline(img_hi, hw, hh, gx, mt+ph-1, mt+ph+4*ss, 90, 90, 90);
       tw= font5x7_text_width(tick_txt, tick_scale);
       tx= gx - tw/2;
@@ -2790,18 +2837,15 @@ write_drop_graph_png(const char *fmt, double level,
       font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
-   {
-      double yv;
-      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
-	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
-	 int tw, tx, ty;
-	 format_tick_value(yv, tick_txt, sizeof(tick_txt));
-	 plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
-	 tw= font5x7_text_width(tick_txt, tick_scale);
-	 tx= ml - 8*ss - tw;
-	 ty= gy - (7 * tick_scale) / 2;
-	 font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
-      }
+   for (a= 0; a<desc.y_tick_count; a++) {
+      int tw, tx, ty;
+      gy= mt + (int)((desc.y_max - desc.y_ticks[a]) * (ph-1) / y_span + 0.5);
+      format_tick_value(desc.y_ticks[a], tick_txt, sizeof(tick_txt));
+      plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= ml - 8*ss - tw;
+      ty= gy - (7 * tick_scale) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
    for (a= -4*ss; a<=4*ss; a++) {
@@ -2810,37 +2854,30 @@ write_drop_graph_png(const char *fmt, double level,
    }
 
    {
-      int xw= font5x7_text_width(x_label, label_scale);
+      int xw= font5x7_text_width(desc.x_label, label_scale);
       int x0= ml + (pw - xw) / 2;
       int y0= mt + ph + 24*ss;
-      font5x7_draw_text(img_hi, hw, hh, x0, y0, x_label, label_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, desc.x_label, label_scale, 0, 30, 30, 30);
    }
 
    {
-      int yh= font5x7_text_height_rot90(y_label, label_scale);
+      int yh= font5x7_text_height_rot90(desc.y_label, label_scale);
       int x0= 20*ss;
       int y0= mt + (ph - yh) / 2;
-      font5x7_draw_text(img_hi, hw, hh, x0, y0, y_label, label_scale, 1, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, desc.y_label, label_scale, 1, 30, 30, 30);
    }
 
-   snprintf(ptxt1, sizeof(ptxt1), "start=%.3fHz target=%.3fHz D=%dmin",
-	    beat_start, beat_target, len0/60);
-   if (slide)
-      snprintf(ptxt2, sizeof(ptxt2), "%s mode: continuous exponential (s)", mode_label);
-   else
-      snprintf(ptxt2, sizeof(ptxt2), "%s mode: stepped exponential (k/default), step=%ds n=%d",
-	       mode_label, steplen, n_step);
    {
-      int tw1= font5x7_text_width(ptxt1, param_scale);
-      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tw1= font5x7_text_width(desc.line1, param_scale);
+      int tw2= font5x7_text_width(desc.line2, param_scale);
       int tx1= ml + (pw - tw1) / 2;
       int tx2= ml + (pw - tw2) / 2;
       int phh= 7 * param_scale;
       int pgap= 4 * ss;
       int ty2= hh - (8 * ss + phh);
       int ty1= ty2 - (phh + pgap);
-      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
-      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, desc.line1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, desc.line2, param_scale, 0, 30, 30, 30);
    }
 
    img= plot_downsample_box(img_hi, hw, hh, ss);
@@ -2873,9 +2910,7 @@ write_curve_graph_png(SbxCurveProgram *curve,
    unsigned char *img_hi;
    unsigned char *img;
    double d_min= len0 / 60.0;
-   double y_min= 1e30, y_max= -1e30;
-   double y_pad, y_span;
-   double y_tick_step, y_tick_first, y_tick_last;
+   double y_span;
    int start_y= -1, end_y= -1;
    int label_scale= 3 * ss;
    int tick_scale= 2 * ss;
@@ -2883,19 +2918,15 @@ write_curve_graph_png(SbxCurveProgram *curve,
    int prev_x= -1, prev_y= -1;
    char fmt_tok[256], lvl_tok[64], depth_tok[64];
    char tick_txt[64];
-   char ptxt1[256], ptxt2[256];
    char fname[1024];
    char mode_ch, curve_ch;
    int mode_kind= ismono ? 2 : (isisochronic ? 1 : 0);
-   const char *mode_label= drop_mode_label(mode_kind);
-   double x_ticks[64];
-   int nx;
-   const char *x_label= "TIME MIN";
-   const char *y_label= "FREQ HZ";
    int n_curve= 2001;
    double *curve_y= 0;
    char sample_file[PATH_MAX];
+   char desc_file[PATH_MAX];
    char audio_file[PATH_MAX];
+   SbxProgramPlotDesc desc;
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
@@ -2928,10 +2959,13 @@ write_curve_graph_png(SbxCurveProgram *curve,
 	 curve_y[a]= beatv;
       }
    }
-   for (a= 0; a<n_curve; a++) {
-      double beatv= curve_y[a];
-      if (beatv < y_min) y_min= beatv;
-      if (beatv > y_max) y_max= beatv;
+   if (sbx_build_program_plot_desc(SBX_PROGRAM_PLOT_CURVE,
+				   len0, beat_start, beat_target,
+				   mode_kind, slide, n_step, steplen,
+				   0.0, 0.0, 0.0, 0.0,
+				   curve_y, n_curve, &desc) != SBX_OK) {
+      free(curve_y);
+      error("Failed to build curve plot description through sbagenxlib");
    }
 
    sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
@@ -2952,11 +2986,11 @@ write_curve_graph_png(SbxCurveProgram *curve,
    }
 
    sample_file[0]= 0;
-   if (write_curve_plot_samples_file(curve_y, n_curve, sample_file, sizeof(sample_file))) {
-      if (try_external_curve_graph_png(fname, len0,
-				       beat_start, beat_target,
-				       mode_kind, slide, n_step, steplen,
-				       sample_file,
+   desc_file[0]= 0;
+   if (write_curve_plot_samples_file(curve_y, n_curve, sample_file, sizeof(sample_file)) &&
+       write_program_plot_desc_file(&desc, desc_file, sizeof(desc_file))) {
+      if (try_external_curve_graph_png(fname,
+				       sample_file, desc_file,
 				       audio_file[0] ? audio_file : 0)) {
 	 if (!opt_Q) {
 	    warn("Curve graph saved to: %s (Python/Cairo)", fname);
@@ -2964,11 +2998,13 @@ write_curve_graph_png(SbxCurveProgram *curve,
 	       warn("Curve graph video saved to: %s", opt_G_video);
 	 }
 	 remove(sample_file);
+	 remove(desc_file);
 	 if (audio_file[0]) remove(audio_file);
 	 free(curve_y);
 	 return;
       }
       remove(sample_file);
+      remove(desc_file);
    }
    if (opt_G_video && *opt_G_video) {
       if (audio_file[0]) remove(audio_file);
@@ -2976,45 +3012,19 @@ write_curve_graph_png(SbxCurveProgram *curve,
       error("Graph video export requires the external Python/Cairo backend and FFmpeg with libx264 support installed and available on PATH");
    }
 
-   if (beat_start < y_min) y_min= beat_start;
-   if (beat_start > y_max) y_max= beat_start;
-   if (beat_target < y_min) y_min= beat_target;
-   if (beat_target > y_max) y_max= beat_target;
-   if (y_max - y_min < 1e-6) {
-      y_min -= 1.0;
-      y_max += 1.0;
-   }
-
-   y_pad= (y_max - y_min) * 0.08;
-   if (y_pad < 0.1) y_pad= 0.1;
-   y_min -= y_pad;
-   y_max += y_pad;
-   y_span= y_max - y_min;
-   y_tick_step= floor(y_span / 8.0 + 0.5);
-   if (y_tick_step < 1.0) y_tick_step= 1.0;
-   y_tick_first= ceil((y_min - 1e-9) / y_tick_step) * y_tick_step;
-   y_tick_last= floor((y_max + 1e-9) / y_tick_step) * y_tick_step;
+   y_span= desc.y_max - desc.y_min;
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
    plot_fill(img_hi, hw, hh, 255, 255, 255);
 
-   nx= build_integer_axis_ticks(d_min, x_ticks, sizeof(x_ticks)/sizeof(x_ticks[0]));
-   if (nx < 2) {
-      x_ticks[0]= 0.0;
-      x_ticks[1]= d_min;
-      nx= 2;
-   }
-   for (a= 0; a<nx; a++) {
-      int gx= ml + (int)((pw-1) * x_ticks[a] / d_min + 0.5);
+   for (a= 0; a<desc.x_tick_count; a++) {
+      int gx= ml + (int)((pw-1) * desc.x_ticks[a] / d_min + 0.5);
       plot_vline(img_hi, hw, hh, gx, mt, mt+ph-1, 236, 236, 236);
    }
 
-   {
-      double yv;
-      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
-	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
-	 plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
-      }
+   for (a= 0; a<desc.y_tick_count; a++) {
+      gy= mt + (int)((desc.y_max - desc.y_ticks[a]) * (ph-1) / y_span + 0.5);
+      plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
    }
 
    plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt, 90, 90, 90);
@@ -3033,7 +3043,7 @@ write_curve_graph_png(SbxCurveProgram *curve,
       if (i1 >= n_curve) i1= n_curve-1;
       rat= pos - i0;
       yv= curve_y[i0] + (curve_y[i1] - curve_y[i0]) * rat;
-      py= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
+      py= mt + (int)((desc.y_max - yv) * (ph-1) / y_span + 0.5);
       if (a == 0) start_y= py;
       if (a == pw-1) end_y= py;
       if (prev_x >= 0)
@@ -3042,10 +3052,10 @@ write_curve_graph_png(SbxCurveProgram *curve,
       prev_y= py;
    }
 
-   for (a= 0; a<nx; a++) {
-      int gx= ml + (int)((pw-1) * x_ticks[a] / d_min + 0.5);
+   for (a= 0; a<desc.x_tick_count; a++) {
+      int gx= ml + (int)((pw-1) * desc.x_ticks[a] / d_min + 0.5);
       int tw, tx, ty;
-      format_tick_value(x_ticks[a], tick_txt, sizeof(tick_txt));
+      format_tick_value(desc.x_ticks[a], tick_txt, sizeof(tick_txt));
       plot_vline(img_hi, hw, hh, gx, mt+ph-1, mt+ph+4*ss, 90, 90, 90);
       tw= font5x7_text_width(tick_txt, tick_scale);
       tx= gx - tw/2;
@@ -3053,18 +3063,15 @@ write_curve_graph_png(SbxCurveProgram *curve,
       font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
-   {
-      double yv;
-      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
-	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
-	 int tw, tx, ty;
-	 format_tick_value(yv, tick_txt, sizeof(tick_txt));
-	 plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
-	 tw= font5x7_text_width(tick_txt, tick_scale);
-	 tx= ml - 8*ss - tw;
-	 ty= gy - (7 * tick_scale) / 2;
-	 font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
-      }
+   for (a= 0; a<desc.y_tick_count; a++) {
+      int tw, tx, ty;
+      gy= mt + (int)((desc.y_max - desc.y_ticks[a]) * (ph-1) / y_span + 0.5);
+      format_tick_value(desc.y_ticks[a], tick_txt, sizeof(tick_txt));
+      plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= ml - 8*ss - tw;
+      ty= gy - (7 * tick_scale) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
    for (a= -4*ss; a<=4*ss; a++) {
@@ -3073,38 +3080,30 @@ write_curve_graph_png(SbxCurveProgram *curve,
    }
 
    {
-      int xw= font5x7_text_width(x_label, label_scale);
+      int xw= font5x7_text_width(desc.x_label, label_scale);
       int x0= ml + (pw - xw) / 2;
       int y0= mt + ph + 24*ss;
-      font5x7_draw_text(img_hi, hw, hh, x0, y0, x_label, label_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, desc.x_label, label_scale, 0, 30, 30, 30);
    }
 
    {
-      int yh= font5x7_text_height_rot90(y_label, label_scale);
+      int yh= font5x7_text_height_rot90(desc.y_label, label_scale);
       int x0= 20*ss;
       int y0= mt + (ph - yh) / 2;
-      font5x7_draw_text(img_hi, hw, hh, x0, y0, y_label, label_scale, 1, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, desc.y_label, label_scale, 1, 30, 30, 30);
    }
 
-   snprintf(ptxt1, sizeof(ptxt1), "start=%.3fHz target=%.3fHz D=%dmin",
-	    beat_start, beat_target, len0/60);
-   if (slide)
-      snprintf(ptxt2, sizeof(ptxt2), "%s mode: custom function curve (.sbgf), continuous (s)",
-	       mode_label);
-   else
-      snprintf(ptxt2, sizeof(ptxt2), "%s mode: sampled custom curve (k/default), step=%ds n=%d",
-	       mode_label, steplen, n_step);
    {
-      int tw1= font5x7_text_width(ptxt1, param_scale);
-      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tw1= font5x7_text_width(desc.line1, param_scale);
+      int tw2= font5x7_text_width(desc.line2, param_scale);
       int tx1= ml + (pw - tw1) / 2;
       int tx2= ml + (pw - tw2) / 2;
       int phh= 7 * param_scale;
       int pgap= 4 * ss;
       int ty2= hh - (8 * ss + phh);
       int ty1= ty2 - (phh + pgap);
-      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
-      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, desc.line1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, desc.line2, param_scale, 0, 30, 30, 30);
    }
 
    img= plot_downsample_box(img_hi, hw, hh, ss);
@@ -3135,9 +3134,7 @@ write_sigmoid_graph_png(const char *fmt, double level,
    unsigned char *img_hi;
    unsigned char *img;
    double d_min= len0 / 60.0;
-   double y_min= 1e30, y_max= -1e30;
-   double y_pad, y_span;
-   double y_tick_step, y_tick_first, y_tick_last;
+   double y_span;
    int start_y= -1, end_y= -1;
    int label_scale= 3 * ss;
    int tick_scale= 2 * ss;
@@ -3145,13 +3142,13 @@ write_sigmoid_graph_png(const char *fmt, double level,
    int prev_x= -1, prev_y= -1;
    char fmt_tok[256], lvl_tok[64], l_tok[64], h_tok[64], depth_tok[64];
    char tick_txt[64];
-   char ptxt1[256], ptxt2[256];
    char fname[1024];
-   const char *x_label= "TIME MIN";
-   const char *y_label= "FREQ HZ";
    int n_curve= 2001;
    double *curve_y= 0;
+   char sample_file[PATH_MAX];
+   char desc_file[PATH_MAX];
    char audio_file[PATH_MAX];
+   SbxProgramPlotDesc desc;
 
    if (pw < 10 || ph < 10)
       error("Graph dimensions are invalid");
@@ -3163,6 +3160,14 @@ write_sigmoid_graph_png(const char *fmt, double level,
 				n_curve, 0, curve_y) != SBX_OK) {
       free(curve_y);
       error("Failed to sample sigmoid graph through sbagenxlib");
+   }
+   if (sbx_build_program_plot_desc(SBX_PROGRAM_PLOT_SIGMOID,
+				   len0, beat_start, beat_target,
+				   0, 1, 0, 0,
+				   sig_l, sig_h, sig_a, sig_b,
+				   curve_y, n_curve, &desc) != SBX_OK) {
+      free(curve_y);
+      error("Failed to build sigmoid plot description through sbagenxlib");
    }
 
    sanitize_filename_token(fmt, fmt_tok, sizeof(fmt_tok));
@@ -3182,17 +3187,25 @@ write_sigmoid_graph_png(const char *fmt, double level,
       error("Failed to render temporary audio track for graph video");
    }
 
-   if (try_external_sigmoid_graph_png(fname, len0, beat_start, beat_target,
-				      sig_l, sig_h, sig_a, sig_b,
-				      audio_file[0] ? audio_file : 0)) {
-      if (!opt_Q) {
-	 warn("Sigmoid graph saved to: %s (Python/Cairo)", fname);
-	 if (opt_G_video && *opt_G_video)
-	    warn("Sigmoid graph video saved to: %s", opt_G_video);
+   sample_file[0]= 0;
+   desc_file[0]= 0;
+   if (write_curve_plot_samples_file(curve_y, n_curve, sample_file, sizeof(sample_file)) &&
+       write_program_plot_desc_file(&desc, desc_file, sizeof(desc_file))) {
+      if (try_external_sigmoid_graph_png(fname, sample_file, desc_file,
+					 audio_file[0] ? audio_file : 0)) {
+	 if (!opt_Q) {
+	    warn("Sigmoid graph saved to: %s (Python/Cairo)", fname);
+	    if (opt_G_video && *opt_G_video)
+	       warn("Sigmoid graph video saved to: %s", opt_G_video);
+	 }
+	 remove(sample_file);
+	 remove(desc_file);
+	 if (audio_file[0]) remove(audio_file);
+	 free(curve_y);
+	 return;
       }
-      if (audio_file[0]) remove(audio_file);
-      free(curve_y);
-      return;
+      remove(sample_file);
+      remove(desc_file);
    }
    if (opt_G_video && *opt_G_video) {
       if (audio_file[0]) remove(audio_file);
@@ -3203,42 +3216,15 @@ write_sigmoid_graph_png(const char *fmt, double level,
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
    plot_fill(img_hi, hw, hh, 255, 255, 255);
 
-   for (a= 0; a<=10; a++) {
-      int gx= ml + (pw-1) * a / 10;
+   y_span= desc.y_max - desc.y_min;
+   for (a= 0; a<desc.x_tick_count; a++) {
+      int gx= ml + (int)((pw-1) * desc.x_ticks[a] / d_min + 0.5);
       plot_vline(img_hi, hw, hh, gx, mt, mt+ph-1, 236, 236, 236);
    }
 
-   for (a= 0; a<n_curve; a++) {
-      double y= curve_y[a];
-      if (y < y_min) y_min= y;
-      if (y > y_max) y_max= y;
-   }
-   if (beat_start < y_min) y_min= beat_start;
-   if (beat_start > y_max) y_max= beat_start;
-   if (beat_target < y_min) y_min= beat_target;
-   if (beat_target > y_max) y_max= beat_target;
-
-   if (y_max - y_min < 1e-6) {
-      y_min -= 1.0;
-      y_max += 1.0;
-   }
-   y_pad= (y_max - y_min) * 0.08;
-   if (y_pad < 0.1) y_pad= 0.1;
-   y_min -= y_pad;
-   y_max += y_pad;
-   y_span= y_max - y_min;
-   // Use whole-number Y ticks for readability (match Python/Cairo renderer).
-   y_tick_step= floor(y_span / 8.0 + 0.5);
-   if (y_tick_step < 1.0) y_tick_step= 1.0;
-   y_tick_first= ceil((y_min - 1e-9) / y_tick_step) * y_tick_step;
-   y_tick_last= floor((y_max + 1e-9) / y_tick_step) * y_tick_step;
-
-   {
-      double yv;
-      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
-	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
-	 plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
-      }
+   for (a= 0; a<desc.y_tick_count; a++) {
+      gy= mt + (int)((desc.y_max - desc.y_ticks[a]) * (ph-1) / y_span + 0.5);
+      plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
    }
 
    plot_hline(img_hi, hw, hh, ml, ml+pw-1, mt, 90, 90, 90);
@@ -3257,7 +3243,7 @@ write_sigmoid_graph_png(const char *fmt, double level,
       if (i1 >= n_curve) i1= n_curve-1;
       rat= pos - i0;
       y= curve_y[i0] + (curve_y[i1] - curve_y[i0]) * rat;
-      py= mt + (int)((y_max - y) * (ph-1) / y_span + 0.5);
+      py= mt + (int)((desc.y_max - y) * (ph-1) / y_span + 0.5);
       if (a == 0) start_y= py;
       if (a == pw-1) end_y= py;
       if (prev_x >= 0)
@@ -3266,11 +3252,10 @@ write_sigmoid_graph_png(const char *fmt, double level,
       prev_y= py;
    }
 
-   for (a= 0; a<=10; a++) {
-      int gx= ml + (pw-1) * a / 10;
+   for (a= 0; a<desc.x_tick_count; a++) {
+      int gx= ml + (int)((pw-1) * desc.x_ticks[a] / d_min + 0.5);
       int tw, tx, ty;
-      double xv= d_min * a / 10.0;
-      format_tick_value(xv, tick_txt, sizeof(tick_txt));
+      format_tick_value(desc.x_ticks[a], tick_txt, sizeof(tick_txt));
       plot_vline(img_hi, hw, hh, gx, mt+ph-1, mt+ph+4*ss, 90, 90, 90);
       tw= font5x7_text_width(tick_txt, tick_scale);
       tx= gx - tw/2;
@@ -3278,18 +3263,15 @@ write_sigmoid_graph_png(const char *fmt, double level,
       font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
-   {
-      double yv;
-      for (yv= y_tick_first; yv <= y_tick_last + y_tick_step*0.25; yv += y_tick_step) {
-	 gy= mt + (int)((y_max - yv) * (ph-1) / y_span + 0.5);
-	 int tw, tx, ty;
-	 format_tick_value(yv, tick_txt, sizeof(tick_txt));
-	 plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
-	 tw= font5x7_text_width(tick_txt, tick_scale);
-	 tx= ml - 8*ss - tw;
-	 ty= gy - (7 * tick_scale) / 2;
-	 font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
-      }
+   for (a= 0; a<desc.y_tick_count; a++) {
+      int tw, tx, ty;
+      gy= mt + (int)((desc.y_max - desc.y_ticks[a]) * (ph-1) / y_span + 0.5);
+      format_tick_value(desc.y_ticks[a], tick_txt, sizeof(tick_txt));
+      plot_hline(img_hi, hw, hh, ml-4*ss, ml, gy, 90, 90, 90);
+      tw= font5x7_text_width(tick_txt, tick_scale);
+      tx= ml - 8*ss - tw;
+      ty= gy - (7 * tick_scale) / 2;
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
    for (a= -4*ss; a<=4*ss; a++) {
@@ -3298,34 +3280,30 @@ write_sigmoid_graph_png(const char *fmt, double level,
    }
 
    {
-      int xw= font5x7_text_width(x_label, label_scale);
+      int xw= font5x7_text_width(desc.x_label, label_scale);
       int x0= ml + (pw - xw) / 2;
       int y0= mt + ph + 24*ss;
-      font5x7_draw_text(img_hi, hw, hh, x0, y0, x_label, label_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, desc.x_label, label_scale, 0, 30, 30, 30);
    }
 
    {
-      int yh= font5x7_text_height_rot90(y_label, label_scale);
+      int yh= font5x7_text_height_rot90(desc.y_label, label_scale);
       int x0= 20*ss;
       int y0= mt + (ph - yh) / 2;
-      font5x7_draw_text(img_hi, hw, hh, x0, y0, y_label, label_scale, 1, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y0, desc.y_label, label_scale, 1, 30, 30, 30);
    }
 
-   snprintf(ptxt1, sizeof(ptxt1), "start=%.3fHz target=%.3fHz D=%dmin",
-	    beat_start, beat_target, len0/60);
-   snprintf(ptxt2, sizeof(ptxt2), "l=%.4f h=%.4f a=%.4f b=%.4f",
-	    sig_l, sig_h, sig_a, sig_b);
    {
-      int tw1= font5x7_text_width(ptxt1, param_scale);
-      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tw1= font5x7_text_width(desc.line1, param_scale);
+      int tw2= font5x7_text_width(desc.line2, param_scale);
       int tx1= ml + (pw - tw1) / 2;
       int tx2= ml + (pw - tw2) / 2;
       int phh= 7 * param_scale;
       int pgap= 4 * ss;
       int ty2= hh - (8 * ss + phh);
       int ty1= ty2 - (phh + pgap);
-      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
-      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, desc.line1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, desc.line2, param_scale, 0, 30, 30, 30);
    }
 
    img= plot_downsample_box(img_hi, hw, hh, ss);
@@ -3357,16 +3335,16 @@ write_mixam_cycle_graph_png(void) {
    int a, i, prev_ex= -1, prev_ey= -1, prev_gx= -1, prev_gy= -1;
    unsigned char *img_hi;
    unsigned char *img;
+   double *t_samp;
    double *env_samp;
    double *gain_samp;
    SbxMixFxSpec fx;
    char s_tok[64], d_tok[64], a_tok[64], r_tok[64], f_tok[64], fname[512];
    char tick_txt[64];
-   char ptxt1[256], ptxt2[256];
    const char *mode_name= (opt_H_m == SBX_MIXAM_MODE_COS) ? "cos" : "pulse";
-   const char *title= (opt_H_m == SBX_MIXAM_MODE_COS)
-      ? "MIXAM SINGLE-CYCLE CONTINUOUS-AM PLOT"
-      : "MIXAM SINGLE-CYCLE ENVELOPE PLOT";
+   char sample_file[PATH_MAX];
+   char desc_file[PATH_MAX];
+   SbxDualPanelPlotDesc desc;
 
    sanitize_filename_token("mixam_cycle", fname, sizeof(fname));
    double_to_token(opt_H_s, s_tok, sizeof(s_tok));
@@ -3378,15 +3356,6 @@ write_mixam_cycle_graph_png(void) {
 	    "mixam_cycle_m%s_s%s_d%s_a%s_r%s_e%d_f%s.png",
 	    mode_name, s_tok, d_tok, a_tok, r_tok, opt_H_e, f_tok);
 
-   if (try_external_mixam_cycle_graph_png(fname,
-					  opt_H_m,
-					  opt_H_s, opt_H_d, opt_H_a, opt_H_r,
-					  opt_H_e, opt_H_f)) {
-      if (!opt_Q)
-	 warn("Mixam cycle graph saved to: %s (Python/Cairo)", fname);
-      return;
-   }
-
    memset(&fx, 0, sizeof(fx));
    fx.type= SBX_MIXFX_AM;
    fx.mixam_mode= opt_H_m;
@@ -3396,12 +3365,39 @@ write_mixam_cycle_graph_png(void) {
    fx.mixam_release= opt_H_r;
    fx.mixam_edge_mode= opt_H_e;
    fx.mixam_floor= opt_H_f;
+   t_samp= ALLOC_ARR(pw, double);
    env_samp= ALLOC_ARR(pw, double);
    gain_samp= ALLOC_ARR(pw, double);
-   if (sbx_sample_mixam_cycle(&fx, 1.0, pw, 0, env_samp, gain_samp) != SBX_OK) {
+   if (sbx_sample_mixam_cycle(&fx, 1.0, pw, t_samp, env_samp, gain_samp) != SBX_OK) {
+      free(t_samp);
       free(env_samp);
       free(gain_samp);
       error("Failed to sample mixam cycle through sbagenxlib");
+   }
+   if (sbx_build_mixam_cycle_plot_desc(&fx, 1.0, &desc) != SBX_OK) {
+      free(t_samp);
+      free(env_samp);
+      free(gain_samp);
+      error("Failed to build mixam cycle plot description through sbagenxlib");
+   }
+
+   sample_file[0]= 0;
+   desc_file[0]= 0;
+   if (write_dual_cycle_plot_samples_file(t_samp, env_samp, gain_samp, pw,
+					  sample_file, sizeof(sample_file), "mixam") &&
+       write_dual_panel_plot_desc_file(&desc, desc_file, sizeof(desc_file))) {
+      if (try_external_mixam_cycle_graph_png(fname, sample_file, desc_file)) {
+	 if (!opt_Q)
+	    warn("Mixam cycle graph saved to: %s (Python/Cairo)", fname);
+	 remove(sample_file);
+	 remove(desc_file);
+	 free(t_samp);
+	 free(env_samp);
+	 free(gain_samp);
+	 return;
+      }
+      remove(sample_file);
+      remove(desc_file);
    }
 
    img_hi= ALLOC_ARR(hw*hh*3, unsigned char);
@@ -3409,17 +3405,20 @@ write_mixam_cycle_graph_png(void) {
    plot_fill_rect(img_hi, hw, hh, ml, top_y0, ml+pw-1, top_y1, 250, 250, 250);
    plot_fill_rect(img_hi, hw, hh, ml, bot_y0, ml+pw-1, bot_y1, 250, 250, 250);
 
-   for (i= 0; i<=10; i++) {
-      int gx= ml + (pw-1) * i / 10;
+   for (i= 0; i<desc.x_tick_count; i++) {
+      int gx= ml + (int)((pw-1) * (desc.x_ticks[i] - desc.x_min) /
+			 (desc.x_max - desc.x_min) + 0.5);
       plot_vline(img_hi, hw, hh, gx, top_y0, top_y1, 236, 236, 236);
       plot_vline(img_hi, hw, hh, gx, bot_y0, bot_y1, 236, 236, 236);
    }
-   for (i= 0; i<=10; i++) {
-      int gy= top_y0 + (ph-1) * i / 10;
+   for (i= 0; i<desc.top_y_tick_count; i++) {
+      int gy= top_y0 + (int)((desc.top_y_max - desc.top_y_ticks[i]) * (ph-1) /
+			     (desc.top_y_max - desc.top_y_min) + 0.5);
       plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
    }
-   for (i= 0; i<=10; i++) {
-      int gy= bot_y0 + (ph-1) * i / 10;
+   for (i= 0; i<desc.bottom_y_tick_count; i++) {
+      int gy= bot_y0 + (int)((desc.bottom_y_max - desc.bottom_y_ticks[i]) * (ph-1) /
+			     (desc.bottom_y_max - desc.bottom_y_min) + 0.5);
       plot_hline(img_hi, hw, hh, ml, ml+pw-1, gy, 236, 236, 236);
    }
 
@@ -3437,8 +3436,10 @@ write_mixam_cycle_graph_png(void) {
       int ex= ml + a;
       double env= env_samp[a];
       double gain= gain_samp[a];
-      int ey= top_y0 + (int)((1.0 - env) * (ph-1) + 0.5);
-      int gy= bot_y0 + (int)((1.0 - gain) * (ph-1) + 0.5);
+      int ey= top_y0 + (int)((desc.top_y_max - env) * (ph-1) /
+			     (desc.top_y_max - desc.top_y_min) + 0.5);
+      int gy= bot_y0 + (int)((desc.bottom_y_max - gain) * (ph-1) /
+			     (desc.bottom_y_max - desc.bottom_y_min) + 0.5);
 
       if (prev_ex >= 0) {
 	 plot_line_thick(img_hi, hw, hh, prev_ex, prev_ey, ex, ey, ss+1, 220, 40, 40);
@@ -3448,20 +3449,21 @@ write_mixam_cycle_graph_png(void) {
       prev_gx= ex; prev_gy= gy;
    }
 
-   for (i= 0; i<=10; i++) {
-      int gx= ml + (pw-1) * i / 10;
-      double xv= i / 10.0;
+   for (i= 0; i<desc.x_tick_count; i++) {
+      int gx= ml + (int)((pw-1) * (desc.x_ticks[i] - desc.x_min) /
+			 (desc.x_max - desc.x_min) + 0.5);
       int tx, tw;
-      format_tick_value(xv, tick_txt, sizeof(tick_txt));
+      format_tick_value(desc.x_ticks[i], tick_txt, sizeof(tick_txt));
       plot_vline(img_hi, hw, hh, gx, bot_y1, bot_y1 + 4*ss, 90, 90, 90);
       tw= font5x7_text_width(tick_txt, tick_scale);
       tx= gx - tw/2;
       font5x7_draw_text(img_hi, hw, hh, tx, bot_y1 + 10*ss, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
-   for (i= 0; i<=10; i++) {
-      double yv= 1.0 - i * 0.1;
-      int gy= top_y0 + (int)((1.0 - yv) * (ph-1) + 0.5);
+   for (i= 0; i<desc.top_y_tick_count; i++) {
+      double yv= desc.top_y_ticks[i];
+      int gy= top_y0 + (int)((desc.top_y_max - yv) * (ph-1) /
+			     (desc.top_y_max - desc.top_y_min) + 0.5);
       int tw, tx, ty;
       format_tick_value(yv, tick_txt, sizeof(tick_txt));
       plot_hline(img_hi, hw, hh, ml - 4*ss, ml, gy, 90, 90, 90);
@@ -3471,9 +3473,10 @@ write_mixam_cycle_graph_png(void) {
       font5x7_draw_text(img_hi, hw, hh, tx, ty, tick_txt, tick_scale, 0, 30, 30, 30);
    }
 
-   for (i= 0; i<=10; i++) {
-      double yv= 1.0 - i * 0.1;
-      int gy= bot_y0 + (int)((1.0 - yv) * (ph-1) + 0.5);
+   for (i= 0; i<desc.bottom_y_tick_count; i++) {
+      double yv= desc.bottom_y_ticks[i];
+      int gy= bot_y0 + (int)((desc.bottom_y_max - yv) * (ph-1) /
+			     (desc.bottom_y_max - desc.bottom_y_min) + 0.5);
       int tw, tx, ty;
       format_tick_value(yv, tick_txt, sizeof(tick_txt));
       plot_hline(img_hi, hw, hh, ml - 4*ss, ml, gy, 90, 90, 90);
@@ -3484,44 +3487,35 @@ write_mixam_cycle_graph_png(void) {
    }
 
    {
-      int tw= font5x7_text_width(title, label_scale);
+      int tw= font5x7_text_width(desc.title, label_scale);
       int tx= ml + (pw - tw) / 2;
-      font5x7_draw_text(img_hi, hw, hh, tx, 8*ss, title, label_scale, 0, 25, 25, 25);
+      font5x7_draw_text(img_hi, hw, hh, tx, 8*ss, desc.title, label_scale, 0, 25, 25, 25);
    }
    {
-      const char *x_label= "CYCLE";
-      int tw= font5x7_text_width(x_label, label_scale);
+      int tw= font5x7_text_width(desc.x_label, label_scale);
       int tx= ml + (pw - tw) / 2;
       int ty= bot_y1 + 32*ss;
-      font5x7_draw_text(img_hi, hw, hh, tx, ty, x_label, label_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx, ty, desc.x_label, label_scale, 0, 30, 30, 30);
    }
    {
-      const char *y1_label= "ENVELOPE";
-      const char *y2_label= "GAIN";
-      int yh1= font5x7_text_height_rot90(y1_label, label_scale);
-      int yh2= font5x7_text_height_rot90(y2_label, label_scale);
+      int yh1= font5x7_text_height_rot90(desc.top_y_label, label_scale);
+      int yh2= font5x7_text_height_rot90(desc.bottom_y_label, label_scale);
       int x0= 18 * ss;
       int y01= top_y0 + (ph - yh1) / 2;
       int y02= bot_y0 + (ph - yh2) / 2;
-      font5x7_draw_text(img_hi, hw, hh, x0, y01, y1_label, label_scale, 1, 30, 30, 30);
-      font5x7_draw_text(img_hi, hw, hh, x0, y02, y2_label, label_scale, 1, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y01, desc.top_y_label, label_scale, 1, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, x0, y02, desc.bottom_y_label, label_scale, 1, 30, 30, 30);
    }
 
-   if (opt_H_m == SBX_MIXAM_MODE_COS)
-      snprintf(ptxt1, sizeof(ptxt1), "H:m=cos s=%.4f f=%.3f", opt_H_s, opt_H_f);
-   else
-      snprintf(ptxt1, sizeof(ptxt1), "H:m=pulse s=%.4f d=%.4f a=%.2f r=%.2f e=%d f=%.3f",
-	       opt_H_s, opt_H_d, opt_H_a, opt_H_r, opt_H_e, opt_H_f);
-   snprintf(ptxt2, sizeof(ptxt2), "mixam cycle gain = f + (1-f)*envelope");
    {
-      int tw1= font5x7_text_width(ptxt1, param_scale);
-      int tw2= font5x7_text_width(ptxt2, param_scale);
+      int tw1= font5x7_text_width(desc.line1, param_scale);
+      int tw2= font5x7_text_width(desc.line2, param_scale);
       int tx1= ml + (pw - tw1) / 2;
       int tx2= ml + (pw - tw2) / 2;
       int ty1= hh - 66 * ss;
       int ty2= hh - 38 * ss;
-      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, ptxt1, param_scale, 0, 30, 30, 30);
-      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, ptxt2, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx1, ty1, desc.line1, param_scale, 0, 30, 30, 30);
+      font5x7_draw_text(img_hi, hw, hh, tx2, ty2, desc.line2, param_scale, 0, 30, 30, 30);
    }
 
    img= plot_downsample_box(img_hi, hw, hh, ss);
@@ -3532,6 +3526,7 @@ write_mixam_cycle_graph_png(void) {
    if (!opt_Q)
       warn("Mixam cycle graph saved to: %s", fname);
    free(img);
+   free(t_samp);
    free(env_samp);
    free(gain_samp);
 }

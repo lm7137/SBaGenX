@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "sbagenxlib.h"
 
@@ -36,6 +37,7 @@ main(void) {
   SbxToneSpec iso_tone;
   SbxIsoEnvelopeSpec iso_env;
   SbxMixFxSpec mixam;
+  SbxDualPanelPlotDesc dual_desc;
   SbxMixFxSpec fxv[4];
   SbxMixFxSpec runtime_fx[2];
   SbxMixFxSpec timed_fx[2];
@@ -282,6 +284,19 @@ main(void) {
     fail("mixam cosine envelope mismatch");
   if (!near(gain[0], 1.0, 1e-9) || !near(gain[2], 0.45, 1e-9) || !near(gain[4], 1.0, 1e-9))
     fail("mixam cosine gain mismatch");
+  rc = sbx_build_mixam_cycle_plot_desc(&mixam, 1.0, &dual_desc);
+  if (rc != SBX_OK) fail("build_mixam_cycle_plot_desc failed");
+  if (strcmp(dual_desc.x_label, "CYCLE") != 0 ||
+      strcmp(dual_desc.top_y_label, "ENVELOPE") != 0 ||
+      strcmp(dual_desc.bottom_y_label, "GAIN") != 0)
+    fail("mixam plot labels mismatch");
+  if (dual_desc.x_tick_count < 2 || dual_desc.top_y_tick_count < 2 ||
+      dual_desc.bottom_y_tick_count < 2)
+    fail("mixam plot tick counts too small");
+  if (strstr(dual_desc.title, "MIXAM") == NULL ||
+      strstr(dual_desc.line1, "H:m=cos") == NULL ||
+      strstr(dual_desc.line2, "mixam cycle gain") == NULL)
+    fail("mixam plot text mismatch");
 
   if (sbx_parse_tone_spec("200@1/100", &iso_tone) != SBX_OK)
     fail("parse isochronic tone failed");

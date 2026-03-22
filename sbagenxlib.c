@@ -8427,6 +8427,204 @@ sbx_sample_sigmoid_curve(double drop_sec,
   return SBX_OK;
 }
 
+void
+sbx_default_program_plot_desc(SbxProgramPlotDesc *desc) {
+  if (!desc) return;
+  memset(desc, 0, sizeof(*desc));
+}
+
+void
+sbx_default_dual_panel_plot_desc(SbxDualPanelPlotDesc *desc) {
+  if (!desc) return;
+  memset(desc, 0, sizeof(*desc));
+}
+
+static int
+sbx_build_integer_axis_ticks(double max_v, double *ticks, int max_ticks) {
+  double step, xv;
+  int n = 0;
+
+  if (!ticks || max_ticks < 2) return 0;
+  if (max_v <= 0.0) {
+    ticks[0] = 0.0;
+    ticks[1] = 1.0;
+    return 2;
+  }
+  step = floor(max_v / 10.0 + 0.5);
+  if (step < 1.0) step = 1.0;
+  xv = 0.0;
+  while (xv <= max_v + 1e-9 && n < max_ticks) {
+    ticks[n++] = xv;
+    xv += step;
+  }
+  if (n < 1) ticks[n++] = 0.0;
+  if (n < max_ticks && fabs(ticks[n - 1] - max_v) > 1e-9)
+    ticks[n++] = max_v;
+  return n;
+}
+
+static const char *
+sbx_plot_mode_label(int mode_kind) {
+  if (mode_kind == 2) return "monaural beat";
+  if (mode_kind == 1) return "pulse";
+  return "binaural beat";
+}
+
+int
+sbx_build_program_plot_desc(SbxProgramPlotKind plot_kind,
+                            double drop_sec,
+                            double beat_start_hz,
+                            double beat_target_hz,
+                            int mode_kind,
+                            int slide,
+                            int n_step,
+                            int step_len_sec,
+                            double sig_l,
+                            double sig_h,
+                            double sig_a,
+                            double sig_b,
+                            const double *samples,
+                            size_t sample_count,
+                            SbxProgramPlotDesc *out_desc) {
+  size_t i;
+  double y_min = 1e30, y_max = -1e30;
+  double y_pad, y_span, y_tick_step, y_tick_first, yv;
+  double drop_min;
+  const char *mode_label;
+
+  if (!out_desc || !samples || sample_count == 0) return SBX_EINVAL;
+  if (!isfinite(drop_sec) || drop_sec <= 0.0) return SBX_EINVAL;
+  if (!isfinite(beat_start_hz) || beat_start_hz <= 0.0) return SBX_EINVAL;
+  if (!isfinite(beat_target_hz) || beat_target_hz <= 0.0) return SBX_EINVAL;
+  if (plot_kind < SBX_PROGRAM_PLOT_DROP || plot_kind > SBX_PROGRAM_PLOT_CURVE)
+    return SBX_EINVAL;
+
+  sbx_default_program_plot_desc(out_desc);
+  drop_min = drop_sec / 60.0;
+  mode_label = sbx_plot_mode_label(mode_kind);
+
+  out_desc->x_min = 0.0;
+  out_desc->x_max = drop_min;
+  out_desc->x_tick_count =
+    sbx_build_integer_axis_ticks(drop_min, out_desc->x_ticks, SBX_PLOT_MAX_TICKS);
+  if (out_desc->x_tick_count < 2) {
+    out_desc->x_ticks[0] = 0.0;
+    out_desc->x_ticks[1] = drop_min;
+    out_desc->x_tick_count = 2;
+  }
+
+  for (i = 0; i < sample_count; i++) {
+    double y = samples[i];
+    if (y < y_min) y_min = y;
+    if (y > y_max) y_max = y;
+  }
+  if (beat_start_hz < y_min) y_min = beat_start_hz;
+  if (beat_start_hz > y_max) y_max = beat_start_hz;
+  if (beat_target_hz < y_min) y_min = beat_target_hz;
+  if (beat_target_hz > y_max) y_max = beat_target_hz;
+  if (fabs(y_max - y_min) < 1e-6) {
+    y_min -= 1.0;
+    y_max += 1.0;
+  }
+  y_pad = (y_max - y_min) * 0.08;
+  if (y_pad < 0.1) y_pad = 0.1;
+  y_min -= y_pad;
+  y_max += y_pad;
+  y_span = y_max - y_min;
+  y_tick_step = floor(y_span / 8.0 + 0.5);
+  if (y_tick_step < 1.0) y_tick_step = 1.0;
+  y_tick_first = ceil((y_min - 1e-9) / y_tick_step) * y_tick_step;
+
+  out_desc->y_min = y_min;
+  out_desc->y_max = y_max;
+  for (yv = y_tick_first;
+       yv <= y_max + y_tick_step * 0.25 &&
+         out_desc->y_tick_count < SBX_PLOT_MAX_TICKS;
+       yv += y_tick_step) {
+    out_desc->y_ticks[out_desc->y_tick_count++] = yv;
+  }
+
+  snprintf(out_desc->x_label, sizeof(out_desc->x_label), "TIME MIN");
+  snprintf(out_desc->y_label, sizeof(out_desc->y_label), "FREQ HZ");
+  snprintf(out_desc->line1, sizeof(out_desc->line1),
+           "start=%.3fHz target=%.3fHz D=%.1fmin",
+           beat_start_hz, beat_target_hz, drop_min);
+
+  if (plot_kind == SBX_PROGRAM_PLOT_SIGMOID) {
+    snprintf(out_desc->line2, sizeof(out_desc->line2),
+             "l=%.4f h=%.4f a=%.4f b=%.4f",
+             sig_l, sig_h, sig_a, sig_b);
+  } else if (plot_kind == SBX_PROGRAM_PLOT_CURVE) {
+    if (slide) {
+      snprintf(out_desc->line2, sizeof(out_desc->line2),
+               "%s mode: custom function curve (.sbgf), continuous (s)",
+               mode_label);
+    } else {
+      snprintf(out_desc->line2, sizeof(out_desc->line2),
+               "%s mode: sampled custom curve (k/default), step=%ds n=%d",
+               mode_label, step_len_sec, n_step);
+    }
+  } else {
+    if (slide) {
+      snprintf(out_desc->line2, sizeof(out_desc->line2),
+               "%s mode: continuous exponential (s)",
+               mode_label);
+    } else {
+      snprintf(out_desc->line2, sizeof(out_desc->line2),
+               "%s mode: stepped exponential (k/default), step=%ds n=%d",
+               mode_label, step_len_sec, n_step);
+    }
+  }
+
+  return SBX_OK;
+}
+
+int
+sbx_build_mixam_cycle_plot_desc(const SbxMixFxSpec *fx,
+                                double rate_hz,
+                                SbxDualPanelPlotDesc *out_desc) {
+  int i;
+
+  if (!fx || !out_desc) return SBX_EINVAL;
+  if (!isfinite(rate_hz) || rate_hz <= 0.0) return SBX_EINVAL;
+  if (fx->type != SBX_MIXFX_AM) return SBX_EINVAL;
+  if (sbx_validate_mixam_fields(fx) != SBX_OK) return SBX_EINVAL;
+
+  sbx_default_dual_panel_plot_desc(out_desc);
+  out_desc->x_min = 0.0;
+  out_desc->x_max = 1.0 / rate_hz;
+  out_desc->top_y_min = 0.0;
+  out_desc->top_y_max = 1.0;
+  out_desc->bottom_y_min = 0.0;
+  out_desc->bottom_y_max = 1.0;
+
+  for (i = 0; i <= 10; i++) {
+    out_desc->x_ticks[out_desc->x_tick_count++] = (1.0 / rate_hz) * i / 10.0;
+    out_desc->top_y_ticks[out_desc->top_y_tick_count++] = 1.0 - i * 0.1;
+    out_desc->bottom_y_ticks[out_desc->bottom_y_tick_count++] = 1.0 - i * 0.1;
+  }
+
+  snprintf(out_desc->x_label, sizeof(out_desc->x_label), "CYCLE");
+  snprintf(out_desc->top_y_label, sizeof(out_desc->top_y_label), "ENVELOPE");
+  snprintf(out_desc->bottom_y_label, sizeof(out_desc->bottom_y_label), "GAIN");
+  if (fx->mixam_mode == SBX_MIXAM_MODE_COS) {
+    snprintf(out_desc->title, sizeof(out_desc->title),
+             "MIXAM SINGLE-CYCLE CONTINUOUS-AM PLOT");
+    snprintf(out_desc->line1, sizeof(out_desc->line1),
+             "H:m=cos s=%.4f f=%.3f", fx->mixam_start, fx->mixam_floor);
+  } else {
+    snprintf(out_desc->title, sizeof(out_desc->title),
+             "MIXAM SINGLE-CYCLE ENVELOPE PLOT");
+    snprintf(out_desc->line1, sizeof(out_desc->line1),
+             "H:m=pulse s=%.4f d=%.4f a=%.2f r=%.2f e=%d f=%.3f",
+             fx->mixam_start, fx->mixam_duty, fx->mixam_attack,
+             fx->mixam_release, fx->mixam_edge_mode, fx->mixam_floor);
+  }
+  snprintf(out_desc->line2, sizeof(out_desc->line2),
+           "mixam cycle gain = f + (1-f)*envelope");
+  return SBX_OK;
+}
+
 int
 sbx_sample_isochronic_cycle(const SbxToneSpec *tone_in,
                             const SbxIsoEnvelopeSpec *env,

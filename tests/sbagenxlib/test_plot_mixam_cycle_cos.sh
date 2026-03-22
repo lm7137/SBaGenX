@@ -18,11 +18,46 @@ then
 fi
 
 TMP_PNG="/tmp/sbx_mixam_cycle_cos_$$.png"
-trap 'rm -f "$TMP_PNG"' EXIT
+TMP_SAMPLES="/tmp/sbx_mixam_cycle_cos_$$.dat"
+TMP_DESC="/tmp/sbx_mixam_cycle_cos_$$.meta"
+trap 'rm -f "$TMP_PNG" "$TMP_SAMPLES" "$TMP_DESC"' EXIT
+
+cat >"$TMP_SAMPLES" <<'EOF_SAMPLES'
+0.00 1.00 1.00
+0.10 0.90 0.945
+0.20 0.65 0.8075
+0.30 0.35 0.6425
+0.40 0.10 0.505
+0.50 0.00 0.450
+0.60 0.10 0.505
+0.70 0.35 0.6425
+0.80 0.65 0.8075
+0.90 0.90 0.945
+1.00 1.00 1.00
+EOF_SAMPLES
+
+cat >"$TMP_DESC" <<'EOF_DESC'
+title=MIXAM SINGLE-CYCLE CONTINUOUS-AM PLOT
+x_label=CYCLE
+top_y_label=ENVELOPE
+bottom_y_label=GAIN
+x_min=0
+x_max=1
+top_y_min=0
+top_y_max=1
+bottom_y_min=0
+bottom_y_max=1
+line1=H:m=cos s=0.0000 f=0.450
+line2=mixam cycle gain = f + (1-f)*envelope
+x_ticks=0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1
+top_y_ticks=1,0.9,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1,0
+bottom_y_ticks=1,0.9,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.1,0
+EOF_DESC
 
 python3 "$PLOT_SCRIPT" mixam-cycle \
   --out "$TMP_PNG" \
-  --h-m cos --h-s 0 --h-d 0.5 --h-a 0.5 --h-r 0.5 --h-e 3 --h-f 0.45
+  --sample-file "$TMP_SAMPLES" \
+  --desc-file "$TMP_DESC"
 
 TMP_PNG="$TMP_PNG" python3 - <<'PY'
 import os

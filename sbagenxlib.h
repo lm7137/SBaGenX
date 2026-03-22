@@ -16,8 +16,10 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 31  /* public API contract revision */
+#define SBX_API_VERSION 32  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
+#define SBX_PLOT_MAX_TICKS 64
+#define SBX_PLOT_TEXT_MAX 256
 
 /* Status codes returned by sbagenxlib APIs. */
 enum {
@@ -1120,6 +1122,83 @@ int sbx_sample_sigmoid_curve(double drop_sec,
                              size_t sample_count,
                              double *out_t_sec,
                              double *out_hz);
+
+typedef enum {
+  SBX_PROGRAM_PLOT_DROP = 0,
+  SBX_PROGRAM_PLOT_SIGMOID = 1,
+  SBX_PROGRAM_PLOT_CURVE = 2
+} SbxProgramPlotKind;
+
+typedef struct {
+  double x_min;
+  double x_max;
+  double y_min;
+  double y_max;
+  int x_tick_count;
+  int y_tick_count;
+  double x_ticks[SBX_PLOT_MAX_TICKS];
+  double y_ticks[SBX_PLOT_MAX_TICKS];
+  char title[SBX_PLOT_TEXT_MAX];
+  char x_label[32];
+  char y_label[32];
+  char line1[SBX_PLOT_TEXT_MAX];
+  char line2[SBX_PLOT_TEXT_MAX];
+} SbxProgramPlotDesc;
+
+typedef struct {
+  double x_min;
+  double x_max;
+  double top_y_min;
+  double top_y_max;
+  double bottom_y_min;
+  double bottom_y_max;
+  int x_tick_count;
+  int top_y_tick_count;
+  int bottom_y_tick_count;
+  double x_ticks[SBX_PLOT_MAX_TICKS];
+  double top_y_ticks[SBX_PLOT_MAX_TICKS];
+  double bottom_y_ticks[SBX_PLOT_MAX_TICKS];
+  char title[SBX_PLOT_TEXT_MAX];
+  char x_label[32];
+  char top_y_label[32];
+  char bottom_y_label[32];
+  char line1[SBX_PLOT_TEXT_MAX];
+  char line2[SBX_PLOT_TEXT_MAX];
+} SbxDualPanelPlotDesc;
+
+void sbx_default_program_plot_desc(SbxProgramPlotDesc *desc);
+void sbx_default_dual_panel_plot_desc(SbxDualPanelPlotDesc *desc);
+
+/*
+ * Build plot metadata for built-in drop/sigmoid/custom-curve program graphs.
+ * - samples should contain the already-sampled beat/pulse series over [0, drop_sec].
+ * - mode_kind: 0 binaural beat, 1 pulse, 2 monaural beat.
+ * - sigmoid coefficients are used only for SBX_PROGRAM_PLOT_SIGMOID.
+ */
+int sbx_build_program_plot_desc(SbxProgramPlotKind plot_kind,
+                                double drop_sec,
+                                double beat_start_hz,
+                                double beat_target_hz,
+                                int mode_kind,
+                                int slide,
+                                int n_step,
+                                int step_len_sec,
+                                double sig_l,
+                                double sig_h,
+                                double sig_a,
+                                double sig_b,
+                                const double *samples,
+                                size_t sample_count,
+                                SbxProgramPlotDesc *out_desc);
+
+/*
+ * Build plot metadata for the dual-panel mixam single-cycle plot.
+ * - fx must be an SBX_MIXFX_AM spec with valid mixam fields.
+ * - rate_hz controls the cycle duration shown on the time axis.
+ */
+int sbx_build_mixam_cycle_plot_desc(const SbxMixFxSpec *fx,
+                                    double rate_hz,
+                                    SbxDualPanelPlotDesc *out_desc);
 
 /*
  * Sample one isochronic cycle for plotting/inspection.

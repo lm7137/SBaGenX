@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "sbagenxlib.h"
 
@@ -51,8 +52,10 @@ int
 main(void) {
   double ts[4];
   double ys[4];
+  double plot_samples[5];
   SbxCurveProgram *curve = NULL;
   SbxCurveEvalConfig cfg;
+  SbxProgramPlotDesc desc;
   int rc;
 
   rc = sbx_sample_drop_curve(600.0, 10.0, 2.5, 1, 0, 0, 3, ts, ys);
@@ -84,6 +87,36 @@ main(void) {
   if (sbx_sample_sigmoid_curve(0.0, 10.0, 2.5, 0.125, 0.0, -3.9306, 6.25, 3, ts, ys) != SBX_EINVAL)
     fail("sigmoid invalid args should fail");
 
+  rc = sbx_sample_drop_curve(600.0, 10.0, 2.5, 1, 0, 0, 5, NULL, plot_samples);
+  if (rc != SBX_OK) fail("drop plot samples failed");
+  rc = sbx_build_program_plot_desc(SBX_PROGRAM_PLOT_DROP,
+                                   600.0, 10.0, 2.5,
+                                   0, 1, 0, 0,
+                                   0.0, 0.0, 0.0, 0.0,
+                                   plot_samples, 5, &desc);
+  if (rc != SBX_OK) fail("drop plot desc failed");
+  if (strcmp(desc.x_label, "TIME MIN") != 0 || strcmp(desc.y_label, "FREQ HZ") != 0)
+    fail("drop plot labels mismatch");
+  if (desc.x_tick_count < 2 || desc.y_tick_count < 2)
+    fail("drop plot tick counts too small");
+  if (strstr(desc.line1, "start=10.000Hz") == NULL || strstr(desc.line1, "target=2.500Hz") == NULL)
+    fail("drop plot line1 mismatch");
+  if (strstr(desc.line2, "continuous") == NULL || strstr(desc.line2, "binaural") == NULL)
+    fail("drop plot line2 mismatch");
+
+  rc = sbx_sample_sigmoid_curve(1800.0, 10.0, 2.5,
+                                0.125, 0.0, -3.9306, 6.25,
+                                5, NULL, plot_samples);
+  if (rc != SBX_OK) fail("sigmoid plot samples failed");
+  rc = sbx_build_program_plot_desc(SBX_PROGRAM_PLOT_SIGMOID,
+                                   1800.0, 10.0, 2.5,
+                                   0, 1, 0, 0,
+                                   0.125, 0.0, -3.9306, 6.25,
+                                   plot_samples, 5, &desc);
+  if (rc != SBX_OK) fail("sigmoid plot desc failed");
+  if (strstr(desc.line2, "l=0.1250") == NULL || strstr(desc.line2, "b=6.2500") == NULL)
+    fail("sigmoid plot line2 mismatch");
+
   curve = sbx_curve_create();
   if (!curve) fail("sbx_curve_create failed");
   rc = sbx_curve_load_text(curve,
@@ -107,6 +140,16 @@ main(void) {
   if (rc != SBX_OK) fail("sbx_curve_sample_program_beat failed");
   if (!near(ys[0], 10.0, 1e-9) || !near(ys[1], 6.25, 1e-9) || !near(ys[2], 2.5, 1e-9))
     fail("curve beat sample values mismatch");
+  rc = sbx_curve_sample_program_beat(curve, 0.0, 600.0, 5, NULL, plot_samples);
+  if (rc != SBX_OK) fail("curve plot samples failed");
+  rc = sbx_build_program_plot_desc(SBX_PROGRAM_PLOT_CURVE,
+                                   600.0, 10.0, 2.5,
+                                   0, 1, 0, 0,
+                                   0.0, 0.0, 0.0, 0.0,
+                                   plot_samples, 5, &desc);
+  if (rc != SBX_OK) fail("curve plot desc failed");
+  if (strstr(desc.line2, "continuous") == NULL)
+    fail("curve plot line2 mismatch");
   if (sbx_curve_sample_program_beat(curve, 0.0, 600.0, 0, ts, ys) != SBX_EINVAL)
     fail("curve beat invalid args should fail");
   sbx_curve_destroy(curve);
