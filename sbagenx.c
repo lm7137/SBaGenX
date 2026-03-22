@@ -582,6 +582,7 @@ int out_mode= 1;		// Output mode: 0 unsigned char[2], 1 short[2], 2 swapped shor
 int opt_b_set= 0;		// Whether -b was explicitly specified
 int out_prate= 10;		// Rate of parameter change (for file and pipe output only)
 int fade_int= 60000;		// Fade interval (ms)
+int fade_int_set= 0;		// Whether -F was explicitly specified
 FILE *in;			// Input sequence file
 int in_lin;			// Current input line
 char buf[4096];			// Buffer for current line
@@ -4109,6 +4110,7 @@ scanOptions(int *acp, char ***avp) {
 	  case 'F':
 	     if (argc-- < 1 || 1 != sscanf(*argv++, "%d %c", &fade_int, &dmy)) 
 		error("-F expects fade-time in ms");
+	     fade_int_set= 1;
 	     break;
 #ifdef MAC_AUDIO
 	  case 'B':
@@ -7373,7 +7375,10 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (safe_cfg.have_W)
       opt_W= 1;
    if (safe_cfg.have_F)
+   {
       fade_int= safe_cfg.fade_ms;
+      fade_int_set= 1;
+   }
    if (safe_cfg.have_q) {
       opt_S= 1;
       fast_mult= safe_cfg.q_mult;
@@ -8800,6 +8805,16 @@ sbx_fill_tone_spec(SbxToneSpec *tone, int isisochronic, int ismono,
    tone->iso_edge_mode= opt_I ? opt_I_e : 2;
 }
 
+static int
+sbx_have_native_fade_override(void) {
+   return fade_int_set ? 1 : 0;
+}
+
+static double
+sbx_native_fade_sec(void) {
+   return fade_int / 1000.0;
+}
+
 static const double sbx_prog_target_vals[]= {
    4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3
 };
@@ -9091,7 +9106,8 @@ create_drop(int ac, char **av) {
       prog_cfg.wake_sec= wakeup ? len2 : 0;
       prog_cfg.slide= slide;
       prog_cfg.step_len_sec= steplen;
-      prog_cfg.fade_sec= 10;
+      if (sbx_have_native_fade_override())
+	 prog_cfg.fade_sec= sbx_native_fade_sec();
 
       if (slide && !opt_D) {
 	 SbxCurveProgram *curve= 0;
@@ -9101,7 +9117,7 @@ create_drop(int ac, char **av) {
 	 sbx_handle_runtime_unsupported_extra("-p drop", &extra_spec);
 	 sbx_runtime_activate_from_curve_program(&curve,
 						 isisochronic, ismono,
-						 (double)(end_sec + 10),
+						 (double)end_sec + prog_cfg.fade_sec,
 						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 						 extra_spec.aux_tones, extra_spec.aux_count,
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
@@ -9385,7 +9401,8 @@ create_sigmoid(int ac, char **av) {
       prog_cfg.wake_sec= wakeup ? len2 : 0;
       prog_cfg.slide= slide;
       prog_cfg.step_len_sec= steplen;
-      prog_cfg.fade_sec= 10;
+      if (sbx_have_native_fade_override())
+	 prog_cfg.fade_sec= sbx_native_fade_sec();
       prog_cfg.sig_l= sig_l;
       prog_cfg.sig_h= sig_h;
 
@@ -9397,7 +9414,7 @@ create_sigmoid(int ac, char **av) {
 	 sbx_handle_runtime_unsupported_extra("-p sigmoid", &extra_spec);
 	 sbx_runtime_activate_from_curve_program(&curve,
 						 isisochronic, ismono,
-						 (double)(end_sec + 10),
+						 (double)end_sec + prog_cfg.fade_sec,
 						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
 						 extra_spec.aux_tones, extra_spec.aux_count,
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
@@ -9752,7 +9769,8 @@ create_curve(int ac, char **av) {
       }
 
       if (slide && !opt_D) {
-	 double duration_sec= (double)(len + (wakeup ? len2 : 0) + 10);
+	 double duration_sec= (double)(len + (wakeup ? len2 : 0)) +
+			    (sbx_have_native_fade_override() ? sbx_native_fade_sec() : 10.0);
 	 sbx_handle_runtime_unsupported_extra("-p curve", &extra_spec);
 	 sbx_runtime_activate_from_curve_program(&curve,
 						 isisochronic, ismono,
@@ -9772,7 +9790,8 @@ create_curve(int ac, char **av) {
       tl_cfg.step_len_sec= steplen;
       tl_cfg.slide= slide;
       tl_cfg.mute_program_tone= mute_prog_tone;
-      tl_cfg.fade_sec= 10;
+      if (sbx_have_native_fade_override())
+	 tl_cfg.fade_sec= sbx_native_fade_sec();
 
       memset(&tl, 0, sizeof(tl));
       if (sbx_build_curve_timeline(curve, &tl_cfg, &tl) != SBX_OK)
@@ -9885,7 +9904,8 @@ create_slide(int ac, char **av) {
 			 c0, signal == '-' ? -beat_abs : beat_abs, amp);
       prog_cfg.carrier_end_hz= c1;
       prog_cfg.slide_sec= len;
-      prog_cfg.fade_sec= 10;
+      if (sbx_have_native_fade_override())
+	 prog_cfg.fade_sec= sbx_native_fade_sec();
       if (sbx_build_slide_keyframes(&prog_cfg, &frames, &frame_count) != SBX_OK)
 	 error("Failed to build built-in slide keyframes");
 

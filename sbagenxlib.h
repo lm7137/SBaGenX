@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 30  /* public API contract revision */
+#define SBX_API_VERSION 31  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 
 /* Status codes returned by sbagenxlib APIs. */
@@ -219,7 +219,7 @@ typedef struct {
   int wake_sec;
   int slide;
   int step_len_sec;
-  int fade_sec;
+  double fade_sec;
 } SbxBuiltinDropConfig;
 
 typedef struct {
@@ -231,7 +231,7 @@ typedef struct {
   int wake_sec;
   int slide;
   int step_len_sec;
-  int fade_sec;
+  double fade_sec;
   double sig_l;
   double sig_h;
 } SbxBuiltinSigmoidConfig;
@@ -240,7 +240,7 @@ typedef struct {
   SbxToneSpec start_tone;
   double carrier_end_hz;
   int slide_sec;
-  int fade_sec;
+  double fade_sec;
 } SbxBuiltinSlideConfig;
 
 typedef struct {
@@ -263,7 +263,7 @@ typedef struct {
   int step_len_sec;
   int slide;
   int mute_program_tone;
-  int fade_sec;
+  double fade_sec;
 } SbxCurveTimelineConfig;
 
 typedef struct {

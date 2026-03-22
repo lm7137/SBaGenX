@@ -3940,7 +3940,7 @@ sbx_default_builtin_drop_config(SbxBuiltinDropConfig *cfg) {
   cfg->beat_target_hz = 2.5;
   cfg->drop_sec = 1800;
   cfg->step_len_sec = 180;
-  cfg->fade_sec = 10;
+  cfg->fade_sec = 10.0;
 }
 
 void
@@ -3953,7 +3953,7 @@ sbx_default_builtin_sigmoid_config(SbxBuiltinSigmoidConfig *cfg) {
   cfg->beat_target_hz = 2.5;
   cfg->drop_sec = 1800;
   cfg->step_len_sec = 180;
-  cfg->fade_sec = 10;
+  cfg->fade_sec = 10.0;
   cfg->sig_l = 0.125;
   cfg->sig_h = 0.0;
 }
@@ -3966,7 +3966,7 @@ sbx_default_builtin_slide_config(SbxBuiltinSlideConfig *cfg) {
   cfg->start_tone.mode = SBX_TONE_BINAURAL;
   cfg->carrier_end_hz = 5.0;
   cfg->slide_sec = 1800;
-  cfg->fade_sec = 10;
+  cfg->fade_sec = 10.0;
 }
 
 void
@@ -3986,7 +3986,7 @@ sbx_default_curve_timeline_config(SbxCurveTimelineConfig *cfg) {
   cfg->main_span_sec = 1800;
   cfg->step_len_sec = 180;
   cfg->slide = 1;
-  cfg->fade_sec = 10;
+  cfg->fade_sec = 10.0;
 }
 
 void
@@ -4081,7 +4081,7 @@ sbx_validate_builtin_drop_like(const SbxToneSpec *tone,
                                int hold_sec,
                                int wake_sec,
                                int step_len_sec,
-                               int fade_sec) {
+                               double fade_sec) {
   if (!tone || !sbx_builtin_supported_mode(tone->mode)) return SBX_EINVAL;
   if (!(tone->carrier_hz >= 0.0) || !isfinite(tone->carrier_hz)) return SBX_EINVAL;
   if (!(carrier_end_hz >= 0.0) || !isfinite(carrier_end_hz)) return SBX_EINVAL;
@@ -4173,7 +4173,7 @@ sbx_build_drop_curve_program(const SbxBuiltinDropConfig *cfg,
            "carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), "
            "ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))\n"
            "amp = ifelse(lt(t,(T+U)*60), a0, "
-           "ifelse(lt(t,(T+U)*60+%d), a0*(1-ramp(t,(T+U)*60,(T+U)*60+%d)), 0))\n",
+           "ifelse(lt(t,(T+U)*60+%.17g), a0*(1-ramp(t,(T+U)*60,(T+U)*60+%.17g)), 0))\n",
            cfg->fade_sec, cfg->fade_sec);
   rc = sbx_curve_load_text(curve, text, "<built-in-drop>");
   if (rc == SBX_OK) rc = sbx_curve_prepare(curve, &eval_cfg);
@@ -4240,7 +4240,7 @@ sbx_build_sigmoid_curve_program(const SbxBuiltinSigmoidConfig *cfg,
            "carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), "
            "ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))\n"
            "amp = ifelse(lt(t,(T+U)*60), a0, "
-           "ifelse(lt(t,(T+U)*60+%d), a0*(1-ramp(t,(T+U)*60,(T+U)*60+%d)), 0))\n",
+           "ifelse(lt(t,(T+U)*60+%.17g), a0*(1-ramp(t,(T+U)*60,(T+U)*60+%.17g)), 0))\n",
            cfg->sig_l, cfg->sig_h, sig_a, sig_b,
            cfg->fade_sec, cfg->fade_sec);
   rc = sbx_curve_load_text(curve, text, "<built-in-sigmoid>");

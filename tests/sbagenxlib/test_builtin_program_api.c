@@ -36,7 +36,7 @@ int main(void) {
   drop_cfg.wake_sec = 60;
   drop_cfg.slide = 0;
   drop_cfg.step_len_sec = 200;
-  drop_cfg.fade_sec = 10;
+  drop_cfg.fade_sec = 2.5;
 
   rc = sbx_build_drop_keyframes(&drop_cfg, &kfs, &kf_count);
   if (rc != SBX_OK) fail("sbx_build_drop_keyframes failed");
@@ -46,7 +46,7 @@ int main(void) {
       !near(kfs[2].time_sec, 400.0, 1e-12) ||
       !near(kfs[3].time_sec, 720.0, 1e-12) ||
       !near(kfs[4].time_sec, 780.0, 1e-12) ||
-      !near(kfs[5].time_sec, 790.0, 1e-12))
+      !near(kfs[5].time_sec, 782.5, 1e-12))
     fail("drop keyframe times mismatch");
   if (!near(kfs[0].tone.beat_hz, 10.0, 1e-9) ||
       !near(kfs[1].tone.beat_hz, 5.0, 1e-9) ||
@@ -83,7 +83,7 @@ int main(void) {
   sig_cfg.drop_sec = 1800;
   sig_cfg.slide = 1;
   sig_cfg.step_len_sec = 600;
-  sig_cfg.fade_sec = 10;
+  sig_cfg.fade_sec = 2.5;
   sig_cfg.sig_l = 0.125;
   sig_cfg.sig_h = 0.0;
 
@@ -102,7 +102,7 @@ int main(void) {
   if (kf_count != 6) fail("sigmoid keyframe count mismatch");
   if (!near(kfs[3].time_sec, 1800.0, 1e-12) ||
       !near(kfs[4].time_sec, 1980.0, 1e-12) ||
-      !near(kfs[5].time_sec, 1990.0, 1e-12))
+      !near(kfs[5].time_sec, 1982.5, 1e-12))
     fail("sigmoid keyframe tail mismatch");
   free(kfs);
   kfs = NULL;
@@ -114,13 +114,13 @@ int main(void) {
   slide_cfg.start_tone.amplitude = 1.0;
   slide_cfg.carrier_end_hz = 5.0;
   slide_cfg.slide_sec = 600;
-  slide_cfg.fade_sec = 10;
+  slide_cfg.fade_sec = 2.5;
   rc = sbx_build_slide_keyframes(&slide_cfg, &kfs, &kf_count);
   if (rc != SBX_OK) fail("sbx_build_slide_keyframes failed");
   if (kf_count != 3) fail("slide keyframe count mismatch");
   if (!near(kfs[0].tone.beat_hz, -10.0, 1e-9) ||
       !near(kfs[1].time_sec, 600.0, 1e-12) ||
-      !near(kfs[2].time_sec, 610.0, 1e-12) ||
+      !near(kfs[2].time_sec, 602.5, 1e-12) ||
       !near(kfs[2].tone.amplitude, 0.0, 1e-12))
     fail("slide keyframe values mismatch");
   free(kfs);

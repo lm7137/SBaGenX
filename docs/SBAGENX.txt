@@ -619,7 +619,8 @@ out, you'll need a faster refresh to avoid clicks.
 '-F fade_interval' specifies the time in ms over which a fade in or
 out takes place.  This is normally one minute (60000ms), which is fine
 for slowly changing tone-sets, but you may wish to adjust this value
-according to your needs.
+according to your needs. In current SBaGenX, explicit '-F' also affects
+the fade-out tail used by the native built-in '-p' programs.
 
 
 2.2: Mixing in background sounds

@@ -18,6 +18,8 @@ trap cleanup EXIT
 
 "$BIN" -D -p drop t5,7,3 00ds+^ >"$tmpdir/drop.txt" 2>&1
 "$BIN" -D -p sigmoid t5,7,3 00ds+^ >"$tmpdir/sigmoid.txt" 2>&1
+"$BIN" -D -F 2500 -p drop t5,7,3 00ds+^ >"$tmpdir/drop_fade.txt" 2>&1
+"$BIN" -D -F 2500 -p sigmoid t5,7,3 00ds+^ >"$tmpdir/sigmoid_fade.txt" 2>&1
 
 grep -q "over 12 minutes" "$tmpdir/drop.txt" || {
   echo "FAIL: drop summary did not preserve explicit 5+7 minute runtime" >&2
@@ -35,6 +37,14 @@ grep -q "^900.000000 " "$tmpdir/drop.txt" || {
   echo "FAIL: drop keyframes missing 900-second wake endpoint" >&2
   exit 1
 }
+grep -q "^910.000000 " "$tmpdir/drop.txt" || {
+  echo "FAIL: drop keyframes missing default 10-second fade tail" >&2
+  exit 1
+}
+grep -q "^902.500000 " "$tmpdir/drop_fade.txt" || {
+  echo "FAIL: drop keyframes did not honor -F 2500 on native built-in path" >&2
+  exit 1
+}
 
 grep -q "over 12 minutes" "$tmpdir/sigmoid.txt" || {
   echo "FAIL: sigmoid summary did not preserve explicit 5+7 minute runtime" >&2
@@ -50,6 +60,14 @@ grep -q "^720.000000 " "$tmpdir/sigmoid.txt" || {
 }
 grep -q "^900.000000 " "$tmpdir/sigmoid.txt" || {
   echo "FAIL: sigmoid keyframes missing 900-second wake endpoint" >&2
+  exit 1
+}
+grep -q "^910.000000 " "$tmpdir/sigmoid.txt" || {
+  echo "FAIL: sigmoid keyframes missing default 10-second fade tail" >&2
+  exit 1
+}
+grep -q "^902.500000 " "$tmpdir/sigmoid_fade.txt" || {
+  echo "FAIL: sigmoid keyframes did not honor -F 2500 on native built-in path" >&2
   exit 1
 }
 
