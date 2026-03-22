@@ -13,6 +13,22 @@ Why
 - deterministic render APIs for automated regression testing,
 - cleaner long-term platform/audio-backend evolution.
 
+Architecture Direction
+----------------------
+
+The migration is no longer just an extraction exercise. It now follows
+an explicit library-first rule set:
+
+- no new core audio/program logic should be added to `sbagenx.c`
+- behavior-affecting fixes should land in `sbagenxlib` first
+- `sbagenx.c` should stay limited to CLI/UI/platform orchestration
+- legacy execution should be progressively removed rather than
+  maintained in parallel
+
+In practical terms, if a bug changes rendered audio, sequencing
+semantics, program generation, or export behavior, the first question
+should be why that logic is not already library-owned.
+
 Phase Plan
 ----------
 

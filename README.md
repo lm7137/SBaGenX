@@ -45,6 +45,13 @@ feature additions, SBaGenX has extracted the core runtime into
 sampling/export helpers, and a cleaner foundation for future front-ends
 and tooling.
 
+The architectural direction is now explicitly library-first: core
+audio/program behavior belongs in `sbagenxlib`, while `sbagenx.c`
+exists as a thin CLI/frontend wrapper around that library. New
+behavior-affecting changes should therefore land in the library first,
+with the CLI limited to argument handling, user-facing output, live
+device glue, and external plotting/video orchestration.
+
 The name was changed from **"Sequenced Binaural Beat Generator"** to **"Sequenced Brainwave Generator"** in the SBaGen+ fork to better reflect its expanded functionality. Since SBaGen+ added support for isochronic tones in addition to binaural beats, and SBaGenX added monaural beat support for the built-in programs, the original name no longer fully represented its capabilities.
 
 ## What SBaGenX Adds
@@ -353,6 +360,15 @@ For developers integrating `sbagenxlib`:
 The library is no longer just a sidecar experiment. The CLI now relies on
 `sbagenxlib` for core runtime generation, modernized export paths, curve
 evaluation, plot-data sampling, and host-facing sampling helpers.
+
+The current project rule is simple:
+
+- if it changes what audio/program behavior SBaGenX produces, it should
+  live in `sbagenxlib`
+- if it is CLI/UI/platform glue, it may stay in `sbagenx.c`
+
+For the explicit architecture rules and the intended boundary between
+library and CLI code, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 Recent library-side audio output work includes:
 
