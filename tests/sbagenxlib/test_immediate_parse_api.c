@@ -18,8 +18,7 @@ int main(void) {
       "200@4/30"
   };
   const char *bad_tokens[] = {
-      "mix/87",
-      "mixbeat:3/40"
+      "mix/87"
   };
   SbxImmediateParseConfig cfg;
   SbxImmediateSpec spec;
@@ -66,11 +65,28 @@ int main(void) {
     fail("mixam override not applied");
 
   err[0] = 0;
-  rc = sbx_parse_immediate_tokens(bad_tokens, 2, &cfg, &spec, err, sizeof(err));
+  rc = sbx_parse_immediate_tokens(bad_tokens, 1, &cfg, &spec, err, sizeof(err));
   if (rc != SBX_EINVAL)
-    fail("expected failure when no tone tokens are present");
-  if (strcmp(err, "no sbagenxlib-compatible immediate tone tokens were found") != 0)
-    fail("unexpected no-tone error message");
+    fail("expected failure when no tone or mix-effect tokens are present");
+  if (strcmp(err, "no sbagenxlib-compatible immediate tone/effect tokens were found") != 0)
+    fail("unexpected empty immediate-token error message");
+
+  {
+    const char *mix_only_tokens[] = {
+        "mix/87",
+        "mixbeat:3/40"
+    };
+    err[0] = 0;
+    rc = sbx_parse_immediate_tokens(mix_only_tokens, 2, &cfg, &spec, err, sizeof(err));
+    if (rc != SBX_OK)
+      fail(err[0] ? err : "mix-only immediate token list should be accepted");
+    if (!spec.have_mix || fabs(spec.mix_amp_pct - 87.0) > 1e-9)
+      fail("mix-only immediate mix/<amp> not preserved");
+    if (spec.tone_count != 0)
+      fail("mix-only immediate token list should not synthesize a tone");
+    if (spec.mix_fx_count != 1 || spec.mix_fx[0].type != SBX_MIXFX_BEAT)
+      fail("mix-only immediate mix effect not preserved");
+  }
 
   puts("PASS: sbagenxlib immediate token API parses and normalizes token lists");
   return 0;

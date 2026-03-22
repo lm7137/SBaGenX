@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 33  /* public API contract revision */
+#define SBX_API_VERSION 34  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_PLOT_MAX_TICKS 64
 #define SBX_PLOT_TEXT_MAX 256
@@ -327,15 +327,38 @@ typedef struct {
   int opt_E;                   /* safe preamble -E */
   int have_T;                  /* safe preamble -T present */
   int T_ms;                    /* safe preamble -T value in ms */
+  int have_L;                  /* safe preamble -L present */
+  int L_ms;                    /* safe preamble -L value in ms */
   int have_q;                  /* safe preamble -q present */
   int q_mult;                  /* safe preamble -q multiplier */
   int have_r;                  /* safe preamble -r present */
   int rate;                    /* safe preamble -r sample rate */
   int have_R;                  /* safe preamble -R present */
   int prate;                   /* safe preamble -R parameter refresh rate */
+  int have_b;                  /* safe preamble -b present */
+  int pcm_bits;                /* safe preamble -b PCM depth */
+  int have_N;                  /* safe preamble -N present */
+  int have_V;                  /* safe preamble -V present */
+  int volume_pct;              /* safe preamble -V value in percent */
+  int have_w;                  /* safe preamble -w present */
+  int waveform;                /* safe preamble -w SBX_WAVE_* */
+  int have_A;                  /* safe preamble -A present */
+  SbxMixModSpec mix_mod;       /* safe preamble -A spec */
+  int have_I;                  /* safe preamble -I present */
+  SbxIsoEnvelopeSpec iso_env;  /* safe preamble -I spec */
+  int have_H;                  /* safe preamble -H present */
+  SbxMixFxSpec mixam_env;      /* safe preamble -H spec */
   int have_W;                  /* safe preamble -W present */
   int have_F;                  /* safe preamble -F present */
   int fade_ms;                 /* safe preamble -F fade time in ms */
+  int have_K;                  /* safe preamble -K present */
+  int mp3_bitrate;             /* safe preamble -K bitrate */
+  int have_J;                  /* safe preamble -J present */
+  int mp3_quality;             /* safe preamble -J quality */
+  int have_X;                  /* safe preamble -X present */
+  double mp3_vbr_quality;      /* safe preamble -X VBR quality */
+  int have_U;                  /* safe preamble -U present */
+  double ogg_quality;          /* safe preamble -U quality */
   int have_Z;                  /* safe preamble -Z present */
   double flac_compression;     /* safe preamble -Z compression level */
   char *mix_path;              /* safe preamble -m path (caller frees via helper) */
@@ -671,6 +694,7 @@ int sbx_parse_sbg_clock_token(const char *tok, size_t *out_consumed, double *out
  *   - initialize from sbx_default_iso_envelope_spec(), or
  *   - initialize from an existing value and override selected fields
  */
+int sbx_is_iso_envelope_option_spec(const char *spec);
 int sbx_parse_iso_envelope_option_spec(const char *spec,
                                        SbxIsoEnvelopeSpec *out_spec,
                                        char *errbuf,
@@ -693,6 +717,27 @@ int sbx_parse_mixam_envelope_option_spec(const char *spec,
                                          SbxMixFxSpec *out_spec,
                                          char *errbuf,
                                          size_t errbuf_sz);
+
+/*
+ * Detect whether a string looks like an `-A` mix-modulation option spec.
+ * This mirrors the CLI behavior for the optional argument form.
+ */
+int sbx_is_mix_mod_option_spec(const char *spec);
+
+/*
+ * Parse an `-A` mix-modulation option spec such as:
+ *   d=0.3:e=0.3:k=10:E=0.7
+ * The parser updates the supplied spec in place, so callers can either:
+ *   - initialize from sbx_default_mix_mod_spec(), or
+ *   - initialize from an existing value and override selected fields
+ *
+ * `k` is interpreted in minutes in the option surface and converted to
+ * period_sec in the returned SbxMixModSpec.
+ */
+int sbx_parse_mix_mod_option_spec(const char *spec,
+                                  SbxMixModSpec *out_spec,
+                                  char *errbuf,
+                                  size_t errbuf_sz);
 
 /* Format mix effect as canonical token (mixspin/mixpulse/mixbeat/mixam). */
 int sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz);
@@ -807,6 +852,10 @@ int sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone);
 
 /* Set default waveform used by unprefixed parsed tones. */
 int sbx_context_set_default_waveform(SbxContext *ctx, int waveform);
+
+/* Apply or clear sequence-load `-I`/`-H` style overrides used by native loaders. */
+int sbx_context_set_sequence_iso_override(SbxContext *ctx, const SbxIsoEnvelopeSpec *spec);
+int sbx_context_set_sequence_mixam_override(SbxContext *ctx, const SbxMixFxSpec *spec);
 
 /* Parse and load single tone token onto context. */
 int sbx_context_load_tone_spec(SbxContext *ctx, const char *tone_spec);

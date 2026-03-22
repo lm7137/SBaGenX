@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +24,18 @@ int main(void) {
   if (!fp) fail("open temp sequence failed");
   fputs("-SE\n"
         "-o /tmp/example.flac\n"
+        "-b 24\n"
+        "-L 00:08:00\n"
+        "-N\n"
+        "-V 75\n"
+        "-w triangle\n"
+        "-A d=0.2:e=0.4:k=5:E=0.6\n"
+        "-I s=0:d=1:e=3\n"
+        "-H d=0.2:a=0.1:r=0.3:e=2:f=0.25\n"
+        "-K 224\n"
+        "-J 2\n"
+        "-X 2.5\n"
+        "-U 6\n"
         "-Z 12\n"
         "-R 400\n"
         "-m /tmp/mix.wav\n"
@@ -45,6 +58,43 @@ int main(void) {
     fail("flac compression mismatch");
   if (!cfg.have_R || cfg.prate != 400)
     fail("parameter refresh mismatch");
+  if (!cfg.have_b || cfg.pcm_bits != 24)
+    fail("PCM depth mismatch");
+  if (!cfg.have_L || cfg.L_ms != 480000)
+    fail("manual length mismatch");
+  if (!cfg.have_N)
+    fail("normalization disable flag mismatch");
+  if (!cfg.have_V || cfg.volume_pct != 75)
+    fail("global volume mismatch");
+  if (!cfg.have_w || cfg.waveform != SBX_WAVE_TRIANGLE)
+    fail("waveform mismatch");
+  if (!cfg.have_A ||
+      fabs(cfg.mix_mod.delta - 0.2) > 1e-9 ||
+      fabs(cfg.mix_mod.epsilon - 0.4) > 1e-9 ||
+      fabs(cfg.mix_mod.period_sec - 300.0) > 1e-9 ||
+      fabs(cfg.mix_mod.end_level - 0.6) > 1e-9)
+    fail("mix modulation mismatch");
+  if (!cfg.have_I ||
+      fabs(cfg.iso_env.start - 0.0) > 1e-9 ||
+      fabs(cfg.iso_env.duty - 1.0) > 1e-9 ||
+      cfg.iso_env.edge_mode != 3)
+    fail("iso override mismatch");
+  if (!cfg.have_H ||
+      cfg.mixam_env.type != SBX_MIXFX_AM ||
+      fabs(cfg.mixam_env.mixam_duty - 0.2) > 1e-9 ||
+      fabs(cfg.mixam_env.mixam_attack - 0.1) > 1e-9 ||
+      fabs(cfg.mixam_env.mixam_release - 0.3) > 1e-9 ||
+      cfg.mixam_env.mixam_edge_mode != 2 ||
+      fabs(cfg.mixam_env.mixam_floor - 0.25) > 1e-9)
+    fail("mixam override mismatch");
+  if (!cfg.have_K || cfg.mp3_bitrate != 224)
+    fail("MP3 bitrate mismatch");
+  if (!cfg.have_J || cfg.mp3_quality != 2)
+    fail("MP3 quality mismatch");
+  if (!cfg.have_X || fabs(cfg.mp3_vbr_quality - 2.5) > 1e-9)
+    fail("MP3 VBR mismatch");
+  if (!cfg.have_U || fabs(cfg.ogg_quality - 6.0) > 1e-9)
+    fail("OGG quality mismatch");
   if (strstr(text, "-o /tmp/example.flac") != 0)
     fail("safe preamble line was not blanked out");
   if (strstr(text, "NOW base") == 0)

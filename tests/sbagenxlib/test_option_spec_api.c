@@ -13,6 +13,7 @@ static void fail(const char *msg) {
 int main(void) {
   SbxIsoEnvelopeSpec iso;
   SbxMixFxSpec mixam;
+  SbxMixModSpec mixmod;
   char err[256];
   int rc;
 
@@ -74,6 +75,37 @@ int main(void) {
   if (strcmp(err, "-H parameter f must be in range [0,1]") != 0)
     fail("unexpected -H error message");
 
-  puts("PASS: sbagenxlib option-spec parsers handle -I/-H semantics");
+  sbx_default_mix_mod_spec(&mixmod);
+  rc = sbx_parse_mix_mod_option_spec("d=0.2:e=0.4:k=5:E=0.6",
+                                     &mixmod, err, sizeof(err));
+  if (rc != SBX_OK) fail(err[0] ? err : "sbx_parse_mix_mod_option_spec failed");
+  if (!mixmod.active ||
+      fabs(mixmod.delta - 0.2) > 1e-9 ||
+      fabs(mixmod.epsilon - 0.4) > 1e-9 ||
+      fabs(mixmod.period_sec - 300.0) > 1e-9 ||
+      fabs(mixmod.end_level - 0.6) > 1e-9)
+    fail("mix-mod option defaults/overrides mismatch");
+
+  rc = sbx_parse_mix_mod_option_spec("E=0.5", &mixmod, err, sizeof(err));
+  if (rc != SBX_OK) fail(err[0] ? err : "sbx_parse_mix_mod_option_spec incremental override failed");
+  if (fabs(mixmod.delta - 0.2) > 1e-9 ||
+      fabs(mixmod.epsilon - 0.4) > 1e-9 ||
+      fabs(mixmod.period_sec - 300.0) > 1e-9 ||
+      fabs(mixmod.end_level - 0.5) > 1e-9)
+    fail("mix-mod option incremental override mismatch");
+
+  if (!sbx_is_mix_mod_option_spec("d=0.3:e=0.4"))
+    fail("mix-mod option detector should accept valid spec");
+  if (sbx_is_mix_mod_option_spec("-foo"))
+    fail("mix-mod option detector should reject dash-prefixed string");
+
+  err[0] = 0;
+  rc = sbx_parse_mix_mod_option_spec("d=2", &mixmod, err, sizeof(err));
+  if (rc != SBX_EINVAL)
+    fail("expected invalid -A parse to fail");
+  if (strcmp(err, "-A parameter d must be in range 0..1") != 0)
+    fail("unexpected -A error message");
+
+  puts("PASS: sbagenxlib option-spec parsers handle -I/-H/-A semantics");
   return 0;
 }

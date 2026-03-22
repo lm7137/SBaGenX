@@ -71,7 +71,7 @@ grep -q "^902.500000 " "$tmpdir/sigmoid_fade.txt" || {
   exit 1
 }
 
-timeout 5 "$BIN" -q 600 -p slide t0.1 200+10/1 >"$tmpdir/slide.txt" 2>&1 || {
+timeout 5 "$BIN" -q 600 -Wo "$tmpdir/slide.wav" -p slide t0.1 200+10/1 >"$tmpdir/slide.txt" 2>&1 || {
   echo "FAIL: built-in slide session did not terminate automatically" >&2
   exit 1
 }
@@ -84,5 +84,13 @@ grep -q "Sequence duration" "$tmpdir/slide.txt" || {
   echo "FAIL: built-in slide session did not report finite duration" >&2
   exit 1
 }
+python3 - <<'PY' "$tmpdir/slide.wav"
+import sys, wave
+path = sys.argv[1]
+with wave.open(path, "rb") as w:
+    dur = w.getnframes() / w.getframerate()
+    if dur < 0.02 or dur > 0.04:
+        raise SystemExit(f"unexpected slide duration {dur}")
+PY
 
 echo "PASS: built-in program runtimes honor explicit timing and auto-stop by default"

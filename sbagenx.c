@@ -1087,78 +1087,38 @@ mix_mod_multiplier(int now_ms) {
 
 int
 is_mix_mod_option_spec(const char *spec) {
-   const char *p= spec;
-   if (!p || !*p) return 0;
-   if (*p == '-') return 0;
-   if (!strchr(p, '=')) return 0;
-   if (*p == ':') p++;
-   return (*p == 'd' || *p == 'e' || *p == 'k' || *p == 'E');
+   return sbx_is_mix_mod_option_spec(spec);
 }
 
 void
 parse_mix_mod_option_spec(const char *spec) {
-   char tmp[256];
-   char *p, *q;
+   SbxMixModSpec spec_state;
+   char errbuf[256];
+
    if (!spec || !*spec) return;
-   if (strlen(spec) >= sizeof(tmp))
-      error("-A spec is too long");
-   strcpy(tmp, spec);
-   p= tmp;
 
-   while (*p) {
-      while (*p == ':') p++;
-      if (!*p) break;
-      switch (*p++) {
-       case 'd':
-	  if (*p++ != '=') error("-A expects d=<val>:e=<val>:k=<val>:E=<val>");
-	  opt_A_d= strtod(p, &q);
-	  if (q == p) error("-A parameter d requires a numeric value");
-	  p= q;
-	  break;
-       case 'e':
-	  if (*p++ != '=') error("-A expects d=<val>:e=<val>:k=<val>:E=<val>");
-	  opt_A_e= strtod(p, &q);
-	  if (q == p) error("-A parameter e requires a numeric value");
-	  p= q;
-	  break;
-       case 'k':
-	  if (*p++ != '=') error("-A expects d=<val>:e=<val>:k=<val>:E=<val>");
-	  opt_A_k= strtod(p, &q);
-	  if (q == p) error("-A parameter k requires a numeric value");
-	  p= q;
-	  break;
-       case 'E':
-	  if (*p++ != '=') error("-A expects d=<val>:e=<val>:k=<val>:E=<val>");
-	  opt_A_E= strtod(p, &q);
-	  if (q == p) error("-A parameter E requires a numeric value");
-	  p= q;
-	  break;
-       default:
-	  error("-A only supports d=, e=, k= and E= parameters");
-      }
+   sbx_default_mix_mod_spec(&spec_state);
+   spec_state.active= 1;
+   spec_state.delta= opt_A_d;
+   spec_state.epsilon= opt_A_e;
+   spec_state.period_sec= opt_A_k * 60.0;
+   spec_state.end_level= opt_A_E;
+   spec_state.main_len_sec= mix_mod_curve.main_len_sec;
+   spec_state.wake_len_sec= mix_mod_curve.wake_len_sec;
+   spec_state.wake_enabled= mix_mod_curve.wake_enabled;
 
-      if (*p == ':') p++;
-      else if (*p) error("-A expects colon-separated parameters");
-   }
+   if (SBX_OK != sbx_parse_mix_mod_option_spec(spec, &spec_state, errbuf, sizeof(errbuf)))
+      error("%s", errbuf[0] ? errbuf : "invalid -A mix modulation spec");
 
-   if (opt_A_d < 0.0 || opt_A_d > 1.0)
-      error("-A parameter d must be in range 0..1");
-   if (opt_A_e <= 0.0)
-      error("-A parameter e must be > 0");
-   if (opt_A_k <= 0.0)
-      error("-A parameter k must be > 0");
-   if (opt_A_E < 0.0 || opt_A_E > 1.0)
-      error("-A parameter E must be in range 0..1");
+   opt_A_d= spec_state.delta;
+   opt_A_e= spec_state.epsilon;
+   opt_A_k= spec_state.period_sec / 60.0;
+   opt_A_E= spec_state.end_level;
 }
 
 int
 is_iso_gate_option_spec(const char *spec) {
-   const char *p= spec;
-   if (!p || !*p) return 0;
-   if (*p == '-') return 0;
-   if (!strchr(p, '=')) return 0;
-   if (*p == ':') p++;
-   return (*p == 's' || *p == 'd' || *p == 'a' || *p == 'r' || *p == 'e');
+   return sbx_is_iso_envelope_option_spec(spec);
 }
 
 void
@@ -7221,14 +7181,42 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       out_rate= safe_cfg.rate;
       out_rate_def= 0;
    }
+   if (safe_cfg.have_b) {
+      out_mode= (safe_cfg.pcm_bits == 8) ? 0 : (safe_cfg.pcm_bits == 24 ? 3 : 1);
+      opt_b_set= 1;
+   }
    if (safe_cfg.have_R)
       out_prate= safe_cfg.prate;
+   if (safe_cfg.have_L)
+      opt_L= safe_cfg.L_ms;
+   if (safe_cfg.have_N)
+      opt_N= 0;
+   if (safe_cfg.have_V)
+      opt_V= safe_cfg.volume_pct;
+   if (safe_cfg.have_w)
+      opt_w= safe_cfg.waveform;
    if (safe_cfg.have_W)
       opt_W= 1;
    if (safe_cfg.have_F)
    {
       fade_int= safe_cfg.fade_ms;
       fade_int_set= 1;
+   }
+   if (safe_cfg.have_K) {
+      opt_mp3_bitrate= safe_cfg.mp3_bitrate;
+      opt_mp3_bitrate_set= 1;
+   }
+   if (safe_cfg.have_J) {
+      opt_mp3_quality= safe_cfg.mp3_quality;
+      opt_mp3_quality_set= 1;
+   }
+   if (safe_cfg.have_X) {
+      opt_mp3_vbr_quality= safe_cfg.mp3_vbr_quality;
+      opt_mp3_vbr_quality_set= 1;
+   }
+   if (safe_cfg.have_U) {
+      opt_ogg_quality= safe_cfg.ogg_quality;
+      opt_ogg_quality_set= 1;
    }
    if (safe_cfg.have_q) {
       opt_S= 1;
@@ -7241,6 +7229,31 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (safe_cfg.have_Z) {
       opt_flac_compression= safe_cfg.flac_compression;
       opt_flac_compression_set= 1;
+   }
+   if (safe_cfg.have_A) {
+      opt_A= 1;
+      opt_A_d= safe_cfg.mix_mod.delta;
+      opt_A_e= safe_cfg.mix_mod.epsilon;
+      opt_A_k= safe_cfg.mix_mod.period_sec / 60.0;
+      opt_A_E= safe_cfg.mix_mod.end_level;
+   }
+   if (safe_cfg.have_I) {
+      opt_I= 1;
+      opt_I_s= safe_cfg.iso_env.start;
+      opt_I_d= safe_cfg.iso_env.duty;
+      opt_I_a= safe_cfg.iso_env.attack;
+      opt_I_r= safe_cfg.iso_env.release;
+      opt_I_e= safe_cfg.iso_env.edge_mode;
+   }
+   if (safe_cfg.have_H) {
+      opt_H= 1;
+      opt_H_m= safe_cfg.mixam_env.mixam_mode;
+      opt_H_s= safe_cfg.mixam_env.mixam_start;
+      opt_H_d= safe_cfg.mixam_env.mixam_duty;
+      opt_H_a= safe_cfg.mixam_env.mixam_attack;
+      opt_H_r= safe_cfg.mixam_env.mixam_release;
+      opt_H_e= safe_cfg.mixam_env.mixam_edge_mode;
+      opt_H_f= safe_cfg.mixam_env.mixam_floor;
    }
    if (safe_cfg.mix_path && !opt_m)
       opt_m= StrDup(safe_cfg.mix_path);
@@ -7256,6 +7269,18 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    }
    if (sbx_context_set_default_waveform(ctx, opt_w) != SBX_OK) {
       sbx_set_runtime_reject_reason("failed to set sbagenxlib default waveform");
+      sbx_context_destroy(ctx);
+      goto fail;
+   }
+   if (safe_cfg.have_I &&
+       sbx_context_set_sequence_iso_override(ctx, &safe_cfg.iso_env) != SBX_OK) {
+      sbx_set_runtime_reject_reason("failed to set sbagenxlib sequence isochronic override");
+      sbx_context_destroy(ctx);
+      goto fail;
+   }
+   if (safe_cfg.have_H &&
+       sbx_context_set_sequence_mixam_override(ctx, &safe_cfg.mixam_env) != SBX_OK) {
+      sbx_set_runtime_reject_reason("failed to set sbagenxlib sequence mixam override");
       sbx_context_destroy(ctx);
       goto fail;
    }
@@ -7279,6 +7304,22 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (safe_cfg.have_T && opt_T == -1) {
       opt_T= safe_cfg.T_ms;
       if (!fast_mult) fast_mult= 1;
+   }
+   if (safe_cfg.have_A) {
+      SbxMixModSpec mix_mod= safe_cfg.mix_mod;
+      double duration_sec= sbx_context_duration_sec(ctx);
+      mix_mod.active= 1;
+      if (!(mix_mod.main_len_sec > 0.0))
+         mix_mod.main_len_sec= (duration_sec > 0.0) ? duration_sec : 1.0;
+      if (mix_mod.wake_len_sec < 0.0)
+         mix_mod.wake_len_sec= 0.0;
+      if (sbx_context_set_mix_mod(ctx, &mix_mod) != SBX_OK) {
+         sbx_set_runtime_reject_reason("failed to set sbagenxlib sequence mix modulation");
+         sbx_context_destroy(ctx);
+         goto fail;
+      }
+      mix_mod_curve= mix_mod;
+      mix_mod_anchor_ms= -1;
    }
 
    if (opt_D) {

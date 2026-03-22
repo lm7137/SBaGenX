@@ -153,6 +153,10 @@ struct SbxContext {
   int loaded;
   char last_error[256];
   int default_waveform;
+  int have_seq_iso_override;
+  SbxIsoEnvelopeSpec seq_iso_env;
+  int have_seq_mixam_override;
+  SbxMixFxSpec seq_mixam_env;
   int source_mode;
   SbxProgramKeyframe *kfs;
   size_t kf_count;
@@ -339,6 +343,10 @@ static int sbx_parse_safe_seqfile_option_line_lib(const char *line,
                                                   SbxSafeSeqfilePreamble *out_cfg,
                                                   char *errbuf,
                                                   size_t errbuf_sz);
+static void sbx_apply_sequence_iso_override(SbxToneSpec *tone,
+                                            const SbxContext *ctx);
+static void sbx_apply_sequence_mixam_override(SbxMixFxSpec *fx,
+                                              const SbxContext *ctx);
 static int sbx_line_contains_seq_mode_option_lib(const char *line);
 static void sbx_apply_immediate_iso_override(SbxToneSpec *tone,
                                              const SbxImmediateParseConfig *cfg);
@@ -1202,7 +1210,7 @@ named_block_find(const SbxNamedBlockDef *defs, size_t ndefs, const char *name) {
 static int
 sbx_frame_apply_token(SbxVoiceSetKeyframe *frame,
                       const char *tok,
-                      int default_waveform,
+                      const SbxContext *ctx,
                       const SbxNamedToneDef *defs,
                       size_t ndefs,
                       int *out_block_idx,
@@ -1216,7 +1224,7 @@ sbx_frame_apply_token(SbxVoiceSetKeyframe *frame,
   int bidx;
   int rc;
 
-  if (!frame || !tok) return SBX_EINVAL;
+  if (!frame || !tok || !ctx) return SBX_EINVAL;
   if (out_block_idx) *out_block_idx = -1;
 
   if (strcmp(tok, "-") == 0)
@@ -1235,11 +1243,13 @@ sbx_frame_apply_token(SbxVoiceSetKeyframe *frame,
     return SBX_EINVAL;
   }
 
-  rc = sbx_parse_extra_token(tok, default_waveform, &extra_type, &tone, &fx, &mix_pct);
+  rc = sbx_parse_extra_token(tok, ctx->default_waveform, &extra_type, &tone, &fx, &mix_pct);
   if (rc != SBX_OK) return rc;
 
-  if (extra_type == SBX_EXTRA_TONE)
+  if (extra_type == SBX_EXTRA_TONE) {
+    sbx_apply_sequence_iso_override(&tone, ctx);
     return sbx_voice_set_frame_append_tone(frame, &tone);
+  }
 
   if (extra_type == SBX_EXTRA_MIXAMP) {
     if (frame->mix_amp_present) return SBX_EINVAL;
@@ -1248,8 +1258,10 @@ sbx_frame_apply_token(SbxVoiceSetKeyframe *frame,
     return SBX_OK;
   }
 
-  if (extra_type == SBX_EXTRA_MIXFX)
+  if (extra_type == SBX_EXTRA_MIXFX) {
+    sbx_apply_sequence_mixam_override(&fx, ctx);
     return sbx_voice_set_frame_append_mix_fx(frame, &fx);
+  }
 
   return SBX_EINVAL;
 }
@@ -1566,6 +1578,7 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
       return 0;
     }
     for (a = 1; tok[a]; a++) {
+      const char *inline_arg = tok[a + 1] ? (tok + a + 1) : 0;
       switch (tok[a]) {
         case 'S':
           out_cfg->opt_S = 1;
@@ -1573,13 +1586,77 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
         case 'E':
           out_cfg->opt_E = 1;
           break;
+        case 'A':
+          {
+            const char *spec = 0;
+            char opt_err[256];
+            if (inline_arg) {
+              spec = inline_arg;
+            } else if (i + 1 < argc && sbx_is_mix_mod_option_spec(argv[i+1])) {
+              spec = argv[++i];
+            }
+            out_cfg->have_A = 1;
+            out_cfg->mix_mod.active = 1;
+            if (spec &&
+                SBX_OK != sbx_parse_mix_mod_option_spec(spec, &out_cfg->mix_mod,
+                                                        opt_err, sizeof(opt_err))) {
+              sbx_set_api_error(errbuf, errbuf_sz, "%s",
+                                opt_err[0] ? opt_err : "safe preamble -A spec is invalid");
+              free(dup);
+              return 0;
+            }
+          }
+          a = strlen(tok) - 1;
+          break;
+        case 'I':
+          {
+            const char *spec = 0;
+            char opt_err[256];
+            if (inline_arg) {
+              spec = inline_arg;
+            } else if (i + 1 < argc && sbx_is_iso_envelope_option_spec(argv[i+1])) {
+              spec = argv[++i];
+            }
+            out_cfg->have_I = 1;
+            if (spec &&
+                SBX_OK != sbx_parse_iso_envelope_option_spec(spec, &out_cfg->iso_env,
+                                                             opt_err, sizeof(opt_err))) {
+              sbx_set_api_error(errbuf, errbuf_sz, "%s",
+                                opt_err[0] ? opt_err : "safe preamble -I spec is invalid");
+              free(dup);
+              return 0;
+            }
+          }
+          a = strlen(tok) - 1;
+          break;
+        case 'H':
+          {
+            const char *spec = 0;
+            char opt_err[256];
+            if (inline_arg) {
+              spec = inline_arg;
+            } else if (i + 1 < argc && sbx_is_mixam_envelope_option_spec(argv[i+1])) {
+              spec = argv[++i];
+            }
+            out_cfg->have_H = 1;
+            if (spec &&
+                SBX_OK != sbx_parse_mixam_envelope_option_spec(spec, &out_cfg->mixam_env,
+                                                               opt_err, sizeof(opt_err))) {
+              sbx_set_api_error(errbuf, errbuf_sz, "%s",
+                                opt_err[0] ? opt_err : "safe preamble -H spec is invalid");
+              free(dup);
+              return 0;
+            }
+          }
+          a = strlen(tok) - 1;
+          break;
         case 'T':
           {
             size_t used = 0;
             double sec = 0.0;
-            if (tok[a+1] || i + 1 >= argc ||
-                SBX_OK != sbx_parse_sbg_clock_token(argv[i+1], &used, &sec) ||
-                argv[i+1][used] != 0) {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || SBX_OK != sbx_parse_sbg_clock_token(arg, &used, &sec) ||
+                arg[used] != 0) {
               sbx_set_api_error(errbuf, errbuf_sz,
                                 "safe preamble -T expects a valid time value");
               free(dup);
@@ -1587,12 +1664,30 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
             }
             out_cfg->have_T = 1;
             out_cfg->T_ms = (int)(sec * 1000.0 + 0.5);
+            if (!inline_arg) i++;
           }
-          i++;
+          a = strlen(tok) - 1;
+          break;
+        case 'L':
+          {
+            size_t used = 0;
+            double sec = 0.0;
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || SBX_OK != sbx_parse_sbg_clock_token(arg, &used, &sec) ||
+                arg[used] != 0) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -L expects a valid time value");
+              free(dup);
+              return 0;
+            }
+            out_cfg->have_L = 1;
+            out_cfg->L_ms = (int)(sec * 1000.0 + 0.5);
+            if (!inline_arg) i++;
+          }
           a = strlen(tok) - 1;
           break;
         case 'm':
-          if (tok[a+1] || i + 1 >= argc) {
+          if (inline_arg || i + 1 >= argc) {
             sbx_set_api_error(errbuf, errbuf_sz,
                               "safe preamble -m expects a mix-input path");
             free(dup);
@@ -1604,7 +1699,7 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
           a = strlen(tok) - 1;
           break;
         case 'o':
-          if (tok[a+1] || i + 1 >= argc) {
+          if (inline_arg || i + 1 >= argc) {
             sbx_set_api_error(errbuf, errbuf_sz,
                               "safe preamble -o expects an output path");
             free(dup);
@@ -1616,38 +1711,44 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
           a = strlen(tok) - 1;
           break;
         case 'q':
-          if (tok[a+1] || i + 1 >= argc ||
-              1 != sscanf(argv[i+1], "%d", &out_cfg->q_mult)) {
-            sbx_set_api_error(errbuf, errbuf_sz,
-                              "safe preamble -q expects an integer multiplier");
-            free(dup);
-            return 0;
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->q_mult)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -q expects an integer multiplier");
+              free(dup);
+              return 0;
+            }
           }
+          if (!inline_arg) i++;
           if (out_cfg->q_mult < 1)
             out_cfg->q_mult = 1;
           out_cfg->have_q = 1;
-          i++;
           a = strlen(tok) - 1;
           break;
         case 'r':
-          if (tok[a+1] || i + 1 >= argc ||
-              1 != sscanf(argv[i+1], "%d", &out_cfg->rate)) {
-            sbx_set_api_error(errbuf, errbuf_sz,
-                              "safe preamble -r expects an integer sample rate");
-            free(dup);
-            return 0;
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->rate)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -r expects an integer sample rate");
+              free(dup);
+              return 0;
+            }
           }
           out_cfg->have_r = 1;
-          i++;
+          if (!inline_arg) i++;
           a = strlen(tok) - 1;
           break;
         case 'R':
-          if (tok[a+1] || i + 1 >= argc ||
-              1 != sscanf(argv[i+1], "%d", &out_cfg->prate)) {
-            sbx_set_api_error(errbuf, errbuf_sz,
-                              "safe preamble -R expects an integer parameter refresh rate");
-            free(dup);
-            return 0;
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->prate)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -R expects an integer parameter refresh rate");
+              free(dup);
+              return 0;
+            }
           }
           if (out_cfg->prate < 1) {
             sbx_set_api_error(errbuf, errbuf_sz, "safe preamble -R must be >= 1");
@@ -1655,34 +1756,180 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
             return 0;
           }
           out_cfg->have_R = 1;
-          i++;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
+        case 'b':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->pcm_bits) ||
+                !(out_cfg->pcm_bits == 8 || out_cfg->pcm_bits == 16 || out_cfg->pcm_bits == 24)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -b expects 8, 16, or 24");
+              free(dup);
+              return 0;
+            }
+          }
+          out_cfg->have_b = 1;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
+        case 'N':
+          out_cfg->have_N = 1;
+          break;
+        case 'V':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->volume_pct)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -V expects an integer percent");
+              free(dup);
+              return 0;
+            }
+          }
+          if (out_cfg->volume_pct < 0 || out_cfg->volume_pct > 100) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "safe preamble -V must be in range 0..100");
+            free(dup);
+            return 0;
+          }
+          out_cfg->have_V = 1;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
+        case 'w':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -w expects sine, square, triangle, or sawtooth");
+              free(dup);
+              return 0;
+            }
+            if (strcmp(arg, "sine") == 0) out_cfg->waveform = SBX_WAVE_SINE;
+            else if (strcmp(arg, "square") == 0) out_cfg->waveform = SBX_WAVE_SQUARE;
+            else if (strcmp(arg, "triangle") == 0) out_cfg->waveform = SBX_WAVE_TRIANGLE;
+            else if (strcmp(arg, "sawtooth") == 0) out_cfg->waveform = SBX_WAVE_SAWTOOTH;
+            else {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -w expects sine, square, triangle, or sawtooth");
+              free(dup);
+              return 0;
+            }
+          }
+          out_cfg->have_w = 1;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
+        case 'K':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->mp3_bitrate)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -K expects MP3 bitrate in kbps");
+              free(dup);
+              return 0;
+            }
+          }
+          if (out_cfg->mp3_bitrate < 8 || out_cfg->mp3_bitrate > 320) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "safe preamble -K must be in range 8..320 kbps");
+            free(dup);
+            return 0;
+          }
+          out_cfg->have_K = 1;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
+        case 'J':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->mp3_quality)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -J expects MP3 quality 0..9");
+              free(dup);
+              return 0;
+            }
+          }
+          if (out_cfg->mp3_quality < 0 || out_cfg->mp3_quality > 9) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "safe preamble -J must be in range 0..9");
+            free(dup);
+            return 0;
+          }
+          out_cfg->have_J = 1;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
+        case 'X':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%lf", &out_cfg->mp3_vbr_quality)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -X expects MP3 VBR quality 0..9");
+              free(dup);
+              return 0;
+            }
+          }
+          if (out_cfg->mp3_vbr_quality < 0.0 || out_cfg->mp3_vbr_quality > 9.0) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "safe preamble -X must be in range 0..9");
+            free(dup);
+            return 0;
+          }
+          out_cfg->have_X = 1;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
+        case 'U':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%lf", &out_cfg->ogg_quality)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -U expects OGG quality 0..10");
+              free(dup);
+              return 0;
+            }
+          }
+          if (out_cfg->ogg_quality < 0.0 || out_cfg->ogg_quality > 10.0) {
+            sbx_set_api_error(errbuf, errbuf_sz,
+                              "safe preamble -U must be in range 0..10");
+            free(dup);
+            return 0;
+          }
+          out_cfg->have_U = 1;
+          if (!inline_arg) i++;
           a = strlen(tok) - 1;
           break;
         case 'W':
           out_cfg->have_W = 1;
           break;
         case 'F':
-          if (tok[a+1] || i + 1 >= argc ||
-              1 != sscanf(argv[i+1], "%d", &out_cfg->fade_ms)) {
-            sbx_set_api_error(errbuf, errbuf_sz,
-                              "safe preamble -F expects an integer fade time in ms");
-            free(dup);
-            return 0;
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%d", &out_cfg->fade_ms)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -F expects an integer fade time in ms");
+              free(dup);
+              return 0;
+            }
           }
           out_cfg->have_F = 1;
-          i++;
+          if (!inline_arg) i++;
           a = strlen(tok) - 1;
           break;
         case 'Z':
-          if (tok[a+1] || i + 1 >= argc ||
-              1 != sscanf(argv[i+1], "%lf", &out_cfg->flac_compression)) {
-            sbx_set_api_error(errbuf, errbuf_sz,
-                              "safe preamble -Z expects a FLAC compression level");
-            free(dup);
-            return 0;
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            if (!arg || 1 != sscanf(arg, "%lf", &out_cfg->flac_compression)) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -Z expects a FLAC compression level");
+              free(dup);
+              return 0;
+            }
           }
           out_cfg->have_Z = 1;
-          i++;
+          if (!inline_arg) i++;
           a = strlen(tok) - 1;
           break;
         default:
@@ -1857,6 +2104,38 @@ sbx_apply_immediate_mixam_override(SbxMixFxSpec *fx,
   fx->mixam_release = cfg->mixam_release;
   fx->mixam_edge_mode = cfg->mixam_edge_mode;
   fx->mixam_floor = cfg->mixam_floor;
+}
+
+static void
+sbx_apply_sequence_iso_override(SbxToneSpec *tone,
+                                const SbxContext *ctx) {
+  if (!tone || !ctx || !ctx->have_seq_iso_override)
+    return;
+  if (tone->mode != SBX_TONE_ISOCHRONIC)
+    return;
+  if (tone->envelope_waveform != SBX_ENV_WAVE_NONE)
+    return;
+  tone->iso_start = ctx->seq_iso_env.start;
+  tone->duty_cycle = ctx->seq_iso_env.duty;
+  tone->iso_attack = ctx->seq_iso_env.attack;
+  tone->iso_release = ctx->seq_iso_env.release;
+  tone->iso_edge_mode = ctx->seq_iso_env.edge_mode;
+}
+
+static void
+sbx_apply_sequence_mixam_override(SbxMixFxSpec *fx,
+                                  const SbxContext *ctx) {
+  if (!fx || !ctx || !ctx->have_seq_mixam_override)
+    return;
+  if (fx->type != SBX_MIXFX_AM)
+    return;
+  fx->mixam_mode = ctx->seq_mixam_env.mixam_mode;
+  fx->mixam_start = ctx->seq_mixam_env.mixam_start;
+  fx->mixam_duty = ctx->seq_mixam_env.mixam_duty;
+  fx->mixam_attack = ctx->seq_mixam_env.mixam_attack;
+  fx->mixam_release = ctx->seq_mixam_env.mixam_release;
+  fx->mixam_edge_mode = ctx->seq_mixam_env.mixam_edge_mode;
+  fx->mixam_floor = ctx->seq_mixam_env.mixam_floor;
 }
 
 int
@@ -3094,6 +3373,16 @@ sbx_parse_sbg_clock_token(const char *tok, size_t *out_consumed, double *out_sec
 }
 
 int
+sbx_is_iso_envelope_option_spec(const char *spec) {
+  const char *p = spec;
+  if (!p || !*p) return 0;
+  if (*p == '-') return 0;
+  if (!strchr(p, '=')) return 0;
+  if (*p == ':') p++;
+  return (*p == 's' || *p == 'd' || *p == 'a' || *p == 'r' || *p == 'e');
+}
+
+int
 sbx_parse_iso_envelope_option_spec(const char *spec,
                                    SbxIsoEnvelopeSpec *out_spec,
                                    char *errbuf,
@@ -3240,6 +3529,105 @@ sbx_is_mixam_envelope_option_spec(const char *spec) {
   if (*p == ':') p++;
   return (*p == 'm' || *p == 's' || *p == 'd' || *p == 'a' ||
           *p == 'r' || *p == 'e' || *p == 'f');
+}
+
+int
+sbx_is_mix_mod_option_spec(const char *spec) {
+  const char *p = spec;
+  if (!p || !*p) return 0;
+  if (*p == '-') return 0;
+  if (!strchr(p, '=')) return 0;
+  if (*p == ':') p++;
+  return (*p == 'd' || *p == 'e' || *p == 'k' || *p == 'E');
+}
+
+int
+sbx_parse_mix_mod_option_spec(const char *spec,
+                              SbxMixModSpec *out_spec,
+                              char *errbuf,
+                              size_t errbuf_sz) {
+  const char *p = spec;
+
+  if (errbuf && errbuf_sz) errbuf[0] = 0;
+  if (!spec || !*spec || !out_spec) {
+    sbx_set_api_error(errbuf, errbuf_sz, "empty -A spec");
+    return SBX_EINVAL;
+  }
+
+  while (*p) {
+    char key;
+    char *end = 0;
+    double val;
+    const char *expect_msg = "-A expects d=<val>:e=<val>:k=<val>:E=<val>";
+
+    while (*p == ':') p++;
+    if (!*p) break;
+
+    key = *p++;
+    if (*p != '=') {
+      sbx_set_api_error(errbuf, errbuf_sz, "%s", expect_msg);
+      return SBX_EINVAL;
+    }
+    p++;
+
+    val = strtod(p, &end);
+    if (end == p) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-A parameter %c requires a numeric value", key);
+      return SBX_EINVAL;
+    }
+
+    switch (key) {
+      case 'd':
+        out_spec->delta = val;
+        break;
+      case 'e':
+        out_spec->epsilon = val;
+        break;
+      case 'k':
+        out_spec->period_sec = val * 60.0;
+        break;
+      case 'E':
+        out_spec->end_level = val;
+        break;
+      default:
+        sbx_set_api_error(errbuf, errbuf_sz,
+                          "-A only supports d=, e=, k= and E= parameters");
+        return SBX_EINVAL;
+    }
+
+    p = end;
+    if (*p == ':') p++;
+    else if (*p) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-A expects colon-separated parameters");
+      return SBX_EINVAL;
+    }
+  }
+
+  if (out_spec->delta < 0.0 || out_spec->delta > 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-A parameter d must be in range 0..1");
+    return SBX_EINVAL;
+  }
+  if (out_spec->epsilon <= 0.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-A parameter e must be > 0");
+    return SBX_EINVAL;
+  }
+  if (out_spec->period_sec <= 0.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-A parameter k must be > 0");
+    return SBX_EINVAL;
+  }
+  if (out_spec->end_level < 0.0 || out_spec->end_level > 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-A parameter E must be in range 0..1");
+    return SBX_EINVAL;
+  }
+
+  out_spec->active = 1;
+  return SBX_OK;
 }
 
 int
@@ -3846,9 +4234,9 @@ sbx_parse_immediate_tokens(const char *const *tokens,
     return SBX_EINVAL;
   }
 
-  if (out_spec->tone_count == 0) {
+  if (out_spec->tone_count == 0 && out_spec->mix_fx_count == 0) {
     sbx_set_api_error(errbuf, errbuf_sz,
-                      "no sbagenxlib-compatible immediate tone tokens were found");
+                      "no sbagenxlib-compatible immediate tone/effect tokens were found");
     return SBX_EINVAL;
   }
 
@@ -4270,10 +4658,21 @@ sbx_default_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg) {
   if (!cfg) return;
   memset(cfg, 0, sizeof(*cfg));
   cfg->T_ms = -1;
+  cfg->L_ms = -1;
   cfg->q_mult = 1;
   cfg->rate = 44100;
   cfg->prate = 10;
+  cfg->pcm_bits = 16;
+  cfg->volume_pct = 100;
+  cfg->waveform = SBX_WAVE_SINE;
+  sbx_default_mix_mod_spec(&cfg->mix_mod);
+  sbx_default_iso_envelope_spec(&cfg->iso_env);
+  sbx_default_mixam_envelope_spec(&cfg->mixam_env);
   cfg->fade_ms = 60000;
+  cfg->mp3_bitrate = 192;
+  cfg->mp3_quality = 2;
+  cfg->mp3_vbr_quality = 0.0;
+  cfg->ogg_quality = 6.0;
   cfg->flac_compression = 5.0;
 }
 
@@ -5865,6 +6264,8 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   }
   ctx->loaded = 0;
   ctx->default_waveform = SBX_WAVE_SINE;
+  sbx_default_iso_envelope_spec(&ctx->seq_iso_env);
+  sbx_default_mixam_envelope_spec(&ctx->seq_mixam_env);
   ctx->source_mode = SBX_CTX_SRC_NONE;
   ctx->kfs = 0;
   ctx->kf_count = 0;
@@ -5953,6 +6354,47 @@ sbx_context_set_default_waveform(SbxContext *ctx, int waveform) {
     return SBX_EINVAL;
   }
   ctx->default_waveform = waveform;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
+sbx_context_set_sequence_iso_override(SbxContext *ctx, const SbxIsoEnvelopeSpec *spec) {
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!spec) {
+    ctx->have_seq_iso_override = 0;
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (!isfinite(spec->start) || spec->start < 0.0 || spec->start > 1.0 ||
+      !isfinite(spec->duty) || spec->duty < 0.0 || spec->duty > 1.0 ||
+      !isfinite(spec->attack) || spec->attack < 0.0 || spec->attack > 1.0 ||
+      !isfinite(spec->release) || spec->release < 0.0 || spec->release > 1.0 ||
+      (spec->attack + spec->release) > (1.0 + 1e-12) ||
+      spec->edge_mode < 0 || spec->edge_mode > 3) {
+    set_ctx_error(ctx, "sequence iso override is invalid");
+    return SBX_EINVAL;
+  }
+  ctx->seq_iso_env = *spec;
+  ctx->have_seq_iso_override = 1;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
+sbx_context_set_sequence_mixam_override(SbxContext *ctx, const SbxMixFxSpec *spec) {
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!spec) {
+    ctx->have_seq_mixam_override = 0;
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (spec->type != SBX_MIXFX_AM || sbx_validate_mixam_fields(spec) != SBX_OK) {
+    set_ctx_error(ctx, "sequence mixam override is invalid");
+    return SBX_EINVAL;
+  }
+  ctx->seq_mixam_env = *spec;
+  ctx->have_seq_mixam_override = 1;
   set_ctx_error(ctx, NULL);
   return SBX_OK;
 }
@@ -6206,6 +6648,7 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
       rc = SBX_EINVAL;
       goto done;
     }
+    sbx_apply_sequence_iso_override(&tone, ctx);
 
     if (interp_tok) {
       rc = parse_interp_mode_token(interp_tok, &interp);
@@ -6475,7 +6918,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             idx++;
             continue;
           }
-          rc = sbx_frame_apply_token(&blk_frame, tok, ctx->default_waveform,
+          rc = sbx_frame_apply_token(&blk_frame, tok, ctx,
                                      defs, ndefs, &bidx, blocks, nblocks);
           if (rc != SBX_OK) {
             char emsg[256];
@@ -6799,7 +7242,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             *r++ = 0;
             r = (char *)skip_ws(r);
           }
-          rc = sbx_frame_apply_token(&frame, v_tok, ctx->default_waveform,
+          rc = sbx_frame_apply_token(&frame, v_tok, ctx,
                                      defs, ndefs, &bdef, blocks, nblocks);
           if (rc != SBX_OK || bdef >= 0) {
             char emsg[224];
@@ -6942,7 +7385,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           idx++;
           continue;
         }
-        rc = sbx_frame_apply_token(&frame, tok, ctx->default_waveform,
+        rc = sbx_frame_apply_token(&frame, tok, ctx,
                                    defs, ndefs, &bidx, blocks, nblocks);
         if (rc != SBX_OK) {
           char emsg[224];
@@ -8031,10 +8474,11 @@ sbx_runtime_context_create_from_immediate(const SbxImmediateSpec *imm,
                                           SbxContext **out_ctx) {
   SbxRuntimeContextConfig local_cfg;
   SbxContext *ctx = 0;
+  SbxToneSpec tone;
   int rc;
 
   if (!imm || !out_ctx) return SBX_EINVAL;
-  if (imm->tone_count == 0)
+  if (imm->tone_count == 0 && imm->mix_fx_count == 0)
     return SBX_EINVAL;
   *out_ctx = 0;
 
@@ -8043,7 +8487,13 @@ sbx_runtime_context_create_from_immediate(const SbxImmediateSpec *imm,
   if (!ctx)
     return SBX_ENOMEM;
 
-  rc = sbx_context_set_tone(ctx, &imm->tones[0]);
+  if (imm->tone_count > 0) {
+    tone = imm->tones[0];
+  } else {
+    sbx_default_tone_spec(&tone);
+  }
+
+  rc = sbx_context_set_tone(ctx, &tone);
   if (rc == SBX_OK) {
     local_cfg.default_mix_amp_pct = imm->have_mix ? imm->mix_amp_pct : 100.0;
     local_cfg.mix_fx = imm->mix_fx;
