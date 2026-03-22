@@ -71,6 +71,10 @@ main(void) {
       "base: 120+0/30\n"
       "NOW base\n"
       "+00:00:02 base\n";
+  const char *sbg_now_anchor_wrap_text =
+      "base: 120+0/30\n"
+      "NOW+00:00:10 base\n"
+      "+00:00:02 base\n";
   const char *sbg_day_wrap_text =
       "off: -\n"
       "base: 180+0/25\n"
@@ -236,6 +240,13 @@ main(void) {
     fail("NOW-based keyframe time mismatch");
   if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 2.0) > 1e-9)
     fail("relative +HH:MM:SS keyframe time mismatch");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_now_anchor_wrap_text, 0);
+  if (rc != SBX_OK) fail("NOW-anchor wrap sbg timing load failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK || fabs(kf.time_sec - 10.0) > 1e-9)
+    fail("NOW-anchor wrap keyframe #0 time mismatch");
+  if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK || fabs(kf.time_sec - 86402.0) > 1e-9)
+    fail("NOW-anchor wrap keyframe #1 time mismatch");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_day_wrap_text, 0);
   if (rc != SBX_OK) fail("day-wrap sbg timing load failed");

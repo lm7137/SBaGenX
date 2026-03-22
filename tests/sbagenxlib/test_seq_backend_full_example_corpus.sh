@@ -22,9 +22,6 @@ should_skip() {
     examples/basics/prog-drop-old-demo.sbg)
       return 0
       ;;
-    examples/contrib/ghostlab/pulse-*.sbg)
-      return 0
-      ;;
   esac
   return 1
 }

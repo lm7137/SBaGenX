@@ -1457,6 +1457,16 @@ parse_sbg_timeline_time_token(const char *tok,
   return SBX_OK;
 }
 
+static double
+sbx_monotonic_day_wrap(double t_sec, double last_t_sec) {
+  const double day_sec = 24.0 * 60.0 * 60.0;
+  if (!isfinite(t_sec))
+    return t_sec;
+  while (last_t_sec >= 0.0 && t_sec < last_t_sec)
+    t_sec += day_sec;
+  return t_sec;
+}
+
 static int
 read_text_file_alloc(const char *path, char **out_text) {
   FILE *fp = 0;
@@ -6294,6 +6304,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   double last_abs_sec = -1.0;
   size_t max_voice_count = 1;
   size_t max_mix_fx_slots = 0;
+  double last_emit_sec = -1.0;
   int rc = SBX_OK;
 
   if (!ctx || !ctx->eng || !text) return SBX_EINVAL;
@@ -6988,8 +6999,10 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             frames = tmp;
             cap = ncap;
           }
-          expanded.time_sec = tsec + expanded.time_sec;
+          expanded.time_sec = sbx_monotonic_day_wrap(tsec + expanded.time_sec,
+                                                     last_emit_sec);
           frames[count++] = expanded;
+          last_emit_sec = expanded.time_sec;
           if (expanded.tone_len > max_voice_count) max_voice_count = expanded.tone_len;
           if (expanded.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = expanded.mix_fx_count;
         }
@@ -7034,9 +7047,10 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       rc = SBX_EINVAL;
       goto done;
     }
-    frame.time_sec = tsec;
+    frame.time_sec = sbx_monotonic_day_wrap(tsec, last_emit_sec);
     frame.interp = interp;
     frames[count] = frame;
+    last_emit_sec = frame.time_sec;
     if (frame.tone_len > max_voice_count) max_voice_count = frame.tone_len;
     if (frame.mix_fx_count > max_mix_fx_slots) max_mix_fx_slots = frame.mix_fx_count;
     count++;
