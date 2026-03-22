@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 32  /* public API contract revision */
+#define SBX_API_VERSION 33  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_PLOT_MAX_TICKS 64
 #define SBX_PLOT_TEXT_MAX 256
@@ -426,6 +426,9 @@ void sbx_default_tone_spec(SbxToneSpec *tone);
 /* Fill spec with library-default isochronic envelope values. */
 void sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec);
 
+/* Fill spec with documented `-H`/mixam envelope defaults. */
+void sbx_default_mixam_envelope_spec(SbxMixFxSpec *spec);
+
 /* Fill cfg with default `.sbgf` evaluation environment values. */
 void sbx_default_curve_eval_config(SbxCurveEvalConfig *cfg);
 
@@ -660,6 +663,36 @@ int sbx_parse_tone_spec_ex(const char *spec, int default_waveform, SbxToneSpec *
 
 /* Parse SBG clock token HH:MM or HH:MM:SS. Returns consumed chars. */
 int sbx_parse_sbg_clock_token(const char *tok, size_t *out_consumed, double *out_sec);
+
+/*
+ * Parse an `-I` isochronic envelope option spec such as:
+ *   s=0:d=0.35:a=0.12:r=0.65:e=2
+ * The parser updates the supplied spec in place, so callers can either:
+ *   - initialize from sbx_default_iso_envelope_spec(), or
+ *   - initialize from an existing value and override selected fields
+ */
+int sbx_parse_iso_envelope_option_spec(const char *spec,
+                                       SbxIsoEnvelopeSpec *out_spec,
+                                       char *errbuf,
+                                       size_t errbuf_sz);
+
+/*
+ * Detect whether a string looks like an `-H` mixam envelope option spec.
+ * This mirrors the CLI behavior for the optional argument form.
+ */
+int sbx_is_mixam_envelope_option_spec(const char *spec);
+
+/*
+ * Parse an `-H` mixam envelope option spec such as:
+ *   m=pulse:s=0:d=0.5:a=0.2:r=0.4:e=2:f=0.25
+ * The parser updates the supplied spec in place, so callers can either:
+ *   - initialize from sbx_default_mixam_envelope_spec(), or
+ *   - initialize from an existing value and override selected fields
+ */
+int sbx_parse_mixam_envelope_option_spec(const char *spec,
+                                         SbxMixFxSpec *out_spec,
+                                         char *errbuf,
+                                         size_t errbuf_sz);
 
 /* Format mix effect as canonical token (mixspin/mixpulse/mixbeat/mixam). */
 int sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz);

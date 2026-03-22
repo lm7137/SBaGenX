@@ -3083,6 +3083,354 @@ sbx_parse_sbg_clock_token(const char *tok, size_t *out_consumed, double *out_sec
   return SBX_EINVAL;
 }
 
+int
+sbx_parse_iso_envelope_option_spec(const char *spec,
+                                   SbxIsoEnvelopeSpec *out_spec,
+                                   char *errbuf,
+                                   size_t errbuf_sz) {
+  const char *p = spec;
+
+  if (errbuf && errbuf_sz) errbuf[0] = 0;
+  if (!spec || !*spec || !out_spec) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "empty -I spec");
+    return SBX_EINVAL;
+  }
+
+  while (*p) {
+    char key;
+    char *end = 0;
+    double val;
+    long edge;
+    const char *expect_msg =
+        "-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>";
+
+    while (*p == ':') p++;
+    if (!*p) break;
+
+    key = (char)tolower((unsigned char)*p++);
+    if (*p != '=') {
+      sbx_set_api_error(errbuf, errbuf_sz, "%s", expect_msg);
+      return SBX_EINVAL;
+    }
+    p++;
+
+    switch (key) {
+      case 's':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-I parameter s requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->start = val;
+        p = end;
+        break;
+      case 'd':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-I parameter d requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->duty = val;
+        p = end;
+        break;
+      case 'a':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-I parameter a requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->attack = val;
+        p = end;
+        break;
+      case 'r':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-I parameter r requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->release = val;
+        p = end;
+        break;
+      case 'e':
+        edge = strtol(p, &end, 10);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-I parameter e requires an integer value");
+          return SBX_EINVAL;
+        }
+        while (isspace((unsigned char)*end)) end++;
+        if (*end && *end != ':') {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-I parameter e must be an integer in range 0..3");
+          return SBX_EINVAL;
+        }
+        out_spec->edge_mode = (int)edge;
+        p = end;
+        break;
+      default:
+        sbx_set_api_error(errbuf, errbuf_sz,
+                          "-I only supports s=, d=, a=, r= and e= parameters");
+        return SBX_EINVAL;
+    }
+
+    if (*p == ':') p++;
+    else if (*p) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "%s",
+                        expect_msg);
+      return SBX_EINVAL;
+    }
+  }
+
+  if (out_spec->start < 0.0 || out_spec->start >= 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-I parameter s must be in range [0,1)");
+    return SBX_EINVAL;
+  }
+  if (out_spec->duty <= 0.0 || out_spec->duty > 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-I parameter d must be in range (0,1]");
+    return SBX_EINVAL;
+  }
+  if (out_spec->attack < 0.0 || out_spec->attack > 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-I parameter a must be in range [0,1]");
+    return SBX_EINVAL;
+  }
+  if (out_spec->release < 0.0 || out_spec->release > 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-I parameter r must be in range [0,1]");
+    return SBX_EINVAL;
+  }
+  if (out_spec->attack + out_spec->release > 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-I parameters a+r must be <= 1");
+    return SBX_EINVAL;
+  }
+  if (out_spec->edge_mode < 0 || out_spec->edge_mode > 3) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-I parameter e must be in range 0..3");
+    return SBX_EINVAL;
+  }
+
+  return SBX_OK;
+}
+
+int
+sbx_is_mixam_envelope_option_spec(const char *spec) {
+  const char *p = spec;
+  if (!p || !*p) return 0;
+  if (*p == '-') return 0;
+  if (!strchr(p, '=')) return 0;
+  if (*p == ':') p++;
+  return (*p == 'm' || *p == 's' || *p == 'd' || *p == 'a' ||
+          *p == 'r' || *p == 'e' || *p == 'f');
+}
+
+int
+sbx_parse_mixam_envelope_option_spec(const char *spec,
+                                     SbxMixFxSpec *out_spec,
+                                     char *errbuf,
+                                     size_t errbuf_sz) {
+  const char *p = spec;
+  int saw_mode = 0;
+  int saw_pulse_shape = 0;
+
+  if (errbuf && errbuf_sz) errbuf[0] = 0;
+  if (!spec || !*spec || !out_spec) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "empty -H spec");
+    return SBX_EINVAL;
+  }
+
+  out_spec->type = SBX_MIXFX_AM;
+  if (out_spec->waveform < SBX_WAVE_SINE || out_spec->waveform > SBX_WAVE_SAWTOOTH)
+    out_spec->waveform = SBX_WAVE_SINE;
+  if (!isfinite(out_spec->amp) || out_spec->amp < 0.0)
+    out_spec->amp = 1.0;
+  if (!isfinite(out_spec->res) || out_spec->res <= 0.0)
+    out_spec->res = 10.0;
+
+  while (*p) {
+    char key;
+    char *end = 0;
+    double val;
+    long edge;
+    const char *expect_msg =
+        "-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>";
+
+    while (*p == ':') p++;
+    if (!*p) break;
+
+    key = (char)tolower((unsigned char)*p++);
+    if (*p != '=') {
+      sbx_set_api_error(errbuf, errbuf_sz, "%s", expect_msg);
+      return SBX_EINVAL;
+    }
+    p++;
+
+    switch (key) {
+      case 'm': {
+        size_t n = 0;
+        char mtok[16];
+        while (p[n] && p[n] != ':' && !isspace((unsigned char)p[n])) n++;
+        if (n == 0) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter m requires a value (pulse or cos)");
+          return SBX_EINVAL;
+        }
+        if (n >= sizeof(mtok)) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter m value is too long");
+          return SBX_EINVAL;
+        }
+        memcpy(mtok, p, n);
+        mtok[n] = 0;
+        if (strcasecmp(mtok, "pulse") == 0)
+          out_spec->mixam_mode = SBX_MIXAM_MODE_PULSE;
+        else if (strcasecmp(mtok, "cos") == 0)
+          out_spec->mixam_mode = SBX_MIXAM_MODE_COS;
+        else {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter m must be 'pulse' or 'cos'");
+          return SBX_EINVAL;
+        }
+        saw_mode = 1;
+        p += n;
+        break;
+      }
+      case 's':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter s requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->mixam_start = val;
+        p = end;
+        break;
+      case 'd':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter d requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->mixam_duty = val;
+        saw_pulse_shape = 1;
+        p = end;
+        break;
+      case 'a':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter a requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->mixam_attack = val;
+        saw_pulse_shape = 1;
+        p = end;
+        break;
+      case 'r':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter r requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->mixam_release = val;
+        saw_pulse_shape = 1;
+        p = end;
+        break;
+      case 'e':
+        edge = strtol(p, &end, 10);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter e requires an integer value");
+          return SBX_EINVAL;
+        }
+        while (isspace((unsigned char)*end)) end++;
+        if (*end && *end != ':') {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter e must be an integer in range 0..3");
+          return SBX_EINVAL;
+        }
+        out_spec->mixam_edge_mode = (int)edge;
+        saw_pulse_shape = 1;
+        p = end;
+        break;
+      case 'f':
+        val = strtod(p, &end);
+        if (end == p) {
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "-H parameter f requires a numeric value");
+          return SBX_EINVAL;
+        }
+        out_spec->mixam_floor = val;
+        p = end;
+        break;
+      default:
+        sbx_set_api_error(errbuf, errbuf_sz,
+                          "-H only supports m=, s=, d=, a=, r=, e= and f= parameters");
+        return SBX_EINVAL;
+    }
+
+    if (*p == ':') p++;
+    else if (*p) {
+      sbx_set_api_error(errbuf, errbuf_sz, "%s", expect_msg);
+      return SBX_EINVAL;
+    }
+  }
+
+  if (!saw_mode && saw_pulse_shape)
+    out_spec->mixam_mode = SBX_MIXAM_MODE_PULSE;
+
+  if (out_spec->mixam_start < 0.0 || out_spec->mixam_start > 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-H parameter s must be in range [0,1]");
+    return SBX_EINVAL;
+  }
+  if (out_spec->mixam_mode == SBX_MIXAM_MODE_PULSE) {
+    if (out_spec->mixam_duty < 0.0 || out_spec->mixam_duty > 1.0) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-H parameter d must be in range [0,1] in m=pulse mode");
+      return SBX_EINVAL;
+    }
+    if (out_spec->mixam_attack < 0.0 || out_spec->mixam_attack > 1.0) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-H parameter a must be in range [0,1] in m=pulse mode");
+      return SBX_EINVAL;
+    }
+    if (out_spec->mixam_release < 0.0 || out_spec->mixam_release > 1.0) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-H parameter r must be in range [0,1] in m=pulse mode");
+      return SBX_EINVAL;
+    }
+    if (out_spec->mixam_attack + out_spec->mixam_release > 1.0) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-H parameters a+r must be <= 1 in m=pulse mode");
+      return SBX_EINVAL;
+    }
+    if (out_spec->mixam_edge_mode < 0 || out_spec->mixam_edge_mode > 3) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-H parameter e must be in range 0..3");
+      return SBX_EINVAL;
+    }
+  }
+  if (out_spec->mixam_floor < 0.0 || out_spec->mixam_floor > 1.0) {
+    sbx_set_api_error(errbuf, errbuf_sz,
+                      "-H parameter f must be in range [0,1]");
+    return SBX_EINVAL;
+  }
+
+  return SBX_OK;
+}
+
 static int
 parse_tone_spec_with_default_waveform(const char *spec,
                                       int default_waveform,
@@ -3850,6 +4198,17 @@ sbx_default_iso_envelope_spec(SbxIsoEnvelopeSpec *spec) {
   spec->attack = 0.5;
   spec->release = 0.5;
   spec->edge_mode = 2;
+}
+
+void
+sbx_default_mixam_envelope_spec(SbxMixFxSpec *spec) {
+  if (!spec) return;
+  memset(spec, 0, sizeof(*spec));
+  spec->type = SBX_MIXFX_AM;
+  spec->waveform = SBX_WAVE_SINE;
+  spec->amp = 1.0;
+  spec->res = 10.0;
+  sbx_mixam_set_defaults(spec);
 }
 
 void

@@ -1163,196 +1163,52 @@ is_iso_gate_option_spec(const char *spec) {
 
 void
 parse_iso_gate_option_spec(const char *spec) {
-   char tmp[256];
-   char *p, *q, *q2;
-   long edge;
+   SbxIsoEnvelopeSpec env;
+   char errbuf[256];
+
    if (!spec || !*spec) return;
-   if (strlen(spec) >= sizeof(tmp))
-      error("-I spec is too long");
-   strcpy(tmp, spec);
-   p= tmp;
-
-   while (*p) {
-      while (*p == ':') p++;
-      if (!*p) break;
-      switch (*p++) {
-       case 's':
-	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
-	  opt_I_s= strtod(p, &q);
-	  if (q == p) error("-I parameter s requires a numeric value");
-	  p= q;
-	  break;
-       case 'd':
-	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
-	  opt_I_d= strtod(p, &q);
-	  if (q == p) error("-I parameter d requires a numeric value");
-	  p= q;
-	  break;
-       case 'a':
-	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
-	  opt_I_a= strtod(p, &q);
-	  if (q == p) error("-I parameter a requires a numeric value");
-	  p= q;
-	  break;
-       case 'r':
-	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
-	  opt_I_r= strtod(p, &q);
-	  if (q == p) error("-I parameter r requires a numeric value");
-	  p= q;
-	  break;
-       case 'e':
-	  if (*p++ != '=') error("-I expects s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>");
-	  edge= strtol(p, &q, 10);
-	  if (q == p) error("-I parameter e requires an integer value");
-	  q2= q;
-	  while (isspace((unsigned char)*q2)) q2++;
-	  if (*q2 && *q2 != ':')
-	     error("-I parameter e must be an integer in range 0..3");
-	  opt_I_e= (int)edge;
-	  p= q;
-	  break;
-       default:
-	  error("-I only supports s=, d=, a=, r= and e= parameters");
-      }
-
-      if (*p == ':') p++;
-      else if (*p) error("-I expects colon-separated parameters");
-   }
-
-   if (opt_I_s < 0.0 || opt_I_s >= 1.0)
-      error("-I parameter s must be in range [0,1)");
-   if (opt_I_d <= 0.0 || opt_I_d > 1.0)
-      error("-I parameter d must be in range (0,1]");
-   if (opt_I_a < 0.0 || opt_I_a > 1.0)
-      error("-I parameter a must be in range [0,1]");
-   if (opt_I_r < 0.0 || opt_I_r > 1.0)
-      error("-I parameter r must be in range [0,1]");
-   if (opt_I_a + opt_I_r > 1.0)
-      error("-I parameters a+r must be <= 1");
-   if (opt_I_e < 0 || opt_I_e > 3)
-      error("-I parameter e must be in range 0..3");
+   env.start= opt_I_s;
+   env.duty= opt_I_d;
+   env.attack= opt_I_a;
+   env.release= opt_I_r;
+   env.edge_mode= opt_I_e;
+   if (SBX_OK != sbx_parse_iso_envelope_option_spec(spec, &env, errbuf, sizeof(errbuf)))
+      error("%s", errbuf[0] ? errbuf : "-I option parse failed");
+   opt_I_s= env.start;
+   opt_I_d= env.duty;
+   opt_I_a= env.attack;
+   opt_I_r= env.release;
+   opt_I_e= env.edge_mode;
 }
 
 int
 is_mixam_env_option_spec(const char *spec) {
-   const char *p= spec;
-   if (!p || !*p) return 0;
-   if (*p == '-') return 0;
-   if (!strchr(p, '=')) return 0;
-   if (*p == ':') p++;
-   return (*p == 'm' || *p == 's' || *p == 'd' || *p == 'a' || *p == 'r' || *p == 'e' || *p == 'f');
+   return sbx_is_mixam_envelope_option_spec(spec);
 }
 
 void
 parse_mixam_env_option_spec(const char *spec) {
-   char tmp[256];
-   char *p, *q, *q2;
-   long edge;
-   int saw_mode= 0;
-   int saw_pulse_shape= 0;
+   SbxMixFxSpec fx;
+   char errbuf[256];
+
    if (!spec || !*spec) return;
-   if (strlen(spec) >= sizeof(tmp))
-      error("-H spec is too long");
-   strcpy(tmp, spec);
-   p= tmp;
-
-   while (*p) {
-      while (*p == ':') p++;
-      if (!*p) break;
-      switch (*p++) {
-       case 'm':
-	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
-	  q= p;
-	  while (*q && *q != ':' && !isspace((unsigned char)*q)) q++;
-	  if (q == p) error("-H parameter m requires a value (pulse or cos)");
-	  {
-	     size_t n= (size_t)(q - p);
-	     char mtok[16];
-	     if (n >= sizeof(mtok)) error("-H parameter m value is too long");
-	     memcpy(mtok, p, n);
-	     mtok[n]= 0;
-	     if (0 == strcasecmp(mtok, "pulse"))
-		opt_H_m= SBX_MIXAM_MODE_PULSE;
-	     else if (0 == strcasecmp(mtok, "cos"))
-		opt_H_m= SBX_MIXAM_MODE_COS;
-	     else
-		error("-H parameter m must be 'pulse' or 'cos'");
-	     saw_mode= 1;
-	  }
-	  p= q;
-	  break;
-       case 's':
-	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
-	  opt_H_s= strtod(p, &q);
-	  if (q == p) error("-H parameter s requires a numeric value");
-	  p= q;
-	  break;
-       case 'd':
-	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
-	  opt_H_d= strtod(p, &q);
-	  if (q == p) error("-H parameter d requires a numeric value");
-	  saw_pulse_shape= 1;
-	  p= q;
-	  break;
-       case 'a':
-	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
-	  opt_H_a= strtod(p, &q);
-	  if (q == p) error("-H parameter a requires a numeric value");
-	  saw_pulse_shape= 1;
-	  p= q;
-	  break;
-       case 'r':
-	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
-	  opt_H_r= strtod(p, &q);
-	  if (q == p) error("-H parameter r requires a numeric value");
-	  saw_pulse_shape= 1;
-	  p= q;
-	  break;
-       case 'e':
-	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
-	  edge= strtol(p, &q, 10);
-	  if (q == p) error("-H parameter e requires an integer value");
-	  q2= q;
-	  while (isspace((unsigned char)*q2)) q2++;
-	  if (*q2 && *q2 != ':')
-	     error("-H parameter e must be an integer in range 0..3");
-	  opt_H_e= (int)edge;
-	  saw_pulse_shape= 1;
-	  p= q;
-	  break;
-       case 'f':
-	  if (*p++ != '=') error("-H expects m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>");
-	  opt_H_f= strtod(p, &q);
-	  if (q == p) error("-H parameter f requires a numeric value");
-	  p= q;
-	  break;
-       default:
-	  error("-H only supports m=, s=, d=, a=, r=, e= and f= parameters");
-      }
-
-      if (*p == ':') p++;
-      else if (*p) error("-H expects colon-separated parameters");
-   }
-
-   if (!saw_mode && saw_pulse_shape)
-      opt_H_m= SBX_MIXAM_MODE_PULSE;
-
-   if (opt_H_s < 0.0 || opt_H_s > 1.0)
-      error("-H parameter s must be in range [0,1]");
-   if (opt_H_m == SBX_MIXAM_MODE_PULSE) {
-      if (opt_H_d < 0.0 || opt_H_d > 1.0)
-	 error("-H parameter d must be in range [0,1] in m=pulse mode");
-      if (opt_H_a < 0.0 || opt_H_a > 1.0)
-	 error("-H parameter a must be in range [0,1] in m=pulse mode");
-      if (opt_H_r < 0.0 || opt_H_r > 1.0)
-	 error("-H parameter r must be in range [0,1] in m=pulse mode");
-      if (opt_H_a + opt_H_r > 1.0)
-	 error("-H parameters a+r must be <= 1 in m=pulse mode");
-      if (opt_H_e < 0 || opt_H_e > 3)
-	 error("-H parameter e must be in range 0..3");
-   }
-   if (opt_H_f < 0.0 || opt_H_f > 1.0)
-      error("-H parameter f must be in range [0,1]");
+   sbx_default_mixam_envelope_spec(&fx);
+   fx.mixam_mode= opt_H_m;
+   fx.mixam_start= opt_H_s;
+   fx.mixam_duty= opt_H_d;
+   fx.mixam_attack= opt_H_a;
+   fx.mixam_release= opt_H_r;
+   fx.mixam_edge_mode= opt_H_e;
+   fx.mixam_floor= opt_H_f;
+   if (SBX_OK != sbx_parse_mixam_envelope_option_spec(spec, &fx, errbuf, sizeof(errbuf)))
+      error("%s", errbuf[0] ? errbuf : "-H option parse failed");
+   opt_H_m= fx.mixam_mode;
+   opt_H_s= fx.mixam_start;
+   opt_H_d= fx.mixam_duty;
+   opt_H_a= fx.mixam_attack;
+   opt_H_r= fx.mixam_release;
+   opt_H_e= fx.mixam_edge_mode;
+   opt_H_f= fx.mixam_floor;
 }
 
 static double
@@ -7788,6 +7644,7 @@ voicesEq(Voice *v0, Voice *v1) {
 
 static int
 legacy_voice_from_sbx_tone(const SbxToneSpec *tone, Voice *out) {
+  int env_wave = 0;
   if (!tone || !out) return 0;
 
   out->waveform= tone->waveform;
@@ -7797,6 +7654,15 @@ legacy_voice_from_sbx_tone(const SbxToneSpec *tone, Voice *out) {
 
   switch (tone->mode) {
    case SBX_TONE_BINAURAL:
+      if (tone->envelope_waveform >= SBX_ENV_WAVE_CUSTOM_BASE &&
+          tone->envelope_waveform < SBX_ENV_WAVE_CUSTOM_BASE + 100)
+         return 0;
+      if (tone->envelope_waveform >= SBX_ENV_WAVE_LEGACY_BASE &&
+          tone->envelope_waveform < SBX_ENV_WAVE_LEGACY_BASE + 100) {
+         env_wave= tone->envelope_waveform - SBX_ENV_WAVE_LEGACY_BASE;
+         out->typ= -1 - env_wave;
+         return 1;
+      }
       out->typ= 1;
       return 1;
    case SBX_TONE_ISOCHRONIC:
@@ -7879,29 +7745,13 @@ sbx_fill_immediate_parse_cfg(SbxImmediateParseConfig *cfg) {
 
 static int
 parse_legacy_voice_token(const char *tok, Voice *out, int *out_sets_mix_flag) {
-   char dmy;
-   double amp, carr, res;
    double mix_pct= 100.0;
-   int wave;
    int extra_type= SBX_EXTRA_INVALID;
    SbxMixFxSpec fx;
    SbxToneSpec tone;
 
    if (!tok || !out) return 0;
    if (out_sets_mix_flag) *out_sets_mix_flag= 0;
-
-   if (4 == sscanf(tok, "wave%d:%lf%lf/%lf %c", &wave, &carr, &res, &amp, &dmy)) {
-      if (wave < 0 || wave >= 100)
-	 error("Only wave00 to wave99 is permitted at line: %d\n  %s", in_lin, lin_copy);
-      if (!waves[wave])
-	 error("Waveform %02d has not been defined, line: %d\n  %s", wave, in_lin, lin_copy);
-      out->typ= -1-wave;
-      out->waveform= opt_w;
-      out->carr= carr;
-      out->res= res;
-      out->amp= AMP_DA(amp);
-      return 1;
-   }
 
    if (SBX_OK == sbx_parse_extra_token(tok, opt_w, &extra_type, &tone, &fx, &mix_pct)) {
       if (extra_type == SBX_EXTRA_MIXFX)
@@ -7932,8 +7782,16 @@ parse_legacy_voice_token(const char *tok, Voice *out, int *out_sets_mix_flag) {
 	  default:
 	     return 0;
 	 }
-      } else if (extra_type == SBX_EXTRA_TONE && legacy_voice_from_sbx_tone(&tone, out)) {
-	 return 1;
+      } else if (extra_type == SBX_EXTRA_TONE) {
+         if (tone.envelope_waveform >= SBX_ENV_WAVE_LEGACY_BASE &&
+             tone.envelope_waveform < SBX_ENV_WAVE_LEGACY_BASE + 100) {
+            int wave= tone.envelope_waveform - SBX_ENV_WAVE_LEGACY_BASE;
+            if (!waves[wave])
+               error("Waveform %02d has not been defined, line: %d\n  %s",
+                     wave, in_lin, lin_copy);
+         }
+         if (legacy_voice_from_sbx_tone(&tone, out))
+            return 1;
       }
    }
 
