@@ -7220,6 +7220,8 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       opt_S= 1;
       fast_mult= safe_cfg.q_mult;
    }
+   if (safe_cfg.have_D)
+      opt_D= 1;
    if (safe_cfg.out_path) {
       opt_o= StrDup(safe_cfg.out_path);
       if (!fast_mult) fast_mult= 1;

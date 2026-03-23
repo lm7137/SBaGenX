@@ -23,6 +23,7 @@ int main(void) {
   fp = fopen(path, "wb");
   if (!fp) fail("open temp sequence failed");
   fputs("-SE\n"
+        "-D\n"
         "-o /tmp/example.flac\n"
         "-b 24\n"
         "-L 00:08:00\n"
@@ -58,6 +59,8 @@ int main(void) {
     fail("out_path mismatch");
   if (!cfg.mix_path || strcmp(cfg.mix_path, "/tmp/mix.wav") != 0)
     fail("mix_path mismatch");
+  if (!cfg.have_D)
+    fail("debug dump flag mismatch");
   if (!cfg.have_Z || cfg.flac_compression != 12.0)
     fail("flac compression mismatch");
   if (!cfg.have_R || cfg.prate != 400)

@@ -71,3 +71,24 @@ with wave.open(path, "rb") as w:
 PY
 
 echo "PASS: extended safe preamble options stay native and affect runtime/output"
+
+seq_debug="$tmpdir/extended_safe_debug.sbg"
+cat > "$seq_debug" <<EOF3
+-SE
+-D
+-I s=0:d=1:e=3
+
+base: 200@4/20
+NOW base
+EOF3
+
+if ! SBAGENX_SEQ_BACKEND=sbagenxlib "$bin" "$seq_debug" >"$tmpdir/debug_preamble.txt" 2>&1; then
+  echo "FAIL: safe preamble -D did not stay on native path" >&2
+  cat "$tmpdir/debug_preamble.txt" >&2
+  exit 1
+fi
+
+grep -q "# sbagenxlib keyframes" "$tmpdir/debug_preamble.txt"
+grep -q "sine:200@4/20 linear" "$tmpdir/debug_preamble.txt"
+
+echo "PASS: safe preamble -D stays native"
