@@ -567,6 +567,16 @@ sbx_mix_input_raw_read(int *dst, int dlen) {
 
 #define ALLOC_ARR(cnt, type) ((type*)sbx_mix_alloc((cnt) * sizeof(type)))
 
+/*
+ * Legacy decoder fragments still use the old CLI-local `uint` alias.
+ * Provide it here while compiling them into the library, then drop it
+ * immediately after the include block so it does not leak further.
+ */
+#ifndef uint
+#define uint unsigned int
+#define SBX_MIX_LEGACY_UINT_ALIAS 1
+#endif
+
 #ifdef MP3_DECODE
 #define mix_in sbx_mix_in_file
 #define Alloc sbx_mix_alloc
@@ -626,6 +636,10 @@ sbx_mix_input_raw_read(int *dst, int dlen) {
 #endif
 
 #undef ALLOC_ARR
+#ifdef SBX_MIX_LEGACY_UINT_ALIAS
+#undef SBX_MIX_LEGACY_UINT_ALIAS
+#undef uint
+#endif
 
 static void
 sbx_flac_term(void) {
