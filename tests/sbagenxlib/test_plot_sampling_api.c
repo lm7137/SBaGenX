@@ -370,6 +370,33 @@ main(void) {
     if (!(env[2] > 0.45 && env[2] < 0.55))
       fail("customNN e=2 should preserve midpoint level on rising segment");
   }
+  {
+    const char *sbg_custom_iso_transition_text =
+      "custom00: e=2 0 0.1 0.9 1 1 0.9 0.1 0\n"
+      "custom01: e=2 0 0.2 0.8 1 1 0.8 0.2 0\n"
+      "t1: custom00:300@2.5/20\n"
+      "t2: custom01:100@20/20\n"
+      "NOW t1\n"
+      "+00:05:00 t1 ->\n"
+      "+00:06:00 t2\n";
+    rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_iso_transition_text, 0);
+    if (rc != SBX_OK) fail("load customNN transition timing failed");
+    rc = sbx_context_sample_tones(ctx, 300.0, 360.0, 3, ts, samples);
+    if (rc != SBX_OK) fail("sample_tones customNN transition failed");
+    if (!near(samples[0].carrier_hz, 300.0, 1e-9) ||
+        !near(samples[0].beat_hz, 2.5, 1e-9) ||
+        samples[0].envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+      fail("customNN transition start mismatch");
+    if (!near(samples[1].carrier_hz, 200.0, 1e-9) ||
+        !near(samples[1].beat_hz, 11.25, 1e-9))
+      fail("customNN transition midpoint should interpolate carrier/beat");
+    if (samples[1].envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+      fail("customNN transition midpoint should retain source envelope until endpoint");
+    if (!near(samples[2].carrier_hz, 100.0, 1e-9) ||
+        !near(samples[2].beat_hz, 20.0, 1e-9) ||
+        samples[2].envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE + 1)
+      fail("customNN transition end mismatch");
+  }
 
   sbx_default_engine_config(&cfg);
   cfg.sample_rate = 1000.0;

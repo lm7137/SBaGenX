@@ -3258,8 +3258,7 @@ ctx_eval_keyframed_tone_at(const SbxProgramKeyframe *kfs,
   if (u > 1.0) u = 1.0;
   if (k0->interp == SBX_INTERP_STEP ||
       k0->tone.mode != k1->tone.mode ||
-      k0->tone.waveform != k1->tone.waveform ||
-      k0->tone.envelope_waveform != k1->tone.envelope_waveform)
+      k0->tone.waveform != k1->tone.waveform)
     u = 0.0;
 
   out->mode = k0->tone.mode;
