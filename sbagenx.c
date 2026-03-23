@@ -726,6 +726,12 @@ sbx_get_runtime_reject_reason(void) {
    return sbx_runtime_reject_reason;
 }
 
+static int
+sbx_runtime_reject_is_fatal(void) {
+   const char *reason= sbx_get_runtime_reject_reason();
+   return 0 == strncmp(reason, "command-line-only option -", 26);
+}
+
 int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
    double freq, adj;
@@ -3771,8 +3777,6 @@ main(int argc, char **argv) {
 	 error("-G is only supported with -p drop/-p sigmoid/-p curve");
       if (argc < 1) usage();
       readSeq(argc, argv);
-      if (opt_G)
-	 error("-G is only supported with -p drop/-p sigmoid/-p curve");
    }
 
    if (opt_dry_run) {
@@ -7177,10 +7181,6 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       out_prate= safe_cfg.prate;
    if (safe_cfg.have_Q)
       opt_Q= 1;
-   if (safe_cfg.have_G)
-      opt_G= 1;
-   if (safe_cfg.have_P)
-      opt_P= 1;
    if (safe_cfg.have_L)
       opt_L= safe_cfg.L_ms;
    if (safe_cfg.have_N)
@@ -7394,6 +7394,8 @@ readSeq(int ac, char **av) {
    if (seq_backend != 1) {
       if (sbx_try_readSeq_runtime(ac, av))
 	 return;
+      if (sbx_runtime_reject_is_fatal())
+	 error("%s", sbx_get_runtime_reject_reason());
       if (seq_backend == 0 && !opt_Q)
 	 warn("Falling back to legacy sequence parser/runtime: %s",
 	      sbx_get_runtime_reject_reason());

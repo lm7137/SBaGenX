@@ -25,8 +25,6 @@ int main(void) {
   fputs("-SE\n"
         "-D\n"
         "-Q\n"
-        "-G\n"
-        "-P\n"
         "-o /tmp/example.flac\n"
         "-b 24\n"
         "-L 00:08:00\n"
@@ -66,10 +64,6 @@ int main(void) {
     fail("debug dump flag mismatch");
   if (!cfg.have_Q)
     fail("quiet flag mismatch");
-  if (!cfg.have_G)
-    fail("graph flag mismatch");
-  if (!cfg.have_P)
-    fail("cycle-plot flag mismatch");
   if (!cfg.have_Z || cfg.flac_compression != 12.0)
     fail("flac compression mismatch");
   if (!cfg.have_R || cfg.prate != 400)

@@ -110,19 +110,21 @@ base: 200@4/20
 NOW base
 EOF4
 
-(
-  cd "$tmpdir"
-  if ! SBAGENX_SEQ_BACKEND=sbagenxlib "$bin" "$seq_plot" >"$tmpdir/plot_preamble.txt" 2>&1; then
-    echo "FAIL: safe preamble -P did not stay on native path" >&2
-    cat "$tmpdir/plot_preamble.txt" >&2
-    exit 1
-  fi
-)
+set +e
+SBAGENX_SEQ_BACKEND=sbagenxlib "$bin" "$seq_plot" >"$tmpdir/plot_preamble.txt" 2>&1
+rc=$?
+set -e
 
-grep -q "Isochronic cycle graph saved to:" "$tmpdir/plot_preamble.txt"
-ls "$tmpdir"/iso_cycle_*.png >/dev/null 2>&1
+if [ "$rc" -eq 0 ]; then
+  echo "FAIL: safe preamble -P should reject command-line-only use explicitly" >&2
+  cat "$tmpdir/plot_preamble.txt" >&2
+  exit 1
+fi
 
-echo "PASS: safe preamble -P stays native"
+grep -q -- "command-line-only option -P is not allowed in sequence-file preambles" \
+  "$tmpdir/plot_preamble.txt"
+
+echo "PASS: safe preamble -P now errors explicitly instead of falling back"
 
 seq_graph="$tmpdir/graph_safe.sbg"
 cat > "$seq_graph" <<EOF5
@@ -144,6 +146,7 @@ if [ "$rc" -eq 0 ]; then
   exit 1
 fi
 
-grep -q -- "-G is only supported with -p drop/-p sigmoid/-p curve" "$tmpdir/graph_preamble.txt"
+grep -q -- "command-line-only option -G is not allowed in sequence-file preambles" \
+  "$tmpdir/graph_preamble.txt"
 
 echo "PASS: safe preamble -G now errors explicitly instead of falling back"

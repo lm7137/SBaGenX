@@ -1605,11 +1605,15 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
           out_cfg->have_Q = 1;
           break;
         case 'G':
-          out_cfg->have_G = 1;
-          break;
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "command-line-only option -G is not allowed in sequence-file preambles");
+          free(dup);
+          return 0;
         case 'P':
-          out_cfg->have_P = 1;
-          break;
+          sbx_set_api_error(errbuf, errbuf_sz,
+                            "command-line-only option -P is not allowed in sequence-file preambles");
+          free(dup);
+          return 0;
         case 'A':
           {
             const char *spec = 0;
