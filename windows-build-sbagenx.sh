@@ -752,6 +752,23 @@ else
     error "64-bit compilation failed!"
 fi
 
+MISSING_WINDOWS_EXES=()
+if [ ! -f dist/sbagenx-win32.exe ]; then
+    MISSING_WINDOWS_EXES+=("dist/sbagenx-win32.exe")
+fi
+if [ ! -f dist/sbagenx-win64.exe ]; then
+    MISSING_WINDOWS_EXES+=("dist/sbagenx-win64.exe")
+fi
+if [ "${#MISSING_WINDOWS_EXES[@]}" -ne 0 ]; then
+    error "Required Windows executables were not produced:"
+    for exe in "${MISSING_WINDOWS_EXES[@]}"; do
+        error "  $exe"
+    done
+    error "Aborting remaining Windows packaging steps."
+    rm -f /tmp/sbagen.rc /tmp/sbagen32.res /tmp/sbagen64.res sbagenx.tmp.c
+    exit 1
+fi
+
 # Build sbagenxlib static archives (Phase 1 extraction artifacts)
 section_header "Building sbagenxlib static libraries..."
 create_dir_if_not_exists "build/sbagenxlib"

@@ -271,8 +271,15 @@ ensure_required_commands() {
 trap cleanup EXIT
 
 # Check if Windows executables exist
-if [ ! -f dist/sbagenx-win32.exe ] || [ ! -f dist/sbagenx-win64.exe ]; then
-    error "Windows executables not found. Run ./windows-build-sbagenx.sh first."
+MISSING_WINDOWS_EXES=()
+[ -f dist/sbagenx-win32.exe ] || MISSING_WINDOWS_EXES+=("dist/sbagenx-win32.exe")
+[ -f dist/sbagenx-win64.exe ] || MISSING_WINDOWS_EXES+=("dist/sbagenx-win64.exe")
+if [ "${#MISSING_WINDOWS_EXES[@]}" -ne 0 ]; then
+    error "Required Windows executables are missing."
+    for exe in "${MISSING_WINDOWS_EXES[@]}"; do
+        error "  $exe"
+    done
+    info "Run ./windows-build-sbagenx.sh first and fix any earlier compile errors."
     exit 1
 fi
 
