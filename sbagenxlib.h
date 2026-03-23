@@ -16,8 +16,9 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 35  /* public API contract revision */
+#define SBX_API_VERSION 36  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
+#define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
 #define SBX_PLOT_TEXT_MAX 256
 
@@ -115,6 +116,16 @@ typedef struct {
   double wake_len_sec;   /* wake phase duration in seconds */
   int wake_enabled;      /* 1 => include wake phase ramp */
 } SbxMixModSpec;
+
+typedef struct {
+  double freq_hz;
+  double adj;
+} SbxAmpAdjustPoint;
+
+typedef struct {
+  size_t point_count;
+  SbxAmpAdjustPoint points[SBX_MAX_AMP_ADJUST_POINTS];
+} SbxAmpAdjustSpec;
 
 typedef struct {
   double time_sec;
@@ -342,6 +353,8 @@ typedef struct {
   int volume_pct;              /* safe preamble -V value in percent */
   int have_w;                  /* safe preamble -w present */
   int waveform;                /* safe preamble -w SBX_WAVE_* */
+  int have_c;                  /* safe preamble -c present */
+  SbxAmpAdjustSpec amp_adjust; /* safe preamble -c amplitude-adjust curve */
   int have_A;                  /* safe preamble -A present */
   SbxMixModSpec mix_mod;       /* safe preamble -A spec */
   int have_I;                  /* safe preamble -I present */
@@ -432,6 +445,7 @@ typedef struct {
   const SbxToneSpec *aux_tones;         /* optional aux runtime overlays */
   size_t aux_count;
   const SbxMixModSpec *mix_mod;         /* optional host mix modulation */
+  const SbxAmpAdjustSpec *amp_adjust;   /* optional -c amplitude-adjust curve */
 } SbxRuntimeContextConfig;
 
 /* ----- Version and status ----- */
@@ -478,6 +492,9 @@ void sbx_default_pcm16_dither_state(SbxPcm16DitherState *state);
 
 /* Fill spec with library-default -A mix modulation parameters. */
 void sbx_default_mix_mod_spec(SbxMixModSpec *spec);
+
+/* Fill spec with library-default -c amplitude-adjust settings (disabled). */
+void sbx_default_amp_adjust_spec(SbxAmpAdjustSpec *spec);
 
 /* Set explicit seed for deterministic PCM16 dithering. */
 void sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed);
@@ -746,6 +763,17 @@ int sbx_parse_mix_mod_option_spec(const char *spec,
                                   char *errbuf,
                                   size_t errbuf_sz);
 
+/*
+ * Parse a `-c` amplitude-adjust option spec such as:
+ *   80=1,40=2,30=4,20=6
+ * The parser appends points to the supplied spec, then sorts them by
+ * increasing frequency. This matches repeated `-c` option accumulation.
+ */
+int sbx_parse_amp_adjust_option_spec(const char *spec,
+                                     SbxAmpAdjustSpec *out_spec,
+                                     char *errbuf,
+                                     size_t errbuf_sz);
+
 /* Format mix effect as canonical token (mixspin/mixpulse/mixbeat/mixam). */
 int sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz);
 
@@ -950,6 +978,9 @@ int sbx_context_set_mix_amp_keyframes(SbxContext *ctx,
 
 /* Replace mix-modulation runtime profile used by the -A host option. */
 int sbx_context_set_mix_mod(SbxContext *ctx, const SbxMixModSpec *spec);
+
+/* Replace runtime -c amplitude-adjust profile. */
+int sbx_context_set_amp_adjust(SbxContext *ctx, const SbxAmpAdjustSpec *spec);
 
 /* Read currently configured mix-modulation profile. */
 int sbx_context_get_mix_mod(const SbxContext *ctx, SbxMixModSpec *out);

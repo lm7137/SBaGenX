@@ -730,6 +730,17 @@ int opt_c;			// Number of -c option points provided (max 16)
 struct AmpAdj { 
    double freq, adj;
 } ampadj[16];			// List of maximum 16 (freq,adj) pairs, freq-increasing order
+SbxAmpAdjustSpec opt_c_spec;
+
+static void
+sync_opt_c_globals_from_spec(void) {
+   size_t a;
+   opt_c= (int)opt_c_spec.point_count;
+   for (a= 0; a<opt_c_spec.point_count && a<sizeof(ampadj)/sizeof(ampadj[0]); a++) {
+      ampadj[a].freq= opt_c_spec.points[a].freq_hz;
+      ampadj[a].adj= opt_c_spec.points[a].adj;
+   }
+}
 
 char *pdir;			// Program directory (used as second place to look for -m files)
 char self_exe[PATH_MAX];	// Full path to current executable when available
@@ -4177,36 +4188,11 @@ handleOptions(char *str0) {
 
 void 
 setupOptC(char *spec) {
-   char *p= spec, *q;
-   int a, b;
-   
-   while (1) {
-      while (isspace(*p) || *p == ',') p++;
-      if (!*p) break;
-
-      if (opt_c >= sizeof(ampadj) / sizeof(ampadj[0]))
-	 error("Too many -c option frequencies; maxmimum is %d", 
-	       sizeof(ampadj) / sizeof(ampadj[0]));
-
-      ampadj[opt_c].freq= strtod(p, &q);
-      if (p == q) goto bad;
-      if (*q++ != '=') goto bad;
-      ampadj[opt_c].adj= strtod(q, &p);
-      if (p == q) goto bad;
-      opt_c++;
+   char err[256];
+   if (SBX_OK == sbx_parse_amp_adjust_option_spec(spec, &opt_c_spec, err, sizeof(err))) {
+      sync_opt_c_globals_from_spec();
+      return;
    }
-
-   // Sort the list
-   for (a= 0; a<opt_c; a++)
-      for (b= a+1; b<opt_c; b++) 
-	 if (ampadj[a].freq > ampadj[b].freq) {
-	    double tmp;
-	    tmp= ampadj[a].freq; ampadj[a].freq= ampadj[b].freq; ampadj[b].freq= tmp;
-	    tmp= ampadj[a].adj; ampadj[a].adj= ampadj[b].adj; ampadj[b].adj= tmp;
-	 }
-   return;
-      
- bad:
    error("Bad -c option spec; expecting <freq>=<amp>[,<freq>=<amp>]...:\n  %s", spec);
 }
 
@@ -7195,6 +7181,10 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       opt_V= safe_cfg.volume_pct;
    if (safe_cfg.have_w)
       opt_w= safe_cfg.waveform;
+   if (safe_cfg.have_c) {
+      opt_c_spec= safe_cfg.amp_adjust;
+      sync_opt_c_globals_from_spec();
+   }
    if (safe_cfg.have_W)
       opt_W= 1;
    if (safe_cfg.have_F)
@@ -7289,6 +7279,12 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    if (safe_cfg.have_H &&
        sbx_context_set_sequence_mixam_override(ctx, &safe_cfg.mixam_env) != SBX_OK) {
       sbx_set_runtime_reject_reason("failed to set sbagenxlib sequence mixam override");
+      sbx_context_destroy(ctx);
+      goto fail;
+   }
+   if (opt_c &&
+       sbx_context_set_amp_adjust(ctx, &opt_c_spec) != SBX_OK) {
+      sbx_set_runtime_reject_reason("failed to set sbagenxlib amplitude-adjust curve");
       sbx_context_destroy(ctx);
       goto fail;
    }
@@ -8479,6 +8475,7 @@ sbx_fill_runtime_context_cfg(SbxRuntimeContextConfig *cfg) {
    cfg->engine.sample_rate= (double)out_rate;
    cfg->engine.channels= 2;
    cfg->mix_mod= mix_mod_curve.active ? &mix_mod_curve : 0;
+   cfg->amp_adjust= opt_c ? &opt_c_spec : 0;
 }
 
 static void

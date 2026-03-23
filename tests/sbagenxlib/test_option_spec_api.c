@@ -14,6 +14,7 @@ int main(void) {
   SbxIsoEnvelopeSpec iso;
   SbxMixFxSpec mixam;
   SbxMixModSpec mixmod;
+  SbxAmpAdjustSpec ampadj;
   char err[256];
   int rc;
 
@@ -106,6 +107,26 @@ int main(void) {
   if (strcmp(err, "-A parameter d must be in range 0..1") != 0)
     fail("unexpected -A error message");
 
-  puts("PASS: sbagenxlib option-spec parsers handle -I/-H/-A semantics");
+  sbx_default_amp_adjust_spec(&ampadj);
+  rc = sbx_parse_amp_adjust_option_spec("80=1,40=2", &ampadj, err, sizeof(err));
+  if (rc != SBX_OK) fail(err[0] ? err : "sbx_parse_amp_adjust_option_spec failed");
+  rc = sbx_parse_amp_adjust_option_spec("30=4,20=6", &ampadj, err, sizeof(err));
+  if (rc != SBX_OK) fail(err[0] ? err : "sbx_parse_amp_adjust_option_spec append failed");
+  if (ampadj.point_count != 4)
+    fail("amp-adjust point count mismatch");
+  if (fabs(ampadj.points[0].freq_hz - 20.0) > 1e-9 ||
+      fabs(ampadj.points[0].adj - 6.0) > 1e-9 ||
+      fabs(ampadj.points[3].freq_hz - 80.0) > 1e-9 ||
+      fabs(ampadj.points[3].adj - 1.0) > 1e-9)
+    fail("amp-adjust sort/append mismatch");
+
+  err[0] = 0;
+  rc = sbx_parse_amp_adjust_option_spec("80=1,bad", &ampadj, err, sizeof(err));
+  if (rc != SBX_EINVAL)
+    fail("expected invalid -c parse to fail");
+  if (strcmp(err, "-c expects <freq>=<adjust>[,<freq>=<adjust>]...") != 0)
+    fail("unexpected -c error message");
+
+  puts("PASS: sbagenxlib option-spec parsers handle -I/-H/-A/-c semantics");
   return 0;
 }

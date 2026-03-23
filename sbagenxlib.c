@@ -130,6 +130,8 @@ typedef struct SbxMixFxKeyframe SbxMixFxKeyframe;
 struct SbxEngine {
   SbxEngineConfig cfg;
   SbxToneSpec tone;
+  double out_gain_l;
+  double out_gain_r;
   double phase_l;
   double phase_r;
   double pulse_phase;
@@ -188,6 +190,8 @@ struct SbxContext {
   size_t mix_kf_seg;
   double mix_default_amp_pct;
   SbxMixModSpec mix_mod;
+  int have_amp_adjust;
+  SbxAmpAdjustSpec amp_adjust;
   double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT];
   double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT];
   int legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
@@ -332,6 +336,14 @@ static int sbx_validate_mix_fx_spec_fields(const SbxMixFxSpec *spec);
 static int sbx_envelope_wave_legacy_index(int waveform);
 static int sbx_envelope_wave_custom_index(int waveform);
 static int sbx_validate_mix_mod_spec(const SbxMixModSpec *spec);
+static int sbx_validate_amp_adjust_spec(const SbxAmpAdjustSpec *spec);
+static double sbx_amp_adjust_factor(const SbxAmpAdjustSpec *spec, double freq_hz);
+static void sbx_amp_adjust_sort(SbxAmpAdjustSpec *spec);
+static void ctx_compute_amp_adjust_gains(const SbxContext *ctx,
+                                         const SbxToneSpec *tones,
+                                         size_t tone_count,
+                                         double *out_gain_l,
+                                         double *out_gain_r);
 static void writer_set_error(SbxAudioWriter *writer, const char *fmt, ...);
 static int sbx_audio_writer_write_wav_header(FILE *fp,
                                              uint32_t sample_rate,
@@ -1821,6 +1833,28 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
           if (!inline_arg) i++;
           a = strlen(tok) - 1;
           break;
+        case 'c':
+          {
+            const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
+            char opt_err[256];
+            if (!arg || !*arg) {
+              sbx_set_api_error(errbuf, errbuf_sz,
+                                "safe preamble -c expects a frequency=adjust spec");
+              free(dup);
+              return 0;
+            }
+            if (SBX_OK != sbx_parse_amp_adjust_option_spec(arg, &out_cfg->amp_adjust,
+                                                           opt_err, sizeof(opt_err))) {
+              sbx_set_api_error(errbuf, errbuf_sz, "%s",
+                                opt_err[0] ? opt_err : "safe preamble -c spec is invalid");
+              free(dup);
+              return 0;
+            }
+          }
+          out_cfg->have_c = 1;
+          if (!inline_arg) i++;
+          a = strlen(tok) - 1;
+          break;
         case 'K':
           {
             const char *arg = inline_arg ? inline_arg : ((i + 1 < argc) ? argv[i+1] : 0);
@@ -2773,6 +2807,8 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     right = amp * base_noise * g_r;
   }
 
+  left *= eng->out_gain_l;
+  right *= eng->out_gain_r;
   *out_l = (float)left;
   *out_r = (float)right;
 }
@@ -3676,6 +3712,84 @@ sbx_parse_mix_mod_option_spec(const char *spec,
   }
 
   out_spec->active = 1;
+  return SBX_OK;
+}
+
+int
+sbx_parse_amp_adjust_option_spec(const char *spec,
+                                 SbxAmpAdjustSpec *out_spec,
+                                 char *errbuf,
+                                 size_t errbuf_sz) {
+  SbxAmpAdjustSpec work;
+  const char *p = spec;
+
+  if (errbuf && errbuf_sz) errbuf[0] = 0;
+  if (!spec || !*spec || !out_spec) {
+    sbx_set_api_error(errbuf, errbuf_sz, "empty -c spec");
+    return SBX_EINVAL;
+  }
+
+  work = *out_spec;
+  while (*p) {
+    char *end = 0;
+    double freq_hz, adj;
+
+    while (isspace((unsigned char)*p) || *p == ',')
+      p++;
+    if (!*p)
+      break;
+
+    if (work.point_count >= SBX_MAX_AMP_ADJUST_POINTS) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-c supports at most %d frequency=adjust points",
+                        SBX_MAX_AMP_ADJUST_POINTS);
+      return SBX_EINVAL;
+    }
+
+    freq_hz = strtod(p, &end);
+    if (end == p || !isfinite(freq_hz)) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-c expects <freq>=<adjust>[,<freq>=<adjust>]...");
+      return SBX_EINVAL;
+    }
+    p = end;
+    while (isspace((unsigned char)*p))
+      p++;
+    if (*p != '=') {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-c expects <freq>=<adjust>[,<freq>=<adjust>]...");
+      return SBX_EINVAL;
+    }
+    p++;
+    while (isspace((unsigned char)*p))
+      p++;
+    adj = strtod(p, &end);
+    if (end == p || !isfinite(adj)) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-c expects <freq>=<adjust>[,<freq>=<adjust>]...");
+      return SBX_EINVAL;
+    }
+    work.points[work.point_count].freq_hz = freq_hz;
+    work.points[work.point_count].adj = adj;
+    work.point_count++;
+    p = end;
+    while (isspace((unsigned char)*p))
+      p++;
+    if (*p == ',')
+      p++;
+    else if (*p != 0) {
+      sbx_set_api_error(errbuf, errbuf_sz,
+                        "-c expects comma-separated <freq>=<adjust> pairs");
+      return SBX_EINVAL;
+    }
+  }
+
+  sbx_amp_adjust_sort(&work);
+  if (sbx_validate_amp_adjust_spec(&work) != SBX_OK) {
+    sbx_set_api_error(errbuf, errbuf_sz, "invalid -c amplitude-adjust spec");
+    return SBX_EINVAL;
+  }
+  *out_spec = work;
   return SBX_OK;
 }
 
@@ -4675,6 +4789,12 @@ sbx_default_mix_mod_spec(SbxMixModSpec *spec) {
 }
 
 void
+sbx_default_amp_adjust_spec(SbxAmpAdjustSpec *spec) {
+  if (!spec) return;
+  memset(spec, 0, sizeof(*spec));
+}
+
+void
 sbx_seed_pcm16_dither_state(SbxPcm16DitherState *state, unsigned int seed) {
   if (!state) return;
   state->rng_state = seed ? seed : 0x12345678u;
@@ -4714,6 +4834,7 @@ sbx_default_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg) {
   cfg->pcm_bits = 16;
   cfg->volume_pct = 100;
   cfg->waveform = SBX_WAVE_SINE;
+  sbx_default_amp_adjust_spec(&cfg->amp_adjust);
   sbx_default_mix_mod_spec(&cfg->mix_mod);
   sbx_default_iso_envelope_spec(&cfg->iso_env);
   sbx_default_mixam_envelope_spec(&cfg->mixam_env);
@@ -5600,6 +5721,8 @@ sbx_engine_create(const SbxEngineConfig *cfg_in) {
 
   eng->cfg = cfg;
   sbx_default_tone_spec(&eng->tone);
+  eng->out_gain_l = 1.0;
+  eng->out_gain_r = 1.0;
   eng->rng_state = 0x12345678u;
   set_last_error(eng, NULL);
   return eng;
@@ -5614,6 +5737,8 @@ sbx_engine_destroy(SbxEngine *eng) {
 void
 sbx_engine_reset(SbxEngine *eng) {
   if (!eng) return;
+  eng->out_gain_l = 1.0;
+  eng->out_gain_r = 1.0;
   eng->phase_l = 0.0;
   eng->phase_r = 0.0;
   eng->pulse_phase = 0.0;
@@ -6353,6 +6478,8 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->mix_kf_seg = 0;
   ctx->mix_default_amp_pct = 100.0;
   sbx_default_mix_mod_spec(&ctx->mix_mod);
+  sbx_default_amp_adjust_spec(&ctx->amp_adjust);
+  ctx->have_amp_adjust = 0;
   ctx->telemetry_cb = 0;
   ctx->telemetry_user = 0;
   memset(&ctx->telemetry_last, 0, sizeof(ctx->telemetry_last));
@@ -7916,6 +8043,119 @@ sbx_validate_mix_mod_spec(const SbxMixModSpec *spec) {
   return SBX_OK;
 }
 
+static int
+sbx_validate_amp_adjust_spec(const SbxAmpAdjustSpec *spec) {
+  size_t i;
+  if (!spec) return SBX_OK;
+  if (spec->point_count > SBX_MAX_AMP_ADJUST_POINTS)
+    return SBX_EINVAL;
+  for (i = 0; i < spec->point_count; i++) {
+    if (!isfinite(spec->points[i].freq_hz) || !isfinite(spec->points[i].adj))
+      return SBX_EINVAL;
+  }
+  return SBX_OK;
+}
+
+static void
+sbx_amp_adjust_sort(SbxAmpAdjustSpec *spec) {
+  size_t i, j;
+  if (!spec) return;
+  for (i = 0; i < spec->point_count; i++) {
+    for (j = i + 1; j < spec->point_count; j++) {
+      if (spec->points[i].freq_hz > spec->points[j].freq_hz) {
+        SbxAmpAdjustPoint tmp = spec->points[i];
+        spec->points[i] = spec->points[j];
+        spec->points[j] = tmp;
+      }
+    }
+  }
+}
+
+static double
+sbx_amp_adjust_factor(const SbxAmpAdjustSpec *spec, double freq_hz) {
+  size_t i;
+
+  if (!spec || spec->point_count == 0 || !isfinite(freq_hz))
+    return 1.0;
+  if (freq_hz <= spec->points[0].freq_hz)
+    return spec->points[0].adj;
+  if (freq_hz >= spec->points[spec->point_count - 1].freq_hz)
+    return spec->points[spec->point_count - 1].adj;
+
+  for (i = 1; i < spec->point_count; i++) {
+    if (freq_hz < spec->points[i].freq_hz) {
+      const SbxAmpAdjustPoint *p0 = &spec->points[i - 1];
+      const SbxAmpAdjustPoint *p1 = &spec->points[i];
+      double span = p1->freq_hz - p0->freq_hz;
+      if (!(span > 0.0))
+        return p1->adj;
+      return p0->adj + (p1->adj - p0->adj) *
+             (freq_hz - p0->freq_hz) / span;
+    }
+  }
+
+  return spec->points[spec->point_count - 1].adj;
+}
+
+static void
+ctx_compute_amp_adjust_gains(const SbxContext *ctx,
+                             const SbxToneSpec *tones,
+                             size_t tone_count,
+                             double *out_gain_l,
+                             double *out_gain_r) {
+  double tot_beat = 0.0, tot_other = 0.0;
+  double beat_gain = 1.0, other_gain = 1.0;
+  size_t i;
+
+  if (!out_gain_l || !out_gain_r)
+    return;
+  for (i = 0; i < tone_count; i++) {
+    out_gain_l[i] = 1.0;
+    out_gain_r[i] = 1.0;
+  }
+  if (!ctx || !ctx->have_amp_adjust || !tones || tone_count == 0)
+    return;
+
+  for (i = 0; i < tone_count; i++) {
+    const SbxToneSpec *tone = &tones[i];
+    if (tone->mode == SBX_TONE_BINAURAL) {
+      double adj_l = sbx_amp_adjust_factor(&ctx->amp_adjust,
+                                           tone->carrier_hz + tone->beat_hz * 0.5);
+      double adj_r = sbx_amp_adjust_factor(&ctx->amp_adjust,
+                                           tone->carrier_hz - tone->beat_hz * 0.5);
+      double adj = (adj_r > adj_l) ? adj_r : adj_l;
+      tot_beat += tone->amplitude * adj;
+    } else if (tone->mode != SBX_TONE_NONE) {
+      tot_other += tone->amplitude;
+    }
+  }
+
+  if (tot_beat + tot_other > 1.0) {
+    if (tot_beat > 1.0)
+      beat_gain = 1.0 / tot_beat;
+    if (tot_other > 0.0) {
+      other_gain = (1.0 - tot_beat * beat_gain) / tot_other;
+      if (other_gain < 0.0)
+        other_gain = 0.0;
+    }
+  }
+
+  for (i = 0; i < tone_count; i++) {
+    const SbxToneSpec *tone = &tones[i];
+    if (tone->mode == SBX_TONE_BINAURAL) {
+      out_gain_l[i] = beat_gain *
+                      sbx_amp_adjust_factor(&ctx->amp_adjust,
+                                            tone->carrier_hz + tone->beat_hz * 0.5);
+      out_gain_r[i] = beat_gain *
+                      sbx_amp_adjust_factor(&ctx->amp_adjust,
+                                            tone->carrier_hz - tone->beat_hz * 0.5);
+    } else if (tone->mode != SBX_TONE_NONE) {
+      out_gain_l[i] = other_gain;
+      out_gain_r[i] = other_gain;
+    }
+  }
+}
+
 static void
 sbx_mixfx_state_assign_spec(SbxMixFxState *state, const SbxMixFxSpec *spec) {
   int reset = 0;
@@ -8461,6 +8701,26 @@ sbx_context_set_mix_mod(SbxContext *ctx, const SbxMixModSpec *spec) {
 }
 
 int
+sbx_context_set_amp_adjust(SbxContext *ctx, const SbxAmpAdjustSpec *spec) {
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!spec || spec->point_count == 0) {
+    sbx_default_amp_adjust_spec(&ctx->amp_adjust);
+    ctx->have_amp_adjust = 0;
+    set_ctx_error(ctx, NULL);
+    return SBX_OK;
+  }
+  if (sbx_validate_amp_adjust_spec(spec) != SBX_OK) {
+    set_ctx_error(ctx, "invalid amplitude-adjust spec");
+    return SBX_EINVAL;
+  }
+  ctx->amp_adjust = *spec;
+  sbx_amp_adjust_sort(&ctx->amp_adjust);
+  ctx->have_amp_adjust = 1;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
 sbx_context_get_mix_mod(const SbxContext *ctx, SbxMixModSpec *out) {
   if (!ctx || !out) return SBX_EINVAL;
   *out = ctx->mix_mod;
@@ -8518,6 +8778,9 @@ sbx_runtime_context_apply_config(SbxContext *ctx,
   if (rc != SBX_OK)
     return rc;
   rc = sbx_context_set_mix_mod(ctx, cfg->mix_mod);
+  if (rc != SBX_OK)
+    return rc;
+  rc = sbx_context_set_amp_adjust(ctx, cfg->amp_adjust);
   if (rc != SBX_OK)
     return rc;
   set_ctx_error(ctx, NULL);
@@ -9636,6 +9899,9 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   double t0_sec = 0.0;
   SbxToneSpec first_tone;
   int have_first_tone = 0;
+  SbxToneSpec tonev[SBX_MAX_SBG_VOICES + SBX_MAX_AUX_TONES];
+  double gain_l[SBX_MAX_SBG_VOICES + SBX_MAX_AUX_TONES];
+  double gain_r[SBX_MAX_SBG_VOICES + SBX_MAX_AUX_TONES];
   memset(&first_tone, 0, sizeof(first_tone));
   if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
   if (!ctx->loaded) {
@@ -9644,7 +9910,18 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   }
 
   if (ctx->source_mode == SBX_CTX_SRC_STATIC) {
+    size_t tone_count = 0;
     t0_sec = ctx->t_sec;
+    tonev[tone_count++] = ctx->eng->tone;
+    for (i = 0; i < ctx->aux_count; i++)
+      tonev[tone_count++] = ctx->aux_tones[i];
+    ctx_compute_amp_adjust_gains(ctx, tonev, tone_count, gain_l, gain_r);
+    ctx->eng->out_gain_l = gain_l[0];
+    ctx->eng->out_gain_r = gain_r[0];
+    for (i = 0; i < ctx->aux_count; i++) {
+      ctx->aux_eng[i]->out_gain_l = gain_l[i + 1];
+      ctx->aux_eng[i]->out_gain_r = gain_r[i + 1];
+    }
     rc = sbx_engine_render_f32(ctx->eng, out, frames);
     if (rc != SBX_OK) {
       set_ctx_error(ctx, sbx_engine_last_error(ctx->eng));
@@ -9696,6 +9973,9 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
   for (i = 0; i < frames; i++) {
     float l = 0.0f, r = 0.0f;
     SbxToneSpec tone;
+    size_t tone_count = 0;
+    size_t voice_count = (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES && ctx->mv_voice_count > 0)
+                           ? ctx->mv_voice_count : 1;
     size_t vi;
 
     if (ctx->source_mode == SBX_CTX_SRC_KEYFRAMES &&
@@ -9712,10 +9992,23 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     } else {
       ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
     }
+    tonev[tone_count++] = tone;
     if (!have_first_tone) {
       first_tone = tone;
       have_first_tone = 1;
     }
+    for (vi = 1; vi < ctx->mv_voice_count; vi++) {
+      ctx_eval_keyframed_tone_at(SBX_MV_KF(ctx, vi), ctx->kf_count, ctx->t_sec,
+                                 &ctx->kf_seg, &tonev[tone_count]);
+      tone_count++;
+    }
+    for (vi = 0; vi < ctx->aux_count; vi++) {
+      tonev[tone_count++] = ctx->aux_tones[vi];
+    }
+    ctx_compute_amp_adjust_gains(ctx, tonev, tone_count, gain_l, gain_r);
+    tone = tonev[0];
+    ctx->eng->out_gain_l = gain_l[0];
+    ctx->eng->out_gain_r = gain_r[0];
     if (tone.mode == SBX_TONE_BELL || ctx->eng->tone.mode == SBX_TONE_BELL) {
       rc = engine_apply_tone(ctx->eng, &tone, 0);
       if (rc != SBX_OK) {
@@ -9728,8 +10021,9 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     engine_render_sample(ctx->eng, &l, &r);
     for (vi = 1; vi < ctx->mv_voice_count; vi++) {
       float vl = 0.0f, vr = 0.0f;
-      ctx_eval_keyframed_tone_at(SBX_MV_KF(ctx, vi), ctx->kf_count, ctx->t_sec,
-                                 &ctx->kf_seg, &tone);
+      tone = tonev[vi];
+      ctx->mv_eng[vi - 1]->out_gain_l = gain_l[vi];
+      ctx->mv_eng[vi - 1]->out_gain_r = gain_r[vi];
       if (tone.mode == SBX_TONE_BELL || ctx->mv_eng[vi - 1]->tone.mode == SBX_TONE_BELL) {
         rc = engine_apply_tone(ctx->mv_eng[vi - 1], &tone, 0);
         if (rc != SBX_OK) {
@@ -9747,6 +10041,8 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
       size_t ai;
       for (ai = 0; ai < ctx->aux_count; ai++) {
         float al = 0.0f, ar = 0.0f;
+        ctx->aux_eng[ai]->out_gain_l = gain_l[voice_count + ai];
+        ctx->aux_eng[ai]->out_gain_r = gain_r[voice_count + ai];
         engine_render_sample(ctx->aux_eng[ai], &al, &ar);
         l += al;
         r += ar;
