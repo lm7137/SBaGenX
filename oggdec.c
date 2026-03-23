@@ -32,15 +32,41 @@ static OggVorbis_File oggfile;
 static short *ogg_buf0, *ogg_buf1, *ogg_rd, *ogg_end;
 static int ogg_mult;
 
+static size_t
+ogg_file_read_cb(void *ptr, size_t size, size_t nmemb, void *datasource) {
+   return fread(ptr, size, nmemb, (FILE*)datasource);
+}
+
+static int
+ogg_file_seek_cb(void *datasource, ogg_int64_t offset, int whence) {
+   return fseek((FILE*)datasource, (long)offset, whence);
+}
+
+static int
+ogg_file_close_cb(void *datasource) {
+   (void)datasource;
+   return 0;
+}
+
+static long
+ogg_file_tell_cb(void *datasource) {
+   return ftell((FILE*)datasource);
+}
+
 void 
 ogg_init() {
    vorbis_info *vi;
    vorbis_comment *vc;
    int len= 2048;
    int a;
+   ov_callbacks cbs;
 
    // Setup OGG decoder
-   if (0 > ov_open(mix_in, &oggfile, NULL, 0)) 
+   cbs.read_func= ogg_file_read_cb;
+   cbs.seek_func= ogg_file_seek_cb;
+   cbs.close_func= ogg_file_close_cb;
+   cbs.tell_func= ogg_file_tell_cb;
+   if (0 > ov_open_callbacks(mix_in, &oggfile, NULL, 0, cbs))
       error("Input does not appear to be an Ogg bitstream");
 
    // Check for ReplayGain

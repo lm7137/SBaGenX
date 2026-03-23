@@ -79,7 +79,7 @@ create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
 create_dir_if_not_exists "dist/pkgconfig"
 
-SBX_LIB_CFLAGS="-Wall -O3 -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_LIB_CFLAGS="$CFLAGS -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
 gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-macos-universal.o
 if [ $? -eq 0 ]; then
     libtool -static -o dist/libsbagenx-macos-universal.a build/sbagenxlib/sbagenxlib-macos-universal.o
@@ -99,7 +99,7 @@ if [ -z "$SO_MAJOR" ]; then
 fi
 gcc $SBX_LIB_CFLAGS -dynamiclib \
     -Wl,-install_name,@rpath/libsbagenx.$SO_MAJOR.dylib \
-    -o dist/libsbagenx.$VERSION.dylib build/sbagenxlib/sbagenxlib-macos-universal.o -lm
+    -o dist/libsbagenx.$VERSION.dylib build/sbagenxlib/sbagenxlib-macos-universal.o $LIBS
 if [ $? -eq 0 ]; then
     ln -sfn "libsbagenx.$VERSION.dylib" dist/libsbagenx.$SO_MAJOR.dylib
     ln -sfn "libsbagenx.$SO_MAJOR.dylib" dist/libsbagenx.dylib

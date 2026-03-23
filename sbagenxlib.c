@@ -6,11 +6,13 @@
 #include <errno.h>
 #include <math.h>
 #include <limits.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -296,6 +298,28 @@ struct SbxAudioWriter {
   int mp3_buflen;
 };
 
+struct SbxMixInput {
+  FILE *fp;
+  int mix_section;
+  int output_rate_hz;
+  int output_rate_is_default;
+  int take_stream_ownership;
+  int format;
+  int (*read_fn)(int *dst, int dlen);
+  void (*term_fn)(void);
+  SbxMixWarnCallback warn_cb;
+  void *warn_user;
+  char last_error[256];
+};
+
+static SbxMixInput *sbx_mix_active_input;
+static int (*sbx_mix_registered_read)(int*, int);
+static jmp_buf *sbx_mix_jmp_env;
+static FILE *sbx_mix_in_file;
+static int sbx_mix_in_cnt;
+static int sbx_mix_out_rate;
+static int sbx_mix_out_rate_def;
+
 #define TE_POW_FROM_RIGHT 0
 /*
  * Vendored tinyexpr uses variable-sized AST node allocation that triggers
@@ -345,6 +369,15 @@ static void ctx_compute_amp_adjust_gains(const SbxContext *ctx,
                                          double *out_gain_l,
                                          double *out_gain_r);
 static void writer_set_error(SbxAudioWriter *writer, const char *fmt, ...);
+static void mix_input_set_error(SbxMixInput *input, const char *fmt, ...);
+static void sbx_mix_warn_msg(char *fmt, ...);
+static void sbx_mix_error_msg(char *fmt, ...);
+static void *sbx_mix_alloc(size_t len);
+static void sbx_mix_inbuf_start(int(*rout)(int*,int), int len);
+static int sbx_mix_input_find_wav_data_start(SbxMixInput *input);
+static int sbx_mix_input_raw_read(int *dst, int dlen);
+static int sbx_mix_input_host_bigendian(void);
+static void sbx_flac_term(void);
 static int sbx_audio_writer_write_wav_header(FILE *fp,
                                              uint32_t sample_rate,
                                              int channels,
@@ -394,6 +427,234 @@ writer_set_error(SbxAudioWriter *writer, const char *fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(writer->last_error, sizeof(writer->last_error), fmt, ap);
   va_end(ap);
+}
+
+static void
+mix_input_set_error(SbxMixInput *input, const char *fmt, ...) {
+  va_list ap;
+  if (!input) return;
+  va_start(ap, fmt);
+  vsnprintf(input->last_error, sizeof(input->last_error), fmt, ap);
+  va_end(ap);
+}
+
+static void
+sbx_mix_warn_msg(char *fmt, ...) {
+  va_list ap;
+  char buf[512];
+  SbxMixInput *input = sbx_mix_active_input;
+
+  if (!input || !input->warn_cb) return;
+  va_start(ap, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  input->warn_cb(input->warn_user, buf);
+}
+
+static void
+sbx_mix_error_msg(char *fmt, ...) {
+  va_list ap;
+  SbxMixInput *input = sbx_mix_active_input;
+
+  if (!input) {
+    if (sbx_mix_jmp_env) longjmp(*sbx_mix_jmp_env, 1);
+    return;
+  }
+  va_start(ap, fmt);
+  vsnprintf(input->last_error, sizeof(input->last_error), fmt, ap);
+  va_end(ap);
+  if (sbx_mix_jmp_env) longjmp(*sbx_mix_jmp_env, 1);
+}
+
+static void *
+sbx_mix_alloc(size_t len) {
+  void *p = calloc(1, len);
+  if (!p) sbx_mix_error_msg("Out of memory");
+  return p;
+}
+
+static void
+sbx_mix_inbuf_start(int(*rout)(int*,int), int len) {
+  (void)len;
+  sbx_mix_registered_read = rout;
+}
+
+static int
+sbx_mix_input_host_bigendian(void) {
+  uint16_t v = 0x0102;
+  return ((const unsigned char *)&v)[0] == 0x01;
+}
+
+static void
+sbx_mix_input_activate(SbxMixInput *input) {
+  sbx_mix_active_input = input;
+  if (!input) return;
+  sbx_mix_in_file = input->fp;
+  sbx_mix_in_cnt = input->mix_section;
+  sbx_mix_out_rate = input->output_rate_hz;
+  sbx_mix_out_rate_def = input->output_rate_is_default ? 1 : 0;
+}
+
+static void
+sbx_mix_input_sync_back(SbxMixInput *input) {
+  if (!input) return;
+  input->fp = sbx_mix_in_file;
+  input->mix_section = sbx_mix_in_cnt;
+  input->output_rate_hz = sbx_mix_out_rate;
+  input->output_rate_is_default = sbx_mix_out_rate_def ? 1 : 0;
+}
+
+static int
+sbx_mix_input_find_wav_data_start(SbxMixInput *input) {
+  unsigned char buf[16];
+
+  if (!input || !input->fp) return 0;
+  if (1 != fread(buf, 12, 1, input->fp)) goto bad;
+  if (0 != memcmp(buf, "RIFF", 4)) goto bad;
+  if (0 != memcmp(buf + 8, "WAVE", 4)) goto bad;
+
+  while (1) {
+    int len;
+    if (1 != fread(buf, 8, 1, input->fp)) goto bad;
+    if (0 == memcmp(buf, "data", 4)) return 1;
+    len = buf[4] + (buf[5] << 8) + (buf[6] << 16) + (buf[7] << 24);
+    if (len & 1) len++;
+    if (input->output_rate_is_default && 0 == memcmp(buf, "fmt ", 4)) {
+      if (1 != fread(buf, 8, 1, input->fp)) goto bad;
+      len -= 8;
+      input->output_rate_hz = buf[4] + (buf[5] << 8) + (buf[6] << 16) + (buf[7] << 24);
+      input->output_rate_is_default = 0;
+    }
+    if (0 != fseek(input->fp, len, SEEK_CUR)) goto bad;
+  }
+
+bad:
+  if (input->warn_cb)
+    input->warn_cb(input->warn_user, "WARNING: Not a valid WAV file, treating as RAW");
+  rewind(input->fp);
+  return 0;
+}
+
+static int
+sbx_mix_input_raw_read(int *dst, int dlen) {
+  short *tmp = (short *)(dst + dlen / 2);
+  int a, rv;
+  SbxMixInput *input = sbx_mix_active_input;
+
+  if (!input || !input->fp) return 0;
+
+  rv = (int)fread(tmp, 2, (size_t)dlen, input->fp);
+  if (rv == 0) {
+    if (feof(input->fp))
+      return 0;
+    mix_input_set_error(input, "Read error on mix input: %s", strerror(errno));
+    return -1;
+  }
+
+  if (sbx_mix_input_host_bigendian()) {
+    char *rd = (char *)tmp;
+    for (a = 0; a < rv; a++) {
+      *dst++ = ((rd[0] & 255) + (rd[1] << 8)) << 4;
+      rd += 2;
+    }
+  } else {
+    for (a = 0; a < rv; a++)
+      *dst++ = *tmp++ << 4;
+  }
+
+  return rv;
+}
+
+#define ALLOC_ARR(cnt, type) ((type*)sbx_mix_alloc((cnt) * sizeof(type)))
+
+#ifdef MP3_DECODE
+#define mix_in sbx_mix_in_file
+#define Alloc sbx_mix_alloc
+#define error sbx_mix_error_msg
+#define warn sbx_mix_warn_msg
+#define inbuf_start sbx_mix_inbuf_start
+#define out_rate sbx_mix_out_rate
+#define out_rate_def sbx_mix_out_rate_def
+#include "mp3dec.c"
+#undef out_rate_def
+#undef out_rate
+#undef inbuf_start
+#undef warn
+#undef error
+#undef Alloc
+#undef mix_in
+#endif
+
+#ifdef OGG_DECODE
+#define mix_in sbx_mix_in_file
+#define mix_cnt sbx_mix_in_cnt
+#define Alloc sbx_mix_alloc
+#define error sbx_mix_error_msg
+#define warn sbx_mix_warn_msg
+#define inbuf_start sbx_mix_inbuf_start
+#define out_rate sbx_mix_out_rate
+#define out_rate_def sbx_mix_out_rate_def
+#include "oggdec.c"
+#undef out_rate_def
+#undef out_rate
+#undef inbuf_start
+#undef warn
+#undef error
+#undef Alloc
+#undef mix_cnt
+#undef mix_in
+#endif
+
+#ifdef FLAC_DECODE
+#define mix_in sbx_mix_in_file
+#define mix_cnt sbx_mix_in_cnt
+#define Alloc sbx_mix_alloc
+#define error sbx_mix_error_msg
+#define warn sbx_mix_warn_msg
+#define inbuf_start sbx_mix_inbuf_start
+#define out_rate sbx_mix_out_rate
+#define out_rate_def sbx_mix_out_rate_def
+#include "flacdec.c"
+#undef out_rate_def
+#undef out_rate
+#undef inbuf_start
+#undef warn
+#undef error
+#undef Alloc
+#undef mix_cnt
+#undef mix_in
+#endif
+
+#undef ALLOC_ARR
+
+static void
+sbx_flac_term(void) {
+#ifdef FLAC_DECODE
+  if (flac_file) {
+    drflac_close(flac_file);
+    flac_file = 0;
+  }
+  free(flac_buf);
+  flac_buf = 0;
+  flac_buf_frames = 0;
+  flac_buf_pos = 0;
+  flac_buf_len = 0;
+  free(flac_pcm);
+  flac_pcm = 0;
+  flac_datcnt = 0;
+  flac_datcnt0 = 0;
+  flac_datbase = 0;
+  flac_datrate = 0;
+  flac_fade_cnt = 0;
+  flac_seg0 = 0;
+  flac_seg1 = 0;
+  flac_ch2 = 0;
+  flac_ch2_swap = 0;
+  flac_del_amp = 0;
+  flac_intro_cnt = 0;
+  flac_intro_pos = 0;
+  flac_intro_first_seg = 0;
+#endif
 }
 
 static void
@@ -4838,6 +5099,15 @@ sbx_default_audio_writer_config(SbxAudioWriterConfig *cfg) {
 }
 
 void
+sbx_default_mix_input_config(SbxMixInputConfig *cfg) {
+  if (!cfg) return;
+  memset(cfg, 0, sizeof(*cfg));
+  cfg->mix_section = -1;
+  cfg->output_rate_hz = 44100;
+  cfg->output_rate_is_default = 1;
+}
+
+void
 sbx_default_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg) {
   if (!cfg) return;
   memset(cfg, 0, sizeof(*cfg));
@@ -6446,6 +6716,176 @@ sbx_audio_writer_write_i32(SbxAudioWriter *writer,
     return SBX_ENOTREADY;
   }
   return SBX_OK;
+}
+
+SbxMixInput *
+sbx_mix_input_create_stdio(FILE *stream,
+                           const char *path_hint,
+                           const SbxMixInputConfig *cfg_in) {
+  SbxMixInput *input;
+  SbxMixInputConfig cfg;
+  const char *ext = 0;
+  const char *dot = 0;
+  const char *slash = 0;
+  const char *bslash = 0;
+  jmp_buf env;
+  int a;
+  char lower[8];
+
+  if (!stream) return 0;
+  sbx_default_mix_input_config(&cfg);
+  if (cfg_in) cfg = *cfg_in;
+
+  input = (SbxMixInput *)calloc(1, sizeof(*input));
+  if (!input) return 0;
+  input->fp = stream;
+  input->mix_section = cfg.mix_section;
+  input->output_rate_hz = cfg.output_rate_hz;
+  input->output_rate_is_default = cfg.output_rate_is_default ? 1 : 0;
+  input->take_stream_ownership = cfg.take_stream_ownership ? 1 : 0;
+  input->warn_cb = cfg.warn_cb;
+  input->warn_user = cfg.warn_user;
+  input->format = SBX_MIX_INPUT_RAW;
+
+  if (path_hint && *path_hint) {
+    dot = strrchr(path_hint, '.');
+    slash = strrchr(path_hint, '/');
+    bslash = strrchr(path_hint, '\\');
+    if (dot && (!slash || dot > slash) && (!bslash || dot > bslash) && dot[1])
+      ext = dot + 1;
+  }
+
+  sbx_mix_input_activate(input);
+  sbx_mix_registered_read = 0;
+  sbx_mix_jmp_env = &env;
+
+  if (setjmp(env) != 0) {
+    sbx_mix_jmp_env = 0;
+    sbx_mix_registered_read = 0;
+    sbx_mix_input_sync_back(input);
+    return input;
+  }
+
+  if (ext) {
+    int len = (int)strlen(ext);
+    if (len >= (int)sizeof(lower))
+      len = (int)sizeof(lower) - 1;
+    for (a = 0; a < len; a++)
+      lower[a] = (char)tolower((unsigned char)ext[a]);
+    lower[len] = 0;
+    ext = lower;
+  }
+
+  if (ext && strcmp(ext, "wav") == 0) {
+    input->format = sbx_mix_input_find_wav_data_start(input)
+      ? SBX_MIX_INPUT_WAV : SBX_MIX_INPUT_RAW;
+    input->read_fn = sbx_mix_input_raw_read;
+    sbx_mix_input_activate(input);
+  } else if (ext && strcmp(ext, "ogg") == 0) {
+#ifdef OGG_DECODE
+    ogg_init();
+    input->format = SBX_MIX_INPUT_OGG;
+    input->read_fn = sbx_mix_registered_read;
+    input->term_fn = ogg_term;
+#else
+    mix_input_set_error(input, "Ogg mix-input support was not compiled into this sbagenxlib build");
+#endif
+  } else if (ext && strcmp(ext, "mp3") == 0) {
+#ifdef MP3_DECODE
+    mp3_init();
+    input->format = SBX_MIX_INPUT_MP3;
+    input->read_fn = sbx_mix_registered_read;
+    input->term_fn = mp3_term;
+#else
+    mix_input_set_error(input, "MP3 mix-input support was not compiled into this sbagenxlib build");
+#endif
+  } else if (ext && strcmp(ext, "flac") == 0) {
+#ifdef FLAC_DECODE
+    flac_init();
+    input->format = SBX_MIX_INPUT_FLAC;
+    input->read_fn = sbx_mix_registered_read;
+    input->term_fn = sbx_flac_term;
+#else
+    mix_input_set_error(input, "FLAC mix-input support was not compiled into this sbagenxlib build");
+#endif
+  } else {
+    input->format = SBX_MIX_INPUT_RAW;
+    input->read_fn = sbx_mix_input_raw_read;
+    sbx_mix_input_activate(input);
+  }
+
+  if (!input->read_fn && !input->last_error[0])
+    mix_input_set_error(input, "Unsupported or unavailable mix input format");
+
+  sbx_mix_input_sync_back(input);
+  sbx_mix_jmp_env = 0;
+  sbx_mix_registered_read = 0;
+  return input;
+}
+
+int
+sbx_mix_input_read(SbxMixInput *input, int *dst, int sample_count) {
+  jmp_buf env;
+  int rv;
+
+  if (!input || !dst || sample_count < 0) return -1;
+  if (!input->read_fn) {
+    if (!input->last_error[0])
+      mix_input_set_error(input, "mix input is not initialized");
+    return -1;
+  }
+
+  input->last_error[0] = 0;
+  sbx_mix_input_activate(input);
+  sbx_mix_jmp_env = &env;
+  if (setjmp(env) != 0) {
+    sbx_mix_jmp_env = 0;
+    sbx_mix_input_sync_back(input);
+    return -1;
+  }
+  rv = input->read_fn(dst, sample_count);
+  sbx_mix_input_sync_back(input);
+  sbx_mix_jmp_env = 0;
+  return rv;
+}
+
+void
+sbx_mix_input_destroy(SbxMixInput *input) {
+  if (!input) return;
+  sbx_mix_input_activate(input);
+  if (input->term_fn)
+    input->term_fn();
+  sbx_mix_input_sync_back(input);
+  if (input->take_stream_ownership && input->fp)
+    fclose(input->fp);
+  input->fp = 0;
+  if (sbx_mix_active_input == input)
+    sbx_mix_active_input = 0;
+  free(input);
+}
+
+const char *
+sbx_mix_input_last_error(const SbxMixInput *input) {
+  if (!input) return "null mix input";
+  return input->last_error;
+}
+
+int
+sbx_mix_input_output_rate(const SbxMixInput *input) {
+  if (!input) return 0;
+  return input->output_rate_hz;
+}
+
+int
+sbx_mix_input_output_rate_is_default(const SbxMixInput *input) {
+  if (!input) return 0;
+  return input->output_rate_is_default ? 1 : 0;
+}
+
+int
+sbx_mix_input_format(const SbxMixInput *input) {
+  if (!input) return SBX_MIX_INPUT_RAW;
+  return input->format;
 }
 
 SbxContext *

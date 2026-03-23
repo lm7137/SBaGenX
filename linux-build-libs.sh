@@ -36,6 +36,7 @@ info "Detected host architecture: $HOST_ARCH"
 X86_CC="gcc -m32"
 X86_64_CC="gcc -m64"
 ARM64_CC="gcc"
+PIC_CFLAGS="-fPIC"
 
 SKIP_32BIT=0
 SKIP_ARM64=0
@@ -147,7 +148,7 @@ check_error "Failed to patch libmad configure script"
 cd "$SRC_DIR/libogg-$LIBOGG_VERSION"
 if [ $SKIP_32BIT = 0 ]; then
     info "Configuring libogg for x86..."
-    ./configure CC="$X86_CC" --prefix="$INSTALL_DIR_X86" --enable-static --disable-shared > "$TEMP_DIR/libogg-x86.log" 2>&1
+    ./configure CC="$X86_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_X86" --enable-static --disable-shared > "$TEMP_DIR/libogg-x86.log" 2>&1
     check_error "libogg configuration for x86 failed" "$TEMP_DIR/libogg-x86.log"
     info "Compiling libogg for x86..."
     make clean >> "$TEMP_DIR/libogg-x86.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libogg-x86.log" 2>&1 && make install >> "$TEMP_DIR/libogg-x86.log" 2>&1
@@ -161,14 +162,14 @@ fi
 # Compile libogg for arm64 or x86_64
 if [ $SKIP_ARM64 = 0 ]; then
     info "Configuring libogg for arm64..."
-    ./configure CC="$ARM64_CC" --prefix="$INSTALL_DIR_ARM64" --enable-static --disable-shared > "$TEMP_DIR/libogg-arm64.log" 2>&1
+    ./configure CC="$ARM64_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_ARM64" --enable-static --disable-shared > "$TEMP_DIR/libogg-arm64.log" 2>&1
     check_error "libogg configuration for arm64 failed" "$TEMP_DIR/libogg-arm64.log"
     info "Compiling libogg for arm64..."
     make clean >> "$TEMP_DIR/libogg-arm64.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libogg-arm64.log" 2>&1 && make install >> "$TEMP_DIR/libogg-arm64.log" 2>&1
     check_error "libogg compilation for arm64 failed" "$TEMP_DIR/libogg-arm64.log"
 else 
     info "Configuring libogg for x86_64..."
-    ./configure CC="$X86_64_CC" --prefix="$INSTALL_DIR_X86_64" --enable-static --disable-shared > "$TEMP_DIR/libogg-x86_64.log" 2>&1
+    ./configure CC="$X86_64_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_X86_64" --enable-static --disable-shared > "$TEMP_DIR/libogg-x86_64.log" 2>&1
     check_error "libogg configuration for x86_64 failed" "$TEMP_DIR/libogg-x86_64.log"
     info "Compiling libogg for x86_64..."
     make clean >> "$TEMP_DIR/libogg-x86_64.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libogg-x86_64.log" 2>&1 && make install >> "$TEMP_DIR/libogg-x86_64.log" 2>&1
@@ -186,7 +187,7 @@ fi
 # Compile libvorbisidec (Tremor) for x86
 if [ $SKIP_32BIT = 0 ]; then
     info "Configuring libvorbisidec for x86..."
-    ./configure CC="$X86_CC" --prefix="$INSTALL_DIR_X86" --enable-static --disable-shared --with-ogg="$INSTALL_DIR_X86" > "$TEMP_DIR/libvorbisidec-x86.log" 2>&1
+    ./configure CC="$X86_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_X86" --enable-static --disable-shared --with-ogg="$INSTALL_DIR_X86" > "$TEMP_DIR/libvorbisidec-x86.log" 2>&1
     check_error "libvorbisidec configuration for x86 failed" "$TEMP_DIR/libvorbisidec-x86.log"
     info "Compiling libvorbisidec for x86..."
     make clean >> "$TEMP_DIR/libvorbisidec-x86.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libvorbisidec-x86.log" 2>&1 && make install >> "$TEMP_DIR/libvorbisidec-x86.log" 2>&1
@@ -198,14 +199,14 @@ fi
 # Compile libvorbisidec (Tremor) for arm64 or x86_64
 if [ $SKIP_ARM64 = 0 ]; then
     info "Configuring libvorbisidec for arm64..."
-    ./configure CC="$ARM64_CC" --prefix="$INSTALL_DIR_ARM64" --enable-static --disable-shared --with-ogg="$INSTALL_DIR_ARM64" > "$TEMP_DIR/libvorbisidec-arm64.log" 2>&1
+    ./configure CC="$ARM64_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_ARM64" --enable-static --disable-shared --with-ogg="$INSTALL_DIR_ARM64" > "$TEMP_DIR/libvorbisidec-arm64.log" 2>&1
     check_error "libvorbisidec configuration for arm64 failed" "$TEMP_DIR/libvorbisidec-arm64.log"
     info "Compiling libvorbisidec for arm64..."
     make clean >> "$TEMP_DIR/libvorbisidec-arm64.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libvorbisidec-arm64.log" 2>&1 && make install >> "$TEMP_DIR/libvorbisidec-arm64.log" 2>&1
     check_error "libvorbisidec compilation for arm64 failed" "$TEMP_DIR/libvorbisidec-arm64.log"
 else
     info "Configuring libvorbisidec for x86_64..."
-    ./configure CC="$X86_64_CC" --prefix="$INSTALL_DIR_X86_64" --enable-static --disable-shared --with-ogg="$INSTALL_DIR_X86_64" > "$TEMP_DIR/libvorbisidec-x86_64.log" 2>&1
+    ./configure CC="$X86_64_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_X86_64" --enable-static --disable-shared --with-ogg="$INSTALL_DIR_X86_64" > "$TEMP_DIR/libvorbisidec-x86_64.log" 2>&1
     check_error "libvorbisidec configuration for x86_64 failed" "$TEMP_DIR/libvorbisidec-x86_64.log"
     info "Compiling libvorbisidec for x86_64..."
     make clean >> "$TEMP_DIR/libvorbisidec-x86_64.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libvorbisidec-x86_64.log" 2>&1 && make install >> "$TEMP_DIR/libvorbisidec-x86_64.log" 2>&1
@@ -216,7 +217,7 @@ fi
 cd "$SRC_DIR/libmad-$LIBMAD_VERSION"
 if [ $SKIP_32BIT = 0 ]; then
     info "Configuring libmad for x86..."
-    ./configure CC="$X86_CC" --prefix="$INSTALL_DIR_X86" --enable-static --disable-shared --disable-debugging > "$TEMP_DIR/libmad-x86.log" 2>&1
+    ./configure CC="$X86_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_X86" --enable-static --disable-shared --disable-debugging > "$TEMP_DIR/libmad-x86.log" 2>&1
     check_error "libmad configuration for x86 failed" "$TEMP_DIR/libmad-x86.log"
     info "Compiling libmad for x86..."
     make clean >> "$TEMP_DIR/libmad-x86.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libmad-x86.log" 2>&1 && make install >> "$TEMP_DIR/libmad-x86.log" 2>&1
@@ -228,14 +229,14 @@ fi
 # Compile libmad for arm64 or x86_64
 if [ $SKIP_ARM64 = 0 ]; then
     info "Configuring libmad for arm64..."
-    ./configure CC="$ARM64_CC" --prefix="$INSTALL_DIR_ARM64" --enable-static --disable-shared --disable-debugging > "$TEMP_DIR/libmad-arm64.log" 2>&1
+    ./configure CC="$ARM64_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_ARM64" --enable-static --disable-shared --disable-debugging > "$TEMP_DIR/libmad-arm64.log" 2>&1
     check_error "libmad configuration for arm64 failed" "$TEMP_DIR/libmad-arm64.log"
     info "Compiling libmad for arm64..."
     make clean >> "$TEMP_DIR/libmad-arm64.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libmad-arm64.log" 2>&1 && make install >> "$TEMP_DIR/libmad-arm64.log" 2>&1
     check_error "libmad compilation for arm64 failed" "$TEMP_DIR/libmad-arm64.log"
-else 
+else
     info "Configuring libmad for x86_64..."
-    ./configure CC="$X86_64_CC" --prefix="$INSTALL_DIR_X86_64" --enable-static --disable-shared --disable-debugging > "$TEMP_DIR/libmad-x86_64.log" 2>&1
+    ./configure CC="$X86_64_CC" CFLAGS="$PIC_CFLAGS" --prefix="$INSTALL_DIR_X86_64" --enable-static --disable-shared --disable-debugging > "$TEMP_DIR/libmad-x86_64.log" 2>&1
     check_error "libmad configuration for x86_64 failed" "$TEMP_DIR/libmad-x86_64.log"
     info "Compiling libmad for x86_64..."
     make clean >> "$TEMP_DIR/libmad-x86_64.log" 2>&1 && make -j$(nproc) >> "$TEMP_DIR/libmad-x86_64.log" 2>&1 && make install >> "$TEMP_DIR/libmad-x86_64.log" 2>&1

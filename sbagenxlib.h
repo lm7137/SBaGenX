@@ -11,12 +11,13 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 36  /* public API contract revision */
+#define SBX_API_VERSION 37  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
@@ -176,6 +177,7 @@ typedef struct SbxEngine SbxEngine;
 typedef struct SbxContext SbxContext;
 typedef struct SbxCurveProgram SbxCurveProgram;
 typedef struct SbxAudioWriter SbxAudioWriter;
+typedef struct SbxMixInput SbxMixInput;
 
 typedef struct {
   double carrier_start_hz;
@@ -304,6 +306,14 @@ typedef enum {
 } SbxAudioFileFormat;
 
 typedef enum {
+  SBX_MIX_INPUT_RAW = 0,
+  SBX_MIX_INPUT_WAV = 1,
+  SBX_MIX_INPUT_OGG = 2,
+  SBX_MIX_INPUT_FLAC = 3,
+  SBX_MIX_INPUT_MP3 = 4
+} SbxMixInputFormat;
+
+typedef enum {
   SBX_AUDIO_WRITER_INPUT_BYTES = 0,
   SBX_AUDIO_WRITER_INPUT_S16 = 1,
   SBX_AUDIO_WRITER_INPUT_F32 = 2,
@@ -332,6 +342,17 @@ typedef struct {
   int mp3_vbr_quality_set;     /* 1 => prefer VBR using mp3_vbr_quality */
   int prefer_float_input;      /* 1 => use float MP3 path if runtime supports it */
 } SbxAudioWriterConfig;
+
+typedef void (*SbxMixWarnCallback)(void *user, const char *msg);
+
+typedef struct {
+  int mix_section;             /* filename #<digits> suffix, or -1 if absent */
+  int output_rate_hz;          /* current output rate before mix source opens */
+  int output_rate_is_default;  /* 1 => mix source may override output_rate_hz */
+  int take_stream_ownership;   /* 1 => destroy closes the supplied FILE * */
+  SbxMixWarnCallback warn_cb;  /* optional warning sink for ReplayGain/looper notes */
+  void *warn_user;             /* user data for warn_cb */
+} SbxMixInputConfig;
 
 typedef struct {
   int opt_S;                   /* safe preamble -S */
@@ -506,6 +527,7 @@ void sbx_default_pcm_convert_state(SbxPcmConvertState *state);
 
 /* Fill cfg with default file-writer settings (44.1k stereo 16-bit WAV). */
 void sbx_default_audio_writer_config(SbxAudioWriterConfig *cfg);
+void sbx_default_mix_input_config(SbxMixInputConfig *cfg);
 
 /* Fill cfg with default safe sequence-file preamble values. */
 void sbx_default_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg);
@@ -620,6 +642,21 @@ int sbx_audio_writer_write_f32(SbxAudioWriter *writer,
 int sbx_audio_writer_write_i32(SbxAudioWriter *writer,
                                const int32_t *pcm,
                                size_t frame_count);
+
+/*
+ * Open a mix-input decoder around an already-open stdio stream. The frontend
+ * remains responsible for choosing the stream/path; sbagenxlib owns the
+ * format-specific decoding behavior behind the returned handle.
+ */
+SbxMixInput *sbx_mix_input_create_stdio(FILE *stream,
+                                        const char *path_hint,
+                                        const SbxMixInputConfig *cfg);
+int sbx_mix_input_read(SbxMixInput *input, int *dst, int sample_count);
+void sbx_mix_input_destroy(SbxMixInput *input);
+const char *sbx_mix_input_last_error(const SbxMixInput *input);
+int sbx_mix_input_output_rate(const SbxMixInput *input);
+int sbx_mix_input_output_rate_is_default(const SbxMixInput *input);
+int sbx_mix_input_format(const SbxMixInput *input);
 
 /*
  * Parse/strip a safe `-SE`-style sequence preamble from in-memory text.

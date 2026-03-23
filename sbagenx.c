@@ -233,8 +233,6 @@ void writeWAV();
 void writeOut(char *, int);
 void sinc_interpolate(double *, int, int *);
 inline int userTime();
-void find_wav_data_start(FILE *in);
-int raw_mix_in(int *dst, int dlen);
 int scanOptions(int *acp, char ***avp);
 void handleOptions(char *p);
 void setupOptC(char *spec) ;
@@ -259,6 +257,8 @@ void printSequenceDuration();
 void checkMixInSequence(); // Check if mix/<amp> is specified
 void emit_dry_run_report(int mode_flag, int ac, char **av);
 static void open_mix_input_stream_if_requested(void);
+static int mix_input_bridge_read(int *dst, int dlen);
+static void mix_input_warn_bridge(void *user, const char *msg);
 void create_noise_spin_effect(
   int typ,
   int amp,
@@ -327,16 +327,6 @@ static void emit_periods_from_sbx_context(SbxContext *ctx, int loop_requested);
 
 #define ALLOC_ARR(cnt, type) ((type*)Alloc((cnt) * sizeof(type)))
 #define uint unsigned int
-
-#ifdef OGG_DECODE
-#include "oggdec.c"
-#endif
-#ifdef MP3_DECODE
-#include "mp3dec.c"
-#endif
-#ifdef FLAC_DECODE
-#include "flacdec.c"
-#endif
 
 #ifdef WIN_AUDIO
 void CALLBACK win32_audio_callback(HWAVEOUT, UINT, DWORD, DWORD, DWORD);
@@ -646,6 +636,7 @@ char *waveform_name[] = {"sine", "square", "triangle", "sawtooth"}; // To be use
 
 FILE *mix_in;			// Input stream for mix sound data, or 0
 int mix_cnt;			// Version number from mix filename (#<digits>), or -1
+SbxMixInput *mix_src;		// Library-owned mix input decoder state, or 0
 int bigendian;			// Is this platform Big-endian?
 int mix_flag= 0;		// Has 'mix/*' been used in the sequence?
 double *mix_amp= NULL; // Amplitude of mix sound data to use with mixspin/mixpulse/mixbeat. Default is 100%
@@ -4206,52 +4197,35 @@ setupOptC(char *spec) {
 //
 //	If this is a WAV file we've been given, skip forward to the
 //	'data' section.  Don't bother checking any of the 'fmt '
-//	stuff.  If they didn't give us a valid 16-bit stereo file at
-//	the right rate, then tough!
-//
+static int
+mix_input_bridge_read(int *dst, int dlen) {
+   int rv;
 
-void 
-find_wav_data_start(FILE *in) {
-   unsigned char buf[16];
+   if (!mix_src)
+      error("Internal error: mix input decoder is not initialized");
+   rv= sbx_mix_input_read(mix_src, dst, dlen);
+   if (rv < 0)
+      error("%s", sbx_mix_input_last_error(mix_src));
+   return rv;
+}
 
-   if (1 != fread(buf, 12, 1, in)) goto bad;
-   if (0 != memcmp(buf, "RIFF", 4)) goto bad;
-   if (0 != memcmp(buf+8, "WAVE", 4)) goto bad;
-   
-   while (1) {
-      int len;
-      if (1 != fread(buf, 8, 1, in)) goto bad;
-      if (0 == memcmp(buf, "data", 4)) return;		// We're in the right place!
-      len= buf[4] + (buf[5]<<8) + (buf[6]<<16) + (buf[7]<<24);
-      if (len & 1) len++;
-      if (out_rate_def && 0 == memcmp(buf, "fmt ", 4)) {
-	 // Grab the sample rate to use as the default if available
-	 if (1 != fread(buf, 8, 1, in)) goto bad;
-	 len -= 8;
-	 out_rate= buf[4] + (buf[5]<<8) + (buf[6]<<16) + (buf[7]<<24);
-	 out_rate_def= 0;
-      }
-      if (0 != fseek(in, len, SEEK_CUR)) goto bad;
-   }
-
- bad:
-   warn("WARNING: Not a valid WAV file, treating as RAW");
-   rewind(in);
+static void
+mix_input_warn_bridge(void *user, const char *msg) {
+   (void)user;
+   if (!msg || !*msg) return;
+   warn("%s", msg);
 }
 
 static void
 open_mix_input_stream_if_requested(void) {
    char *p;
-   char tmp[8];
-   int raw= 1;
+   SbxMixInputConfig cfg;
 
    if (mix_in || (!opt_M && !opt_m))
       return;
 
-   tmp[0]= 0;
    if (opt_M) {
       mix_in= stdin;
-      tmp[0]= 0;
    }
    if (opt_m) {
       // Pick up #<digits> on end of filename
@@ -4282,82 +4256,29 @@ open_mix_input_stream_if_requested(void) {
       }
       if (!mix_in)
          error("Can't open -m option mix input file: %s", opt_m);
-
-      // Pick up extension
-      {
-         char *dot= strrchr(opt_m, '.');
-         char *slash= strrchr(opt_m, '/');
-         char *bslash= strrchr(opt_m, '\\');
-         char *sep= slash > bslash ? slash : bslash;
-         if (dot && (!sep || dot > sep) && dot + 1 < p) {
-            int a, len= p - (dot + 1);
-            if (len >= (int)sizeof(tmp))
-               len= sizeof(tmp)-1;
-            for (a= 0; a<len; a++)
-               tmp[a]= tolower((unsigned char)dot[1+a]);
-            tmp[len]= 0;
-         }
-      }
-   }
-   if (0 == strcmp(tmp, "wav"))	// Skip header on WAV files
-      find_wav_data_start(mix_in);
-   if (0 == strcmp(tmp, "ogg")) {
-#ifdef OGG_DECODE
-      ogg_init(); raw= 0;
-#else
-      error("Sorry: Ogg support wasn't compiled into this executable");
-#endif
-   }
-   if (0 == strcmp(tmp, "mp3")) {
-#ifdef MP3_DECODE
-      mp3_init(); raw= 0;
-#else
-      error("Sorry: MP3 support wasn't compiled into this executable");
-#endif
-   }
-   if (0 == strcmp(tmp, "flac")) {
-#ifdef FLAC_DECODE
-      flac_init(); raw= 0;
-#else
-      error("Sorry: FLAC support wasn't compiled into this executable");
-#endif
-   }
-   // If this is a raw/wav data stream, setup a 256*1024-int
-   // buffer (3s@44.1kHz)
-   if (raw) inbuf_start(raw_mix_in, 256*1024);
-}
-
-//
-//	Input raw audio data from the 'mix_in' stream, and convert to
-//	32-bit values (max 'dlen')
-//
-
-int 
-raw_mix_in(int *dst, int dlen) {
-   short *tmp= (short*)(dst + dlen/2);
-   int a, rv;
-   
-   rv= fread(tmp, 2, dlen, mix_in);
-   if (rv == 0) {
-      if (feof(mix_in))
-	 return 0;
-      error("Read error on mix input:\n  %s", strerror(errno));
    }
 
-   // Now convert 16-bit little-endian input data into 20-bit native
-   // int values
-   if (bigendian) {
-      char *rd= (char*)tmp;
-      for (a= 0; a<rv; a++) {
-	 *dst++= ((rd[0]&255) + (rd[1]<<8)) << 4;
-	 rd += 2;
-      }
-   } else {
-      for (a= 0; a<rv; a++) 
-	 *dst++= *tmp++ << 4;
-   }
+   sbx_default_mix_input_config(&cfg);
+   cfg.mix_section= mix_cnt;
+   cfg.output_rate_hz= out_rate;
+   cfg.output_rate_is_default= out_rate_def;
+   cfg.take_stream_ownership= 0;
+   cfg.warn_cb= mix_input_warn_bridge;
+   cfg.warn_user= 0;
 
-   return rv;
+   mix_src= sbx_mix_input_create_stdio(mix_in, opt_m ? opt_m : 0, &cfg);
+   if (!mix_src)
+      error("Out of memory creating mix input decoder");
+   if (*sbx_mix_input_last_error(mix_src))
+      error("%s", sbx_mix_input_last_error(mix_src));
+
+   out_rate= sbx_mix_input_output_rate(mix_src);
+   out_rate_def= sbx_mix_input_output_rate_is_default(mix_src);
+
+   // Setup a 256*1024-int buffer (3s@44.1kHz)
+   inbuf_start(mix_input_bridge_read, 256*1024);
+   out_rate= sbx_mix_input_output_rate(mix_src);
+   out_rate_def= sbx_mix_input_output_rate_is_default(mix_src);
 }
 
    

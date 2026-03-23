@@ -42,6 +42,38 @@ if [ "$HOST_ARCH" = "aarch64" ]; then
     warning "32-bit compilation is not supported on ARM64, skipping..."
 fi
 
+shared_link_libs_are_safe() {
+    local arch_flag="$1"
+    shift
+    local libs=("$@")
+    local tmp_c tmp_o tmp_so tmp_log
+
+    tmp_c="$(mktemp /tmp/sbx-shared-probe-XXXXXX.c)"
+    tmp_o="${tmp_c%.c}.o"
+    tmp_so="${tmp_c%.c}.so"
+    tmp_log="${tmp_c%.c}.log"
+
+    printf 'int sbx_shared_probe(void) { return 0; }\n' > "$tmp_c"
+    if ! gcc $arch_flag -fPIC -c "$tmp_c" -o "$tmp_o" >/dev/null 2>"$tmp_log"; then
+        rm -f "$tmp_c" "$tmp_o" "$tmp_so" "$tmp_log"
+        return 1
+    fi
+    if ! gcc -shared $arch_flag -o "$tmp_so" "$tmp_o" \
+        -Wl,--whole-archive "${libs[@]}" -Wl,--no-whole-archive \
+        -lm -ldl \
+        >/dev/null 2>"$tmp_log"; then
+        rm -f "$tmp_c" "$tmp_o" "$tmp_so" "$tmp_log"
+        return 1
+    fi
+    if grep -Eiq 'recompile with -fPIC|DT_TEXTREL|text reloc' "$tmp_log"; then
+        rm -f "$tmp_c" "$tmp_o" "$tmp_so" "$tmp_log"
+        return 1
+    fi
+
+    rm -f "$tmp_c" "$tmp_o" "$tmp_so" "$tmp_log"
+    return 0
+}
+
 # Build 32-bit version
 if [ $SKIP_32BIT = 0 ]; then
     section_header "Building 32-bit version..."
@@ -182,10 +214,56 @@ create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
 create_dir_if_not_exists "dist/pkgconfig"
 
-SBX_LIB_CFLAGS="-Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_LIB_CFLAGS_32="$CFLAGS_32 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_LIB_CFLAGS_64="$CFLAGS_64 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_SHARED_CFLAGS_32="-DT_LINUX -DFLAC_DECODE -m32 -Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_SHARED_LIBS_32="-lm -ldl"
+SBX_SHARED_CFLAGS_64="-DT_LINUX -DFLAC_DECODE -Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+SBX_SHARED_LIBS_64="-lm -ldl"
+
+if [ "$HOST_ARCH" != "aarch64" ]; then
+    SBX_SHARED_CFLAGS_64="-m64 $SBX_SHARED_CFLAGS_64"
+fi
 
 if [ $SKIP_32BIT = 0 ]; then
-    gcc $SBX_LIB_CFLAGS -m32 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux32.o
+    if [ -f "$LIB_PATH_32" ] && shared_link_libs_are_safe "-m32" "$LIB_PATH_32"; then
+        SBX_SHARED_CFLAGS_32="$SBX_SHARED_CFLAGS_32 -DMP3_DECODE"
+        SBX_SHARED_LIBS_32="$SBX_SHARED_LIBS_32 $LIB_PATH_32"
+    elif [ -f "$LIB_PATH_32" ]; then
+        warning "32-bit shared sbagenxlib will be built without MP3 mix-input decode; rebuild decoder libs with ./linux-build-libs.sh to restore shared-library MP3 support"
+    fi
+    if [ -f "$OGG_LIB_PATH_32" ] && [ -f "$TREMOR_LIB_PATH_32" ]; then
+        SBX_SHARED_CFLAGS_32="$SBX_SHARED_CFLAGS_32 -DOGG_DECODE"
+        SBX_SHARED_LIBS_32="$SBX_SHARED_LIBS_32 $TREMOR_LIB_PATH_32 $OGG_LIB_PATH_32"
+    fi
+fi
+
+if [ "$HOST_ARCH" = "aarch64" ]; then
+    if [ -f "$LIB_PATH_ARM64" ] && shared_link_libs_are_safe "" "$LIB_PATH_ARM64"; then
+        SBX_SHARED_CFLAGS_64="$SBX_SHARED_CFLAGS_64 -DMP3_DECODE"
+        SBX_SHARED_LIBS_64="$SBX_SHARED_LIBS_64 $LIB_PATH_ARM64"
+    elif [ -f "$LIB_PATH_ARM64" ]; then
+        warning "ARM64 shared sbagenxlib will be built without MP3 mix-input decode; rebuild decoder libs with ./linux-build-libs.sh to restore shared-library MP3 support"
+    fi
+    if [ -f "$OGG_LIB_PATH_ARM64" ] && [ -f "$TREMOR_LIB_PATH_ARM64" ]; then
+        SBX_SHARED_CFLAGS_64="$SBX_SHARED_CFLAGS_64 -DOGG_DECODE"
+        SBX_SHARED_LIBS_64="$SBX_SHARED_LIBS_64 $TREMOR_LIB_PATH_ARM64 $OGG_LIB_PATH_ARM64"
+    fi
+else
+    if [ -f "$LIB_PATH_64" ] && shared_link_libs_are_safe "-m64" "$LIB_PATH_64"; then
+        SBX_SHARED_CFLAGS_64="$SBX_SHARED_CFLAGS_64 -DMP3_DECODE"
+        SBX_SHARED_LIBS_64="$SBX_SHARED_LIBS_64 $LIB_PATH_64"
+    elif [ -f "$LIB_PATH_64" ]; then
+        warning "64-bit shared sbagenxlib will be built without MP3 mix-input decode; rebuild decoder libs with ./linux-build-libs.sh to restore shared-library MP3 support"
+    fi
+    if [ -f "$OGG_LIB_PATH_64" ] && [ -f "$TREMOR_LIB_PATH_64" ]; then
+        SBX_SHARED_CFLAGS_64="$SBX_SHARED_CFLAGS_64 -DOGG_DECODE"
+        SBX_SHARED_LIBS_64="$SBX_SHARED_LIBS_64 $TREMOR_LIB_PATH_64 $OGG_LIB_PATH_64"
+    fi
+fi
+
+if [ $SKIP_32BIT = 0 ]; then
+    gcc $SBX_LIB_CFLAGS_32 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux32.o
     if [ $? -eq 0 ]; then
         ar rcs dist/libsbagenx-linux32.a build/sbagenxlib/sbagenxlib-linux32.o
         if [ $? -eq 0 ]; then
@@ -205,11 +283,11 @@ if [ -z "$SO_MAJOR" ]; then
 fi
 
 if [ $SKIP_32BIT = 0 ]; then
-    gcc $SBX_LIB_CFLAGS -fPIC -m32 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux32.pic.o
+    gcc $SBX_SHARED_CFLAGS_32 -fPIC -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux32.pic.o
     if [ $? -eq 0 ]; then
         gcc -shared -m32 -Wl,-soname,libsbagenx-linux32.so.$SO_MAJOR \
             -o dist/libsbagenx-linux32.so.$VERSION \
-            build/sbagenxlib/sbagenxlib-linux32.pic.o -lm
+            build/sbagenxlib/sbagenxlib-linux32.pic.o $SBX_SHARED_LIBS_32
         if [ $? -eq 0 ]; then
             ln -sfn "libsbagenx-linux32.so.$VERSION" dist/libsbagenx-linux32.so.$SO_MAJOR
             ln -sfn "libsbagenx-linux32.so.$SO_MAJOR" dist/libsbagenx-linux32.so
@@ -223,7 +301,7 @@ if [ $SKIP_32BIT = 0 ]; then
 fi
 
 if [ "$HOST_ARCH" = "aarch64" ]; then
-    gcc $SBX_LIB_CFLAGS -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux-arm64.o
+    gcc $SBX_LIB_CFLAGS_64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux-arm64.o
     if [ $? -eq 0 ]; then
         ar rcs dist/libsbagenx-linux-arm64.a build/sbagenxlib/sbagenxlib-linux-arm64.o
         if [ $? -eq 0 ]; then
@@ -235,11 +313,11 @@ if [ "$HOST_ARCH" = "aarch64" ]; then
         warning "Failed to compile sbagenxlib for ARM64"
     fi
 
-    gcc $SBX_LIB_CFLAGS -fPIC -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux-arm64.pic.o
+    gcc $SBX_SHARED_CFLAGS_64 -fPIC -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux-arm64.pic.o
     if [ $? -eq 0 ]; then
         gcc -shared -Wl,-soname,libsbagenx.so.$SO_MAJOR \
             -o dist/libsbagenx.so.$VERSION \
-            build/sbagenxlib/sbagenxlib-linux-arm64.pic.o -lm
+            build/sbagenxlib/sbagenxlib-linux-arm64.pic.o $SBX_SHARED_LIBS_64
         if [ $? -eq 0 ]; then
             ln -sfn "libsbagenx.so.$VERSION" dist/libsbagenx.so.$SO_MAJOR
             ln -sfn "libsbagenx.so.$SO_MAJOR" dist/libsbagenx.so
@@ -251,7 +329,7 @@ if [ "$HOST_ARCH" = "aarch64" ]; then
         warning "Failed to compile PIC sbagenxlib for ARM64"
     fi
 else
-    gcc $SBX_LIB_CFLAGS -m64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux64.o
+    gcc $SBX_LIB_CFLAGS_64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux64.o
     if [ $? -eq 0 ]; then
         ar rcs dist/libsbagenx-linux64.a build/sbagenxlib/sbagenxlib-linux64.o
         if [ $? -eq 0 ]; then
@@ -263,11 +341,11 @@ else
         warning "Failed to compile sbagenxlib for 64-bit"
     fi
 
-    gcc $SBX_LIB_CFLAGS -fPIC -m64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux64.pic.o
+    gcc $SBX_SHARED_CFLAGS_64 -fPIC -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux64.pic.o
     if [ $? -eq 0 ]; then
         gcc -shared -m64 -Wl,-soname,libsbagenx.so.$SO_MAJOR \
             -o dist/libsbagenx.so.$VERSION \
-            build/sbagenxlib/sbagenxlib-linux64.pic.o -lm
+            build/sbagenxlib/sbagenxlib-linux64.pic.o $SBX_SHARED_LIBS_64
         if [ $? -eq 0 ]; then
             ln -sfn "libsbagenx.so.$VERSION" dist/libsbagenx.so.$SO_MAJOR
             ln -sfn "libsbagenx.so.$SO_MAJOR" dist/libsbagenx.so
