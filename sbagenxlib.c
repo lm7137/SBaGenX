@@ -1601,6 +1601,9 @@ sbx_parse_safe_seqfile_option_line_lib(const char *line,
         case 'D':
           out_cfg->have_D = 1;
           break;
+        case 'Q':
+          out_cfg->have_Q = 1;
+          break;
         case 'A':
           {
             const char *spec = 0;

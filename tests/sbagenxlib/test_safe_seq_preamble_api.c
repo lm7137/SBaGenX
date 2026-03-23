@@ -24,6 +24,7 @@ int main(void) {
   if (!fp) fail("open temp sequence failed");
   fputs("-SE\n"
         "-D\n"
+        "-Q\n"
         "-o /tmp/example.flac\n"
         "-b 24\n"
         "-L 00:08:00\n"
@@ -61,6 +62,8 @@ int main(void) {
     fail("mix_path mismatch");
   if (!cfg.have_D)
     fail("debug dump flag mismatch");
+  if (!cfg.have_Q)
+    fail("quiet flag mismatch");
   if (!cfg.have_Z || cfg.flac_compression != 12.0)
     fail("flac compression mismatch");
   if (!cfg.have_R || cfg.prate != 400)

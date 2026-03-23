@@ -25,6 +25,7 @@ PY
 seq="$tmpdir/extended_safe.sbg"
 cat > "$seq" <<EOF2
 -SE
+-Q
 -Wo $tmpdir/out.wav
 -m $tmpdir/mix.wav
 -A d=0.2:e=0.4:k=5:E=0.6
@@ -55,6 +56,12 @@ grep -q "#   mixfx\\[0\\]\\[0\\] 0.000000 mixam:beat:s=0:d=0.2:a=0.1:r=0.3:e=2:f
 
 if ! SBAGENX_SEQ_BACKEND=sbagenxlib "$bin" "$seq" >"$tmpdir/render.log" 2>&1; then
   echo "FAIL: extended safe preamble render failed" >&2
+  cat "$tmpdir/render.log" >&2
+  exit 1
+fi
+
+if [ -s "$tmpdir/render.log" ]; then
+  echo "FAIL: safe preamble -Q should suppress normal host warnings" >&2
   cat "$tmpdir/render.log" >&2
   exit 1
 fi

@@ -7173,6 +7173,8 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    }
    if (safe_cfg.have_R)
       out_prate= safe_cfg.prate;
+   if (safe_cfg.have_Q)
+      opt_Q= 1;
    if (safe_cfg.have_L)
       opt_L= safe_cfg.L_ms;
    if (safe_cfg.have_N)

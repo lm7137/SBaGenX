@@ -337,6 +337,7 @@ typedef struct {
   int opt_S;                   /* safe preamble -S */
   int opt_E;                   /* safe preamble -E */
   int have_D;                  /* safe preamble -D present */
+  int have_Q;                  /* safe preamble -Q present */
   int have_T;                  /* safe preamble -T present */
   int T_ms;                    /* safe preamble -T value in ms */
   int have_L;                  /* safe preamble -L present */
