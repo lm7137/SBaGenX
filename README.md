@@ -98,7 +98,11 @@ This fork introduces substantial functional changes beyond maintenance:
    - built-in `drop`, `sigmoid`, and `curve` beat/pulse graphs
    - one-cycle isochronic envelope and waveform views
    - one-cycle `mixam` envelope/gain views
+   - MP4 graph-video export with synced audio, a moving cursor, and a
+     beat-synced tracking dot
    Windows builds bundle Python+Cairo for higher-quality anti-aliased plots.
+   Graph-video export additionally requires `ffmpeg` with `libx264`
+   available on `PATH`.
 
 7. **Expanded input/output format support**  
    Added:
@@ -167,6 +171,15 @@ sbagenx -P -p sigmoid t30,30,0 00ls+:l=0.2:h=0
 ```
 
 This writes a PNG curve to the current directory.
+
+#### Graph-Video Example (MP4 With Audio)
+
+```bash
+sbagenx --graph-video drop-demo.mp4 -p drop t1,0,0 00ls+/100
+```
+
+This writes an MP4 with the graph animation and the matching audio
+track. It requires `ffmpeg` with `libx264` on `PATH`.
 
 #### Custom Curve Example (`.sbgf`)
 
@@ -327,6 +340,12 @@ sbagenx -p curve examples/basics/curve-expfit-solve-demo.sbgf 00ls:l=0.2 mix/99
 
 ```bash
 sbagenx -G -p curve examples/basics/curve-raised-cosine-demo.sbgf 00ls mix/99
+```
+
+### Render a Graph Video With Audio
+
+```bash
+sbagenx --graph-video sigmoid-demo.mp4 -p sigmoid t1,0,0 00ls+/100:l=3
 ```
 
 ### Literal Custom Envelope for Isochronic Work
@@ -516,6 +535,9 @@ Provenance notes for these runtime trees are tracked in:
 The installer copies the matching architecture runtime to
 `{app}\python`, and SBaGenX uses it automatically for plotting.
 
+For graph-video export (`--graph-video ...`), install `ffmpeg` with
+`libx264` separately and ensure `ffmpeg.exe` is on `PATH`.
+
 ## License
 
 SBaGenX is distributed under the GPL license. See [COPYING.txt](COPYING.txt) for details.
@@ -530,4 +552,5 @@ Original SBaGen was developed by Jim Peters. See [SBaGen project](https://uazu.n
 
 The SBaGen+ fork was developed by Ruan Klein. See [SBaGen+ project](https://github.com/ruanklein/sbagen-plus)
 
-ALSA support is based from this [patch](https://github.com/jave/sbagen-alsa/blob/master/sbagen.c).
+Linux ALSA playback support in this codebase derives from this
+[patch](https://github.com/jave/sbagen-alsa/blob/master/sbagen.c).
