@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$repo_root"
 
-bin="./dist/sbagenx-linux64"
+bin="$repo_root/dist/sbagenx-linux64"
 if [ ! -x "$bin" ]; then
   echo "SKIP: $bin not built" >&2
   exit 0
@@ -99,3 +100,50 @@ grep -q "# sbagenxlib keyframes" "$tmpdir/debug_preamble.txt"
 grep -q "sine:200@4/20 linear" "$tmpdir/debug_preamble.txt"
 
 echo "PASS: safe preamble -D stays native"
+
+seq_plot="$tmpdir/plot_safe.sbg"
+cat > "$seq_plot" <<EOF4
+-SE
+-P
+
+base: 200@4/20
+NOW base
+EOF4
+
+(
+  cd "$tmpdir"
+  if ! SBAGENX_SEQ_BACKEND=sbagenxlib "$bin" "$seq_plot" >"$tmpdir/plot_preamble.txt" 2>&1; then
+    echo "FAIL: safe preamble -P did not stay on native path" >&2
+    cat "$tmpdir/plot_preamble.txt" >&2
+    exit 1
+  fi
+)
+
+grep -q "Isochronic cycle graph saved to:" "$tmpdir/plot_preamble.txt"
+ls "$tmpdir"/iso_cycle_*.png >/dev/null 2>&1
+
+echo "PASS: safe preamble -P stays native"
+
+seq_graph="$tmpdir/graph_safe.sbg"
+cat > "$seq_graph" <<EOF5
+-SE
+-G
+
+base: 200@4/20
+NOW base
+EOF5
+
+set +e
+SBAGENX_SEQ_BACKEND=sbagenxlib "$bin" "$seq_graph" >"$tmpdir/graph_preamble.txt" 2>&1
+rc=$?
+set -e
+
+if [ "$rc" -eq 0 ]; then
+  echo "FAIL: safe preamble -G should reject sequence-mode use explicitly" >&2
+  cat "$tmpdir/graph_preamble.txt" >&2
+  exit 1
+fi
+
+grep -q -- "-G is only supported with -p drop/-p sigmoid/-p curve" "$tmpdir/graph_preamble.txt"
+
+echo "PASS: safe preamble -G now errors explicitly instead of falling back"

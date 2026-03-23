@@ -3771,6 +3771,8 @@ main(int argc, char **argv) {
 	 error("-G is only supported with -p drop/-p sigmoid/-p curve");
       if (argc < 1) usage();
       readSeq(argc, argv);
+      if (opt_G)
+	 error("-G is only supported with -p drop/-p sigmoid/-p curve");
    }
 
    if (opt_dry_run) {
@@ -7175,6 +7177,10 @@ sbx_try_readSeq_runtime(int ac, char **av) {
       out_prate= safe_cfg.prate;
    if (safe_cfg.have_Q)
       opt_Q= 1;
+   if (safe_cfg.have_G)
+      opt_G= 1;
+   if (safe_cfg.have_P)
+      opt_P= 1;
    if (safe_cfg.have_L)
       opt_L= safe_cfg.L_ms;
    if (safe_cfg.have_N)
