@@ -374,7 +374,7 @@ fn load_development_examples() -> Result<Vec<FileDocument>, String> {
     .map_err(|err| format!("failed to resolve repo root: {}", err))?;
 
   let paths = [
-    repo_root.join("examples/sbagenxlib/minimal-sbg-wave-custom.sbg"),
+    repo_root.join("examples/basics/prog-custom-envelope-binaural-demo.sbg"),
     repo_root.join("examples/basics/curve-expfit-solve-demo.sbgf"),
   ];
 

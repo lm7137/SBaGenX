@@ -1,0 +1,23 @@
+## Literal customNN envelope driving a binaural program.
+##
+## The custom00 samples are treated as a unipolar 0..1 envelope shape:
+##   - 0 really means silence
+##   - values are scaled only by the maximum sample
+##   - interpolation mode is selected with e=0..3
+##   - here we use smoothstep interpolation (e=2)
+##
+## Try:
+##   sbagenx -D examples/basics/prog-custom-envelope-binaural-demo.sbg
+##   sbagenx -S -L 00:06 examples/basics/prog-custom-envelope-binaural-demo.sbg
+
+custom00: e=2 0 0.1 0.85 1 1 0.85 0.1 0
+
+base: custom00:196+6/35
+drift: custom00:180+4/30
+alloff: -
+
+NOW base
++00:02:00 base ->
++00:03:00 drift
++00:05:00 drift ->
++00:06:00 alloff
