@@ -123,6 +123,45 @@ fn read_text_file(path: String) -> Result<FileDocument, String> {
 }
 
 #[tauri::command]
+fn load_development_examples() -> Result<Vec<FileDocument>, String> {
+  let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("../..")
+    .canonicalize()
+    .map_err(|err| format!("failed to resolve repo root: {}", err))?;
+
+  let paths = [
+    repo_root.join("examples/sbagenxlib/minimal-sbg-wave-custom.sbg"),
+    repo_root.join("examples/basics/curve-expfit-solve-demo.sbgf"),
+  ];
+
+  let mut docs = Vec::new();
+  for path_buf in paths {
+    if !path_buf.exists() {
+      continue;
+    }
+    let kind = match kind_from_path(&path_buf) {
+      Some(kind) => kind,
+      None => continue,
+    };
+    let content = fs::read_to_string(&path_buf)
+      .map_err(|err| format!("failed to read {}: {}", path_buf.display(), err))?;
+    let name = path_buf
+      .file_name()
+      .and_then(|name| name.to_str())
+      .ok_or_else(|| format!("failed to determine document name for {}", path_buf.display()))?
+      .to_string();
+    docs.push(FileDocument {
+      path: path_buf.to_string_lossy().into_owned(),
+      name,
+      kind: kind.to_string(),
+      content,
+    });
+  }
+
+  Ok(docs)
+}
+
+#[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
   fs::write(&path, content).map_err(|err| format!("failed to write {}: {}", path, err))
 }
@@ -206,6 +245,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       backend_status,
       read_text_file,
+      load_development_examples,
       write_text_file,
       validate_document,
       render_preview,

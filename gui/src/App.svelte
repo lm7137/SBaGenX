@@ -6,6 +6,7 @@
   import {
     backendStatus,
     exportDocument,
+    loadDevelopmentExamples,
     readTextFile,
     renderPreview,
     validateDocument,
@@ -58,6 +59,24 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     activeId = id
   }
 
+  function makeDocumentRecord(source: {
+    path: string | null
+    name: string
+    kind: DocumentKind
+    content: string
+  }): DocumentRecord {
+    return {
+      id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: source.name,
+      path: source.path,
+      kind: source.kind,
+      dirty: false,
+      content: source.content,
+      lines: source.content.split('\n'),
+      diagnostics: [],
+    }
+  }
+
   function upsertDocument(next: DocumentRecord) {
     const existingIndex = documents.findIndex((doc) => doc.id === next.id)
     if (existingIndex === -1) {
@@ -103,16 +122,18 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     for (const path of paths) {
       const loaded = await readTextFile(path)
       const existing = documents.find((doc) => doc.path === loaded.path)
-      const next: DocumentRecord = {
-        id: existing?.id ?? `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        name: loaded.name,
-        path: loaded.path,
-        kind: loaded.kind,
-        dirty: false,
-        content: loaded.content,
-        lines: loaded.content.split('\n'),
-        diagnostics: [],
-      }
+      const next: DocumentRecord = existing
+        ? {
+            ...existing,
+            name: loaded.name,
+            path: loaded.path,
+            kind: loaded.kind,
+            dirty: false,
+            content: loaded.content,
+            lines: loaded.content.split('\n'),
+            diagnostics: [],
+          }
+        : makeDocumentRecord(loaded)
       upsertDocument(next)
       activeId = next.id
       queueValidation(next.id)
@@ -180,8 +201,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         id: `diag-${doc.id}-bridge`,
         documentId: doc.id,
         severity: 'error',
-        line: 1,
-        column: 1,
         message,
       }
       updateDocument(doc.id, { diagnostics: [diagnostic] })
@@ -271,6 +290,19 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
   onMount(async () => {
     status = await backendStatus()
+    const untouchedStarterTabs = documents.every((doc) => !doc.path && !doc.dirty)
+    if (untouchedStarterTabs) {
+      try {
+        const examples = await loadDevelopmentExamples()
+        if (examples.length > 0) {
+          documents = examples.map((example) => makeDocumentRecord(example))
+          activeId = documents[0].id
+          transportMessage = 'loaded development examples'
+        }
+      } catch (error) {
+        transportMessage = error instanceof Error ? error.message : String(error)
+      }
+    }
     for (const doc of documents) {
       void runValidation(doc.id)
     }

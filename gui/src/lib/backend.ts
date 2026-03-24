@@ -26,6 +26,10 @@ export async function readTextFile(path: string): Promise<FileDocument> {
   return invoke<FileDocument>('read_text_file', { path })
 }
 
+export async function loadDevelopmentExamples(): Promise<FileDocument[]> {
+  return invoke<FileDocument[]>('load_development_examples')
+}
+
 export async function writeTextFile(path: string, content: string): Promise<void> {
   await invoke('write_text_file', { path, content })
 }
@@ -36,9 +40,11 @@ export async function validateDocument(
   sourceName?: string | null,
 ): Promise<ValidationResult> {
   return invoke<ValidationResult>('validate_document', {
-    kind,
-    text,
-    sourceName,
+    args: {
+      kind,
+      text,
+      sourceName,
+    },
   })
 }
 
@@ -47,9 +53,11 @@ export async function renderPreview(
   sourceName?: string | null,
 ): Promise<PreviewResult> {
   return invoke<PreviewResult>('render_preview', {
-    kind: 'sbg',
-    text,
-    sourceName,
+    args: {
+      kind: 'sbg',
+      text,
+      sourceName,
+    },
   })
 }
 
@@ -59,9 +67,11 @@ export async function exportDocument(
   sourceName?: string | null,
 ): Promise<ExportResult> {
   return invoke<ExportResult>('export_document', {
-    kind: 'sbg',
-    text,
-    outputPath,
-    sourceName,
+    args: {
+      kind: 'sbg',
+      text,
+      outputPath,
+      sourceName,
+    },
   })
 }
