@@ -35,6 +35,13 @@ struct RecentFileEntry {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct SessionDocumentState {
+  documents: Vec<FileDocument>,
+  active_path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ValidationDiagnostic {
   id: String,
   document_id: String,
@@ -143,6 +150,13 @@ struct ExportDocumentArgs {
   output_path: String,
 }
 
+#[derive(Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SessionStore {
+  paths: Vec<String>,
+  active_path: Option<String>,
+}
+
 fn recent_files_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
   let dir = app
     .path()
@@ -151,6 +165,16 @@ fn recent_files_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
   fs::create_dir_all(&dir)
     .map_err(|err| format!("failed to create app config directory {}: {}", dir.display(), err))?;
   Ok(dir.join("recent-files.json"))
+}
+
+fn session_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  let dir = app
+    .path()
+    .app_config_dir()
+    .map_err(|err| format!("failed to resolve app config directory: {}", err))?;
+  fs::create_dir_all(&dir)
+    .map_err(|err| format!("failed to create app config directory {}: {}", dir.display(), err))?;
+  Ok(dir.join("session-state.json"))
 }
 
 fn load_recent_paths(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
@@ -170,6 +194,25 @@ fn save_recent_paths(app: &tauri::AppHandle, paths: &[String]) -> Result<(), Str
     .map_err(|err| format!("failed to encode recent file store: {}", err))?;
   fs::write(&path, raw)
     .map_err(|err| format!("failed to write recent file store {}: {}", path.display(), err))
+}
+
+fn load_session_store(app: &tauri::AppHandle) -> Result<SessionStore, String> {
+  let path = session_store_path(app)?;
+  if !path.exists() {
+    return Ok(SessionStore::default());
+  }
+  let raw = fs::read_to_string(&path)
+    .map_err(|err| format!("failed to read session store {}: {}", path.display(), err))?;
+  serde_json::from_str::<SessionStore>(&raw)
+    .map_err(|err| format!("failed to parse session store {}: {}", path.display(), err))
+}
+
+fn save_session_store(app: &tauri::AppHandle, store: &SessionStore) -> Result<(), String> {
+  let path = session_store_path(app)?;
+  let raw = serde_json::to_string_pretty(store)
+    .map_err(|err| format!("failed to encode session store: {}", err))?;
+  fs::write(&path, raw)
+    .map_err(|err| format!("failed to write session store {}: {}", path.display(), err))
 }
 
 fn remember_recent_path(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
@@ -254,6 +297,73 @@ fn load_recent_files(app: tauri::AppHandle) -> Result<Vec<RecentFileEntry>, Stri
   }
 
   Ok(entries)
+}
+
+#[tauri::command]
+fn load_session_documents(app: tauri::AppHandle) -> Result<SessionDocumentState, String> {
+  let SessionStore {
+    paths,
+    active_path: stored_active_path,
+  } = load_session_store(&app)?;
+  let original_len = paths.len();
+  let mut documents = Vec::new();
+  let mut normalized_paths = Vec::new();
+
+  for path in paths {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+      continue;
+    }
+    let kind = match kind_from_path(&path_buf) {
+      Some(kind) => kind,
+      None => continue,
+    };
+    let content = match fs::read_to_string(&path_buf) {
+      Ok(content) => content,
+      Err(_) => continue,
+    };
+    let name = match path_buf.file_name().and_then(|name| name.to_str()) {
+      Some(name) => name.to_string(),
+      None => continue,
+    };
+    normalized_paths.push(path.clone());
+    documents.push(FileDocument {
+      path,
+      name,
+      kind: kind.to_string(),
+      content,
+    });
+  }
+
+  let active_path = stored_active_path
+    .clone()
+    .filter(|path| normalized_paths.iter().any(|item| item == path));
+
+  if documents.len() != original_len {
+    save_session_store(
+      &app,
+      &SessionStore {
+        paths: normalized_paths.clone(),
+        active_path: stored_active_path
+          .filter(|path| normalized_paths.iter().any(|item| item == path)),
+      },
+    )?;
+  }
+
+  Ok(SessionDocumentState {
+    documents,
+    active_path,
+  })
+}
+
+#[tauri::command]
+fn save_session_state(
+  app: tauri::AppHandle,
+  paths: Vec<String>,
+  active_path: Option<String>,
+) -> Result<(), String> {
+  let store = SessionStore { paths, active_path };
+  save_session_store(&app, &store)
 }
 
 #[tauri::command]
@@ -438,7 +548,9 @@ pub fn run() {
       backend_status,
       read_text_file,
       load_recent_files,
+      load_session_documents,
       load_development_examples,
+      save_session_state,
       write_text_file,
       validate_document,
       render_preview,

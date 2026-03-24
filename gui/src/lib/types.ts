@@ -44,6 +44,11 @@ export interface RecentFileEntry {
   kind: DocumentKind
 }
 
+export interface SessionDocumentState {
+  documents: FileDocument[]
+  activePath: string | null
+}
+
 export interface ValidationResult {
   valid: boolean
   diagnostics: ValidationDiagnostic[]

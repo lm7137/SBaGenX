@@ -7,6 +7,7 @@ import type {
   FileDocument,
   PreviewResult,
   RecentFileEntry,
+  SessionDocumentState,
   ValidationResult,
 } from './types'
 
@@ -35,6 +36,20 @@ export async function loadRecentFiles(): Promise<RecentFileEntry[]> {
 
 export async function loadDevelopmentExamples(): Promise<FileDocument[]> {
   return invoke<FileDocument[]>('load_development_examples')
+}
+
+export async function loadSessionDocuments(): Promise<SessionDocumentState> {
+  return invoke<SessionDocumentState>('load_session_documents')
+}
+
+export async function saveSessionState(
+  paths: string[],
+  activePath?: string | null,
+): Promise<void> {
+  await invoke('save_session_state', {
+    paths,
+    activePath,
+  })
 }
 
 export async function writeTextFile(path: string, content: string): Promise<void> {

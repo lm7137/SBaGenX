@@ -11,8 +11,10 @@
     inspectCurveInfo,
     loadDevelopmentExamples,
     loadRecentFiles,
+    loadSessionDocuments,
     readTextFile,
     renderPreview,
+    saveSessionState,
     sampleBeatPreview,
     validateDocument,
     writeTextFile,
@@ -73,6 +75,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   function activateDocument(id: string) {
     activeId = id
     selectedDiagnosticId = null
+    void persistSessionState()
     tick().then(() => editorView?.focusEditor())
   }
 
@@ -165,6 +168,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       queueValidation(next.id)
     }
     await refreshRecentFiles()
+    await persistSessionState()
   }
 
   async function saveActiveDocument() {
@@ -205,6 +209,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     })
     await refreshRecentFiles()
     transportMessage = `saved ${path.split(/[\\/]/).pop() ?? path}`
+    await persistSessionState()
   }
 
   async function refreshRecentFiles() {
@@ -213,6 +218,14 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     } catch {
       recentFiles = []
     }
+  }
+
+  async function persistSessionState() {
+    const paths = documents
+      .map((doc) => doc.path)
+      .filter((path): path is string => !!path)
+    const activePath = documents.find((doc) => doc.id === activeId)?.path ?? null
+    await saveSessionState(paths, activePath)
   }
 
   async function openRecentFile(path: string) {
@@ -239,6 +252,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       activeId = next.id
       queueValidation(next.id)
       await refreshRecentFiles()
+      await persistSessionState()
     } catch (error) {
       transportMessage = error instanceof Error ? error.message : String(error)
       await refreshRecentFiles()
@@ -251,6 +265,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     activeId = doc.id
     selectedDiagnosticId = null
     queueValidation(doc.id)
+    void persistSessionState()
     tick().then(() => editorView?.focusEditor())
   }
 
@@ -284,6 +299,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       transportMessage = `closed ${doc.name}`
       selectedDiagnosticId = null
       queueValidation(fallback.id)
+      await persistSessionState()
       tick().then(() => editorView?.focusEditor())
       return
     }
@@ -296,6 +312,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       tick().then(() => editorView?.focusEditor())
     }
     transportMessage = `closed ${doc.name}`
+    await persistSessionState()
   }
 
   function handleEditorChange(nextValue: string) {
@@ -532,11 +549,20 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       const untouchedStarterTabs = documents.every((doc) => !doc.path && !doc.dirty)
       if (untouchedStarterTabs) {
         try {
-          const examples = await loadDevelopmentExamples()
-          if (examples.length > 0) {
-            documents = examples.map((example) => makeDocumentRecord(example))
-            activeId = documents[0].id
-            transportMessage = 'loaded development examples'
+          const session = await loadSessionDocuments()
+          if (session.documents.length > 0) {
+            documents = session.documents.map((doc) => makeDocumentRecord(doc))
+            activeId =
+              documents.find((doc) => doc.path === session.activePath)?.id ??
+              documents[0].id
+            transportMessage = 'restored previous session'
+          } else {
+            const examples = await loadDevelopmentExamples()
+            if (examples.length > 0) {
+              documents = examples.map((example) => makeDocumentRecord(example))
+              activeId = documents[0].id
+              transportMessage = 'loaded development examples'
+            }
           }
         } catch (error) {
           transportMessage = error instanceof Error ? error.message : String(error)
