@@ -6,6 +6,7 @@ import type {
   ExportResult,
   FileDocument,
   PreviewResult,
+  RecentFileEntry,
   ValidationResult,
 } from './types'
 
@@ -26,6 +27,10 @@ export async function backendStatus(): Promise<BackendStatus> {
 
 export async function readTextFile(path: string): Promise<FileDocument> {
   return invoke<FileDocument>('read_text_file', { path })
+}
+
+export async function loadRecentFiles(): Promise<RecentFileEntry[]> {
+  return invoke<RecentFileEntry[]>('load_recent_files')
 }
 
 export async function loadDevelopmentExamples(): Promise<FileDocument[]> {

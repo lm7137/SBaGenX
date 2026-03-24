@@ -38,6 +38,12 @@ export interface FileDocument {
   content: string
 }
 
+export interface RecentFileEntry {
+  path: string
+  name: string
+  kind: DocumentKind
+}
+
 export interface ValidationResult {
   valid: boolean
   diagnostics: ValidationDiagnostic[]

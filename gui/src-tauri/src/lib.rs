@@ -3,6 +3,7 @@ mod sbagenxlib;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tauri::Manager;
 
 use crate::sbagenxlib::{kind_from_path, normalize_source_name};
 
@@ -22,6 +23,14 @@ struct FileDocument {
   name: String,
   kind: String,
   content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentFileEntry {
+  path: String,
+  name: String,
+  kind: String,
 }
 
 #[derive(Serialize)]
@@ -134,6 +143,50 @@ struct ExportDocumentArgs {
   output_path: String,
 }
 
+fn recent_files_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  let dir = app
+    .path()
+    .app_config_dir()
+    .map_err(|err| format!("failed to resolve app config directory: {}", err))?;
+  fs::create_dir_all(&dir)
+    .map_err(|err| format!("failed to create app config directory {}: {}", dir.display(), err))?;
+  Ok(dir.join("recent-files.json"))
+}
+
+fn load_recent_paths(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
+  let path = recent_files_store_path(app)?;
+  if !path.exists() {
+    return Ok(Vec::new());
+  }
+  let raw = fs::read_to_string(&path)
+    .map_err(|err| format!("failed to read recent file store {}: {}", path.display(), err))?;
+  serde_json::from_str::<Vec<String>>(&raw)
+    .map_err(|err| format!("failed to parse recent file store {}: {}", path.display(), err))
+}
+
+fn save_recent_paths(app: &tauri::AppHandle, paths: &[String]) -> Result<(), String> {
+  let path = recent_files_store_path(app)?;
+  let raw = serde_json::to_string_pretty(paths)
+    .map_err(|err| format!("failed to encode recent file store: {}", err))?;
+  fs::write(&path, raw)
+    .map_err(|err| format!("failed to write recent file store {}: {}", path.display(), err))
+}
+
+fn remember_recent_path(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
+  let path_buf = PathBuf::from(path);
+  if kind_from_path(&path_buf).is_none() {
+    return Ok(());
+  }
+  let canonical = path_buf.to_string_lossy().into_owned();
+  let mut recent = load_recent_paths(app).unwrap_or_default();
+  recent.retain(|item| item != &canonical);
+  recent.insert(0, canonical);
+  if recent.len() > 12 {
+    recent.truncate(12);
+  }
+  save_recent_paths(app, &recent)
+}
+
 #[tauri::command]
 fn backend_status() -> BackendStatus {
   let engine = sbagenxlib::backend_status()
@@ -148,7 +201,7 @@ fn backend_status() -> BackendStatus {
 }
 
 #[tauri::command]
-fn read_text_file(path: String) -> Result<FileDocument, String> {
+fn read_text_file(app: tauri::AppHandle, path: String) -> Result<FileDocument, String> {
   let path_buf = PathBuf::from(&path);
   let kind = kind_from_path(&path_buf)
     .ok_or_else(|| "only .sbg and .sbgf files are supported in the current GUI scaffold".to_string())?;
@@ -159,12 +212,48 @@ fn read_text_file(path: String) -> Result<FileDocument, String> {
     .and_then(|name| name.to_str())
     .ok_or_else(|| "failed to determine document name".to_string())?
     .to_string();
+  remember_recent_path(&app, &path)?;
   Ok(FileDocument {
     path,
     name,
     kind: kind.to_string(),
     content,
   })
+}
+
+#[tauri::command]
+fn load_recent_files(app: tauri::AppHandle) -> Result<Vec<RecentFileEntry>, String> {
+  let recent = load_recent_paths(&app)?;
+  let original_len = recent.len();
+  let mut entries = Vec::new();
+  let mut normalized = Vec::new();
+
+  for path in recent {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+      continue;
+    }
+    let kind = match kind_from_path(&path_buf) {
+      Some(kind) => kind,
+      None => continue,
+    };
+    let name = match path_buf.file_name().and_then(|name| name.to_str()) {
+      Some(name) => name.to_string(),
+      None => continue,
+    };
+    normalized.push(path.clone());
+    entries.push(RecentFileEntry {
+      path,
+      name,
+      kind: kind.to_string(),
+    });
+  }
+
+  if entries.len() != original_len {
+    save_recent_paths(&app, &normalized)?;
+  }
+
+  Ok(entries)
 }
 
 #[tauri::command]
@@ -207,8 +296,9 @@ fn load_development_examples() -> Result<Vec<FileDocument>, String> {
 }
 
 #[tauri::command]
-fn write_text_file(path: String, content: String) -> Result<(), String> {
-  fs::write(&path, content).map_err(|err| format!("failed to write {}: {}", path, err))
+fn write_text_file(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
+  fs::write(&path, content).map_err(|err| format!("failed to write {}: {}", path, err))?;
+  remember_recent_path(&app, &path)
 }
 
 #[tauri::command]
@@ -347,6 +437,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       backend_status,
       read_text_file,
+      load_recent_files,
       load_development_examples,
       write_text_file,
       validate_document,

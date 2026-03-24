@@ -10,6 +10,7 @@
     exportDocument,
     inspectCurveInfo,
     loadDevelopmentExamples,
+    loadRecentFiles,
     readTextFile,
     renderPreview,
     sampleBeatPreview,
@@ -19,6 +20,7 @@
   import type {
     DocumentKind,
     DocumentRecord,
+    RecentFileEntry,
     ValidationDiagnostic,
   } from './lib/types'
 
@@ -32,6 +34,7 @@
   let isPlaying = false
   let audioSource: string | null = null
   let audioElement: HTMLAudioElement | null = null
+  let recentFiles: RecentFileEntry[] = []
   let previewLoadingId: string | null = null
   let curveInfoLoadingId: string | null = null
   let editorView: {
@@ -161,30 +164,85 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       activeId = next.id
       queueValidation(next.id)
     }
+    await refreshRecentFiles()
   }
 
   async function saveActiveDocument() {
     if (!activeDocument) return
     let path = activeDocument.path
     if (!path) {
-      path = await save({
-        defaultPath: activeDocument.name,
-        filters: [
-          {
-            name: activeDocument.kind === 'sbg' ? 'Sequence files' : 'Curve files',
-            extensions: [activeDocument.kind],
-          },
-        ],
-      })
+      path = await promptSavePath(activeDocument)
       if (!path) return
     }
-    await writeTextFile(path, activeDocument.content)
-    updateDocument(activeDocument.id, {
+    await writeDocumentToPath(activeDocument.id, path, activeDocument.content)
+  }
+
+  async function saveActiveDocumentAs() {
+    if (!activeDocument) return
+    const path = await promptSavePath(activeDocument)
+    if (!path) return
+    await writeDocumentToPath(activeDocument.id, path, activeDocument.content)
+  }
+
+  async function promptSavePath(doc: DocumentRecord) {
+    return save({
+      defaultPath: doc.path ?? doc.name,
+      filters: [
+        {
+          name: doc.kind === 'sbg' ? 'Sequence files' : 'Curve files',
+          extensions: [doc.kind],
+        },
+      ],
+    })
+  }
+
+  async function writeDocumentToPath(id: string, path: string, content: string) {
+    await writeTextFile(path, content)
+    updateDocument(id, {
       path,
-      name: path.split(/[\\/]/).pop() ?? activeDocument.name,
+      name: path.split(/[\\/]/).pop() ?? path,
       dirty: false,
     })
+    await refreshRecentFiles()
     transportMessage = `saved ${path.split(/[\\/]/).pop() ?? path}`
+  }
+
+  async function refreshRecentFiles() {
+    try {
+      recentFiles = await loadRecentFiles()
+    } catch {
+      recentFiles = []
+    }
+  }
+
+  async function openRecentFile(path: string) {
+    try {
+      const loaded = await readTextFile(path)
+      const existing = documents.find((doc) => doc.path === loaded.path)
+      const next = existing
+        ? {
+            ...existing,
+            name: loaded.name,
+            path: loaded.path,
+            kind: loaded.kind,
+            dirty: false,
+            content: loaded.content,
+            lines: loaded.content.split('\n'),
+            diagnostics: [],
+            beatPreview: null,
+            beatPreviewError: null,
+            curveInfo: null,
+            curveInfoError: null,
+          }
+        : makeDocumentRecord(loaded)
+      upsertDocument(next)
+      activeId = next.id
+      queueValidation(next.id)
+      await refreshRecentFiles()
+    } catch (error) {
+      transportMessage = error instanceof Error ? error.message : String(error)
+      await refreshRecentFiles()
+    }
   }
 
   function createDocument(kind: DocumentKind) {
@@ -418,7 +476,11 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
     if (key === 's') {
       event.preventDefault()
-      void saveActiveDocument()
+      if (event.shiftKey) {
+        void saveActiveDocumentAs()
+      } else {
+        void saveActiveDocument()
+      }
       return
     }
 
@@ -480,6 +542,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           transportMessage = error instanceof Error ? error.message : String(error)
         }
       }
+      await refreshRecentFiles()
       for (const doc of documents) {
         void runValidation(doc.id)
       }
@@ -524,6 +587,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     <div class="toolbar">
       <button class="button ghost" on:click={openDocuments}>Open</button>
       <button class="button ghost" on:click={saveActiveDocument}>Save</button>
+      <button class="button ghost" on:click={saveActiveDocumentAs}>Save As</button>
       <button class="button ghost" on:click={() => createDocument('sbg')}>New `.sbg`</button>
       <button class="button ghost" on:click={() => createDocument('sbgf')}>New `.sbgf`</button>
       <span class="toolbar-divider"></span>
@@ -567,10 +631,24 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       </div>
 
       <div class="panel-footer">
-        <p class="panel-note">
-          Keep `.sbg` and `.sbgf` side by side here and switch from the
-          document list.
-        </p>
+        <div class="recent-block">
+          <p class="panel-title">Recent Files</p>
+          {#if recentFiles.length === 0}
+            <p class="panel-note">
+              Recent `.sbg` and `.sbgf` files will appear here after you open
+              or save them.
+            </p>
+          {:else}
+            <div class="recent-list">
+              {#each recentFiles as entry}
+                <button class="recent-button" on:click={() => void openRecentFile(entry.path)}>
+                  <span class="recent-name">{entry.name}</span>
+                  <span class="recent-type">{entry.kind}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
     </aside>
 
