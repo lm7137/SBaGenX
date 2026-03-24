@@ -22,17 +22,19 @@
     monacoRef.editor.setModelMarkers(
       model,
       'sbagenx',
-      diagnostics.map((diag) => ({
-        severity:
-          diag.severity === 'error'
-            ? monacoRef!.MarkerSeverity.Error
-            : monacoRef!.MarkerSeverity.Warning,
-        message: diag.message,
-        startLineNumber: diag.line || 1,
-        startColumn: diag.column || 1,
-        endLineNumber: diag.line || 1,
-        endColumn: (diag.column || 1) + 1,
-      })),
+      diagnostics
+        .filter((diag) => typeof diag.line === 'number' && diag.line > 0)
+        .map((diag) => ({
+          severity:
+            diag.severity === 'error'
+              ? monacoRef!.MarkerSeverity.Error
+              : monacoRef!.MarkerSeverity.Warning,
+          message: diag.message,
+          startLineNumber: diag.line || 1,
+          startColumn: diag.column || 1,
+          endLineNumber: diag.line || 1,
+          endColumn: (diag.column || 1) + 1,
+        })),
     )
   }
 

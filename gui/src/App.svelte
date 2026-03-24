@@ -455,7 +455,13 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           <article class="diagnostic">
             <div class="diagnostic-head">
               <span class:warning={item.severity === 'warning'} class="severity">{item.severity}</span>
-              <span class="location">L{item.line}{#if item.column}:C{item.column}{/if}</span>
+              <span class="location">
+                {#if item.line}
+                  L{item.line}{#if item.column}:C{item.column}{/if}
+                {:else}
+                  general
+                {/if}
+              </span>
             </div>
             <p class="diagnostic-message">{item.message}</p>
           </article>

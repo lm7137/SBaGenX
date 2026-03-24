@@ -15,7 +15,7 @@ export interface ValidationDiagnostic {
   id: string
   documentId: string
   severity: 'error' | 'warning'
-  line: number
+  line?: number
   column?: number
   message: string
 }

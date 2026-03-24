@@ -30,7 +30,7 @@ struct ValidationDiagnostic {
   id: String,
   document_id: String,
   severity: String,
-  line: u32,
+  line: Option<u32>,
   column: Option<u32>,
   message: String,
 }
@@ -143,7 +143,7 @@ fn validate_document(args: ValidateDocumentArgs) -> Result<ValidationResult, Str
       id: format!("diag-{}-{}", args.kind, index),
       document_id: source_name.clone(),
       severity: diag.severity.to_string(),
-      line: diag.line.unwrap_or(1),
+      line: diag.line,
       column: diag.column,
       message: diag.message,
     })
