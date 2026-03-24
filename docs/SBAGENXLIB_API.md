@@ -245,6 +245,9 @@ host-side exporters and GUI tooling even though the render source remains
 - `sbx_free_safe_seqfile_preamble(SbxSafeSeqfilePreamble *cfg)`
 - `sbx_prepare_safe_seq_text(const char *text, char **out_text, SbxSafeSeqfilePreamble *cfg, char *errbuf, size_t errbuf_sz)`
 - `sbx_prepare_safe_seqfile_text(const char *path, char **out_text, SbxSafeSeqfilePreamble *cfg, char *errbuf, size_t errbuf_sz)`
+- `sbx_validate_sbg_text(const char *text, const char *source_name, SbxDiagnostic **out_diags, size_t *out_count)`
+- `sbx_validate_sbgf_text(const char *text, const char *source_name, SbxDiagnostic **out_diags, size_t *out_count)`
+- `sbx_free_diagnostics(SbxDiagnostic *diags)`
 - `sbx_run_option_only_seq_wrapper_text(const char *text, SbxSeqOptionLineCallback cb, void *user, char *errbuf, size_t errbuf_sz)`
 - `sbx_run_option_only_seq_wrapper_file(const char *path, SbxSeqOptionLineCallback cb, void *user, char *errbuf, size_t errbuf_sz)`
 - `sbx_default_immediate_parse_config(SbxImmediateParseConfig *cfg)`
@@ -266,6 +269,7 @@ This is the first library-owned export/container layer. It covers:
 - FLAC via libsndfile
 - MP3 via libmp3lame
 - safe `-SE` preamble stripping/parsing for native sequence loading
+- structured validation diagnostics for `.sbg` / `.sbgf` editor integrations
 - classification and iteration of historical option-only wrapper files, while
   leaving actual option semantics in the host callback
 - immediate token-list classification/normalization for `-i` frontends, while
@@ -281,6 +285,13 @@ This is the first library-owned export/container layer. It covers:
 
 The current CLI still owns live device output, but raw/WAV/OGG/FLAC/MP3 file
 writing no longer needs to live in `sbagenx.c`.
+
+`SbxDiagnostic` is a fixed-size public struct intended for editor/GUI use. The
+first pass is line-based: `line` / `column` are populated where the native
+loader can recover a source location from the parser error text, while
+`end_line` / `end_column` currently describe a minimal one-character span.
+Validation success returns `SBX_OK` either way; invalid content is represented
+by a non-empty diagnostics array rather than the return code.
 
 5) Curve program API
 

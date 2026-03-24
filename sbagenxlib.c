@@ -385,6 +385,19 @@ static int sbx_audio_writer_write_wav_header(FILE *fp,
                                              int pcm_bits,
                                              uint32_t data_bytes);
 static void sbx_set_api_error(char *errbuf, size_t errbuf_sz, const char *fmt, ...);
+static void sbx_prefix_line_error(char *errbuf, size_t errbuf_sz, unsigned int line_no);
+static void sbx_diag_extract_location(const char *message,
+                                      uint32_t *line,
+                                      uint32_t *column);
+static void sbx_diag_fill(SbxDiagnostic *diag,
+                          int severity,
+                          const char *code,
+                          const char *message);
+static int sbx_diag_alloc_one(SbxDiagnostic **out_diags,
+                              size_t *out_count,
+                              int severity,
+                              const char *code,
+                              const char *message);
 static int sbx_parse_safe_seqfile_option_line_lib(const char *line,
                                                   SbxSafeSeqfilePreamble *out_cfg,
                                                   char *errbuf,
@@ -679,6 +692,122 @@ sbx_set_api_error(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
   va_start(ap, fmt);
   vsnprintf(errbuf, errbuf_sz, fmt, ap);
   va_end(ap);
+}
+
+static void
+sbx_prefix_line_error(char *errbuf, size_t errbuf_sz, unsigned int line_no) {
+  char tmp[512];
+
+  if (!errbuf || !errbuf_sz || !errbuf[0]) return;
+  if (0 == strncmp(errbuf, "line ", 5)) return;
+  snprintf(tmp, sizeof(tmp), "line %u: %s", line_no, errbuf);
+  snprintf(errbuf, errbuf_sz, "%s", tmp);
+}
+
+static void
+sbx_diag_extract_location(const char *message,
+                          uint32_t *line,
+                          uint32_t *column) {
+  const unsigned char *bytes;
+  size_t i, len;
+
+  if (line) *line = 0;
+  if (column) *column = 0;
+  if (!message || !*message) return;
+
+  {
+    const char *pos = strstr(message, "line ");
+    if (pos) {
+      const char *rest = pos + 5;
+      char digits[32];
+      size_t d = 0;
+      while (rest[d] && isdigit((unsigned char)rest[d]) && d + 1 < sizeof(digits)) {
+        digits[d] = rest[d];
+        d++;
+      }
+      digits[d] = 0;
+      if (d > 0) {
+        if (line) *line = (uint32_t)strtoul(digits, 0, 10);
+        return;
+      }
+    }
+  }
+
+  bytes = (const unsigned char *)message;
+  len = strlen(message);
+  for (i = 0; i < len; i++) {
+    size_t j, start_line, k, start_col;
+    char digits[32];
+
+    if (bytes[i] != ':')
+      continue;
+    j = i + 1;
+    start_line = j;
+    while (j < len && isdigit(bytes[j]))
+      j++;
+    if (j == start_line || j >= len || bytes[j] != ':')
+      continue;
+    if ((j - start_line) >= sizeof(digits))
+      continue;
+    memcpy(digits, message + start_line, j - start_line);
+    digits[j - start_line] = 0;
+    if (line) *line = (uint32_t)strtoul(digits, 0, 10);
+
+    k = j + 1;
+    start_col = k;
+    while (k < len && isdigit(bytes[k]))
+      k++;
+    if (k > start_col && k < len && bytes[k] == ':') {
+      if ((k - start_col) < sizeof(digits)) {
+        memcpy(digits, message + start_col, k - start_col);
+        digits[k - start_col] = 0;
+        if (column) *column = (uint32_t)strtoul(digits, 0, 10);
+      }
+    }
+    return;
+  }
+}
+
+static void
+sbx_diag_fill(SbxDiagnostic *diag,
+              int severity,
+              const char *code,
+              const char *message) {
+  uint32_t line = 0, column = 0;
+
+  if (!diag) return;
+  memset(diag, 0, sizeof(*diag));
+  diag->severity = severity;
+  if (code)
+    snprintf(diag->code, sizeof(diag->code), "%s", code);
+  if (message)
+    snprintf(diag->message, sizeof(diag->message), "%s", message);
+  sbx_diag_extract_location(diag->message, &line, &column);
+  diag->line = line;
+  diag->column = column;
+  diag->end_line = line;
+  diag->end_column = column ? (column + 1U) : 0U;
+}
+
+static int
+sbx_diag_alloc_one(SbxDiagnostic **out_diags,
+                   size_t *out_count,
+                   int severity,
+                   const char *code,
+                   const char *message) {
+  SbxDiagnostic *diags;
+
+  if (!out_diags || !out_count)
+    return SBX_EINVAL;
+  *out_diags = 0;
+  *out_count = 0;
+  diags = (SbxDiagnostic *)calloc(1, sizeof(*diags));
+  if (!diags)
+    return SBX_ENOMEM;
+  sbx_diag_fill(diags, severity, code, message);
+  *out_diags = diags;
+  *out_count = 1;
+  return SBX_OK;
 }
 
 #if defined(_WIN32) || defined(T_MINGW) || defined(T_MSVC)
@@ -2343,6 +2472,7 @@ sbx_prepare_safe_seq_text(const char *text,
                           char *errbuf,
                           size_t errbuf_sz) {
   char *work, *line;
+  unsigned int line_no = 1;
 
   if (errbuf && errbuf_sz) errbuf[0] = 0;
   if (!text || !out_text || !out_cfg) {
@@ -2385,10 +2515,12 @@ sbx_prepare_safe_seq_text(const char *text,
         (*trim == '/' && trim[1] == '/')) {
       if (saved) *line_nl = saved;
       line = next;
+      line_no++;
       continue;
     }
     if (*trim == '-') {
       if (!sbx_parse_safe_seqfile_option_line_lib(trim, out_cfg, errbuf, errbuf_sz)) {
+        sbx_prefix_line_error(errbuf, errbuf_sz, line_no);
         if (saved) *line_nl = saved;
         free(work);
         sbx_free_safe_seqfile_preamble(out_cfg);
@@ -2398,6 +2530,7 @@ sbx_prepare_safe_seq_text(const char *text,
       memset(line, ' ', (size_t)(line_end - line));
       if (saved) *line_nl = saved;
       line = next;
+      line_no++;
       continue;
     }
     if (saved) *line_nl = saved;
@@ -2434,6 +2567,171 @@ sbx_prepare_safe_seqfile_text(const char *path,
   rc = sbx_prepare_safe_seq_text(text, out_text, out_cfg, errbuf, errbuf_sz);
   free(text);
   return rc;
+}
+
+int
+sbx_validate_sbg_text(const char *text,
+                      const char *source_name,
+                      SbxDiagnostic **out_diags,
+                      size_t *out_count) {
+  char *prepared = 0;
+  char errbuf[512];
+  SbxSafeSeqfilePreamble cfg;
+  SbxEngineConfig eng_cfg;
+  SbxContext *ctx = 0;
+  int rc;
+
+  if (out_diags) *out_diags = 0;
+  if (out_count) *out_count = 0;
+  if (!text || !out_diags || !out_count)
+    return SBX_EINVAL;
+  (void)source_name;
+
+  errbuf[0] = 0;
+  sbx_default_safe_seqfile_preamble(&cfg);
+  rc = sbx_prepare_safe_seq_text(text, &prepared, &cfg, errbuf, sizeof(errbuf));
+  if (rc != SBX_OK) {
+    sbx_free_safe_seqfile_preamble(&cfg);
+    if (rc == SBX_EINVAL)
+      return sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                                "sbg-parse", errbuf[0] ? errbuf : "SBaGenX validation failed");
+    return rc;
+  }
+
+  sbx_default_engine_config(&eng_cfg);
+  if (cfg.have_r)
+    eng_cfg.sample_rate = (double)cfg.rate;
+  ctx = sbx_context_create(&eng_cfg);
+  if (!ctx) {
+    sbx_free_safe_seqfile_preamble(&cfg);
+    free(prepared);
+    return SBX_ENOMEM;
+  }
+
+  if (cfg.have_w &&
+      SBX_OK != sbx_context_set_default_waveform(ctx, cfg.waveform)) {
+    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                            "sbg-parse", sbx_context_last_error(ctx));
+    sbx_context_destroy(ctx);
+    sbx_free_safe_seqfile_preamble(&cfg);
+    free(prepared);
+    return rc;
+  }
+  if (cfg.have_I &&
+      SBX_OK != sbx_context_set_sequence_iso_override(ctx, &cfg.iso_env)) {
+    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                            "sbg-parse", sbx_context_last_error(ctx));
+    sbx_context_destroy(ctx);
+    sbx_free_safe_seqfile_preamble(&cfg);
+    free(prepared);
+    return rc;
+  }
+  if (cfg.have_H &&
+      SBX_OK != sbx_context_set_sequence_mixam_override(ctx, &cfg.mixam_env)) {
+    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                            "sbg-parse", sbx_context_last_error(ctx));
+    sbx_context_destroy(ctx);
+    sbx_free_safe_seqfile_preamble(&cfg);
+    free(prepared);
+    return rc;
+  }
+  if (cfg.have_c &&
+      SBX_OK != sbx_context_set_amp_adjust(ctx, &cfg.amp_adjust)) {
+    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                            "sbg-parse", sbx_context_last_error(ctx));
+    sbx_context_destroy(ctx);
+    sbx_free_safe_seqfile_preamble(&cfg);
+    free(prepared);
+    return rc;
+  }
+
+  rc = sbx_context_load_sbg_timing_text(ctx, prepared, 0);
+  if (rc != SBX_OK)
+    rc = sbx_context_load_sequence_text(ctx, prepared, 0);
+  if (rc != SBX_OK) {
+    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                            "sbg-parse",
+                            sbx_context_last_error(ctx)[0] ?
+                              sbx_context_last_error(ctx) :
+                              "SBaGenX validation failed");
+    sbx_context_destroy(ctx);
+    sbx_free_safe_seqfile_preamble(&cfg);
+    free(prepared);
+    return rc;
+  }
+
+  if (cfg.have_A) {
+    SbxMixModSpec mix_mod = cfg.mix_mod;
+    double duration_sec = sbx_context_duration_sec(ctx);
+    mix_mod.active = 1;
+    if (mix_mod.main_len_sec <= 0.0)
+      mix_mod.main_len_sec = (duration_sec > 0.0) ? duration_sec : 1.0;
+    if (mix_mod.wake_len_sec < 0.0)
+      mix_mod.wake_len_sec = 0.0;
+    if (SBX_OK != sbx_context_set_mix_mod(ctx, &mix_mod)) {
+      rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                              "sbg-parse", sbx_context_last_error(ctx));
+      sbx_context_destroy(ctx);
+      sbx_free_safe_seqfile_preamble(&cfg);
+      free(prepared);
+      return rc;
+    }
+  }
+
+  sbx_context_destroy(ctx);
+  sbx_free_safe_seqfile_preamble(&cfg);
+  free(prepared);
+  return SBX_OK;
+}
+
+int
+sbx_validate_sbgf_text(const char *text,
+                       const char *source_name,
+                       SbxDiagnostic **out_diags,
+                       size_t *out_count) {
+  SbxCurveProgram *curve;
+  SbxCurveEvalConfig cfg;
+  int rc;
+
+  if (out_diags) *out_diags = 0;
+  if (out_count) *out_count = 0;
+  if (!text || !out_diags || !out_count)
+    return SBX_EINVAL;
+
+  curve = sbx_curve_create();
+  if (!curve)
+    return SBX_ENOMEM;
+  sbx_default_curve_eval_config(&cfg);
+
+  rc = sbx_curve_load_text(curve, text, source_name ? source_name : "<memory.sbgf>");
+  if (rc != SBX_OK) {
+    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                            "sbgf-parse",
+                            sbx_curve_last_error(curve)[0] ?
+                              sbx_curve_last_error(curve) :
+                              "SBaGenX curve validation failed");
+    sbx_curve_destroy(curve);
+    return rc;
+  }
+
+  rc = sbx_curve_prepare(curve, &cfg);
+  if (rc != SBX_OK) {
+    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
+                            "sbgf-prepare",
+                            sbx_curve_last_error(curve)[0] ?
+                              sbx_curve_last_error(curve) :
+                              "SBaGenX curve preparation failed");
+    sbx_curve_destroy(curve);
+    return rc;
+  }
+
+  sbx_curve_destroy(curve);
+  return SBX_OK;
+}
+
+void
+sbx_free_diagnostics(SbxDiagnostic *diags) {
+  free(diags);
 }
 
 static int

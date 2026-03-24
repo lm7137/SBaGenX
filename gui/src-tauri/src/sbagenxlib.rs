@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SBX_MAX_AMP_ADJUST_POINTS: usize = 16;
+const SBX_DIAG_CODE_MAX: usize = 32;
+const SBX_DIAG_MESSAGE_MAX: usize = 256;
 const SBX_OK: c_int = 0;
+const SBX_DIAG_ERROR: c_int = 1;
 const SBX_AUDIO_FILE_WAV: c_int = 1;
 const SBX_AUDIO_FILE_OGG: c_int = 2;
 const SBX_AUDIO_FILE_FLAC: c_int = 3;
@@ -79,22 +82,6 @@ struct SbxMixFxSpec {
 struct SbxEngineConfig {
   sample_rate: f64,
   channels: c_int,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct SbxCurveEvalConfig {
-  carrier_start_hz: f64,
-  carrier_end_hz: f64,
-  carrier_span_sec: f64,
-  beat_start_hz: f64,
-  beat_target_hz: f64,
-  beat_span_sec: f64,
-  hold_min: f64,
-  total_min: f64,
-  wake_min: f64,
-  beat_amp0_pct: f64,
-  mix_amp0_pct: f64,
 }
 
 #[repr(C)]
@@ -185,17 +172,22 @@ struct SbxContext {
 }
 
 #[repr(C)]
-struct SbxCurveProgram {
-  _private: [u8; 0],
-}
-
-#[repr(C)]
 struct SbxAudioWriter {
   _private: [u8; 0],
 }
 
+#[repr(C)]
+struct SbxDiagnosticRaw {
+  severity: c_int,
+  code: [c_char; SBX_DIAG_CODE_MAX],
+  line: u32,
+  column: u32,
+  end_line: u32,
+  end_column: u32,
+  message: [c_char; SBX_DIAG_MESSAGE_MAX],
+}
+
 type SbxDefaultEngineConfig = unsafe extern "C" fn(*mut SbxEngineConfig);
-type SbxDefaultCurveEvalConfig = unsafe extern "C" fn(*mut SbxCurveEvalConfig);
 type SbxDefaultPcmConvertState = unsafe extern "C" fn(*mut SbxPcmConvertState);
 type SbxDefaultAudioWriterConfig = unsafe extern "C" fn(*mut SbxAudioWriterConfig);
 type SbxDefaultSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
@@ -216,6 +208,11 @@ type SbxPrepareSafeSeqText = unsafe extern "C" fn(
   *mut c_char,
   usize,
 ) -> c_int;
+type SbxValidateSbgText =
+  unsafe extern "C" fn(*const c_char, *const c_char, *mut *mut SbxDiagnosticRaw, *mut usize) -> c_int;
+type SbxValidateSbgfText =
+  unsafe extern "C" fn(*const c_char, *const c_char, *mut *mut SbxDiagnosticRaw, *mut usize) -> c_int;
+type SbxFreeDiagnostics = unsafe extern "C" fn(*mut SbxDiagnosticRaw);
 type SbxContextLoadSbgTimingText =
   unsafe extern "C" fn(*mut SbxContext, *const c_char, c_int) -> c_int;
 type SbxContextLoadSequenceText =
@@ -225,12 +222,6 @@ type SbxContextDurationSec = unsafe extern "C" fn(*const SbxContext) -> f64;
 type SbxContextIsLooping = unsafe extern "C" fn(*const SbxContext) -> c_int;
 type SbxContextHasMixEffects = unsafe extern "C" fn(*const SbxContext) -> c_int;
 type SbxContextRenderF32 = unsafe extern "C" fn(*mut SbxContext, *mut f32, usize) -> c_int;
-type SbxCurveCreate = unsafe extern "C" fn() -> *mut SbxCurveProgram;
-type SbxCurveDestroy = unsafe extern "C" fn(*mut SbxCurveProgram);
-type SbxCurveLoadText =
-  unsafe extern "C" fn(*mut SbxCurveProgram, *const c_char, *const c_char) -> c_int;
-type SbxCurvePrepare = unsafe extern "C" fn(*mut SbxCurveProgram, *const SbxCurveEvalConfig) -> c_int;
-type SbxCurveLastError = unsafe extern "C" fn(*const SbxCurveProgram) -> *const c_char;
 type SbxVersion = unsafe extern "C" fn() -> *const c_char;
 type SbxApiVersion = unsafe extern "C" fn() -> c_int;
 type SbxAudioWriterCreatePath =
@@ -280,7 +271,6 @@ struct Api {
   sbx_version: SbxVersion,
   sbx_api_version: SbxApiVersion,
   sbx_default_engine_config: SbxDefaultEngineConfig,
-  sbx_default_curve_eval_config: SbxDefaultCurveEvalConfig,
   sbx_default_pcm_convert_state: SbxDefaultPcmConvertState,
   sbx_default_audio_writer_config: SbxDefaultAudioWriterConfig,
   sbx_default_safe_seqfile_preamble: SbxDefaultSafeSeqfilePreamble,
@@ -293,6 +283,9 @@ struct Api {
   sbx_context_set_amp_adjust: SbxContextSetAmpAdjust,
   sbx_context_set_mix_mod: SbxContextSetMixMod,
   sbx_prepare_safe_seq_text: SbxPrepareSafeSeqText,
+  sbx_validate_sbg_text: SbxValidateSbgText,
+  sbx_validate_sbgf_text: SbxValidateSbgfText,
+  sbx_free_diagnostics: SbxFreeDiagnostics,
   sbx_context_load_sbg_timing_text: SbxContextLoadSbgTimingText,
   sbx_context_load_sequence_text: SbxContextLoadSequenceText,
   sbx_context_last_error: SbxContextLastError,
@@ -300,11 +293,6 @@ struct Api {
   sbx_context_is_looping: SbxContextIsLooping,
   sbx_context_has_mix_effects: SbxContextHasMixEffects,
   sbx_context_render_f32: SbxContextRenderF32,
-  sbx_curve_create: SbxCurveCreate,
-  sbx_curve_destroy: SbxCurveDestroy,
-  sbx_curve_load_text: SbxCurveLoadText,
-  sbx_curve_prepare: SbxCurvePrepare,
-  sbx_curve_last_error: SbxCurveLastError,
   sbx_audio_writer_create_path: SbxAudioWriterCreatePath,
   sbx_audio_writer_close: SbxAudioWriterClose,
   sbx_audio_writer_destroy: SbxAudioWriterDestroy,
@@ -357,7 +345,6 @@ impl Api {
         sbx_version: Self::load_symbol(&lib, b"sbx_version\0")?,
         sbx_api_version: Self::load_symbol(&lib, b"sbx_api_version\0")?,
         sbx_default_engine_config: Self::load_symbol(&lib, b"sbx_default_engine_config\0")?,
-        sbx_default_curve_eval_config: Self::load_symbol(&lib, b"sbx_default_curve_eval_config\0")?,
         sbx_default_pcm_convert_state:
           Self::load_symbol(&lib, b"sbx_default_pcm_convert_state\0")?,
         sbx_default_audio_writer_config:
@@ -378,6 +365,9 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_context_set_amp_adjust\0")?,
         sbx_context_set_mix_mod: Self::load_symbol(&lib, b"sbx_context_set_mix_mod\0")?,
         sbx_prepare_safe_seq_text: Self::load_symbol(&lib, b"sbx_prepare_safe_seq_text\0")?,
+        sbx_validate_sbg_text: Self::load_symbol(&lib, b"sbx_validate_sbg_text\0")?,
+        sbx_validate_sbgf_text: Self::load_symbol(&lib, b"sbx_validate_sbgf_text\0")?,
+        sbx_free_diagnostics: Self::load_symbol(&lib, b"sbx_free_diagnostics\0")?,
         sbx_context_load_sbg_timing_text:
           Self::load_symbol(&lib, b"sbx_context_load_sbg_timing_text\0")?,
         sbx_context_load_sequence_text:
@@ -388,11 +378,6 @@ impl Api {
         sbx_context_has_mix_effects:
           Self::load_symbol(&lib, b"sbx_context_has_mix_effects\0")?,
         sbx_context_render_f32: Self::load_symbol(&lib, b"sbx_context_render_f32\0")?,
-        sbx_curve_create: Self::load_symbol(&lib, b"sbx_curve_create\0")?,
-        sbx_curve_destroy: Self::load_symbol(&lib, b"sbx_curve_destroy\0")?,
-        sbx_curve_load_text: Self::load_symbol(&lib, b"sbx_curve_load_text\0")?,
-        sbx_curve_prepare: Self::load_symbol(&lib, b"sbx_curve_prepare\0")?,
-        sbx_curve_last_error: Self::load_symbol(&lib, b"sbx_curve_last_error\0")?,
         sbx_audio_writer_create_path:
           Self::load_symbol(&lib, b"sbx_audio_writer_create_path\0")?,
         sbx_audio_writer_close: Self::load_symbol(&lib, b"sbx_audio_writer_close\0")?,
@@ -480,54 +465,37 @@ fn cstr_to_string(ptr: *const c_char) -> String {
   unsafe { CStr::from_ptr(ptr).to_string_lossy().into_owned() }
 }
 
-fn make_diagnostic(message: String) -> ValidationDiagnostic {
-  let (line, column) = extract_location(&message);
-  ValidationDiagnostic {
-    severity: "error",
-    line,
-    column,
-    message,
-  }
+fn fixed_cstr_to_string(buf: &[c_char]) -> String {
+  let len = buf.iter().position(|ch| *ch == 0).unwrap_or(buf.len());
+  let bytes: Vec<u8> = buf[..len].iter().map(|ch| *ch as u8).collect();
+  String::from_utf8_lossy(&bytes).into_owned()
 }
 
-fn extract_location(message: &str) -> (Option<u32>, Option<u32>) {
-  if let Some(pos) = message.find("line ") {
-    let rest = &message[pos + 5..];
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if let Ok(line) = digits.parse::<u32>() {
-      return (Some(line), None);
-    }
+fn collect_validation_diagnostics(
+  api: &Api,
+  raw_ptr: *mut SbxDiagnosticRaw,
+  count: usize,
+) -> Vec<ValidationDiagnostic> {
+  if raw_ptr.is_null() || count == 0 {
+    return Vec::new();
   }
 
-  let bytes = message.as_bytes();
-  for i in 0..bytes.len() {
-    if bytes[i] != b':' {
-      continue;
-    }
-    let mut j = i + 1;
-    let start_line = j;
-    while j < bytes.len() && bytes[j].is_ascii_digit() {
-      j += 1;
-    }
-    if j == start_line || j >= bytes.len() || bytes[j] != b':' {
-      continue;
-    }
-    if let Ok(line) = message[start_line..j].parse::<u32>() {
-      let mut k = j + 1;
-      let start_col = k;
-      while k < bytes.len() && bytes[k].is_ascii_digit() {
-        k += 1;
-      }
-      if k > start_col && k < bytes.len() && bytes[k] == b':' {
-        if let Ok(column) = message[start_col..k].parse::<u32>() {
-          return (Some(line), Some(column));
-        }
-      }
-      return (Some(line), None);
-    }
-  }
-
-  (None, None)
+  let slice = unsafe { std::slice::from_raw_parts(raw_ptr, count) };
+  let diags = slice
+    .iter()
+    .map(|diag| ValidationDiagnostic {
+      severity: if diag.severity == SBX_DIAG_ERROR {
+        "error"
+      } else {
+        "warning"
+      },
+      line: (diag.line != 0).then_some(diag.line),
+      column: (diag.column != 0).then_some(diag.column),
+      message: fixed_cstr_to_string(&diag.message),
+    })
+    .collect();
+  unsafe { (api.sbx_free_diagnostics)(raw_ptr) };
+  diags
 }
 
 fn format_from_path(path: &Path) -> Result<(c_int, &'static str), String> {
@@ -948,25 +916,24 @@ pub fn backend_status() -> Result<(String, i32), String> {
 }
 
 pub fn validate_sbg(text: &str, source_name: &str) -> Result<ValidationOutcome, String> {
-  match load_sbg_context(text, source_name) {
-    Ok(loaded) => Ok(ValidationOutcome {
-      valid: true,
-      diagnostics: Vec::new(),
-      engine_version: format!(
-        "{} (api {})",
-        loaded.api.version_string(),
-        loaded.api.api_version()
-      ),
-    }),
-    Err(message) => {
-      let api = Api::load()?;
-      Ok(ValidationOutcome {
-        valid: false,
-        diagnostics: vec![make_diagnostic(message)],
-        engine_version: format!("{} (api {})", api.version_string(), api.api_version()),
-      })
-    }
+  let api = Api::load()?;
+  let c_text = CString::new(text).map_err(|_| "document contains embedded NUL byte".to_string())?;
+  let c_source =
+    CString::new(source_name).map_err(|_| "source name contains embedded NUL byte".to_string())?;
+  let mut raw_ptr: *mut SbxDiagnosticRaw = std::ptr::null_mut();
+  let mut count: usize = 0;
+  let rc = unsafe {
+    (api.sbx_validate_sbg_text)(c_text.as_ptr(), c_source.as_ptr(), &mut raw_ptr, &mut count)
+  };
+  if rc != SBX_OK {
+    return Err("sbagenxlib structured validation failed".to_string());
   }
+  let diagnostics = collect_validation_diagnostics(&api, raw_ptr, count);
+  Ok(ValidationOutcome {
+    valid: diagnostics.is_empty(),
+    diagnostics,
+    engine_version: format!("{} (api {})", api.version_string(), api.api_version()),
+  })
 }
 
 pub fn validate_sbgf(text: &str, source_name: &str) -> Result<ValidationOutcome, String> {
@@ -974,64 +941,20 @@ pub fn validate_sbgf(text: &str, source_name: &str) -> Result<ValidationOutcome,
   let c_text = CString::new(text).map_err(|_| "document contains embedded NUL byte".to_string())?;
   let c_source =
     CString::new(source_name).map_err(|_| "source name contains embedded NUL byte".to_string())?;
-  let curve = unsafe { (api.sbx_curve_create)() };
-  if curve.is_null() {
-    return Err("failed to create sbagenxlib curve program".to_string());
-  }
-
-  let mut eval_cfg = SbxCurveEvalConfig {
-    carrier_start_hz: 0.0,
-    carrier_end_hz: 0.0,
-    carrier_span_sec: 0.0,
-    beat_start_hz: 0.0,
-    beat_target_hz: 0.0,
-    beat_span_sec: 0.0,
-    hold_min: 0.0,
-    total_min: 0.0,
-    wake_min: 0.0,
-    beat_amp0_pct: 0.0,
-    mix_amp0_pct: 0.0,
+  let mut raw_ptr: *mut SbxDiagnosticRaw = std::ptr::null_mut();
+  let mut count: usize = 0;
+  let rc = unsafe {
+    (api.sbx_validate_sbgf_text)(c_text.as_ptr(), c_source.as_ptr(), &mut raw_ptr, &mut count)
   };
-  unsafe { (api.sbx_default_curve_eval_config)(&mut eval_cfg) };
-
-  let load_rc = unsafe { (api.sbx_curve_load_text)(curve, c_text.as_ptr(), c_source.as_ptr()) };
-  let outcome = if load_rc != SBX_OK {
-    let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
-    ValidationOutcome {
-      valid: false,
-      diagnostics: vec![make_diagnostic(if msg.is_empty() {
-        format!("SBaGenX curve validation failed for {}", source_name)
-      } else {
-        msg
-      })],
-      engine_version: format!("{} (api {})", api.version_string(), api.api_version()),
-    }
-  } else {
-    let prep_rc = unsafe { (api.sbx_curve_prepare)(curve, &eval_cfg) };
-    if prep_rc == SBX_OK {
-      ValidationOutcome {
-        valid: true,
-        diagnostics: Vec::new(),
-        engine_version: format!("{} (api {})", api.version_string(), api.api_version()),
-      }
-    } else {
-      let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
-      ValidationOutcome {
-        valid: false,
-        diagnostics: vec![make_diagnostic(if msg.is_empty() {
-          format!("SBaGenX curve preparation failed for {}", source_name)
-        } else {
-          msg
-        })],
-        engine_version: format!("{} (api {})", api.version_string(), api.api_version()),
-      }
-    }
-  };
-
-  unsafe {
-    (api.sbx_curve_destroy)(curve);
+  if rc != SBX_OK {
+    return Err("sbagenxlib structured curve validation failed".to_string());
   }
-  Ok(outcome)
+  let diagnostics = collect_validation_diagnostics(&api, raw_ptr, count);
+  Ok(ValidationOutcome {
+    valid: diagnostics.is_empty(),
+    diagnostics,
+    engine_version: format!("{} (api {})", api.version_string(), api.api_version()),
+  })
 }
 
 pub fn render_preview(text: &str, source_name: &str) -> Result<PreviewOutcome, String> {
