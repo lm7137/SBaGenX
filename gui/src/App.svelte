@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import { convertFileSrc } from '@tauri-apps/api/core'
-  import { open, save } from '@tauri-apps/plugin-dialog'
+  import { confirm, open, save } from '@tauri-apps/plugin-dialog'
   import MonacoEditor from './lib/editor/MonacoEditor.svelte'
   import logoUrl from './lib/assets/sbagenx-logo.svg'
   import {
@@ -20,9 +20,14 @@
   let validatingId: string | null = null
   let transportBusy = false
   let transportMessage = 'ready'
+  let selectedDiagnosticId: string | null = null
   let isPlaying = false
   let audioSource: string | null = null
   let audioElement: HTMLAudioElement | null = null
+  let editorView: {
+    revealPosition: (line: number, column?: number) => void
+    focusEditor: () => void
+  } | null = null
 
   function makeUntitledDocument(kind: DocumentKind): DocumentRecord {
     const base =
@@ -50,6 +55,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
   function activateDocument(id: string) {
     activeId = id
+    selectedDiagnosticId = null
+    tick().then(() => editorView?.focusEditor())
   }
 
   function makeDocumentRecord(source: {
@@ -157,7 +164,53 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     const doc = makeUntitledDocument(kind)
     documents = [...documents, doc]
     activeId = doc.id
+    selectedDiagnosticId = null
     queueValidation(doc.id)
+    tick().then(() => editorView?.focusEditor())
+  }
+
+  async function closeDocument(id: string) {
+    const doc = documents.find((item) => item.id === id)
+    if (!doc) return
+
+    if (doc.dirty) {
+      const approved = await confirm(
+        `Close ${doc.name} without saving your changes?`,
+        {
+          title: 'Unsaved changes',
+          kind: 'warning',
+          okLabel: 'Close anyway',
+          cancelLabel: 'Keep editing',
+        },
+      )
+      if (!approved) return
+    }
+
+    if (activeId === id) {
+      await stopPlayback(false)
+    }
+
+    const currentIndex = documents.findIndex((item) => item.id === id)
+    const remaining = documents.filter((item) => item.id !== id)
+    if (remaining.length === 0) {
+      const fallback = makeUntitledDocument('sbg')
+      documents = [fallback]
+      activeId = fallback.id
+      transportMessage = `closed ${doc.name}`
+      selectedDiagnosticId = null
+      queueValidation(fallback.id)
+      tick().then(() => editorView?.focusEditor())
+      return
+    }
+
+    documents = remaining
+    if (activeId === id) {
+      const nextIndex = Math.max(0, Math.min(currentIndex, remaining.length - 1))
+      activeId = remaining[nextIndex].id
+      selectedDiagnosticId = null
+      tick().then(() => editorView?.focusEditor())
+    }
+    transportMessage = `closed ${doc.name}`
   }
 
   function handleEditorChange(nextValue: string) {
@@ -256,6 +309,42 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     }
   }
 
+  async function jumpToDiagnostic(item: ValidationDiagnostic) {
+    selectedDiagnosticId = item.id
+    if (!item.line) return
+    await tick()
+    editorView?.revealPosition(item.line, item.column ?? 1)
+  }
+
+  function handleGlobalKeydown(event: KeyboardEvent) {
+    const modifier = event.metaKey || event.ctrlKey
+    if (!modifier || event.altKey) return
+    const key = event.key.toLowerCase()
+
+    if (key === 's') {
+      event.preventDefault()
+      void saveActiveDocument()
+      return
+    }
+
+    if (key === 'o') {
+      event.preventDefault()
+      void openDocuments()
+      return
+    }
+
+    if (key === 'n') {
+      event.preventDefault()
+      createDocument(event.shiftKey ? 'sbgf' : 'sbg')
+      return
+    }
+
+    if (key === 'w' && activeDocument) {
+      event.preventDefault()
+      void closeDocument(activeDocument.id)
+    }
+  }
+
   function handleAudioPlay() {
     isPlaying = true
   }
@@ -274,22 +363,32 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   $: canRunActive =
     !!activeDocument && activeDocument.kind === 'sbg' && activeDiagnostics.length === 0 && !transportBusy
 
-  onMount(async () => {
-    const untouchedStarterTabs = documents.every((doc) => !doc.path && !doc.dirty)
-    if (untouchedStarterTabs) {
-      try {
-        const examples = await loadDevelopmentExamples()
-        if (examples.length > 0) {
-          documents = examples.map((example) => makeDocumentRecord(example))
-          activeId = documents[0].id
-          transportMessage = 'loaded development examples'
+  onMount(() => {
+    const onKeydown = (event: KeyboardEvent) => handleGlobalKeydown(event)
+    window.addEventListener('keydown', onKeydown)
+
+    void (async () => {
+      const untouchedStarterTabs = documents.every((doc) => !doc.path && !doc.dirty)
+      if (untouchedStarterTabs) {
+        try {
+          const examples = await loadDevelopmentExamples()
+          if (examples.length > 0) {
+            documents = examples.map((example) => makeDocumentRecord(example))
+            activeId = documents[0].id
+            transportMessage = 'loaded development examples'
+          }
+        } catch (error) {
+          transportMessage = error instanceof Error ? error.message : String(error)
         }
-      } catch (error) {
-        transportMessage = error instanceof Error ? error.message : String(error)
       }
-    }
-    for (const doc of documents) {
-      void runValidation(doc.id)
+      for (const doc of documents) {
+        void runValidation(doc.id)
+      }
+    })()
+
+    return () => {
+      window.removeEventListener('keydown', onKeydown)
+      if (validationTimer) clearTimeout(validationTimer)
     }
   })
 </script>
@@ -343,22 +442,28 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
       <div class="document-list">
         {#each documents as document}
-          <button
-            class:active={document.id === activeId}
-            class="document-row"
-            on:click={() => activateDocument(document.id)}
-          >
-            <div class="document-name-row">
-              <span class="document-name">{document.name}</span>
-              {#if document.dirty}
-                <span class="dirty-indicator"></span>
+          <div class:active={document.id === activeId} class="document-row">
+            <button class="document-main" on:click={() => activateDocument(document.id)}>
+              <div class="document-name-row">
+                <span class="document-name">{document.name}</span>
+                {#if document.dirty}
+                  <span class="dirty-indicator"></span>
+                {/if}
+              </div>
+              <span class="document-type">{document.kind}</span>
+              {#if document.diagnostics.length}
+                <span class="document-diagnostics">{document.diagnostics.length} issue(s)</span>
               {/if}
-            </div>
-            <span class="document-type">{document.kind}</span>
-            {#if document.diagnostics.length}
-              <span class="document-diagnostics">{document.diagnostics.length} issue(s)</span>
-            {/if}
-          </button>
+            </button>
+            <button
+              class="document-close"
+              title={`Close ${document.name}`}
+              aria-label={`Close ${document.name}`}
+              on:click|stopPropagation={() => void closeDocument(document.id)}
+            >
+              ×
+            </button>
+          </div>
         {/each}
       </div>
 
@@ -392,6 +497,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         <div class="editor-surface">
           {#if activeDocument}
             <MonacoEditor
+              bind:this={editorView}
               docId={activeDocument.id}
               language={activeDocument.kind}
               value={activeDocument.content}
@@ -425,7 +531,13 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           </article>
         {/if}
         {#each activeDiagnostics as item}
-          <article class="diagnostic">
+          <button
+            class:selected={item.id === selectedDiagnosticId}
+            class:jumpable={!!item.line}
+            class="diagnostic diagnostic-button"
+            disabled={!item.line}
+            on:click={() => void jumpToDiagnostic(item)}
+          >
             <div class="diagnostic-head">
               <span class:warning={item.severity === 'warning'} class="severity">{item.severity}</span>
               <span class="location">
@@ -437,7 +549,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               </span>
             </div>
             <p class="diagnostic-message">{item.message}</p>
-          </article>
+          </button>
         {/each}
       </div>
 

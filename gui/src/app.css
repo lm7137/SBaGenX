@@ -278,20 +278,48 @@ h1 {
 }
 
 .document-row {
-  width: 100%;
-  text-align: left;
-  padding: 0.9rem 0.95rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
   margin-bottom: 0.75rem;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(0, 0, 0, 0.10);
   background: rgba(255, 255, 255, 0.55);
-  cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
 }
 
 .document-row.active {
   background: rgba(58, 124, 255, 0.12);
   border-color: rgba(58, 124, 255, 0.18);
+}
+
+.document-main {
+  width: 100%;
+  text-align: left;
+  padding: 0.9rem 0.95rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.document-close {
+  margin: 0.6rem 0.7rem 0 0;
+  width: 1.95rem;
+  height: 1.95rem;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.document-close:hover {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
 }
 
 .document-name-row {
@@ -396,6 +424,30 @@ h1 {
   border: 1px solid rgba(0, 0, 0, 0.10);
   background: rgba(255, 255, 255, 0.6);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+}
+
+.diagnostic-button {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  cursor: default;
+}
+
+.diagnostic-button.jumpable {
+  cursor: pointer;
+}
+
+.diagnostic-button.jumpable:hover {
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.diagnostic-button.selected {
+  border-color: rgba(58, 124, 255, 0.24);
+  background: rgba(58, 124, 255, 0.08);
+}
+
+.diagnostic-button:disabled {
+  opacity: 1;
 }
 
 .diagnostic.ok {

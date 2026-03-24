@@ -15,6 +15,27 @@
   let monacoRef: typeof import('monaco-editor') | null = null
   let applyingExternalValue = false
 
+  export function revealPosition(line: number, column = 1) {
+    if (!editor) return
+    const model = editor.getModel()
+    if (!model) return
+    const safeLine = Math.max(1, Math.min(Math.floor(line), model.getLineCount()))
+    const safeColumn = Math.max(1, Math.min(Math.floor(column), model.getLineMaxColumn(safeLine)))
+    editor.focus()
+    editor.setPosition({ lineNumber: safeLine, column: safeColumn })
+    editor.setSelection({
+      startLineNumber: safeLine,
+      startColumn: safeColumn,
+      endLineNumber: safeLine,
+      endColumn: safeColumn,
+    })
+    editor.revealPositionInCenter({ lineNumber: safeLine, column: safeColumn })
+  }
+
+  export function focusEditor() {
+    editor?.focus()
+  }
+
   function applyMarkers() {
     if (!editor || !monacoRef) return
     const model = editor.getModel()
