@@ -1,8 +1,16 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
+  import { convertFileSrc } from '@tauri-apps/api/core'
   import { open, save } from '@tauri-apps/plugin-dialog'
   import MonacoEditor from './lib/editor/MonacoEditor.svelte'
-  import { backendStatus, readTextFile, validateDocument, writeTextFile } from './lib/backend'
+  import {
+    backendStatus,
+    exportDocument,
+    readTextFile,
+    renderPreview,
+    validateDocument,
+    writeTextFile,
+  } from './lib/backend'
   import type {
     BackendStatus,
     DocumentKind,
@@ -10,21 +18,17 @@
     ValidationDiagnostic,
   } from './lib/types'
 
-  let documents: DocumentRecord[] = [
-    makeUntitledDocument('sbg'),
-    makeUntitledDocument('sbgf'),
-  ]
+  let documents: DocumentRecord[] = [makeUntitledDocument('sbg'), makeUntitledDocument('sbgf')]
   let activeId = documents[0].id
   let status: BackendStatus | null = null
   let validationBridge = 'loading'
   let validationTimer: ReturnType<typeof setTimeout> | null = null
   let validatingId: string | null = null
-
-  const transport = {
-    canPlay: false,
-    canStop: false,
-    canExport: false,
-  }
+  let transportBusy = false
+  let transportMessage = 'ready'
+  let isPlaying = false
+  let audioSource: string | null = null
+  let audioElement: HTMLAudioElement | null = null
 
   function makeUntitledDocument(kind: DocumentKind): DocumentRecord {
     const base =
@@ -50,10 +54,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     }
   }
 
-  function detectKind(path: string): DocumentKind {
-    return path.toLowerCase().endsWith('.sbgf') ? 'sbgf' : 'sbg'
-  }
-
   function activateDocument(id: string) {
     activeId = id
   }
@@ -74,6 +74,19 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       merged.lines = merged.content.split('\n')
       return merged
     })
+  }
+
+  function formatDuration(seconds: number): string {
+    if (seconds >= 60) {
+      const mins = Math.floor(seconds / 60)
+      const secs = Math.round(seconds % 60)
+      return `${mins}m ${secs}s`
+    }
+    return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
+  }
+
+  function syncBridge(bridge: string, engineVersion: string) {
+    validationBridge = `${bridge} · ${engineVersion}`
   }
 
   async function openDocuments() {
@@ -127,6 +140,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       name: path.split(/[\\/]/).pop() ?? activeDocument.name,
       dirty: false,
     })
+    transportMessage = `saved ${path.split(/[\\/]/).pop() ?? path}`
   }
 
   function createDocument(kind: DocumentKind) {
@@ -158,7 +172,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     if (!doc) return
     try {
       const result = await validateDocument(doc.kind, doc.content, doc.path ?? doc.name)
-      validationBridge = `${result.bridge} · ${result.engineVersion}`
+      syncBridge(result.bridge, result.engineVersion)
       updateDocument(doc.id, { diagnostics: result.diagnostics })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -176,8 +190,84 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     }
   }
 
+  async function playActiveDocument() {
+    if (!activeDocument || activeDocument.kind !== 'sbg') return
+    transportBusy = true
+    transportMessage = 'rendering preview audio...'
+    try {
+      await stopPlayback(false)
+      const result = await renderPreview(activeDocument.content, activeDocument.path ?? activeDocument.name)
+      syncBridge(result.bridge, result.engineVersion)
+      audioSource = convertFileSrc(result.audioPath)
+      await tick()
+      if (!audioElement) {
+        throw new Error('audio element is not available')
+      }
+      audioElement.load()
+      await audioElement.play()
+      transportMessage = result.limited
+        ? `preview playing · ${formatDuration(result.durationSec)} cap`
+        : `preview playing · ${formatDuration(result.durationSec)}`
+    } catch (error) {
+      transportMessage = error instanceof Error ? error.message : String(error)
+    } finally {
+      transportBusy = false
+    }
+  }
+
+  async function stopPlayback(updateMessage = true) {
+    if (!audioElement) return
+    audioElement.pause()
+    audioElement.currentTime = 0
+    isPlaying = false
+    if (updateMessage) {
+      transportMessage = 'playback stopped'
+    }
+  }
+
+  async function exportActiveDocument() {
+    if (!activeDocument || activeDocument.kind !== 'sbg') return
+    const target = await save({
+      defaultPath: activeDocument.name.replace(/\.sbg$/i, '.wav'),
+      filters: [
+        { name: 'WAV audio', extensions: ['wav'] },
+        { name: 'FLAC audio', extensions: ['flac'] },
+        { name: 'OGG/Vorbis audio', extensions: ['ogg'] },
+        { name: 'MP3 audio', extensions: ['mp3'] },
+      ],
+    })
+    if (!target) return
+
+    transportBusy = true
+    transportMessage = 'exporting audio...'
+    try {
+      const result = await exportDocument(activeDocument.content, target, activeDocument.path ?? activeDocument.name)
+      syncBridge(result.bridge, result.engineVersion)
+      transportMessage = `exported ${result.format.toUpperCase()} · ${formatDuration(result.durationSec)}`
+    } catch (error) {
+      transportMessage = error instanceof Error ? error.message : String(error)
+    } finally {
+      transportBusy = false
+    }
+  }
+
+  function handleAudioPlay() {
+    isPlaying = true
+  }
+
+  function handleAudioPause() {
+    isPlaying = false
+  }
+
+  function handleAudioEnded() {
+    isPlaying = false
+    transportMessage = 'preview finished'
+  }
+
   $: activeDocument = documents.find((doc) => doc.id === activeId) ?? documents[0]
   $: activeDiagnostics = activeDocument?.diagnostics ?? []
+  $: canRunActive =
+    !!activeDocument && activeDocument.kind === 'sbg' && activeDiagnostics.length === 0 && !transportBusy
 
   onMount(async () => {
     status = await backendStatus()
@@ -195,6 +285,14 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   />
 </svelte:head>
 
+<audio
+  bind:this={audioElement}
+  src={audioSource ?? undefined}
+  on:play={handleAudioPlay}
+  on:pause={handleAudioPause}
+  on:ended={handleAudioEnded}
+></audio>
+
 <div class="shell">
   <header class="topbar">
     <div class="brand">
@@ -211,9 +309,9 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       <button class="button ghost" on:click={() => createDocument('sbg')}>New `.sbg`</button>
       <button class="button ghost" on:click={() => createDocument('sbgf')}>New `.sbgf`</button>
       <span class="toolbar-divider"></span>
-      <button class="button accent" disabled={!transport.canPlay}>Play</button>
-      <button class="button ghost" disabled={!transport.canStop}>Stop</button>
-      <button class="button export" disabled={!transport.canExport}>Export</button>
+      <button class="button accent" disabled={!canRunActive} on:click={playActiveDocument}>Play</button>
+      <button class="button ghost" disabled={!isPlaying} on:click={() => stopPlayback()}>Stop</button>
+      <button class="button export" disabled={!canRunActive} on:click={exportActiveDocument}>Export</button>
     </div>
   </header>
 
@@ -237,6 +335,10 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     <div class="status-group">
       <span class="status-label">Validation</span>
       <span class="status-value">{validationBridge}</span>
+    </div>
+    <div class="status-group transport-group">
+      <span class="status-label">Transport</span>
+      <span class="status-value">{transportMessage}</span>
     </div>
     {#if validatingId}
       <div class="status-group">
@@ -304,8 +406,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           <div>
             <p class="panel-title">Editor</p>
             <p class="panel-subtitle">
-              Monaco is now wired in. Validation is debounced and runs through the
-              Rust bridge against `sbagenxlib`.
+              Monaco is wired in. Validation, preview playback, and export are running
+              through the Rust bridge against `sbagenxlib`.
             </p>
           </div>
           <div class="editor-meta">
@@ -367,7 +469,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           <li>Monaco editor integration</li>
           <li>Dialog-backed open/save</li>
           <li>Debounced native validation</li>
-          <li>Playback/export still to be wired</li>
+          <li>`.sbg` preview playback and export</li>
+          <li>Standalone `.sbgf` tabs remain editor/validation only</li>
         </ul>
       </div>
     </aside>

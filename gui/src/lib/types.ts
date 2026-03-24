@@ -40,3 +40,19 @@ export interface ValidationResult {
   bridge: string
   engineVersion: string
 }
+
+export interface PreviewResult {
+  audioPath: string
+  durationSec: number
+  limited: boolean
+  bridge: string
+  engineVersion: string
+}
+
+export interface ExportResult {
+  outputPath: string
+  durationSec: number
+  format: string
+  bridge: string
+  engineVersion: string
+}

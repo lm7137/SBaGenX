@@ -1,5 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { BackendStatus, FileDocument, ValidationResult } from './types'
+import type {
+  BackendStatus,
+  ExportResult,
+  FileDocument,
+  PreviewResult,
+  ValidationResult,
+} from './types'
 
 const fallbackStatus: BackendStatus = {
   bridge: 'tauri-rust',
@@ -32,6 +38,30 @@ export async function validateDocument(
   return invoke<ValidationResult>('validate_document', {
     kind,
     text,
+    sourceName,
+  })
+}
+
+export async function renderPreview(
+  text: string,
+  sourceName?: string | null,
+): Promise<PreviewResult> {
+  return invoke<PreviewResult>('render_preview', {
+    kind: 'sbg',
+    text,
+    sourceName,
+  })
+}
+
+export async function exportDocument(
+  text: string,
+  outputPath: string,
+  sourceName?: string | null,
+): Promise<ExportResult> {
+  return invoke<ExportResult>('export_document', {
+    kind: 'sbg',
+    text,
+    outputPath,
     sourceName,
   })
 }

@@ -1,4 +1,3 @@
-
 mod sbagenxlib;
 
 use serde::{Deserialize, Serialize};
@@ -45,12 +44,49 @@ struct ValidationResult {
   engine_version: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewResult {
+  audio_path: String,
+  duration_sec: f64,
+  limited: bool,
+  bridge: &'static str,
+  engine_version: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportResult {
+  output_path: String,
+  duration_sec: f64,
+  format: String,
+  bridge: &'static str,
+  engine_version: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ValidateDocumentArgs {
   kind: String,
   text: String,
   source_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RenderDocumentArgs {
+  kind: String,
+  text: String,
+  source_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportDocumentArgs {
+  kind: String,
+  text: String,
+  source_name: Option<String>,
+  output_path: String,
 }
 
 #[tauri::command]
@@ -120,6 +156,39 @@ fn validate_document(args: ValidateDocumentArgs) -> Result<ValidationResult, Str
   })
 }
 
+#[tauri::command]
+fn render_preview(args: RenderDocumentArgs) -> Result<PreviewResult, String> {
+  if args.kind != "sbg" {
+    return Err("preview is currently available only for .sbg documents".to_string());
+  }
+  let source_name = normalize_source_name(args.source_name, &args.kind);
+  let outcome = sbagenxlib::render_preview(&args.text, &source_name)?;
+  Ok(PreviewResult {
+    audio_path: outcome.audio_path,
+    duration_sec: outcome.duration_sec,
+    limited: outcome.limited,
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
+#[tauri::command]
+fn export_document(args: ExportDocumentArgs) -> Result<ExportResult, String> {
+  if args.kind != "sbg" {
+    return Err("export is currently available only for .sbg documents".to_string());
+  }
+  let source_name = normalize_source_name(args.source_name, &args.kind);
+  let out_path = PathBuf::from(&args.output_path);
+  let outcome = sbagenxlib::export_sbg(&args.text, &source_name, &out_path)?;
+  Ok(ExportResult {
+    output_path: outcome.output_path,
+    duration_sec: outcome.duration_sec,
+    format: outcome.format,
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -138,7 +207,9 @@ pub fn run() {
       backend_status,
       read_text_file,
       write_text_file,
-      validate_document
+      validate_document,
+      render_preview,
+      export_document
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
