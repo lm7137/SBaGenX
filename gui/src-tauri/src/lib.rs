@@ -1,27 +1,129 @@
-use serde::Serialize;
+
+mod sbagenxlib;
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+
+use crate::sbagenxlib::{kind_from_path, normalize_source_name};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BackendStatus {
   bridge: &'static str,
-  engine: &'static str,
+  engine: String,
   mode: &'static str,
   target: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileDocument {
+  path: String,
+  name: String,
+  kind: String,
+  content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ValidationDiagnostic {
+  id: String,
+  document_id: String,
+  severity: String,
+  line: u32,
+  column: Option<u32>,
+  message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ValidationResult {
+  valid: bool,
+  diagnostics: Vec<ValidationDiagnostic>,
+  bridge: &'static str,
+  engine_version: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ValidateDocumentArgs {
+  kind: String,
+  text: String,
+  source_name: Option<String>,
+}
+
 #[tauri::command]
 fn backend_status() -> BackendStatus {
+  let engine = sbagenxlib::backend_status()
+    .map(|(version, api)| format!("sbagenxlib {} (api {})", version, api))
+    .unwrap_or_else(|err| format!("sbagenxlib unavailable: {}", err));
   BackendStatus {
     bridge: "tauri-rust",
-    engine: "sbagenxlib",
-    mode: "scaffold",
+    engine,
+    mode: "ffi",
     target: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
   }
+}
+
+#[tauri::command]
+fn read_text_file(path: String) -> Result<FileDocument, String> {
+  let path_buf = PathBuf::from(&path);
+  let kind = kind_from_path(&path_buf)
+    .ok_or_else(|| "only .sbg and .sbgf files are supported in the current GUI scaffold".to_string())?;
+  let content = fs::read_to_string(&path_buf)
+    .map_err(|err| format!("failed to read {}: {}", path_buf.display(), err))?;
+  let name = path_buf
+    .file_name()
+    .and_then(|name| name.to_str())
+    .ok_or_else(|| "failed to determine document name".to_string())?
+    .to_string();
+  Ok(FileDocument {
+    path,
+    name,
+    kind: kind.to_string(),
+    content,
+  })
+}
+
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+  fs::write(&path, content).map_err(|err| format!("failed to write {}: {}", path, err))
+}
+
+#[tauri::command]
+fn validate_document(args: ValidateDocumentArgs) -> Result<ValidationResult, String> {
+  let source_name = normalize_source_name(args.source_name, &args.kind);
+  let outcome = match args.kind.as_str() {
+    "sbg" => sbagenxlib::validate_sbg(&args.text, &source_name)?,
+    "sbgf" => sbagenxlib::validate_sbgf(&args.text, &source_name)?,
+    _ => return Err(format!("unsupported document kind: {}", args.kind)),
+  };
+  let diagnostics = outcome
+    .diagnostics
+    .into_iter()
+    .enumerate()
+    .map(|(index, diag)| ValidationDiagnostic {
+      id: format!("diag-{}-{}", args.kind, index),
+      document_id: source_name.clone(),
+      severity: diag.severity.to_string(),
+      line: diag.line.unwrap_or(1),
+      column: diag.column,
+      message: diag.message,
+    })
+    .collect();
+  Ok(ValidationResult {
+    valid: outcome.valid,
+    diagnostics,
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -32,7 +134,12 @@ pub fn run() {
       }
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![backend_status])
+    .invoke_handler(tauri::generate_handler![
+      backend_status,
+      read_text_file,
+      write_text_file,
+      validate_document
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

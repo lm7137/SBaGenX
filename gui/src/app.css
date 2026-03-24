@@ -311,6 +311,14 @@ h1 {
   font-size: 0.82rem;
 }
 
+.document-diagnostics {
+  display: inline-flex;
+  margin-top: 0.45rem;
+  color: #8f5c10;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
 .dirty-indicator,
 .tab-dirty {
   width: 0.55rem;
@@ -370,42 +378,10 @@ h1 {
 .editor-surface {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 3.75rem minmax(0, 1fr);
   border-top: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(249, 245, 238, 0.88)),
     linear-gradient(90deg, rgba(15, 106, 193, 0.05), transparent 14rem);
-}
-
-.editor-gutter {
-  padding: 1rem 0.7rem 1rem 1rem;
-  border-right: 1px solid var(--line);
-  background: rgba(23, 36, 49, 0.04);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.86rem;
-  line-height: 1.7;
-  text-align: right;
-  overflow: auto;
-}
-
-.editor-gutter span {
-  display: block;
-}
-
-.editor-code {
-  margin: 0;
-  padding: 1rem 1.15rem 1.2rem;
-  overflow: auto;
-  font-family: var(--mono);
-  font-size: 0.96rem;
-  line-height: 1.7;
-  color: #1c2733;
-}
-
-.editor-code code {
-  font-family: inherit;
 }
 
 .diagnostic-count {
@@ -425,6 +401,11 @@ h1 {
   border-radius: var(--radius-sm);
   border: 1px solid rgba(45, 58, 74, 0.09);
   background: rgba(255, 255, 255, 0.6);
+}
+
+.diagnostic.ok {
+  border-color: rgba(47, 127, 89, 0.18);
+  background: rgba(239, 249, 243, 0.88);
 }
 
 .diagnostic-head {
@@ -450,6 +431,10 @@ h1 {
 
 .severity.warning {
   color: #9a6a12;
+}
+
+.severity.ok {
+  color: var(--success);
 }
 
 .location {
