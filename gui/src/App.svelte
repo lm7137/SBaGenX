@@ -3,8 +3,8 @@
   import { convertFileSrc } from '@tauri-apps/api/core'
   import { open, save } from '@tauri-apps/plugin-dialog'
   import MonacoEditor from './lib/editor/MonacoEditor.svelte'
+  import logoUrl from './lib/assets/sbagenx-logo.svg'
   import {
-    backendStatus,
     exportDocument,
     loadDevelopmentExamples,
     readTextFile,
@@ -12,17 +12,10 @@
     validateDocument,
     writeTextFile,
   } from './lib/backend'
-  import type {
-    BackendStatus,
-    DocumentKind,
-    DocumentRecord,
-    ValidationDiagnostic,
-  } from './lib/types'
+  import type { DocumentKind, DocumentRecord, ValidationDiagnostic } from './lib/types'
 
   let documents: DocumentRecord[] = [makeUntitledDocument('sbg'), makeUntitledDocument('sbgf')]
   let activeId = documents[0].id
-  let status: BackendStatus | null = null
-  let validationBridge = 'loading'
   let validationTimer: ReturnType<typeof setTimeout> | null = null
   let validatingId: string | null = null
   let transportBusy = false
@@ -102,10 +95,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       return `${mins}m ${secs}s`
     }
     return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
-  }
-
-  function syncBridge(bridge: string, engineVersion: string) {
-    validationBridge = `${bridge} · ${engineVersion}`
   }
 
   async function openDocuments() {
@@ -193,7 +182,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     if (!doc) return
     try {
       const result = await validateDocument(doc.kind, doc.content, doc.path ?? doc.name)
-      syncBridge(result.bridge, result.engineVersion)
       updateDocument(doc.id, { diagnostics: result.diagnostics })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -216,7 +204,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     try {
       await stopPlayback(false)
       const result = await renderPreview(activeDocument.content, activeDocument.path ?? activeDocument.name)
-      syncBridge(result.bridge, result.engineVersion)
       audioSource = convertFileSrc(result.audioPath)
       await tick()
       if (!audioElement) {
@@ -261,7 +248,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     transportMessage = 'exporting audio...'
     try {
       const result = await exportDocument(activeDocument.content, target, activeDocument.path ?? activeDocument.name)
-      syncBridge(result.bridge, result.engineVersion)
       transportMessage = `exported ${result.format.toUpperCase()} · ${formatDuration(result.durationSec)}`
     } catch (error) {
       transportMessage = error instanceof Error ? error.message : String(error)
@@ -289,7 +275,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     !!activeDocument && activeDocument.kind === 'sbg' && activeDiagnostics.length === 0 && !transportBusy
 
   onMount(async () => {
-    status = await backendStatus()
     const untouchedStarterTabs = documents.every((doc) => !doc.path && !doc.dirty)
     if (untouchedStarterTabs) {
       try {
@@ -325,13 +310,16 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   on:ended={handleAudioEnded}
 ></audio>
 
+<div class="bg-overlay" aria-hidden="true"></div>
+<div class="noise-overlay" aria-hidden="true"></div>
+
 <div class="shell">
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark">SX</div>
-      <div>
-        <p class="eyebrow">SBaGenX Desktop</p>
-        <h1>Library-Backed Session Studio</h1>
+      <img class="brand-logo" src={logoUrl} alt="SBaGenX" />
+      <div class="brand-copy">
+        <h1>SBAGENX DESKTOP</h1>
+        <p class="brand-subtitle">Library-backed editor, validation, playback, and export.</p>
       </div>
     </div>
 
@@ -346,39 +334,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       <button class="button export" disabled={!canRunActive} on:click={exportActiveDocument}>Export</button>
     </div>
   </header>
-
-  <section class="statusbar">
-    <div class="status-group">
-      <span class="status-label">Bridge</span>
-      <span class="status-value">{status?.bridge ?? 'loading'}</span>
-    </div>
-    <div class="status-group">
-      <span class="status-label">Engine</span>
-      <span class="status-value">{status?.engine ?? 'loading'}</span>
-    </div>
-    <div class="status-group">
-      <span class="status-label">Mode</span>
-      <span class="status-value">{status?.mode ?? 'loading'}</span>
-    </div>
-    <div class="status-group">
-      <span class="status-label">Target</span>
-      <span class="status-value">{status?.target ?? 'loading'}</span>
-    </div>
-    <div class="status-group">
-      <span class="status-label">Validation</span>
-      <span class="status-value">{validationBridge}</span>
-    </div>
-    <div class="status-group transport-group">
-      <span class="status-label">Transport</span>
-      <span class="status-value">{transportMessage}</span>
-    </div>
-    {#if validatingId}
-      <div class="status-group">
-        <span class="status-label">State</span>
-        <span class="status-value">validating</span>
-      </div>
-    {/if}
-  </section>
 
   <main class="workspace">
     <aside class="sidebar panel">
@@ -409,42 +364,28 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
       <div class="panel-footer">
         <p class="panel-note">
-          Open `.sbg` and `.sbgf` side by side, switch between tabs, and validate
-          against `sbagenxlib` directly.
+          Keep `.sbg` and `.sbgf` side by side here and switch from the
+          document list.
         </p>
       </div>
     </aside>
 
     <section class="editor-column">
-      <div class="tabs panel">
-        <div class="tab-strip">
-          {#each documents as document}
-            <button
-              class:active={document.id === activeId}
-              class="tab"
-              on:click={() => activateDocument(document.id)}
-            >
-              <span>{document.name}</span>
-              {#if document.dirty}
-                <span class="tab-dirty"></span>
-              {/if}
-            </button>
-          {/each}
-        </div>
-      </div>
-
       <section class="editor panel">
         <div class="panel-header">
           <div>
             <p class="panel-title">Editor</p>
-            <p class="panel-subtitle">
-              Monaco is wired in. Validation, preview playback, and export are running
-              through the Rust bridge against `sbagenxlib`.
-            </p>
           </div>
           <div class="editor-meta">
             <span>{activeDocument?.kind ?? 'unknown'}</span>
             <span>{activeDocument?.path ?? 'unsaved'}</span>
+            <span class:busy={transportBusy || validatingId === activeDocument?.id} class="editor-status">
+              {#if validatingId === activeDocument?.id}
+                validating...
+              {:else}
+                {transportMessage}
+              {/if}
+            </span>
           </div>
         </div>
 

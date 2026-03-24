@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="780"
+   height="220"
+   viewBox="0 0 780 220"
+   role="img"
+   aria-label="SBaGenX logo"
+   version="1.1"
+   id="svg11"
+   sodipodi:docname="sbagenx-logo-no-bg.svg"
+   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview11"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.1"
+     inkscape:cx="389.54545"
+     inkscape:cy="110.45455"
+     inkscape:window-width="1757"
+     inkscape:window-height="1057"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg11" />
+  <defs
+     id="defs2">
+    <linearGradient
+       id="accentGrad"
+       x1="0"
+       y1="0"
+       x2="1"
+       y2="0">
+      <stop
+         offset="0%"
+         stop-color="#3a7cff"
+         id="stop1" />
+      <stop
+         offset="100%"
+         stop-color="#ff2ea6"
+         id="stop2" />
+    </linearGradient>
+  </defs>
+  <g
+     fill="#141414"
+     id="g8">
+    <path
+       d="M309 -14Q228 -14 166.0 15.0Q104 44 69.0 98.0Q34 152 34 228V256H164V228Q164 165 203.0 133.5Q242 102 309 102Q377 102 410.5 129.0Q444 156 444 198Q444 227 427.5 245.0Q411 263 379.5 274.5Q348 286 303 296L280 301Q208 317 156.5 341.5Q105 366 77.5 406.0Q50 446 50 510Q50 574 80.5 619.5Q111 665 166.5 689.5Q222 714 297 714Q372 714 430.5 688.5Q489 663 522.5 612.5Q556 562 556 486V456H426V486Q426 526 410.5 550.5Q395 575 366.0 586.5Q337 598 297 598Q237 598 208.5 575.5Q180 553 180 514Q180 488 193.5 470.0Q207 452 234.0 440.0Q261 428 303 419L326 414Q401 398 456.5 373.0Q512 348 543.0 307.0Q574 266 574 202Q574 138 541.5 89.5Q509 41 449.5 13.5Q390 -14 309 -14Z"
+       transform="translate(60.000 110.000) scale(0.096000 -0.096000)"
+       id="path2" />
+    <path
+       d="M46 0V116H138V584H46V700H406Q470 700 517.5 678.5Q565 657 591.5 617.5Q618 578 618 523V513Q618 465 600.0 434.5Q582 404 557.5 387.5Q533 371 511 364V346Q533 340 559.0 323.5Q585 307 603.5 276.0Q622 245 622 195V185Q622 127 595.0 85.5Q568 44 520.5 22.0Q473 0 410 0ZM270 120H394Q437 120 463.5 141.0Q490 162 490 201V211Q490 250 464.0 271.0Q438 292 394 292H270ZM270 412H392Q433 412 459.5 433.0Q486 454 486 491V501Q486 539 460.0 559.5Q434 580 392 580H270Z"
+       transform="translate(116.176 110.000) scale(0.096000 -0.096000)"
+       id="path3" />
+    <path
+       d="M224 -14Q171 -14 129.0 4.5Q87 23 62.5 58.5Q38 94 38 145Q38 196 62.5 230.5Q87 265 130.5 282.5Q174 300 230 300H366V328Q366 363 344.0 385.5Q322 408 274 408Q227 408 204.0 386.5Q181 365 174 331L58 370Q70 408 96.5 439.5Q123 471 167.5 490.5Q212 510 276 510Q374 510 431.0 461.0Q488 412 488 319V134Q488 104 516 104H556V0H472Q435 0 411.0 18.0Q387 36 387 66V67H368Q364 55 350.0 35.5Q336 16 306.0 1.0Q276 -14 224 -14ZM246 88Q299 88 332.5 117.5Q366 147 366 196V206H239Q204 206 184.0 191.0Q164 176 164 149Q164 122 185.0 105.0Q206 88 246 88Z"
+       transform="translate(180.920 110.000) scale(0.096000 -0.096000)"
+       id="path4" />
+    <path
+       d="M308 -14Q236 -14 177.5 18.5Q119 51 84.5 113.5Q50 176 50 266V434Q50 569 126.0 641.5Q202 714 332 714Q461 714 531.5 645.5Q602 577 602 460V456H472V464Q472 501 456.5 531.0Q441 561 410.0 578.5Q379 596 332 596Q262 596 222.0 553.0Q182 510 182 436V264Q182 191 222.0 146.5Q262 102 334 102Q406 102 439.0 140.0Q472 178 472 236V246H306V358H602V0H480V67H462Q455 50 439.5 31.0Q424 12 393.0 -1.0Q362 -14 308 -14Z"
+       transform="translate(237.408 110.000) scale(0.096000 -0.096000)"
+       id="path5" />
+    <path
+       d="M296 -14Q222 -14 165.5 17.5Q109 49 77.5 106.5Q46 164 46 242V254Q46 332 77.0 389.5Q108 447 164.0 478.5Q220 510 294 510Q367 510 421.0 477.5Q475 445 505.0 387.5Q535 330 535 254V211H174Q176 160 212.0 128.0Q248 96 300 96Q353 96 378.0 119.0Q403 142 416 170L519 116Q505 90 478.5 59.5Q452 29 408.0 7.5Q364 -14 296 -14ZM175 305H407Q403 348 372.5 374.0Q342 400 293 400Q242 400 212.0 374.0Q182 348 175 305Z"
+       transform="translate(300.960 110.000) scale(0.096000 -0.096000)"
+       id="path6" />
+    <path
+       d="M70 0V496H194V431H212Q224 457 257.0 480.5Q290 504 357 504Q415 504 458.5 477.5Q502 451 526.0 404.5Q550 358 550 296V0H424V286Q424 342 396.5 370.0Q369 398 318 398Q260 398 228.0 359.5Q196 321 196 252V0Z"
+       transform="translate(356.352 110.000) scale(0.096000 -0.096000)"
+       id="path7" />
+    <path
+       d="M22 0 227 353 24 700H174L313 447H331L470 700H620L417 353L622 0H472L331 259H313L172 0Z"
+       transform="translate(412.988 110.000) scale(0.096000 -0.096000)"
+       id="path8" />
+  </g>
+  <g
+     transform="translate(60, 138)"
+     id="g11">
+    <path
+       d="M0 28 H720"
+       stroke="#141414"
+       stroke-opacity="0.12"
+       stroke-width="6"
+       stroke-linecap="round"
+       id="path9" />
+    <path
+       d="M20 28          C 70 28, 70 6, 120 6          C 170 6, 170 50, 220 50          C 270 50, 270 18, 320 18          C 370 18, 370 42, 420 42          C 470 42, 470 10, 520 10          C 570 10, 570 52, 620 52          C 670 52, 670 28, 700 28"
+       fill="none"
+       stroke="url(#accentGrad)"
+       stroke-width="8"
+       stroke-linecap="round"
+       stroke-linejoin="round"
+       id="path10" />
+    <circle
+       cx="20"
+       cy="28"
+       r="10"
+       fill="#3a7cff"
+       id="circle10" />
+    <circle
+       cx="700"
+       cy="28"
+       r="10"
+       fill="#ff2ea6"
+       id="circle11" />
+  </g>
+</svg>
