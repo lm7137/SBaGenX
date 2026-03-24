@@ -172,6 +172,11 @@ struct SbxContext {
 }
 
 #[repr(C)]
+struct SbxCurveProgram {
+  _private: [u8; 0],
+}
+
+#[repr(C)]
 struct SbxAudioWriter {
   _private: [u8; 0],
 }
@@ -187,11 +192,34 @@ struct SbxDiagnosticRaw {
   message: [c_char; SBX_DIAG_MESSAGE_MAX],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxCurveInfoRaw {
+  parameter_count: usize,
+  has_solve: c_int,
+  has_carrier_expr: c_int,
+  has_amp_expr: c_int,
+  has_mixamp_expr: c_int,
+  beat_piece_count: usize,
+  carrier_piece_count: usize,
+  amp_piece_count: usize,
+  mixamp_piece_count: usize,
+}
+
 type SbxDefaultEngineConfig = unsafe extern "C" fn(*mut SbxEngineConfig);
 type SbxDefaultPcmConvertState = unsafe extern "C" fn(*mut SbxPcmConvertState);
 type SbxDefaultAudioWriterConfig = unsafe extern "C" fn(*mut SbxAudioWriterConfig);
 type SbxDefaultSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
 type SbxFreeSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
+type SbxCurveCreate = unsafe extern "C" fn() -> *mut SbxCurveProgram;
+type SbxCurveDestroy = unsafe extern "C" fn(*mut SbxCurveProgram);
+type SbxCurveLoadText =
+  unsafe extern "C" fn(*mut SbxCurveProgram, *const c_char, *const c_char) -> c_int;
+type SbxCurveGetInfo = unsafe extern "C" fn(*const SbxCurveProgram, *mut SbxCurveInfoRaw) -> c_int;
+type SbxCurveParamCount = unsafe extern "C" fn(*const SbxCurveProgram) -> usize;
+type SbxCurveGetParam =
+  unsafe extern "C" fn(*const SbxCurveProgram, usize, *mut *const c_char, *mut f64) -> c_int;
+type SbxCurveLastError = unsafe extern "C" fn(*const SbxCurveProgram) -> *const c_char;
 type SbxContextCreate = unsafe extern "C" fn(*const SbxEngineConfig) -> *mut SbxContext;
 type SbxContextDestroy = unsafe extern "C" fn(*mut SbxContext);
 type SbxContextSetDefaultWaveform = unsafe extern "C" fn(*mut SbxContext, c_int) -> c_int;
@@ -284,6 +312,25 @@ pub struct BeatPreviewOutcome {
   pub engine_version: String,
 }
 
+pub struct CurveParameter {
+  pub name: String,
+  pub value: f64,
+}
+
+pub struct CurveInfoOutcome {
+  pub parameter_count: usize,
+  pub has_solve: bool,
+  pub has_carrier_expr: bool,
+  pub has_amp_expr: bool,
+  pub has_mixamp_expr: bool,
+  pub beat_piece_count: usize,
+  pub carrier_piece_count: usize,
+  pub amp_piece_count: usize,
+  pub mixamp_piece_count: usize,
+  pub parameters: Vec<CurveParameter>,
+  pub engine_version: String,
+}
+
 struct Api {
   _lib: Library,
   sbx_version: SbxVersion,
@@ -293,6 +340,13 @@ struct Api {
   sbx_default_audio_writer_config: SbxDefaultAudioWriterConfig,
   sbx_default_safe_seqfile_preamble: SbxDefaultSafeSeqfilePreamble,
   sbx_free_safe_seqfile_preamble: SbxFreeSafeSeqfilePreamble,
+  sbx_curve_create: SbxCurveCreate,
+  sbx_curve_destroy: SbxCurveDestroy,
+  sbx_curve_load_text: SbxCurveLoadText,
+  sbx_curve_get_info: SbxCurveGetInfo,
+  sbx_curve_param_count: SbxCurveParamCount,
+  sbx_curve_get_param: SbxCurveGetParam,
+  sbx_curve_last_error: SbxCurveLastError,
   sbx_context_create: SbxContextCreate,
   sbx_context_destroy: SbxContextDestroy,
   sbx_context_set_default_waveform: SbxContextSetDefaultWaveform,
@@ -372,6 +426,13 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_default_safe_seqfile_preamble\0")?,
         sbx_free_safe_seqfile_preamble:
           Self::load_symbol(&lib, b"sbx_free_safe_seqfile_preamble\0")?,
+        sbx_curve_create: Self::load_symbol(&lib, b"sbx_curve_create\0")?,
+        sbx_curve_destroy: Self::load_symbol(&lib, b"sbx_curve_destroy\0")?,
+        sbx_curve_load_text: Self::load_symbol(&lib, b"sbx_curve_load_text\0")?,
+        sbx_curve_get_info: Self::load_symbol(&lib, b"sbx_curve_get_info\0")?,
+        sbx_curve_param_count: Self::load_symbol(&lib, b"sbx_curve_param_count\0")?,
+        sbx_curve_get_param: Self::load_symbol(&lib, b"sbx_curve_get_param\0")?,
+        sbx_curve_last_error: Self::load_symbol(&lib, b"sbx_curve_last_error\0")?,
         sbx_context_create: Self::load_symbol(&lib, b"sbx_context_create\0")?,
         sbx_context_destroy: Self::load_symbol(&lib, b"sbx_context_destroy\0")?,
         sbx_context_set_default_waveform:
@@ -1079,6 +1140,83 @@ pub fn sample_beat_preview(text: &str, source_name: &str) -> Result<BeatPreviewO
     },
     points,
     engine_version: loaded.api.version_string(),
+  })
+}
+
+pub fn inspect_curve_info(text: &str, source_name: &str) -> Result<CurveInfoOutcome, String> {
+  let api = Api::load()?;
+  let curve = unsafe { (api.sbx_curve_create)() };
+  if curve.is_null() {
+    return Err("failed to create sbagenxlib curve program".to_string());
+  }
+
+  let c_text = CString::new(text).map_err(|_| "document contains embedded NUL byte".to_string())?;
+  let c_source =
+    CString::new(source_name).map_err(|_| "source name contains embedded NUL byte".to_string())?;
+
+  let load_rc = unsafe { (api.sbx_curve_load_text)(curve, c_text.as_ptr(), c_source.as_ptr()) };
+  if load_rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+    unsafe { (api.sbx_curve_destroy)(curve) };
+    return Err(if msg.is_empty() {
+      "failed to load curve text in sbagenxlib".to_string()
+    } else {
+      msg
+    });
+  }
+
+  let mut info = SbxCurveInfoRaw {
+    parameter_count: 0,
+    has_solve: 0,
+    has_carrier_expr: 0,
+    has_amp_expr: 0,
+    has_mixamp_expr: 0,
+    beat_piece_count: 0,
+    carrier_piece_count: 0,
+    amp_piece_count: 0,
+    mixamp_piece_count: 0,
+  };
+
+  let info_rc = unsafe { (api.sbx_curve_get_info)(curve, &mut info) };
+  if info_rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+    unsafe { (api.sbx_curve_destroy)(curve) };
+    return Err(if msg.is_empty() {
+      "failed to inspect curve metadata in sbagenxlib".to_string()
+    } else {
+      msg
+    });
+  }
+
+  let mut parameters = Vec::new();
+  let param_count = unsafe { (api.sbx_curve_param_count)(curve) };
+  for index in 0..param_count {
+    let mut name_ptr: *const c_char = std::ptr::null();
+    let mut value = 0.0_f64;
+    let rc = unsafe { (api.sbx_curve_get_param)(curve, index, &mut name_ptr, &mut value) };
+    if rc != SBX_OK {
+      continue;
+    }
+    parameters.push(CurveParameter {
+      name: cstr_to_string(name_ptr),
+      value,
+    });
+  }
+
+  unsafe { (api.sbx_curve_destroy)(curve) };
+
+  Ok(CurveInfoOutcome {
+    parameter_count: info.parameter_count,
+    has_solve: info.has_solve != 0,
+    has_carrier_expr: info.has_carrier_expr != 0,
+    has_amp_expr: info.has_amp_expr != 0,
+    has_mixamp_expr: info.has_mixamp_expr != 0,
+    beat_piece_count: info.beat_piece_count,
+    carrier_piece_count: info.carrier_piece_count,
+    amp_piece_count: info.amp_piece_count,
+    mixamp_piece_count: info.mixamp_piece_count,
+    parameters,
+    engine_version: api.version_string(),
   })
 }
 

@@ -4,9 +4,11 @@
   import { confirm, open, save } from '@tauri-apps/plugin-dialog'
   import MonacoEditor from './lib/editor/MonacoEditor.svelte'
   import BeatPreviewChart from './lib/inspector/BeatPreviewChart.svelte'
+  import CurveInfoCard from './lib/inspector/CurveInfoCard.svelte'
   import logoUrl from './lib/assets/sbagenx-logo.svg'
   import {
     exportDocument,
+    inspectCurveInfo,
     loadDevelopmentExamples,
     readTextFile,
     renderPreview,
@@ -31,6 +33,7 @@
   let audioSource: string | null = null
   let audioElement: HTMLAudioElement | null = null
   let previewLoadingId: string | null = null
+  let curveInfoLoadingId: string | null = null
   let editorView: {
     revealPosition: (line: number, column?: number) => void
     focusEditor: () => void
@@ -59,6 +62,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       diagnostics: [],
       beatPreview: null,
       beatPreviewError: null,
+      curveInfo: null,
+      curveInfoError: null,
     }
   }
 
@@ -85,6 +90,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       diagnostics: [],
       beatPreview: null,
       beatPreviewError: null,
+      curveInfo: null,
+      curveInfoError: null,
     }
   }
 
@@ -146,6 +153,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             diagnostics: [],
             beatPreview: null,
             beatPreviewError: null,
+            curveInfo: null,
+            curveInfoError: null,
           }
         : makeDocumentRecord(loaded)
       upsertDocument(next)
@@ -238,6 +247,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       dirty: true,
       beatPreview: null,
       beatPreviewError: null,
+      curveInfo: null,
+      curveInfoError: null,
     })
     queueValidation(activeDocument.id)
   }
@@ -261,9 +272,13 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         diagnostics: result.diagnostics,
         beatPreview: result.valid && doc.kind === 'sbg' ? doc.beatPreview : null,
         beatPreviewError: null,
+        curveInfo: result.valid && doc.kind === 'sbgf' ? doc.curveInfo : null,
+        curveInfoError: null,
       })
       if (result.valid && doc.kind === 'sbg') {
         void loadBeatPreview(doc.id, contentSnapshot, doc.path ?? doc.name)
+      } else if (result.valid && doc.kind === 'sbgf') {
+        void loadCurveInfo(doc.id, contentSnapshot, doc.path ?? doc.name)
       }
     } catch (error) {
       if (!currentDocumentMatches(doc.id, contentSnapshot)) return
@@ -278,6 +293,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         diagnostics: [diagnostic],
         beatPreview: null,
         beatPreviewError: null,
+        curveInfo: null,
+        curveInfoError: null,
       })
     } finally {
       validatingId = null
@@ -302,6 +319,28 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     } finally {
       if (previewLoadingId === id) {
         previewLoadingId = null
+      }
+    }
+  }
+
+  async function loadCurveInfo(id: string, text: string, sourceName: string) {
+    curveInfoLoadingId = id
+    try {
+      const info = await inspectCurveInfo(text, sourceName)
+      if (!currentDocumentMatches(id, text)) return
+      updateDocument(id, {
+        curveInfo: info,
+        curveInfoError: null,
+      })
+    } catch (error) {
+      if (!currentDocumentMatches(id, text)) return
+      updateDocument(id, {
+        curveInfo: null,
+        curveInfoError: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      if (curveInfoLoadingId === id) {
+        curveInfoLoadingId = null
       }
     }
   }
@@ -418,6 +457,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   $: activeDiagnostics = activeDocument?.diagnostics ?? []
   $: activeBeatPreview = activeDocument?.beatPreview ?? null
   $: activeBeatPreviewError = activeDocument?.beatPreviewError ?? null
+  $: activeCurveInfo = activeDocument?.curveInfo ?? null
+  $: activeCurveInfoError = activeDocument?.curveInfoError ?? null
   $: canRunActive =
     !!activeDocument && activeDocument.kind === 'sbg' && activeDiagnostics.length === 0 && !transportBusy
 
@@ -568,12 +609,20 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     </section>
 
     <aside class="inspector panel">
-      <BeatPreviewChart
-        preview={activeBeatPreview}
-        error={activeBeatPreviewError}
-        kind={activeDocument?.kind ?? null}
-        validating={previewLoadingId === activeDocument?.id}
-      />
+      {#if activeDocument?.kind === 'sbgf'}
+        <CurveInfoCard
+          info={activeCurveInfo}
+          error={activeCurveInfoError}
+          validating={curveInfoLoadingId === activeDocument?.id}
+        />
+      {:else}
+        <BeatPreviewChart
+          preview={activeBeatPreview}
+          error={activeBeatPreviewError}
+          kind={activeDocument?.kind ?? null}
+          validating={previewLoadingId === activeDocument?.id}
+        />
+      {/if}
 
       <div class="panel-header">
         <div>
@@ -626,7 +675,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           <li>Dialog-backed open/save</li>
           <li>Debounced native validation</li>
           <li>`.sbg` preview playback and export</li>
-          <li>Standalone `.sbgf` tabs remain editor/validation only</li>
+          <li>`.sbg` beat preview sampling</li>
+          <li>`.sbgf` curve metadata inspector</li>
         </ul>
       </div>
     </aside>

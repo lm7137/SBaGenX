@@ -11,6 +11,8 @@ export interface DocumentRecord {
   diagnostics: ValidationDiagnostic[]
   beatPreview: BeatPreviewResult | null
   beatPreviewError: string | null
+  curveInfo: CurveInfoResult | null
+  curveInfoError: string | null
 }
 
 export interface ValidationDiagnostic {
@@ -72,6 +74,26 @@ export interface BeatPreviewResult {
   limited: boolean
   timeLabel: string
   points: BeatPreviewPoint[]
+  bridge: string
+  engineVersion: string
+}
+
+export interface CurveParameter {
+  name: string
+  value: number
+}
+
+export interface CurveInfoResult {
+  parameterCount: number
+  hasSolve: boolean
+  hasCarrierExpr: boolean
+  hasAmpExpr: boolean
+  hasMixampExpr: boolean
+  beatPieceCount: number
+  carrierPieceCount: number
+  ampPieceCount: number
+  mixampPieceCount: number
+  parameters: CurveParameter[]
   bridge: string
   engineVersion: string
 }

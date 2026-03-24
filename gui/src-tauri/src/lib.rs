@@ -85,6 +85,30 @@ struct BeatPreviewResult {
   engine_version: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurveParameter {
+  name: String,
+  value: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurveInfoResult {
+  parameter_count: usize,
+  has_solve: bool,
+  has_carrier_expr: bool,
+  has_amp_expr: bool,
+  has_mixamp_expr: bool,
+  beat_piece_count: usize,
+  carrier_piece_count: usize,
+  amp_piece_count: usize,
+  mixamp_piece_count: usize,
+  parameters: Vec<CurveParameter>,
+  bridge: &'static str,
+  engine_version: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ValidateDocumentArgs {
@@ -276,6 +300,36 @@ fn sample_beat_preview(args: RenderDocumentArgs) -> Result<BeatPreviewResult, St
   })
 }
 
+#[tauri::command]
+fn inspect_curve_info(args: RenderDocumentArgs) -> Result<CurveInfoResult, String> {
+  if args.kind != "sbgf" {
+    return Err("curve inspection is currently available only for .sbgf documents".to_string());
+  }
+  let source_name = normalize_source_name(args.source_name, &args.kind);
+  let outcome = sbagenxlib::inspect_curve_info(&args.text, &source_name)?;
+  Ok(CurveInfoResult {
+    parameter_count: outcome.parameter_count,
+    has_solve: outcome.has_solve,
+    has_carrier_expr: outcome.has_carrier_expr,
+    has_amp_expr: outcome.has_amp_expr,
+    has_mixamp_expr: outcome.has_mixamp_expr,
+    beat_piece_count: outcome.beat_piece_count,
+    carrier_piece_count: outcome.carrier_piece_count,
+    amp_piece_count: outcome.amp_piece_count,
+    mixamp_piece_count: outcome.mixamp_piece_count,
+    parameters: outcome
+      .parameters
+      .into_iter()
+      .map(|param| CurveParameter {
+        name: param.name,
+        value: param.value,
+      })
+      .collect(),
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -298,7 +352,8 @@ pub fn run() {
       validate_document,
       render_preview,
       export_document,
-      sample_beat_preview
+      sample_beat_preview,
+      inspect_curve_info
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

@@ -604,6 +604,37 @@ h1 {
   color: var(--heading);
 }
 
+.curve-param-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.curve-param-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.curve-param-name,
+.curve-param-value {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+}
+
+.curve-param-name {
+  color: var(--heading);
+  font-weight: 700;
+}
+
+.curve-param-value {
+  color: var(--muted);
+}
+
 .milestone-list {
   margin: 0.85rem 0 0;
   padding-left: 1.1rem;

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
   BackendStatus,
   BeatPreviewResult,
+  CurveInfoResult,
   ExportResult,
   FileDocument,
   PreviewResult,
@@ -84,6 +85,19 @@ export async function sampleBeatPreview(
   return invoke<BeatPreviewResult>('sample_beat_preview', {
     args: {
       kind: 'sbg',
+      text,
+      sourceName,
+    },
+  })
+}
+
+export async function inspectCurveInfo(
+  text: string,
+  sourceName?: string | null,
+): Promise<CurveInfoResult> {
+  return invoke<CurveInfoResult>('inspect_curve_info', {
+    args: {
+      kind: 'sbgf',
       text,
       sourceName,
     },
