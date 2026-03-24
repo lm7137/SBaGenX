@@ -498,6 +498,112 @@ h1 {
   padding: 1rem;
 }
 
+.preview-block {
+  border-bottom: 1px solid var(--line);
+}
+
+.preview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.95rem;
+}
+
+.preview-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.preview-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.9rem;
+}
+
+.preview-stat {
+  padding: 0.8rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.preview-stat-label {
+  display: block;
+  margin-bottom: 0.28rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.preview-stat strong {
+  color: var(--heading);
+  font-size: 0.96rem;
+}
+
+.preview-chart {
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.9));
+  overflow: hidden;
+}
+
+.preview-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.preview-axis {
+  stroke: rgba(20, 20, 20, 0.25);
+  stroke-width: 1.5;
+}
+
+.preview-grid {
+  stroke: rgba(20, 20, 20, 0.08);
+  stroke-width: 1;
+  stroke-dasharray: 4 6;
+}
+
+.preview-label {
+  fill: rgba(20, 20, 20, 0.64);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.preview-label.end {
+  text-anchor: end;
+}
+
+.preview-empty {
+  padding: 0.95rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.45);
+  color: var(--muted);
+}
+
+.preview-empty.error {
+  border-style: solid;
+  border-color: rgba(255, 46, 166, 0.18);
+  background: rgba(255, 46, 166, 0.06);
+  color: var(--heading);
+}
+
 .milestone-list {
   margin: 0.85rem 0 0;
   padding-left: 1.1rem;

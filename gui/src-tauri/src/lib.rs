@@ -64,6 +64,27 @@ struct ExportResult {
   engine_version: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BeatPreviewPoint {
+  t_sec: f64,
+  beat_hz: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BeatPreviewResult {
+  duration_sec: f64,
+  sample_count: usize,
+  min_hz: f64,
+  max_hz: f64,
+  limited: bool,
+  time_label: String,
+  points: Vec<BeatPreviewPoint>,
+  bridge: &'static str,
+  engine_version: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ValidateDocumentArgs {
@@ -228,6 +249,33 @@ fn export_document(args: ExportDocumentArgs) -> Result<ExportResult, String> {
   })
 }
 
+#[tauri::command]
+fn sample_beat_preview(args: RenderDocumentArgs) -> Result<BeatPreviewResult, String> {
+  if args.kind != "sbg" {
+    return Err("beat preview is currently available only for .sbg documents".to_string());
+  }
+  let source_name = normalize_source_name(args.source_name, &args.kind);
+  let outcome = sbagenxlib::sample_beat_preview(&args.text, &source_name)?;
+  Ok(BeatPreviewResult {
+    duration_sec: outcome.duration_sec,
+    sample_count: outcome.sample_count,
+    min_hz: outcome.min_hz,
+    max_hz: outcome.max_hz,
+    limited: outcome.limited,
+    time_label: outcome.time_label,
+    points: outcome
+      .points
+      .into_iter()
+      .map(|point| BeatPreviewPoint {
+        t_sec: point.t_sec,
+        beat_hz: point.beat_hz,
+      })
+      .collect(),
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -249,7 +297,8 @@ pub fn run() {
       write_text_file,
       validate_document,
       render_preview,
-      export_document
+      export_document,
+      sample_beat_preview
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

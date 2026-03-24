@@ -9,6 +9,8 @@ export interface DocumentRecord {
   content: string
   lines: string[]
   diagnostics: ValidationDiagnostic[]
+  beatPreview: BeatPreviewResult | null
+  beatPreviewError: string | null
 }
 
 export interface ValidationDiagnostic {
@@ -53,6 +55,23 @@ export interface ExportResult {
   outputPath: string
   durationSec: number
   format: string
+  bridge: string
+  engineVersion: string
+}
+
+export interface BeatPreviewPoint {
+  tSec: number
+  beatHz: number
+}
+
+export interface BeatPreviewResult {
+  durationSec: number
+  sampleCount: number
+  minHz: number
+  maxHz: number
+  limited: boolean
+  timeLabel: string
+  points: BeatPreviewPoint[]
   bridge: string
   engineVersion: string
 }

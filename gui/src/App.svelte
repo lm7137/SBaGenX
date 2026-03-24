@@ -3,16 +3,22 @@
   import { convertFileSrc } from '@tauri-apps/api/core'
   import { confirm, open, save } from '@tauri-apps/plugin-dialog'
   import MonacoEditor from './lib/editor/MonacoEditor.svelte'
+  import BeatPreviewChart from './lib/inspector/BeatPreviewChart.svelte'
   import logoUrl from './lib/assets/sbagenx-logo.svg'
   import {
     exportDocument,
     loadDevelopmentExamples,
     readTextFile,
     renderPreview,
+    sampleBeatPreview,
     validateDocument,
     writeTextFile,
   } from './lib/backend'
-  import type { DocumentKind, DocumentRecord, ValidationDiagnostic } from './lib/types'
+  import type {
+    DocumentKind,
+    DocumentRecord,
+    ValidationDiagnostic,
+  } from './lib/types'
 
   let documents: DocumentRecord[] = [makeUntitledDocument('sbg'), makeUntitledDocument('sbgf')]
   let activeId = documents[0].id
@@ -24,6 +30,7 @@
   let isPlaying = false
   let audioSource: string | null = null
   let audioElement: HTMLAudioElement | null = null
+  let previewLoadingId: string | null = null
   let editorView: {
     revealPosition: (line: number, column?: number) => void
     focusEditor: () => void
@@ -50,6 +57,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       content: base,
       lines: base.split('\n'),
       diagnostics: [],
+      beatPreview: null,
+      beatPreviewError: null,
     }
   }
 
@@ -74,6 +83,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       content: source.content,
       lines: source.content.split('\n'),
       diagnostics: [],
+      beatPreview: null,
+      beatPreviewError: null,
     }
   }
 
@@ -93,6 +104,11 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       merged.lines = merged.content.split('\n')
       return merged
     })
+  }
+
+  function currentDocumentMatches(id: string, content: string) {
+    const current = documents.find((doc) => doc.id === id)
+    return !!current && current.content === content
   }
 
   function formatDuration(seconds: number): string {
@@ -128,6 +144,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             content: loaded.content,
             lines: loaded.content.split('\n'),
             diagnostics: [],
+            beatPreview: null,
+            beatPreviewError: null,
           }
         : makeDocumentRecord(loaded)
       upsertDocument(next)
@@ -218,6 +236,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     updateDocument(activeDocument.id, {
       content: nextValue,
       dirty: true,
+      beatPreview: null,
+      beatPreviewError: null,
     })
     queueValidation(activeDocument.id)
   }
@@ -233,10 +253,20 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   async function runValidation(id: string) {
     const doc = documents.find((item) => item.id === id)
     if (!doc) return
+    const contentSnapshot = doc.content
     try {
       const result = await validateDocument(doc.kind, doc.content, doc.path ?? doc.name)
-      updateDocument(doc.id, { diagnostics: result.diagnostics })
+      if (!currentDocumentMatches(doc.id, contentSnapshot)) return
+      updateDocument(doc.id, {
+        diagnostics: result.diagnostics,
+        beatPreview: result.valid && doc.kind === 'sbg' ? doc.beatPreview : null,
+        beatPreviewError: null,
+      })
+      if (result.valid && doc.kind === 'sbg') {
+        void loadBeatPreview(doc.id, contentSnapshot, doc.path ?? doc.name)
+      }
     } catch (error) {
+      if (!currentDocumentMatches(doc.id, contentSnapshot)) return
       const message = error instanceof Error ? error.message : String(error)
       const diagnostic: ValidationDiagnostic = {
         id: `diag-${doc.id}-bridge`,
@@ -244,9 +274,35 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         severity: 'error',
         message,
       }
-      updateDocument(doc.id, { diagnostics: [diagnostic] })
+      updateDocument(doc.id, {
+        diagnostics: [diagnostic],
+        beatPreview: null,
+        beatPreviewError: null,
+      })
     } finally {
       validatingId = null
+    }
+  }
+
+  async function loadBeatPreview(id: string, text: string, sourceName: string) {
+    previewLoadingId = id
+    try {
+      const preview = await sampleBeatPreview(text, sourceName)
+      if (!currentDocumentMatches(id, text)) return
+      updateDocument(id, {
+        beatPreview: preview,
+        beatPreviewError: null,
+      })
+    } catch (error) {
+      if (!currentDocumentMatches(id, text)) return
+      updateDocument(id, {
+        beatPreview: null,
+        beatPreviewError: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      if (previewLoadingId === id) {
+        previewLoadingId = null
+      }
     }
   }
 
@@ -360,6 +416,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
   $: activeDocument = documents.find((doc) => doc.id === activeId) ?? documents[0]
   $: activeDiagnostics = activeDocument?.diagnostics ?? []
+  $: activeBeatPreview = activeDocument?.beatPreview ?? null
+  $: activeBeatPreviewError = activeDocument?.beatPreviewError ?? null
   $: canRunActive =
     !!activeDocument && activeDocument.kind === 'sbg' && activeDiagnostics.length === 0 && !transportBusy
 
@@ -510,6 +568,13 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     </section>
 
     <aside class="inspector panel">
+      <BeatPreviewChart
+        preview={activeBeatPreview}
+        error={activeBeatPreviewError}
+        kind={activeDocument?.kind ?? null}
+        validating={previewLoadingId === activeDocument?.id}
+      />
+
       <div class="panel-header">
         <div>
           <p class="panel-title">Diagnostics</p>

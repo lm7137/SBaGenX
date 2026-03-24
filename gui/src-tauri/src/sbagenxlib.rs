@@ -222,6 +222,8 @@ type SbxContextDurationSec = unsafe extern "C" fn(*const SbxContext) -> f64;
 type SbxContextIsLooping = unsafe extern "C" fn(*const SbxContext) -> c_int;
 type SbxContextHasMixEffects = unsafe extern "C" fn(*const SbxContext) -> c_int;
 type SbxContextRenderF32 = unsafe extern "C" fn(*mut SbxContext, *mut f32, usize) -> c_int;
+type SbxContextSampleProgramBeat =
+  unsafe extern "C" fn(*mut SbxContext, f64, f64, usize, *mut f64, *mut f64) -> c_int;
 type SbxVersion = unsafe extern "C" fn() -> *const c_char;
 type SbxApiVersion = unsafe extern "C" fn() -> c_int;
 type SbxAudioWriterCreatePath =
@@ -266,6 +268,22 @@ pub struct ExportOutcome {
   pub engine_version: String,
 }
 
+pub struct BeatPreviewPoint {
+  pub t_sec: f64,
+  pub beat_hz: f64,
+}
+
+pub struct BeatPreviewOutcome {
+  pub duration_sec: f64,
+  pub sample_count: usize,
+  pub min_hz: f64,
+  pub max_hz: f64,
+  pub limited: bool,
+  pub time_label: String,
+  pub points: Vec<BeatPreviewPoint>,
+  pub engine_version: String,
+}
+
 struct Api {
   _lib: Library,
   sbx_version: SbxVersion,
@@ -293,6 +311,7 @@ struct Api {
   sbx_context_is_looping: SbxContextIsLooping,
   sbx_context_has_mix_effects: SbxContextHasMixEffects,
   sbx_context_render_f32: SbxContextRenderF32,
+  sbx_context_sample_program_beat: SbxContextSampleProgramBeat,
   sbx_audio_writer_create_path: SbxAudioWriterCreatePath,
   sbx_audio_writer_close: SbxAudioWriterClose,
   sbx_audio_writer_destroy: SbxAudioWriterDestroy,
@@ -378,6 +397,8 @@ impl Api {
         sbx_context_has_mix_effects:
           Self::load_symbol(&lib, b"sbx_context_has_mix_effects\0")?,
         sbx_context_render_f32: Self::load_symbol(&lib, b"sbx_context_render_f32\0")?,
+        sbx_context_sample_program_beat:
+          Self::load_symbol(&lib, b"sbx_context_sample_program_beat\0")?,
         sbx_audio_writer_create_path:
           Self::load_symbol(&lib, b"sbx_audio_writer_create_path\0")?,
         sbx_audio_writer_close: Self::load_symbol(&lib, b"sbx_audio_writer_close\0")?,
@@ -978,6 +999,86 @@ pub fn export_sbg(text: &str, source_name: &str, output_path: &Path) -> Result<E
     duration_sec,
     format: format.to_string(),
     engine_version,
+  })
+}
+
+pub fn sample_beat_preview(text: &str, source_name: &str) -> Result<BeatPreviewOutcome, String> {
+  let loaded = load_sbg_context(text, source_name)?;
+  let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
+  let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
+  let mut sample_span_sec = duration_sec;
+  let mut limited = false;
+
+  if is_looping || sample_span_sec <= 0.0 {
+    sample_span_sec = PREVIEW_LIMIT_SEC;
+    limited = true;
+  }
+
+  if !sample_span_sec.is_finite() || sample_span_sec <= 0.0 {
+    return Err("beat preview currently requires a finite timeline".to_string());
+  }
+
+  let sample_count = 240usize;
+  let mut t_sec = vec![0.0_f64; sample_count];
+  let mut hz = vec![0.0_f64; sample_count];
+  let rc = unsafe {
+    (loaded.api.sbx_context_sample_program_beat)(
+      loaded.ctx,
+      0.0,
+      sample_span_sec,
+      sample_count,
+      t_sec.as_mut_ptr(),
+      hz.as_mut_ptr(),
+    )
+  };
+  if rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) };
+    return Err(if msg.is_empty() {
+      "failed to sample beat preview from sbagenxlib".to_string()
+    } else {
+      msg
+    });
+  }
+
+  let mut min_hz = f64::INFINITY;
+  let mut max_hz = f64::NEG_INFINITY;
+  let mut points = Vec::with_capacity(sample_count);
+  for index in 0..sample_count {
+    let beat_hz = hz[index];
+    if beat_hz.is_finite() {
+      if beat_hz < min_hz {
+        min_hz = beat_hz;
+      }
+      if beat_hz > max_hz {
+        max_hz = beat_hz;
+      }
+    }
+    points.push(BeatPreviewPoint {
+      t_sec: t_sec[index],
+      beat_hz,
+    });
+  }
+
+  if !min_hz.is_finite() || !max_hz.is_finite() {
+    min_hz = 0.0;
+    max_hz = 1.0;
+  } else if (max_hz - min_hz).abs() < 1e-9 {
+    max_hz = min_hz + 1.0;
+  }
+
+  Ok(BeatPreviewOutcome {
+    duration_sec: sample_span_sec,
+    sample_count,
+    min_hz,
+    max_hz,
+    limited,
+    time_label: if sample_span_sec >= 180.0 {
+      "TIME MIN".to_string()
+    } else {
+      "TIME SEC".to_string()
+    },
+    points,
+    engine_version: loaded.api.version_string(),
   })
 }
 

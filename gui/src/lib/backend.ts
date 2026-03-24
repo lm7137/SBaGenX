@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   BackendStatus,
+  BeatPreviewResult,
   ExportResult,
   FileDocument,
   PreviewResult,
@@ -71,6 +72,19 @@ export async function exportDocument(
       kind: 'sbg',
       text,
       outputPath,
+      sourceName,
+    },
+  })
+}
+
+export async function sampleBeatPreview(
+  text: string,
+  sourceName?: string | null,
+): Promise<BeatPreviewResult> {
+  return invoke<BeatPreviewResult>('sample_beat_preview', {
+    args: {
+      kind: 'sbg',
+      text,
       sourceName,
     },
   })
