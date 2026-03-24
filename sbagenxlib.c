@@ -163,6 +163,7 @@ struct SbxContext {
   SbxMixFxSpec seq_mixam_env;
   int source_mode;
   SbxProgramKeyframe *kfs;
+  unsigned char *kf_styles;
   size_t kf_count;
   int kf_loop;
   size_t kf_seg;
@@ -1434,6 +1435,7 @@ struct SbxVoiceSetKeyframe {
   SbxToneSpec tones[SBX_MAX_SBG_VOICES];
   size_t tone_len;
   int interp;
+  int transition_style;
   int mix_amp_present;
   double mix_amp_pct;
   SbxMixFxSpec mix_fx[SBX_MAX_SBG_MIXFX];
@@ -1459,6 +1461,12 @@ struct SbxMixFxKeyframe {
   size_t mix_fx_count;
 };
 
+enum {
+  SBX_SEG_STYLE_DIRECT = 0,
+  SBX_SEG_STYLE_SBG_DEFAULT = 1,
+  SBX_SEG_STYLE_SBG_SLIDE = 2
+};
+
 static int
 is_sbg_transition_token(const char *tok) {
   if (!tok || !tok[0] || !tok[1] || tok[2]) return 0;
@@ -1470,6 +1478,13 @@ sbg_transition_token_to_interp(const char *tok) {
   if (tok && (tok[0] == '=' || tok[1] == '='))
     return SBX_INTERP_STEP;
   return SBX_INTERP_LINEAR;
+}
+
+static int
+sbg_transition_token_to_style(const char *tok) {
+  if (tok && strcmp(tok, "->") == 0)
+    return SBX_SEG_STYLE_SBG_SLIDE;
+  return SBX_SEG_STYLE_SBG_DEFAULT;
 }
 
 static int
@@ -1647,6 +1662,7 @@ sbx_voice_set_frame_init(SbxVoiceSetKeyframe *frame) {
   memset(frame, 0, sizeof(*frame));
   sbx_voice_set_init(frame->tones);
   frame->interp = SBX_INTERP_LINEAR;
+  frame->transition_style = SBX_SEG_STYLE_SBG_DEFAULT;
 }
 
 static int
@@ -3114,6 +3130,7 @@ ctx_clear_keyframes(SbxContext *ctx) {
   size_t i;
   if (!ctx) return;
   if (ctx->kfs) free(ctx->kfs);
+  if (ctx->kf_styles) free(ctx->kf_styles);
   if (ctx->mv_kfs) free(ctx->mv_kfs);
   if (ctx->mv_eng) {
     for (i = 0; i + 1 < ctx->mv_voice_count; i++) {
@@ -3122,6 +3139,7 @@ ctx_clear_keyframes(SbxContext *ctx) {
     free(ctx->mv_eng);
   }
   ctx->kfs = 0;
+  ctx->kf_styles = 0;
   ctx->mv_kfs = 0;
   ctx->mv_eng = 0;
   ctx->kf_count = 0;
@@ -3220,9 +3238,11 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
                                 size_t frame_count,
                                 const SbxProgramKeyframe *mv_frames,
                                 size_t mv_voice_count,
+                                const unsigned char *styles,
                                 int loop) {
   SbxProgramKeyframe *copy = 0;
   SbxProgramKeyframe *mv_copy = 0;
+  unsigned char *style_copy = 0;
   SbxEngine **mv_eng = 0;
   size_t i, vi;
   char err[160];
@@ -3239,26 +3259,39 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
     return SBX_ENOMEM;
   }
 
+  style_copy = (unsigned char *)calloc(frame_count, sizeof(*style_copy));
+  if (!style_copy) {
+    free(copy);
+    set_ctx_error(ctx, "out of memory");
+    return SBX_ENOMEM;
+  }
+  for (i = 0; i < frame_count; i++)
+    style_copy[i] = styles ? styles[i] : SBX_SEG_STYLE_DIRECT;
+
   for (i = 0; i < frame_count; i++) {
     copy[i] = frames[i];
     if (!isfinite(copy[i].time_sec) || copy[i].time_sec < 0.0) {
+      free(style_copy);
       free(copy);
       set_ctx_error(ctx, "keyframe time_sec must be finite and >= 0");
       return SBX_EINVAL;
     }
     if (i > 0 && copy[i].time_sec < copy[i - 1].time_sec) {
+      free(style_copy);
       free(copy);
       set_ctx_error(ctx, "keyframe time_sec values must be non-decreasing");
       return SBX_EINVAL;
     }
     if (copy[i].interp != SBX_INTERP_LINEAR &&
         copy[i].interp != SBX_INTERP_STEP) {
+      free(style_copy);
       free(copy);
       set_ctx_error(ctx, "keyframe interp must be SBX_INTERP_LINEAR or SBX_INTERP_STEP");
       return SBX_EINVAL;
     }
     rc = normalize_tone(&copy[i].tone, err, sizeof(err));
     if (rc != SBX_OK) {
+      free(style_copy);
       free(copy);
       set_ctx_error(ctx, err);
       return rc;
@@ -3268,6 +3301,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
   if (mv_voice_count > 1) {
     mv_copy = (SbxProgramKeyframe *)calloc(mv_voice_count * frame_count, sizeof(*mv_copy));
     if (!mv_copy) {
+      free(style_copy);
       free(copy);
       set_ctx_error(ctx, "out of memory");
       return SBX_ENOMEM;
@@ -3277,12 +3311,14 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
         mv_copy[vi * frame_count + i] = mv_frames[vi * frame_count + i];
         if (fabs(mv_copy[vi * frame_count + i].time_sec - copy[i].time_sec) > 1e-9) {
           free(mv_copy);
+          free(style_copy);
           free(copy);
           set_ctx_error(ctx, "multivoice keyframe lanes must share identical time positions");
           return SBX_EINVAL;
         }
         if (mv_copy[vi * frame_count + i].interp != copy[i].interp) {
           free(mv_copy);
+          free(style_copy);
           free(copy);
           set_ctx_error(ctx, "multivoice keyframe lanes must share identical interpolation");
           return SBX_EINVAL;
@@ -3290,6 +3326,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
         rc = normalize_tone(&mv_copy[vi * frame_count + i].tone, err, sizeof(err));
         if (rc != SBX_OK) {
           free(mv_copy);
+          free(style_copy);
           free(copy);
           set_ctx_error(ctx, err);
           return rc;
@@ -3300,6 +3337,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
     mv_eng = (SbxEngine **)calloc(mv_voice_count - 1, sizeof(*mv_eng));
     if (!mv_eng) {
       free(mv_copy);
+      free(style_copy);
       free(copy);
       set_ctx_error(ctx, "out of memory");
       return SBX_ENOMEM;
@@ -3313,6 +3351,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
         }
         free(mv_eng);
         free(mv_copy);
+        free(style_copy);
         free(copy);
         set_ctx_error(ctx, "out of memory");
         return SBX_ENOMEM;
@@ -3330,6 +3369,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
       free(mv_eng);
     }
     if (mv_copy) free(mv_copy);
+    free(style_copy);
     free(copy);
     set_ctx_error(ctx, "looped keyframes require final time_sec > 0");
     return SBX_EINVAL;
@@ -3338,6 +3378,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
   ctx_clear_keyframes(ctx);
   ctx_clear_curve_source(ctx);
   ctx->kfs = copy;
+  ctx->kf_styles = style_copy;
   ctx->mv_kfs = mv_copy;
   ctx->mv_eng = mv_eng;
   ctx->kf_count = frame_count;
@@ -3498,7 +3539,81 @@ eval_fail:
 }
 
 static void
+sbx_interp_direct_tone(const SbxToneSpec *a,
+                       const SbxToneSpec *b,
+                       double u,
+                       SbxToneSpec *out) {
+  out->mode = a->mode;
+  out->carrier_hz = sbx_lerp(a->carrier_hz, b->carrier_hz, u);
+  out->beat_hz = sbx_lerp(a->beat_hz, b->beat_hz, u);
+  out->amplitude = sbx_lerp(a->amplitude, b->amplitude, u);
+  out->waveform = a->waveform;
+  out->envelope_waveform = a->envelope_waveform;
+  out->duty_cycle = sbx_lerp(a->duty_cycle, b->duty_cycle, u);
+  out->iso_start = sbx_lerp(a->iso_start, b->iso_start, u);
+  out->iso_attack = sbx_lerp(a->iso_attack, b->iso_attack, u);
+  out->iso_release = sbx_lerp(a->iso_release, b->iso_release, u);
+  out->iso_edge_mode = a->iso_edge_mode;
+}
+
+static int
+sbx_tone_needs_default_fade_through(const SbxToneSpec *a,
+                                    const SbxToneSpec *b) {
+  if (!a || !b) return 0;
+  if (a->mode == SBX_TONE_BINAURAL ||
+      a->mode == SBX_TONE_SPIN_PINK ||
+      a->mode == SBX_TONE_SPIN_BROWN ||
+      a->mode == SBX_TONE_SPIN_WHITE) {
+    if (fabs(a->carrier_hz - b->carrier_hz) > 1e-12 ||
+        fabs(a->beat_hz - b->beat_hz) > 1e-12)
+      return 1;
+  }
+  return 0;
+}
+
+static void
+sbx_eval_sbg_transition_tone(const SbxToneSpec *a_in,
+                             const SbxToneSpec *b_in,
+                             int seg_style,
+                             double u,
+                             SbxToneSpec *out) {
+  SbxToneSpec a = *a_in;
+  SbxToneSpec b = *b_in;
+  int fade_through;
+
+  if (seg_style == SBX_SEG_STYLE_SBG_SLIDE) {
+    if (a.mode == SBX_TONE_NONE && b.mode != SBX_TONE_NONE && b.mode != SBX_TONE_BELL) {
+      a = b;
+      a.amplitude = 0.0;
+    } else if (a.mode != SBX_TONE_NONE && b.mode == SBX_TONE_NONE) {
+      b = a;
+      b.amplitude = 0.0;
+    }
+  }
+
+  fade_through =
+      (a.mode != b.mode) ||
+      (a.waveform != b.waveform) ||
+      (seg_style == SBX_SEG_STYLE_SBG_DEFAULT &&
+       sbx_tone_needs_default_fade_through(&a, &b));
+
+  if (fade_through) {
+    if (u <= 0.5) {
+      *out = a;
+      out->amplitude = sbx_lerp(a.amplitude, 0.0, u * 2.0);
+    } else {
+      *out = b;
+      out->amplitude = sbx_lerp(0.0, b.amplitude, (u - 0.5) * 2.0);
+    }
+    return;
+  }
+
+  sbx_interp_direct_tone(&a, &b, u, out);
+}
+
+static void
 ctx_eval_keyframed_tone_at(const SbxProgramKeyframe *kfs,
+                           const unsigned char *styles,
                            size_t n,
                            double t_sec,
                            size_t *inout_seg,
@@ -3547,28 +3662,22 @@ ctx_eval_keyframed_tone_at(const SbxProgramKeyframe *kfs,
   u = (t_sec - t0) / (t1 - t0);
   if (u < 0.0) u = 0.0;
   if (u > 1.0) u = 1.0;
-  if (k0->interp == SBX_INTERP_STEP ||
-      k0->tone.mode != k1->tone.mode ||
-      k0->tone.waveform != k1->tone.waveform)
+  if (k0->interp == SBX_INTERP_STEP)
     u = 0.0;
-
-  out->mode = k0->tone.mode;
-  out->carrier_hz = sbx_lerp(k0->tone.carrier_hz, k1->tone.carrier_hz, u);
-  out->beat_hz = sbx_lerp(k0->tone.beat_hz, k1->tone.beat_hz, u);
-  out->amplitude = sbx_lerp(k0->tone.amplitude, k1->tone.amplitude, u);
-  out->waveform = k0->tone.waveform;
-  out->envelope_waveform = k0->tone.envelope_waveform;
-  out->duty_cycle = sbx_lerp(k0->tone.duty_cycle, k1->tone.duty_cycle, u);
-  out->iso_start = sbx_lerp(k0->tone.iso_start, k1->tone.iso_start, u);
-  out->iso_attack = sbx_lerp(k0->tone.iso_attack, k1->tone.iso_attack, u);
-  out->iso_release = sbx_lerp(k0->tone.iso_release, k1->tone.iso_release, u);
-  out->iso_edge_mode = k0->tone.iso_edge_mode;
+  if (styles && styles[i0] != SBX_SEG_STYLE_DIRECT)
+    sbx_eval_sbg_transition_tone(&k0->tone, &k1->tone, styles[i0], u, out);
+  else if (k0->tone.mode != k1->tone.mode ||
+           k0->tone.waveform != k1->tone.waveform)
+    *out = k0->tone;
+  else
+    sbx_interp_direct_tone(&k0->tone, &k1->tone, u, out);
   if (inout_seg) *inout_seg = seg;
 }
 
 static void
 ctx_eval_keyframed_tone(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
-  ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, t_sec, &ctx->kf_seg, out);
+  ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_styles, ctx->kf_count,
+                             t_sec, &ctx->kf_seg, out);
 }
 
 static double
@@ -3584,7 +3693,8 @@ ctx_eval_program_beat_hz(SbxContext *ctx, double t_sec) {
         eval_t = fmod(eval_t, ctx->kf_duration_sec);
         if (eval_t < 0.0) eval_t += ctx->kf_duration_sec;
       }
-      ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, eval_t, &seg, &tone);
+      ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_styles, ctx->kf_count,
+                                 eval_t, &seg, &tone);
       break;
     }
     case SBX_CTX_SRC_STATIC:
@@ -3618,7 +3728,8 @@ ctx_eval_program_beat_hz_voice(SbxContext *ctx, size_t voice_index, double t_sec
       }
       kfs = (voice_index == 0 || !ctx->mv_kfs) ? ctx->kfs : SBX_MV_KF(ctx, voice_index);
       seg = (voice_index == 0) ? ctx->kf_seg : 0;
-      ctx_eval_keyframed_tone_at(kfs, ctx->kf_count, eval_t, &seg, &tone);
+      ctx_eval_keyframed_tone_at(kfs, ctx->kf_styles, ctx->kf_count,
+                                 eval_t, &seg, &tone);
       break;
     }
     case SBX_CTX_SRC_CURVE:
@@ -3667,7 +3778,8 @@ ctx_collect_runtime_telemetry(SbxContext *ctx,
           t_sec = fmod(t_sec, ctx->kf_duration_sec);
           if (t_sec < 0.0) t_sec += ctx->kf_duration_sec;
         }
-        ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_count, t_sec, &seg, &tone);
+        ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_styles, ctx->kf_count,
+                                   t_sec, &seg, &tone);
         break;
       default:
         sbx_default_tone_spec(&tone);
@@ -7180,7 +7292,7 @@ sbx_context_load_keyframes(SbxContext *ctx,
                            const SbxProgramKeyframe *frames,
                            size_t frame_count,
                            int loop) {
-  return ctx_activate_keyframes_internal(ctx, frames, frame_count, frames, 1, loop);
+  return ctx_activate_keyframes_internal(ctx, frames, frame_count, frames, 1, 0, loop);
 }
 
 int
@@ -7383,6 +7495,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   SbxVoiceSetKeyframe *frames = 0;
   SbxProgramKeyframe *primary = 0;
   SbxProgramKeyframe *mv_frames = 0;
+  unsigned char *styles = 0;
   SbxMixAmpKeyframe *mix_kfs = 0;
   SbxMixFxKeyframe *mix_fx_kfs = 0;
   size_t count = 0, cap = 0;
@@ -7460,6 +7573,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     if (active_block_idx >= 0) {
       char *time_tok = p;
       int interp = SBX_INTERP_LINEAR;
+      int transition_style = SBX_SEG_STYLE_SBG_DEFAULT;
       double off_sec = 0.0;
       SbxVoiceSetKeyframe blk_frame;
       SbxNamedBlockDef *blk = &blocks[active_block_idx];
@@ -7542,6 +7656,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
 
         if (is_sbg_transition_token(tokv[idx])) {
           interp = sbg_transition_token_to_interp(tokv[idx]);
+          transition_style = sbg_transition_token_to_style(tokv[idx]);
           had_leading_transition = 1;
           idx++;
         }
@@ -7567,6 +7682,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           }
           if (is_sbg_transition_token(tok)) {
             interp = sbg_transition_token_to_interp(tok);
+            transition_style = sbg_transition_token_to_style(tok);
             idx++;
             continue;
           }
@@ -7670,6 +7786,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           }
           blk_frame.time_sec = off_sec;
           blk_frame.interp = interp;
+          blk_frame.transition_style = transition_style;
           rc = block_append_entry(blk, &blk_frame);
           if (rc != SBX_OK) {
             set_ctx_error(ctx, "out of memory");
@@ -8009,6 +8126,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
 
       if (is_sbg_transition_token(tokv[idx])) {
         interp = sbg_transition_token_to_interp(tokv[idx]);
+        frame.transition_style = sbg_transition_token_to_style(tokv[idx]);
         had_leading_transition = 1;
         idx++;
       }
@@ -8034,6 +8152,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         }
         if (is_sbg_transition_token(tok)) {
           interp = sbg_transition_token_to_interp(tok);
+          frame.transition_style = sbg_transition_token_to_style(tok);
           idx++;
           continue;
         }
@@ -8168,6 +8287,13 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     goto done;
   }
 
+  styles = (unsigned char *)calloc(count, sizeof(*styles));
+  if (!styles) {
+    set_ctx_error(ctx, "out of memory");
+    rc = SBX_ENOMEM;
+    goto done;
+  }
+
   {
     size_t ki;
     int have_mix = 0;
@@ -8232,6 +8358,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   {
     size_t ki;
     for (ki = 0; ki < count; ki++) {
+      styles[ki] = (unsigned char)frames[ki].transition_style;
       primary[ki].time_sec = frames[ki].time_sec;
       primary[ki].tone = frames[ki].tones[0];
       primary[ki].interp = frames[ki].interp;
@@ -8243,6 +8370,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   rc = ctx_activate_keyframes_internal(ctx, primary, count,
                                        mv_frames ? mv_frames : primary,
                                        max_voice_count ? max_voice_count : 1,
+                                       styles,
                                        loop);
   if (rc != SBX_OK) goto done;
   rc = sbx_context_set_mix_amp_keyframes(ctx, mix_kfs, mix_kfs ? count : 0,
@@ -8271,6 +8399,7 @@ done:
   if (frames) free(frames);
   if (primary) free(primary);
   if (mv_frames) free(mv_frames);
+  if (styles) free(styles);
   if (mix_kfs) free(mix_kfs);
   if (mix_fx_kfs) free(mix_fx_kfs);
   {
@@ -9913,7 +10042,8 @@ sbx_context_sample_tones_voice(SbxContext *ctx,
       eval_t = fmod(eval_t, ctx->kf_duration_sec);
       if (eval_t < 0.0) eval_t += ctx->kf_duration_sec;
     }
-    ctx_eval_keyframed_tone_at(kfs, ctx->kf_count, eval_t, &seg_saved, &out_tones[i]);
+    ctx_eval_keyframed_tone_at(kfs, ctx->kf_styles, ctx->kf_count,
+                               eval_t, &seg_saved, &out_tones[i]);
     if (out_t_sec) out_t_sec[i] = ts;
   }
   if (voice_index == 0)
@@ -10467,8 +10597,8 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
       have_first_tone = 1;
     }
     for (vi = 1; vi < ctx->mv_voice_count; vi++) {
-      ctx_eval_keyframed_tone_at(SBX_MV_KF(ctx, vi), ctx->kf_count, ctx->t_sec,
-                                 &ctx->kf_seg, &tonev[tone_count]);
+      ctx_eval_keyframed_tone_at(SBX_MV_KF(ctx, vi), ctx->kf_styles, ctx->kf_count,
+                                 ctx->t_sec, &ctx->kf_seg, &tonev[tone_count]);
       tone_count++;
     }
     for (vi = 0; vi < ctx->aux_count; vi++) {

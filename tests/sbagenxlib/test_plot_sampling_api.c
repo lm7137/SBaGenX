@@ -397,6 +397,77 @@ main(void) {
         samples[2].envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE + 1)
       fail("customNN transition end mismatch");
   }
+  {
+    const char *sbg_custom_iso_alloff_text =
+      "custom00: e=2 0 0.1 0.9 1 1 0.9 0.1 0\n"
+      "t1: custom00:300@2.5/20\n"
+      "alloff: -\n"
+      "NOW t1\n"
+      "+00:05:00 t1 ->\n"
+      "+00:06:00 alloff\n";
+    rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_iso_alloff_text, 0);
+    if (rc != SBX_OK) fail("load customNN alloff timing failed");
+    rc = sbx_context_sample_tones(ctx, 300.0, 360.0, 3, ts, samples);
+    if (rc != SBX_OK) fail("sample_tones customNN alloff failed");
+    if (!near(samples[0].carrier_hz, 300.0, 1e-9) ||
+        !near(samples[0].beat_hz, 2.5, 1e-9) ||
+        !near(samples[0].amplitude, 0.20, 1e-9))
+      fail("customNN alloff start mismatch");
+    if (!near(samples[1].carrier_hz, 300.0, 1e-9) ||
+        !near(samples[1].beat_hz, 2.5, 1e-9) ||
+        !near(samples[1].amplitude, 0.10, 1e-9) ||
+        samples[1].envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+      fail("customNN alloff midpoint should fade source tone over full slide");
+    if (samples[2].mode != SBX_TONE_NONE || !near(samples[2].amplitude, 0.0, 1e-9))
+      fail("customNN alloff end should be silent");
+  }
+  {
+    const char *sbg_custom_iso_fadein_text =
+      "custom00: e=2 0 0.1 0.9 1 1 0.9 0.1 0\n"
+      "t1: custom00:300@2.5/20\n"
+      "alloff: -\n"
+      "NOW alloff\n"
+      "+00:05:00 alloff ->\n"
+      "+00:06:00 t1\n";
+    rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_iso_fadein_text, 0);
+    if (rc != SBX_OK) fail("load customNN fade-in timing failed");
+    rc = sbx_context_sample_tones(ctx, 300.0, 360.0, 3, ts, samples);
+    if (rc != SBX_OK) fail("sample_tones customNN fade-in failed");
+    if (samples[0].mode != SBX_TONE_NONE || !near(samples[0].amplitude, 0.0, 1e-9))
+      fail("customNN fade-in start should be silent");
+    if (!near(samples[1].carrier_hz, 300.0, 1e-9) ||
+        !near(samples[1].beat_hz, 2.5, 1e-9) ||
+        !near(samples[1].amplitude, 0.10, 1e-9) ||
+        samples[1].envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+      fail("customNN fade-in midpoint should ramp source tone over full slide");
+    if (!near(samples[2].carrier_hz, 300.0, 1e-9) ||
+        !near(samples[2].beat_hz, 2.5, 1e-9) ||
+        !near(samples[2].amplitude, 0.20, 1e-9) ||
+        samples[2].envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+      fail("customNN fade-in end mismatch");
+  }
+  {
+    const char *sbg_cross_type_transition_text =
+      "custom00: e=2 0 0.1 0.9 1 1 0.9 0.1 0\n"
+      "t1: custom00:300@2.5/20\n"
+      "t2: 150+4/20\n"
+      "NOW t1\n"
+      "+00:05:00 t1\n"
+      "+00:06:00 t2\n";
+    rc = sbx_context_load_sbg_timing_text(ctx, sbg_cross_type_transition_text, 0);
+    if (rc != SBX_OK) fail("load cross-type transition timing failed");
+    rc = sbx_context_sample_tones(ctx, 300.0, 360.0, 5, ts, samples);
+    if (rc != SBX_OK) fail("sample_tones cross-type transition failed");
+    if (samples[1].mode != SBX_TONE_ISOCHRONIC || !near(samples[1].amplitude, 0.10, 1e-9))
+      fail("cross-type transition first half should fade out the source tone");
+    if (samples[3].mode != SBX_TONE_BINAURAL || !near(samples[3].amplitude, 0.10, 1e-9))
+      fail("cross-type transition second half should fade in the target tone");
+    if (samples[4].mode != SBX_TONE_BINAURAL ||
+        !near(samples[4].carrier_hz, 150.0, 1e-9) ||
+        !near(samples[4].beat_hz, 4.0, 1e-9) ||
+        !near(samples[4].amplitude, 0.20, 1e-9))
+      fail("cross-type transition end mismatch");
+  }
 
   sbx_default_engine_config(&cfg);
   cfg.sample_rate = 1000.0;
