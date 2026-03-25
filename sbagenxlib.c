@@ -810,31 +810,6 @@ sbx_diag_alloc_one(SbxDiagnostic **out_diags,
   return SBX_OK;
 }
 
-static const char *
-sbx_choose_preferred_parse_error(const char *primary, const char *fallback) {
-  uint32_t primary_line = 0, primary_col = 0;
-  uint32_t fallback_line = 0, fallback_col = 0;
-
-  if (!primary || !primary[0]) return fallback;
-  if (!fallback || !fallback[0]) return primary;
-
-  sbx_diag_extract_location(primary, &primary_line, &primary_col);
-  sbx_diag_extract_location(fallback, &fallback_line, &fallback_col);
-
-  if (primary_line && fallback_line) {
-    if (primary_line > fallback_line) return primary;
-    if (fallback_line > primary_line) return fallback;
-    if (primary_col && fallback_col) {
-      if (primary_col >= fallback_col) return primary;
-      return fallback;
-    }
-    return primary;
-  }
-  if (primary_line) return primary;
-  if (fallback_line) return fallback;
-  return primary;
-}
-
 #if defined(_WIN32) || defined(T_MINGW) || defined(T_MSVC)
 static SbxDLibHandle
 sbx_dlib_open_one(const char *name) {
@@ -2601,7 +2576,6 @@ sbx_validate_sbg_text(const char *text,
                       size_t *out_count) {
   char *prepared = 0;
   char errbuf[512];
-  char timing_err[512];
   SbxSafeSeqfilePreamble cfg;
   SbxEngineConfig eng_cfg;
   SbxContext *ctx = 0;
@@ -2614,7 +2588,6 @@ sbx_validate_sbg_text(const char *text,
   (void)source_name;
 
   errbuf[0] = 0;
-  timing_err[0] = 0;
   sbx_default_safe_seqfile_preamble(&cfg);
   rc = sbx_prepare_safe_seq_text(text, &prepared, &cfg, errbuf, sizeof(errbuf));
   if (rc != SBX_OK) {
@@ -2674,22 +2647,10 @@ sbx_validate_sbg_text(const char *text,
 
   rc = sbx_context_load_sbg_timing_text(ctx, prepared, 0);
   if (rc != SBX_OK) {
-    const char *msg = sbx_context_last_error(ctx);
-    if (msg && msg[0])
-      snprintf(timing_err, sizeof(timing_err), "%s", msg);
-  }
-  if (rc != SBX_OK)
-    rc = sbx_context_load_sequence_text(ctx, prepared, 0);
-  if (rc != SBX_OK) {
-    const char *sequence_err = sbx_context_last_error(ctx);
-    const char *best_err = sbx_choose_preferred_parse_error(
-      timing_err,
-      (sequence_err && sequence_err[0]) ? sequence_err : 0
-    );
     rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
                             "sbg-parse",
-                            (best_err && best_err[0]) ?
-                              best_err :
+                            sbx_context_last_error(ctx)[0] ?
+                              sbx_context_last_error(ctx) :
                               "SBaGenX validation failed");
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);

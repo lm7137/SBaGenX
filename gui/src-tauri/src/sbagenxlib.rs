@@ -259,8 +259,6 @@ type SbxValidateSbgfText =
 type SbxFreeDiagnostics = unsafe extern "C" fn(*mut SbxDiagnosticRaw);
 type SbxContextLoadSbgTimingText =
   unsafe extern "C" fn(*mut SbxContext, *const c_char, c_int) -> c_int;
-type SbxContextLoadSequenceText =
-  unsafe extern "C" fn(*mut SbxContext, *const c_char, c_int) -> c_int;
 type SbxContextLastError = unsafe extern "C" fn(*const SbxContext) -> *const c_char;
 type SbxContextDurationSec = unsafe extern "C" fn(*const SbxContext) -> f64;
 type SbxContextIsLooping = unsafe extern "C" fn(*const SbxContext) -> c_int;
@@ -393,7 +391,6 @@ struct Api {
   sbx_validate_sbgf_text: SbxValidateSbgfText,
   sbx_free_diagnostics: SbxFreeDiagnostics,
   sbx_context_load_sbg_timing_text: SbxContextLoadSbgTimingText,
-  sbx_context_load_sequence_text: SbxContextLoadSequenceText,
   sbx_context_last_error: SbxContextLastError,
   sbx_context_duration_sec: SbxContextDurationSec,
   sbx_context_is_looping: SbxContextIsLooping,
@@ -486,8 +483,6 @@ impl Api {
         sbx_free_diagnostics: Self::load_symbol(&lib, b"sbx_free_diagnostics\0")?,
         sbx_context_load_sbg_timing_text:
           Self::load_symbol(&lib, b"sbx_context_load_sbg_timing_text\0")?,
-        sbx_context_load_sequence_text:
-          Self::load_symbol(&lib, b"sbx_context_load_sequence_text\0")?,
         sbx_context_last_error: Self::load_symbol(&lib, b"sbx_context_last_error\0")?,
         sbx_context_duration_sec: Self::load_symbol(&lib, b"sbx_context_duration_sec\0")?,
         sbx_context_is_looping: Self::load_symbol(&lib, b"sbx_context_is_looping\0")?,
@@ -726,10 +721,8 @@ fn load_sbg_context(text: &str, source_name: &str) -> Result<LoadedSbgContext, S
 
   apply_sequence_overrides(&mut loaded)?;
 
-  let mut load_rc = unsafe { (loaded.api.sbx_context_load_sbg_timing_text)(loaded.ctx, loaded.prepared_text, 0) };
-  if load_rc != SBX_OK {
-    load_rc = unsafe { (loaded.api.sbx_context_load_sequence_text)(loaded.ctx, loaded.prepared_text, 0) };
-  }
+  let load_rc =
+    unsafe { (loaded.api.sbx_context_load_sbg_timing_text)(loaded.ctx, loaded.prepared_text, 0) };
   if load_rc != SBX_OK {
     let msg = unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) };
     return Err(if msg.is_empty() {
