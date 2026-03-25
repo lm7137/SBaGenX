@@ -240,6 +240,12 @@ h1 {
   gap: 0;
 }
 
+.monaco-host {
+  width: 100%;
+  height: 100%;
+  min-height: 24rem;
+}
+
 .panel-header,
 .panel-footer {
   padding: 1.05rem 1.05rem 0.9rem;

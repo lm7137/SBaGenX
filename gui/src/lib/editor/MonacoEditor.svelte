@@ -119,11 +119,3 @@
 </script>
 
 <div class="monaco-host" bind:this={host} data-doc-id={docId}></div>
-
-<style>
-  .monaco-host {
-    width: 100%;
-    height: 100%;
-    min-height: 24rem;
-  }
-</style>
