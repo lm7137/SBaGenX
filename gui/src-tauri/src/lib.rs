@@ -84,7 +84,16 @@ struct ExportResult {
 #[serde(rename_all = "camelCase")]
 struct BeatPreviewPoint {
   t_sec: f64,
-  beat_hz: f64,
+  beat_hz: Option<f64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BeatPreviewSeries {
+  voice_index: usize,
+  label: String,
+  active_sample_count: usize,
+  points: Vec<BeatPreviewPoint>,
 }
 
 #[derive(Serialize)]
@@ -92,11 +101,12 @@ struct BeatPreviewPoint {
 struct BeatPreviewResult {
   duration_sec: f64,
   sample_count: usize,
-  min_hz: f64,
-  max_hz: f64,
+  voice_count: usize,
+  min_hz: Option<f64>,
+  max_hz: Option<f64>,
   limited: bool,
   time_label: String,
-  points: Vec<BeatPreviewPoint>,
+  series: Vec<BeatPreviewSeries>,
   bridge: &'static str,
   engine_version: String,
 }
@@ -483,16 +493,26 @@ fn sample_beat_preview(args: RenderDocumentArgs) -> Result<BeatPreviewResult, St
   Ok(BeatPreviewResult {
     duration_sec: outcome.duration_sec,
     sample_count: outcome.sample_count,
+    voice_count: outcome.voice_count,
     min_hz: outcome.min_hz,
     max_hz: outcome.max_hz,
     limited: outcome.limited,
     time_label: outcome.time_label,
-    points: outcome
-      .points
+    series: outcome
+      .series
       .into_iter()
-      .map(|point| BeatPreviewPoint {
-        t_sec: point.t_sec,
-        beat_hz: point.beat_hz,
+      .map(|series| BeatPreviewSeries {
+        voice_index: series.voice_index,
+        label: series.label,
+        active_sample_count: series.active_sample_count,
+        points: series
+          .points
+          .into_iter()
+          .map(|point| BeatPreviewPoint {
+            t_sec: point.t_sec,
+            beat_hz: point.beat_hz,
+          })
+          .collect(),
       })
       .collect(),
     bridge: "tauri-rust",

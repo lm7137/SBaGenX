@@ -74,17 +74,25 @@ export interface ExportResult {
 
 export interface BeatPreviewPoint {
   tSec: number
-  beatHz: number
+  beatHz: number | null
+}
+
+export interface BeatPreviewSeries {
+  voiceIndex: number
+  label: string
+  activeSampleCount: number
+  points: BeatPreviewPoint[]
 }
 
 export interface BeatPreviewResult {
   durationSec: number
   sampleCount: number
-  minHz: number
-  maxHz: number
+  voiceCount: number
+  minHz: number | null
+  maxHz: number | null
   limited: boolean
   timeLabel: string
-  points: BeatPreviewPoint[]
+  series: BeatPreviewSeries[]
   bridge: string
   engineVersion: string
 }

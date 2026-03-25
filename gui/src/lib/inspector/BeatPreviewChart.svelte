@@ -17,6 +17,10 @@
     return value >= 10 ? value.toFixed(1) : value.toFixed(2)
   }
 
+  function formatHzNullable(value: number | null): string {
+    return value === null ? '—' : formatHz(value)
+  }
+
   function formatDuration(seconds: number): string {
     if (seconds >= 60) {
       const mins = Math.floor(seconds / 60)
@@ -26,27 +30,44 @@
     return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
   }
 
-  function chartPath(points: BeatPreviewResult['points']) {
+  function chartPath(points: BeatPreviewResult['series'][number]['points']) {
     if (!preview || points.length === 0) return ''
 
     const usableWidth = width - padLeft - padRight
     const usableHeight = height - padTop - padBottom
-    const hzSpan = Math.max(preview.maxHz - preview.minHz, 0.001)
+    const minHz = preview.minHz ?? 0
+    const maxHz = preview.maxHz ?? 1
+    const hzSpan = Math.max(maxHz - minHz, 0.001)
     const duration = Math.max(preview.durationSec, 0.001)
 
     return points
       .map((point, index) => {
+        if (point.beatHz === null) {
+          return ''
+        }
         const x = padLeft + (point.tSec / duration) * usableWidth
         const y =
           padTop +
           usableHeight -
-          ((point.beatHz - preview.minHz) / hzSpan) * usableHeight
-        return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
+          ((point.beatHz - minHz) / hzSpan) * usableHeight
+        const prev = points[index - 1]
+        const cmd = index === 0 || !prev || prev.beatHz === null ? 'M' : 'L'
+        return `${cmd}${x.toFixed(2)},${y.toFixed(2)}`
       })
+      .filter(Boolean)
       .join(' ')
   }
 
-  $: pathData = chartPath(preview?.points ?? [])
+  const lineColors = ['#3a7cff', '#ff2ea6', '#00a47a', '#7b61ff']
+
+  $: seriesPaths =
+    preview?.series.map((series, index) => ({
+      key: `${series.voiceIndex}-${index}`,
+      label: series.label,
+      color: lineColors[index % lineColors.length],
+      path: chartPath(series.points),
+      activeSampleCount: series.activeSampleCount,
+    })) ?? []
 </script>
 
 <div class="inspector-block preview-block">
@@ -79,15 +100,15 @@
     <div class="preview-stats">
       <div class="preview-stat">
         <span class="preview-stat-label">Min</span>
-        <strong>{formatHz(preview.minHz)} Hz</strong>
+        <strong>{formatHzNullable(preview.minHz)}{preview.minHz === null ? '' : ' Hz'}</strong>
       </div>
       <div class="preview-stat">
         <span class="preview-stat-label">Max</span>
-        <strong>{formatHz(preview.maxHz)} Hz</strong>
+        <strong>{formatHzNullable(preview.maxHz)}{preview.maxHz === null ? '' : ' Hz'}</strong>
       </div>
       <div class="preview-stat">
-        <span class="preview-stat-label">Samples</span>
-        <strong>{preview.sampleCount}</strong>
+        <span class="preview-stat-label">Voices</span>
+        <strong>{preview.voiceCount}</strong>
       </div>
       <div class="preview-stat">
         <span class="preview-stat-label">Axis</span>
@@ -97,13 +118,6 @@
 
     <div class="preview-chart">
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Beat preview chart">
-        <defs>
-          <linearGradient id="preview-line" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stop-color="#3a7cff" />
-            <stop offset="100%" stop-color="#ff2ea6" />
-          </linearGradient>
-        </defs>
-
         <line x1={padLeft} y1={padTop} x2={padLeft} y2={height - padBottom} class="preview-axis" />
         <line
           x1={padLeft}
@@ -127,21 +141,41 @@
           class="preview-grid"
         />
 
-        {#if pathData}
-          <path d={pathData} fill="none" stroke="url(#preview-line)" stroke-width="3" />
-        {/if}
+        {#each seriesPaths as series}
+          {#if series.path}
+            <path
+              d={series.path}
+              fill="none"
+              stroke={series.color}
+              stroke-width="3"
+              stroke-linejoin="round"
+              stroke-linecap="round"
+            />
+          {/if}
+        {/each}
 
         <text x={padLeft} y="9" class="preview-label">
-          {formatHz(preview.maxHz)} Hz
+          {formatHzNullable(preview.maxHz)}{preview.maxHz === null ? '' : ' Hz'}
         </text>
         <text x={padLeft} y={height - 2} class="preview-label">
-          {formatHz(preview.minHz)} Hz
+          {formatHzNullable(preview.minHz)}{preview.minHz === null ? '' : ' Hz'}
         </text>
         <text x={width - padRight} y={height - 2} class="preview-label end">
           {preview.timeLabel}
         </text>
       </svg>
     </div>
+
+    {#if preview.series.length > 1}
+      <div class="preview-legend">
+        {#each seriesPaths as series}
+          <span class="preview-legend-item">
+            <span class="preview-legend-swatch" style={`background:${series.color}`}></span>
+            {series.label}
+          </span>
+        {/each}
+      </div>
+    {/if}
   {:else}
     <div class="preview-empty">
       Beat preview appears here once the active `.sbg` validates cleanly.

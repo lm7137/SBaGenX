@@ -566,6 +566,29 @@ h1 {
   height: auto;
 }
 
+.preview-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 0.9rem;
+  margin-top: 0.8rem;
+}
+
+.preview-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.preview-legend-swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
 .preview-axis {
   stroke: rgba(20, 20, 20, 0.25);
   stroke-width: 1.5;
