@@ -108,6 +108,8 @@ main(void) {
     fail("invalid custom .sbg should emit one diagnostic");
   if (diags[0].line != 3)
     fail("invalid custom .sbg should report edited tone-set line");
+  if (diags[0].column != 25 || diags[0].end_column != 28)
+    fail("invalid custom .sbg diagnostic should highlight offending token span");
   if (!strstr(diags[0].message, "invalid named tone-set token 'xyz'"))
     fail("invalid custom .sbg diagnostic should preserve native timing error");
   sbx_free_diagnostics(diags);

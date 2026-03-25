@@ -21,6 +21,8 @@ export interface ValidationDiagnostic {
   severity: 'error' | 'warning'
   line?: number
   column?: number
+  endLine?: number
+  endColumn?: number
   message: string
 }
 

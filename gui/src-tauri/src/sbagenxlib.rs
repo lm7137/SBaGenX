@@ -297,6 +297,8 @@ pub struct ValidationDiagnostic {
   pub severity: &'static str,
   pub line: Option<u32>,
   pub column: Option<u32>,
+  pub end_line: Option<u32>,
+  pub end_column: Option<u32>,
   pub message: String,
 }
 
@@ -607,6 +609,8 @@ fn collect_validation_diagnostics(
       },
       line: (diag.line != 0).then_some(diag.line),
       column: (diag.column != 0).then_some(diag.column),
+      end_line: (diag.end_line != 0).then_some(diag.end_line),
+      end_column: (diag.end_column != 0).then_some(diag.end_column),
       message: fixed_cstr_to_string(&diag.message),
     })
     .collect();

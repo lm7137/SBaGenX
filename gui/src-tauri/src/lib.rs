@@ -48,6 +48,8 @@ struct ValidationDiagnostic {
   severity: String,
   line: Option<u32>,
   column: Option<u32>,
+  end_line: Option<u32>,
+  end_column: Option<u32>,
   message: String,
 }
 
@@ -439,6 +441,8 @@ fn validate_document(args: ValidateDocumentArgs) -> Result<ValidationResult, Str
       severity: diag.severity.to_string(),
       line: diag.line,
       column: diag.column,
+      end_line: diag.end_line,
+      end_column: diag.end_column,
       message: diag.message,
     })
     .collect();

@@ -53,8 +53,8 @@
           message: diag.message,
           startLineNumber: diag.line || 1,
           startColumn: diag.column || 1,
-          endLineNumber: diag.line || 1,
-          endColumn: (diag.column || 1) + 1,
+          endLineNumber: diag.endLine || diag.line || 1,
+          endColumn: diag.endColumn || (diag.column || 1) + 1,
         })),
     )
   }
