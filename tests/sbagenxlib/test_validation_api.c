@@ -73,6 +73,12 @@ main(void) {
     "+00:03:00 drift\n"
     "+00:05:00 drift ->\n"
     "+00:06:00 alloff\n";
+  const char *bad_sbg_block_close =
+    "tone: 196+6/35\n"
+    "pattern: {\n"
+    "+00:00:05 tone\n"
+    "} xyz\n"
+    "NOW tone\n";
   const char *bad_sbgf =
     "title \"broken\"\n"
     "beat =\n";
@@ -112,6 +118,20 @@ main(void) {
     fail("invalid custom .sbg diagnostic should highlight offending token span");
   if (!strstr(diags[0].message, "invalid named tone-set token 'xyz'"))
     fail("invalid custom .sbg diagnostic should preserve native timing error");
+  sbx_free_diagnostics(diags);
+  diags = 0;
+  count = 0;
+
+  rc = sbx_validate_sbg_text(bad_sbg_block_close, "bad-block-close.sbg", &diags, &count);
+  if (rc != SBX_OK) fail("sbx_validate_sbg_text block close invalid case failed");
+  if (!diags || count != 1)
+    fail("invalid block-close .sbg should emit one diagnostic");
+  if (diags[0].line != 4)
+    fail("invalid block-close .sbg should report block close line");
+  if (diags[0].column != 3 || diags[0].end_column != 6)
+    fail("invalid block-close .sbg should highlight trailing token span");
+  if (!strstr(diags[0].message, "unexpected trailing token(s) after block close"))
+    fail("invalid block-close .sbg should preserve native block-close error");
   sbx_free_diagnostics(diags);
   diags = 0;
   count = 0;

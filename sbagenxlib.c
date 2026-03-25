@@ -156,6 +156,10 @@ struct SbxContext {
   SbxEngine *eng;
   int loaded;
   char last_error[256];
+  uint32_t last_error_line;
+  uint32_t last_error_column;
+  uint32_t last_error_end_line;
+  uint32_t last_error_end_column;
   int default_waveform;
   int have_seq_iso_override;
   SbxIsoEnvelopeSpec seq_iso_env;
@@ -427,11 +431,65 @@ set_last_error(SbxEngine *eng, const char *msg) {
 static void
 set_ctx_error(SbxContext *ctx, const char *msg) {
   if (!ctx) return;
+  ctx->last_error_line = 0;
+  ctx->last_error_column = 0;
+  ctx->last_error_end_line = 0;
+  ctx->last_error_end_column = 0;
   if (!msg) {
     ctx->last_error[0] = 0;
     return;
   }
   snprintf(ctx->last_error, sizeof(ctx->last_error), "%s", msg);
+}
+
+static void
+set_ctx_error_span(SbxContext *ctx,
+                   const char *msg,
+                   uint32_t line,
+                   uint32_t column,
+                   uint32_t end_line,
+                   uint32_t end_column) {
+  if (!ctx) return;
+  set_ctx_error(ctx, msg);
+  if (!msg) return;
+  ctx->last_error_line = line;
+  ctx->last_error_column = column;
+  ctx->last_error_end_line = end_line;
+  ctx->last_error_end_column = end_column;
+}
+
+static void
+set_ctx_error_token_span(SbxContext *ctx,
+                         const char *msg,
+                         size_t line_no,
+                         const char *line_start,
+                         const char *token) {
+  uint32_t column = 0;
+  uint32_t end_column = 0;
+
+  if (line_start && token && token >= line_start) {
+    size_t token_len = strlen(token);
+    column = (uint32_t)(token - line_start) + 1U;
+    end_column = column + (uint32_t)token_len;
+  }
+  set_ctx_error_span(ctx, msg, (uint32_t)line_no, column, (uint32_t)line_no, end_column);
+}
+
+static void
+set_ctx_error_range_span(SbxContext *ctx,
+                         const char *msg,
+                         size_t line_no,
+                         const char *line_start,
+                         const char *range_start,
+                         size_t range_len) {
+  uint32_t column = 0;
+  uint32_t end_column = 0;
+
+  if (line_start && range_start && range_start >= line_start) {
+    column = (uint32_t)(range_start - line_start) + 1U;
+    end_column = column + (uint32_t)range_len;
+  }
+  set_ctx_error_span(ctx, msg, (uint32_t)line_no, column, (uint32_t)line_no, end_column);
 }
 
 static void
@@ -910,6 +968,50 @@ sbx_diag_alloc_one_from_text(SbxDiagnostic **out_diags,
   if (rc == SBX_OK && out_diags && *out_diags)
     sbx_diag_refine_span_from_source(*out_diags, text);
   return rc;
+}
+
+static int
+sbx_diag_alloc_one_with_span(SbxDiagnostic **out_diags,
+                             size_t *out_count,
+                             int severity,
+                             const char *code,
+                             const char *message,
+                             uint32_t line,
+                             uint32_t column,
+                             uint32_t end_line,
+                             uint32_t end_column) {
+  int rc = sbx_diag_alloc_one(out_diags, out_count, severity, code, message);
+  if (rc == SBX_OK && out_diags && *out_diags) {
+    (*out_diags)->line = line;
+    (*out_diags)->column = column;
+    (*out_diags)->end_line = end_line;
+    (*out_diags)->end_column = end_column;
+  }
+  return rc;
+}
+
+static int
+sbx_diag_alloc_one_from_ctx_error(SbxDiagnostic **out_diags,
+                                  size_t *out_count,
+                                  int severity,
+                                  const char *code,
+                                  const SbxContext *ctx,
+                                  const char *fallback_message,
+                                  const char *text) {
+  const char *message = fallback_message;
+
+  if (ctx && ctx->last_error[0])
+    message = ctx->last_error;
+  if (ctx && ctx->last_error_line) {
+    return sbx_diag_alloc_one_with_span(out_diags, out_count, severity, code,
+                                        message ? message : "",
+                                        ctx->last_error_line,
+                                        ctx->last_error_column,
+                                        ctx->last_error_end_line,
+                                        ctx->last_error_end_column);
+  }
+  return sbx_diag_alloc_one_from_text(out_diags, out_count, severity, code,
+                                      message ? message : "", text);
 }
 
 #if defined(_WIN32) || defined(T_MINGW) || defined(T_MSVC)
@@ -2714,8 +2816,8 @@ sbx_validate_sbg_text(const char *text,
 
   if (cfg.have_w &&
       SBX_OK != sbx_context_set_default_waveform(ctx, cfg.waveform)) {
-    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
-                                      "sbg-parse", sbx_context_last_error(ctx), text);
+    rc = sbx_diag_alloc_one_from_ctx_error(out_diags, out_count, SBX_DIAG_ERROR,
+                                           "sbg-parse", ctx, sbx_context_last_error(ctx), text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2723,8 +2825,8 @@ sbx_validate_sbg_text(const char *text,
   }
   if (cfg.have_I &&
       SBX_OK != sbx_context_set_sequence_iso_override(ctx, &cfg.iso_env)) {
-    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
-                                      "sbg-parse", sbx_context_last_error(ctx), text);
+    rc = sbx_diag_alloc_one_from_ctx_error(out_diags, out_count, SBX_DIAG_ERROR,
+                                           "sbg-parse", ctx, sbx_context_last_error(ctx), text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2732,8 +2834,8 @@ sbx_validate_sbg_text(const char *text,
   }
   if (cfg.have_H &&
       SBX_OK != sbx_context_set_sequence_mixam_override(ctx, &cfg.mixam_env)) {
-    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
-                                      "sbg-parse", sbx_context_last_error(ctx), text);
+    rc = sbx_diag_alloc_one_from_ctx_error(out_diags, out_count, SBX_DIAG_ERROR,
+                                           "sbg-parse", ctx, sbx_context_last_error(ctx), text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2741,8 +2843,8 @@ sbx_validate_sbg_text(const char *text,
   }
   if (cfg.have_c &&
       SBX_OK != sbx_context_set_amp_adjust(ctx, &cfg.amp_adjust)) {
-    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
-                                      "sbg-parse", sbx_context_last_error(ctx), text);
+    rc = sbx_diag_alloc_one_from_ctx_error(out_diags, out_count, SBX_DIAG_ERROR,
+                                           "sbg-parse", ctx, sbx_context_last_error(ctx), text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2751,12 +2853,13 @@ sbx_validate_sbg_text(const char *text,
 
   rc = sbx_context_load_sbg_timing_text(ctx, prepared, 0);
   if (rc != SBX_OK) {
-    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
-                                      "sbg-parse",
-                                      sbx_context_last_error(ctx)[0] ?
-                                        sbx_context_last_error(ctx) :
-                                        "SBaGenX validation failed",
-                                      text);
+    rc = sbx_diag_alloc_one_from_ctx_error(out_diags, out_count, SBX_DIAG_ERROR,
+                                           "sbg-parse",
+                                           ctx,
+                                           sbx_context_last_error(ctx)[0] ?
+                                             sbx_context_last_error(ctx) :
+                                             "SBaGenX validation failed",
+                                           text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2772,8 +2875,8 @@ sbx_validate_sbg_text(const char *text,
     if (mix_mod.wake_len_sec < 0.0)
       mix_mod.wake_len_sec = 0.0;
     if (SBX_OK != sbx_context_set_mix_mod(ctx, &mix_mod)) {
-      rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
-                              "sbg-parse", sbx_context_last_error(ctx));
+      rc = sbx_diag_alloc_one_from_ctx_error(out_diags, out_count, SBX_DIAG_ERROR,
+                                             "sbg-parse", ctx, sbx_context_last_error(ctx), text);
       sbx_context_destroy(ctx);
       sbx_free_safe_seqfile_preamble(&cfg);
       free(prepared);
@@ -7784,7 +7887,7 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
               snprintf(emsg, sizeof(emsg),
                        "line %lu: unexpected trailing token '%s'",
                        (unsigned long)line_no, r);
-              set_ctx_error(ctx, emsg);
+              set_ctx_error_range_span(ctx, emsg, line_no, line, r, strlen(r));
               rc = SBX_EINVAL;
               goto done;
             }
@@ -7799,7 +7902,7 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
       snprintf(emsg, sizeof(emsg),
                "line %lu: invalid time token '%s' (use s/m/h suffix or seconds default)",
                (unsigned long)line_no, time_tok);
-      set_ctx_error(ctx, emsg);
+      set_ctx_error_token_span(ctx, emsg, line_no, line, time_tok);
       rc = SBX_EINVAL;
       goto done;
     }
@@ -7810,7 +7913,7 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
       snprintf(emsg, sizeof(emsg),
                "line %lu: invalid tone-spec '%s'",
                (unsigned long)line_no, tone_tok);
-      set_ctx_error(ctx, emsg);
+      set_ctx_error_token_span(ctx, emsg, line_no, line, tone_tok);
       rc = SBX_EINVAL;
       goto done;
     }
@@ -7823,7 +7926,7 @@ sbx_context_load_sequence_text(SbxContext *ctx, const char *text, int loop) {
         snprintf(emsg, sizeof(emsg),
                  "line %lu: invalid interpolation token '%s' (use linear|ramp|step|hold)",
                  (unsigned long)line_no, interp_tok);
-        set_ctx_error(ctx, emsg);
+        set_ctx_error_token_span(ctx, emsg, line_no, line, interp_tok);
         rc = SBX_EINVAL;
         goto done;
       }
@@ -7988,7 +8091,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           snprintf(emsg, sizeof(emsg),
                    "line %lu: unexpected trailing token(s) after block close",
                    (unsigned long)line_no);
-          set_ctx_error(ctx, emsg);
+          set_ctx_error_range_span(ctx, emsg, line_no, line, rest, strlen(rest));
           rc = SBX_EINVAL;
           goto done;
         }
@@ -8014,7 +8117,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         snprintf(emsg, sizeof(emsg),
                  "line %lu: invalid block-relative timing token '%s' (use +HH:MM[:SS][+...])",
                  (unsigned long)line_no, time_tok);
-        set_ctx_error(ctx, emsg);
+        set_ctx_error_token_span(ctx, emsg, line_no, line, time_tok);
         rc = SBX_EINVAL;
         goto done;
       }
@@ -8096,7 +8199,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                      "line %lu: invalid block tone-spec, unknown named tone-set, or unknown nested block '%s'",
                      (unsigned long)line_no, tok);
             if (tokv) free(tokv);
-            set_ctx_error(ctx, emsg);
+            set_ctx_error_token_span(ctx, emsg, line_no, line, tok);
             rc = SBX_EINVAL;
             goto done;
           }
@@ -8118,7 +8221,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                        "line %lu: nested block '%s' must appear alone in block '%s'",
                        (unsigned long)line_no, tok, blk->name ? blk->name : "?");
               if (tokv) free(tokv);
-              set_ctx_error(ctx, emsg);
+              set_ctx_error_token_span(ctx, emsg, line_no, line, tok);
               rc = SBX_EINVAL;
               goto done;
             }
@@ -8280,7 +8383,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                        "line %lu: customNN %02d expects optional e=<0..3> before samples",
                        (unsigned long)line_no, wave_idx);
               if (raw) free(raw);
-              set_ctx_error(ctx, emsg);
+              set_ctx_error_token_span(ctx, emsg, line_no, line, wr);
               rc = SBX_EINVAL;
               goto done;
             }
@@ -8290,7 +8393,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                        "line %lu: customNN %02d optional e=<0..3> may appear at most once",
                        (unsigned long)line_no, wave_idx);
               if (raw) free(raw);
-              set_ctx_error(ctx, emsg);
+              set_ctx_error_token_span(ctx, emsg, line_no, line, wr);
               rc = SBX_EINVAL;
               goto done;
             }
@@ -8308,7 +8411,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                      "line %lu: %s %02d expects floating-point samples",
                      (unsigned long)line_no, is_custom ? "customNN" : "waveNN", wave_idx);
             if (raw) free(raw);
-            set_ctx_error(ctx, emsg);
+            set_ctx_error_token_span(ctx, emsg, line_no, line, wr);
             rc = SBX_EINVAL;
             goto done;
           }
@@ -8420,7 +8523,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             snprintf(emsg, sizeof(emsg),
                      "line %lu: invalid named tone-set token '%s'",
                      (unsigned long)line_no, v_tok);
-            set_ctx_error(ctx, emsg);
+            set_ctx_error_token_span(ctx, emsg, line_no, line, v_tok);
             rc = SBX_EINVAL;
             goto done;
           }
@@ -8493,7 +8596,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
       snprintf(emsg, sizeof(emsg),
                "line %lu: invalid SBG timing token '%s' (use HH:MM[:SS], NOW, and optional +relative parts)",
                (unsigned long)line_no, time_tok);
-      set_ctx_error(ctx, emsg);
+      set_ctx_error_token_span(ctx, emsg, line_no, line, time_tok);
       rc = SBX_EINVAL;
       goto done;
     }
@@ -8566,7 +8669,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                    "line %lu: invalid tone-spec or unknown named tone-set '%s'",
                    (unsigned long)line_no, tok);
           if (tokv) free(tokv);
-          set_ctx_error(ctx, emsg);
+          set_ctx_error_token_span(ctx, emsg, line_no, line, tok);
           rc = SBX_EINVAL;
           goto done;
         }
@@ -8578,7 +8681,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
                      "line %lu: block invocation '%s' must appear alone",
                      (unsigned long)line_no, tok);
             if (tokv) free(tokv);
-            set_ctx_error(ctx, emsg);
+            set_ctx_error_token_span(ctx, emsg, line_no, line, tok);
             rc = SBX_EINVAL;
             goto done;
           }
