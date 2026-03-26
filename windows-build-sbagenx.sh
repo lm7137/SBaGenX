@@ -8,12 +8,36 @@
 
 section_header "Building SBaGenX for Windows (32-bit and 64-bit) with FLAC, MP3 and OGG support..."
 
+REQUESTED_WINDOWS_ARCHES="${SBAGENX_WINDOWS_ARCHES:-win32,win64}"
+BUILD_WIN32=0
+BUILD_WIN64=0
+
+case ",${REQUESTED_WINDOWS_ARCHES}," in
+    *,win32,*) BUILD_WIN32=1 ;;
+esac
+case ",${REQUESTED_WINDOWS_ARCHES}," in
+    *,win64,*) BUILD_WIN64=1 ;;
+esac
+
+if [ "$BUILD_WIN32" -eq 0 ] && [ "$BUILD_WIN64" -eq 0 ]; then
+    error "No valid Windows architectures requested via SBAGENX_WINDOWS_ARCHES=${REQUESTED_WINDOWS_ARCHES}"
+    info "Supported values include: win32, win64, or win32,win64"
+    exit 1
+fi
+
 # Check for MinGW cross-compilers
-if ! command -v i686-w64-mingw32-gcc &> /dev/null || ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
-    error "MinGW cross-compilers not found. Please install them."
+if [ "$BUILD_WIN32" -eq 1 ] && ! command -v i686-w64-mingw32-gcc &> /dev/null; then
+    error "32-bit MinGW cross-compiler not found. Please install it."
     info "On Debian/Ubuntu: sudo apt-get install mingw-w64"
-    info "On Fedora: sudo dnf install mingw64-gcc mingw32-gcc"
-    info "On Arch: sudo pacman -S mingw-w64-gcc"
+    info "On Fedora: sudo dnf install mingw32-gcc"
+    info "On Arch/MSYS2: sudo pacman -S mingw-w64-i686-gcc"
+    exit 1
+fi
+if [ "$BUILD_WIN64" -eq 1 ] && ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
+    error "64-bit MinGW cross-compiler not found. Please install it."
+    info "On Debian/Ubuntu: sudo apt-get install mingw-w64"
+    info "On Fedora: sudo dnf install mingw64-gcc"
+    info "On Arch/MSYS2: sudo pacman -S mingw-w64-x86_64-gcc"
     exit 1
 fi
 
@@ -33,22 +57,29 @@ resolve_mingw_ar() {
     return 1
 }
 
-AR_32=$(resolve_mingw_ar "i686-w64-mingw32" || true)
-AR_64=$(resolve_mingw_ar "x86_64-w64-mingw32" || true)
-
-if [ -z "$AR_32" ] || [ -z "$AR_64" ]; then
-    error "MinGW archiver tools not found."
-    warning "Expected one of:"
-    warning "  i686-w64-mingw32-ar or i686-w64-mingw32-gcc-ar"
-    warning "  x86_64-w64-mingw32-ar or x86_64-w64-mingw32-gcc-ar"
-    exit 1
+AR_32=""
+AR_64=""
+if [ "$BUILD_WIN32" -eq 1 ]; then
+    AR_32=$(resolve_mingw_ar "i686-w64-mingw32" || true)
+    if [ -z "$AR_32" ]; then
+        error "32-bit MinGW archiver tools not found."
+        warning "Expected one of: i686-w64-mingw32-ar or i686-w64-mingw32-gcc-ar"
+        exit 1
+    fi
+    if [ "$(basename "$AR_32")" != "i686-w64-mingw32-ar" ]; then
+        warning "Using fallback archiver for win32: $(basename "$AR_32")"
+    fi
 fi
-
-if [ "$(basename "$AR_32")" != "i686-w64-mingw32-ar" ]; then
-    warning "Using fallback archiver for win32: $(basename "$AR_32")"
-fi
-if [ "$(basename "$AR_64")" != "x86_64-w64-mingw32-ar" ]; then
-    warning "Using fallback archiver for win64: $(basename "$AR_64")"
+if [ "$BUILD_WIN64" -eq 1 ]; then
+    AR_64=$(resolve_mingw_ar "x86_64-w64-mingw32" || true)
+    if [ -z "$AR_64" ]; then
+        error "64-bit MinGW archiver tools not found."
+        warning "Expected one of: x86_64-w64-mingw32-ar or x86_64-w64-mingw32-gcc-ar"
+        exit 1
+    fi
+    if [ "$(basename "$AR_64")" != "x86_64-w64-mingw32-ar" ]; then
+        warning "Using fallback archiver for win64: $(basename "$AR_64")"
+    fi
 fi
 
 # Create libs directory if it doesn't exist
@@ -121,9 +152,13 @@ BEGIN
 END
 EOF
 
-# Compile resource file for both architectures
-i686-w64-mingw32-windres /tmp/sbagen.rc -O coff -o /tmp/sbagen32.res
-x86_64-w64-mingw32-windres /tmp/sbagen.rc -O coff -o /tmp/sbagen64.res
+# Compile resource file for requested architectures
+if [ "$BUILD_WIN32" -eq 1 ]; then
+    i686-w64-mingw32-windres /tmp/sbagen.rc -O coff -o /tmp/sbagen32.res
+fi
+if [ "$BUILD_WIN64" -eq 1 ]; then
+    x86_64-w64-mingw32-windres /tmp/sbagen.rc -O coff -o /tmp/sbagen64.res
+fi
 
 # Define paths for libraries
 LIB_PATH_32="libs/windows-win32-libmad.a"
@@ -643,6 +678,7 @@ copy_python_runtime_tree() {
     return 0
 }
 
+if [ "$BUILD_WIN32" -eq 1 ]; then
 # Build 32-bit version
 section_header "Building 32-bit version..."
 
@@ -698,7 +734,9 @@ if [ $? -eq 0 ]; then
 else
     error "32-bit compilation failed!"
 fi
+fi
 
+if [ "$BUILD_WIN64" -eq 1 ]; then
 # Build 64-bit version
 section_header "Building 64-bit version..."
 
@@ -751,12 +789,13 @@ if [ $? -eq 0 ]; then
 else
     error "64-bit compilation failed!"
 fi
+fi
 
 MISSING_WINDOWS_EXES=()
-if [ ! -f dist/sbagenx-win32.exe ]; then
+if [ "$BUILD_WIN32" -eq 1 ] && [ ! -f dist/sbagenx-win32.exe ]; then
     MISSING_WINDOWS_EXES+=("dist/sbagenx-win32.exe")
 fi
-if [ ! -f dist/sbagenx-win64.exe ]; then
+if [ "$BUILD_WIN64" -eq 1 ] && [ ! -f dist/sbagenx-win64.exe ]; then
     MISSING_WINDOWS_EXES+=("dist/sbagenx-win64.exe")
 fi
 if [ "${#MISSING_WINDOWS_EXES[@]}" -ne 0 ]; then
@@ -774,52 +813,59 @@ section_header "Building sbagenxlib static libraries..."
 create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
 create_dir_if_not_exists "dist/pkgconfig"
-SBX_LIB_CFLAGS_32="$CFLAGS_32 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
-SBX_LIB_CFLAGS_64="$CFLAGS_64 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
-
-i686-w64-mingw32-gcc $SBX_LIB_CFLAGS_32 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win32.o
-if [ $? -eq 0 ]; then
-    "$AR_32" rcs dist/libsbagenx-win32.a build/sbagenxlib/sbagenxlib-win32.o
+if [ "$BUILD_WIN32" -eq 1 ]; then
+    SBX_LIB_CFLAGS_32="$CFLAGS_32 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+    i686-w64-mingw32-gcc $SBX_LIB_CFLAGS_32 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win32.o
     if [ $? -eq 0 ]; then
-        success "Created sbagenxlib archive: dist/libsbagenx-win32.a"
+        "$AR_32" rcs dist/libsbagenx-win32.a build/sbagenxlib/sbagenxlib-win32.o
+        if [ $? -eq 0 ]; then
+            success "Created sbagenxlib archive: dist/libsbagenx-win32.a"
+        else
+            warning "Failed to archive dist/libsbagenx-win32.a"
+        fi
     else
-        warning "Failed to archive dist/libsbagenx-win32.a"
+        warning "Failed to compile sbagenxlib for win32"
     fi
-else
-    warning "Failed to compile sbagenxlib for win32"
 fi
 
-x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS_64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win64.o
-if [ $? -eq 0 ]; then
-    "$AR_64" rcs dist/libsbagenx-win64.a build/sbagenxlib/sbagenxlib-win64.o
+if [ "$BUILD_WIN64" -eq 1 ]; then
+    SBX_LIB_CFLAGS_64="$CFLAGS_64 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+    x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS_64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win64.o
     if [ $? -eq 0 ]; then
-        success "Created sbagenxlib archive: dist/libsbagenx-win64.a"
+        "$AR_64" rcs dist/libsbagenx-win64.a build/sbagenxlib/sbagenxlib-win64.o
+        if [ $? -eq 0 ]; then
+            success "Created sbagenxlib archive: dist/libsbagenx-win64.a"
+        else
+            warning "Failed to archive dist/libsbagenx-win64.a"
+        fi
     else
-        warning "Failed to archive dist/libsbagenx-win64.a"
+        warning "Failed to compile sbagenxlib for win64"
     fi
-else
-    warning "Failed to compile sbagenxlib for win64"
 fi
 
 section_header "Building sbagenxlib shared libraries..."
-i686-w64-mingw32-gcc $SBX_LIB_CFLAGS_32 -shared sbagenxlib.c \
-    -Wl,--out-implib,dist/libsbagenx-win32.dll.a \
-    -Wl,--export-all-symbols -Wl,--enable-auto-import \
-    -o dist/sbagenxlib-win32.dll $LIBS_32
-if [ $? -eq 0 ]; then
-    success "Created sbagenxlib shared library: dist/sbagenxlib-win32.dll"
-else
-    warning "Failed to link dist/sbagenxlib-win32.dll"
+if [ "$BUILD_WIN32" -eq 1 ]; then
+    i686-w64-mingw32-gcc $SBX_LIB_CFLAGS_32 -shared sbagenxlib.c \
+        -Wl,--out-implib,dist/libsbagenx-win32.dll.a \
+        -Wl,--export-all-symbols -Wl,--enable-auto-import \
+        -o dist/sbagenxlib-win32.dll $LIBS_32
+    if [ $? -eq 0 ]; then
+        success "Created sbagenxlib shared library: dist/sbagenxlib-win32.dll"
+    else
+        warning "Failed to link dist/sbagenxlib-win32.dll"
+    fi
 fi
 
-x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS_64 -shared sbagenxlib.c \
-    -Wl,--out-implib,dist/libsbagenx-win64.dll.a \
-    -Wl,--export-all-symbols -Wl,--enable-auto-import \
-    -o dist/sbagenxlib-win64.dll $LIBS_64
-if [ $? -eq 0 ]; then
-    success "Created sbagenxlib shared library: dist/sbagenxlib-win64.dll"
-else
-    warning "Failed to link dist/sbagenxlib-win64.dll"
+if [ "$BUILD_WIN64" -eq 1 ]; then
+    x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS_64 -shared sbagenxlib.c \
+        -Wl,--out-implib,dist/libsbagenx-win64.dll.a \
+        -Wl,--export-all-symbols -Wl,--enable-auto-import \
+        -o dist/sbagenxlib-win64.dll $LIBS_64
+    if [ $? -eq 0 ]; then
+        success "Created sbagenxlib shared library: dist/sbagenxlib-win64.dll"
+    else
+        warning "Failed to link dist/sbagenxlib-win64.dll"
+    fi
 fi
 
 cp sbagenxlib.h dist/include/sbagenxlib.h
@@ -872,9 +918,9 @@ else
 fi
 
 section_header "Bundling optional runtime encoder DLLs..."
-if [ "$STATIC_ENCODERS_32" -eq 1 ]; then
+if [ "$BUILD_WIN32" -eq 1 ] && [ "$STATIC_ENCODERS_32" -eq 1 ]; then
     info "Skipping win32 runtime DLL bundle (static output encoders linked)"
-else
+elif [ "$BUILD_WIN32" -eq 1 ]; then
     copy_runtime_dll "win32" "i686-w64-mingw32" "libsndfile" "libsndfile-1.dll" "sndfile.dll"
     copy_runtime_dll "win32" "i686-w64-mingw32" "libmp3lame" "libmp3lame-0.dll" "libmp3lame.dll"
     copy_runtime_dll "win32" "i686-w64-mingw32" "libFLAC" "libFLAC.dll"
@@ -886,9 +932,9 @@ else
     copy_runtime_dll "win32" "i686-w64-mingw32" "libgcc_s_dw2-1" "libgcc_s_dw2-1.dll"
     copy_runtime_dll "win32" "i686-w64-mingw32" "libwinpthread-1" "libwinpthread-1.dll"
 fi
-if [ "$STATIC_ENCODERS_64" -eq 1 ]; then
+if [ "$BUILD_WIN64" -eq 1 ] && [ "$STATIC_ENCODERS_64" -eq 1 ]; then
     info "Skipping win64 runtime DLL bundle (static output encoders linked)"
-else
+elif [ "$BUILD_WIN64" -eq 1 ]; then
     copy_runtime_dll "win64" "x86_64-w64-mingw32" "libsndfile" "libsndfile-1.dll" "sndfile.dll"
     copy_runtime_dll "win64" "x86_64-w64-mingw32" "libmp3lame" "libmp3lame-0.dll" "libmp3lame.dll"
     copy_runtime_dll "win64" "x86_64-w64-mingw32" "libFLAC" "libFLAC.dll"
@@ -901,11 +947,11 @@ else
 fi
 
 section_header "Bundling required Python+Cairo plot runtimes..."
-if ! copy_python_runtime_tree "win32"; then
+if [ "$BUILD_WIN32" -eq 1 ] && ! copy_python_runtime_tree "win32"; then
     error "Failed to bundle required win32 Python+Cairo runtime"
     exit 1
 fi
-if ! copy_python_runtime_tree "win64"; then
+if [ "$BUILD_WIN64" -eq 1 ] && ! copy_python_runtime_tree "win64"; then
     error "Failed to bundle required win64 Python+Cairo runtime"
     exit 1
 fi

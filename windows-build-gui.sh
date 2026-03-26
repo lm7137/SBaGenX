@@ -548,6 +548,30 @@ ensure_required_windows_gui_tools() {
     return 0
 }
 
+ensure_current_arch_windows_compiler() {
+    local compiler=""
+
+    case "$WIN_SUFFIX" in
+        win64) compiler="x86_64-w64-mingw32-gcc" ;;
+        win32) compiler="i686-w64-mingw32-gcc" ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    if ! ensure_command_available "$compiler"; then
+        error "Missing required tool: $compiler"
+        if [ "$AUTO_INSTALL_DEPS" = "0" ]; then
+            info "Automatic dependency install is disabled (SBAGENX_AUTO_INSTALL_DEPS=0)."
+        else
+            info "If auto-install did not succeed, install the missing tool manually and rerun the script."
+        fi
+        return 1
+    fi
+
+    return 0
+}
+
 MSYS_REPO="$(resolve_msys_repo)"
 load_node_env
 load_rust_env
@@ -680,14 +704,12 @@ else
 
     if gui_runtime_ready && gui_sbagenxlib_exports_ready && [ "$GUI_FORCE_RUNTIME_REBUILD" != "1" ]; then
         :
-    elif ! ensure_required_windows_gui_tools 1; then
-        error "The CLI/library rebuild path still requires both MinGW cross-compilers."
-        info "If you already have the required ${WIN_SUFFIX} runtime DLLs in dist/, rerun without forcing a rebuild."
-        info "To force a rebuild later: SBAGENX_GUI_FORCE_RUNTIME_REBUILD=1 bash windows-build-gui.sh"
+    elif ! ensure_current_arch_windows_compiler; then
+        error "The GUI runtime rebuild path requires the ${WIN_SUFFIX} MinGW compiler."
         exit 1
     else
         section_header "Building Windows sbagenxlib runtime prerequisites..."
-        if ! (cd "$REPO_ROOT" && SBAGENX_REQUIRE_PY_RUNTIME=0 ./windows-build-sbagenx.sh); then
+        if ! (cd "$REPO_ROOT" && SBAGENX_REQUIRE_PY_RUNTIME=0 SBAGENX_WINDOWS_ARCHES="$WIN_SUFFIX" ./windows-build-sbagenx.sh); then
             error "Failed to build Windows sbagenxlib prerequisites for the GUI."
             exit 1
         fi
