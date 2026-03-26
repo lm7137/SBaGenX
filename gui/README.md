@@ -75,6 +75,17 @@ Build the Windows GUI bundle on a Windows host from the repo root:
 bash windows-build-gui.sh
 ```
 
+The Windows GUI build script now tries to bootstrap missing prerequisites:
+
+- on MSYS2 shells, it prefers `pacman` for:
+  - `node`
+  - `rust`
+  - the MinGW compilers required by `windows-build-sbagenx.sh`
+- if `node` or `rust` are still missing, it falls back to `winget` where
+  available
+- it intentionally installs the actual toolchain/runtime rather than
+  trying to install `nvm`
+
 Stage the current platform runtime libraries without building:
 
 ```bash

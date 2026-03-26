@@ -7,6 +7,8 @@
 
 section_header "Building SBaGenX GUI for Windows..."
 
+AUTO_INSTALL_DEPS="${SBAGENX_AUTO_INSTALL_DEPS:-1}"
+
 HOST_UNAME="$(uname -s)"
 case "$HOST_UNAME" in
     MINGW*|MSYS*|CYGWIN*)
@@ -27,6 +29,22 @@ GUI_BUNDLE_DIR="$GUI_DIR/src-tauri/target/release/bundle"
 
 create_dir_if_not_exists "$DIST_DIR"
 create_dir_if_not_exists "$GUI_DIST_DIR"
+
+MSYS_REPO=""
+
+resolve_msys_repo() {
+    case "${MSYSTEM:-}" in
+        UCRT64) echo "ucrt64" ;;
+        MINGW64) echo "mingw64" ;;
+        MINGW32) echo "mingw32" ;;
+        CLANG64) echo "clang64" ;;
+        CLANG32) echo "clang32" ;;
+        CLANGARM64) echo "clangarm64" ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
 
 load_node_env() {
     if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
@@ -54,15 +72,170 @@ load_rust_env() {
     fi
 }
 
+find_winget() {
+    if command -v winget >/dev/null 2>&1; then
+        command -v winget
+        return 0
+    fi
+    if command -v winget.exe >/dev/null 2>&1; then
+        command -v winget.exe
+        return 0
+    fi
+    local candidate="/c/Users/${USERNAME}/AppData/Local/Microsoft/WindowsApps/winget.exe"
+    if [ -f "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
+    return 1
+}
+
+install_with_winget() {
+    local package_id="$1"
+    local winget_bin=""
+
+    winget_bin="$(find_winget || true)"
+    if [ -z "$winget_bin" ]; then
+        return 1
+    fi
+
+    info "Trying winget install ${package_id}..."
+    "$winget_bin" install --id "$package_id" -e --accept-package-agreements --accept-source-agreements --silent --disable-interactivity >/dev/null 2>&1 || return 1
+    return 0
+}
+
+pacman_install() {
+    local pkg="$1"
+
+    if ! command -v pacman >/dev/null 2>&1; then
+        return 1
+    fi
+
+    info "Installing ${pkg} with pacman..."
+    pacman -Sy --noconfirm --needed "$pkg" >/dev/null 2>&1 || return 1
+    hash -r
+    return 0
+}
+
+resolve_msys_package_for_command() {
+    local cmd="$1"
+
+    case "$cmd" in
+        node|npm)
+            case "$MSYS_REPO" in
+                ucrt64) echo "mingw-w64-ucrt-x86_64-nodejs" ;;
+                mingw64) echo "mingw-w64-x86_64-nodejs" ;;
+                mingw32) echo "mingw-w64-i686-nodejs" ;;
+                *)
+                    echo ""
+                    ;;
+            esac
+            ;;
+        cargo|rustc)
+            case "$MSYS_REPO" in
+                ucrt64) echo "mingw-w64-ucrt-x86_64-rust" ;;
+                mingw64) echo "mingw-w64-x86_64-rust" ;;
+                mingw32) echo "mingw-w64-i686-rust" ;;
+                *)
+                    echo ""
+                    ;;
+            esac
+            ;;
+        x86_64-w64-mingw32-gcc)
+            case "$MSYS_REPO" in
+                ucrt64) echo "mingw-w64-ucrt-x86_64-gcc" ;;
+                mingw64) echo "mingw-w64-x86_64-gcc" ;;
+                *)
+                    echo ""
+                    ;;
+            esac
+            ;;
+        i686-w64-mingw32-gcc)
+            echo "mingw-w64-i686-gcc"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+ensure_command_available() {
+    local cmd="$1"
+    local pacman_pkg=""
+
+    if command -v "$cmd" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [ "$AUTO_INSTALL_DEPS" = "0" ]; then
+        return 1
+    fi
+
+    pacman_pkg="$(resolve_msys_package_for_command "$cmd")"
+    if [ -n "$pacman_pkg" ] && pacman_install "$pacman_pkg"; then
+        if command -v "$cmd" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    case "$cmd" in
+        node|npm)
+            if install_with_winget "OpenJS.NodeJS.LTS"; then
+                hash -r
+                if command -v "$cmd" >/dev/null 2>&1; then
+                    return 0
+                fi
+            fi
+            ;;
+        cargo|rustc)
+            if install_with_winget "Rustlang.Rustup"; then
+                load_rust_env
+                hash -r
+                if command -v "$cmd" >/dev/null 2>&1; then
+                    return 0
+                fi
+            fi
+            ;;
+    esac
+
+    return 1
+}
+
+ensure_required_windows_gui_tools() {
+    local missing=()
+    local tool
+
+    for tool in node npm cargo rustc x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc; do
+        if ! ensure_command_available "$tool"; then
+            missing+=("$tool")
+        fi
+    done
+
+    if [ "${#missing[@]}" -ne 0 ]; then
+        error "Missing required tools: ${missing[*]}"
+        if [ "$AUTO_INSTALL_DEPS" = "0" ]; then
+            info "Automatic dependency install is disabled (SBAGENX_AUTO_INSTALL_DEPS=0)."
+        else
+            info "If auto-install did not succeed, install the missing tools manually and rerun the script."
+        fi
+        return 1
+    fi
+
+    return 0
+}
+
+MSYS_REPO="$(resolve_msys_repo)"
 load_node_env
 load_rust_env
 
-check_required_tools node npm cargo rustc
+if ! ensure_required_windows_gui_tools; then
+    exit 1
+fi
 
 info "Node: $(node -v)"
 info "npm: $(npm -v)"
 info "rustc: $(rustc --version)"
 info "cargo: $(cargo --version)"
+info "MSYS environment: ${MSYSTEM:-unknown}"
 
 section_header "Ensuring GUI npm dependencies are installed..."
 if [ ! -d "$GUI_DIR/node_modules" ]; then
