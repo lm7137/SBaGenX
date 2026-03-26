@@ -679,6 +679,14 @@ copy_python_runtime_tree() {
 }
 
 if [ "$BUILD_WIN32" -eq 1 ]; then
+# Replace VERSION with the actual version number once for any requested arch.
+sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
+if [ $? -ne 0 ] || [ ! -f sbagenx.tmp.c ]; then
+    error "Failed to prepare temporary Windows source file: sbagenx.tmp.c"
+    rm -f /tmp/sbagen.rc /tmp/sbagen32.res /tmp/sbagen64.res sbagenx.tmp.c
+    exit 1
+fi
+
 # Build 32-bit version
 section_header "Building 32-bit version..."
 
@@ -723,9 +731,6 @@ fi
 # Compile 32-bit version
 info "Compiling 32-bit version with flags: $CFLAGS_32"
 info "Libraries: $LIBS_32"
-
-# Replace VERSION with the actual version number
-sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
 i686-w64-mingw32-gcc $CFLAGS_32 sbagenx.tmp.c sbagenxlib.c /tmp/sbagen32.res -o dist/sbagenx-win32.exe $LIBS_32
 
