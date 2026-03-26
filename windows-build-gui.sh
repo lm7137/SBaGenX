@@ -26,6 +26,7 @@ GUI_DIR="$REPO_ROOT/gui"
 DIST_DIR="$REPO_ROOT/dist"
 GUI_DIST_DIR="$DIST_DIR/gui"
 GUI_BUNDLE_DIR="$GUI_DIR/src-tauri/target/release/bundle"
+GUI_FORCE_RUNTIME_REBUILD="${SBAGENX_GUI_FORCE_RUNTIME_REBUILD:-0}"
 
 create_dir_if_not_exists "$DIST_DIR"
 create_dir_if_not_exists "$GUI_DIST_DIR"
@@ -201,14 +202,23 @@ ensure_command_available() {
 }
 
 ensure_required_windows_gui_tools() {
+    local require_compilers="${1:-1}"
     local missing=()
     local tool
 
-    for tool in node npm cargo rustc x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc; do
+    for tool in node npm cargo rustc; do
         if ! ensure_command_available "$tool"; then
             missing+=("$tool")
         fi
     done
+
+    if [ "$require_compilers" = "1" ]; then
+        for tool in x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc; do
+            if ! ensure_command_available "$tool"; then
+                missing+=("$tool")
+            fi
+        done
+    fi
 
     if [ "${#missing[@]}" -ne 0 ]; then
         error "Missing required tools: ${missing[*]}"
@@ -227,7 +237,7 @@ MSYS_REPO="$(resolve_msys_repo)"
 load_node_env
 load_rust_env
 
-if ! ensure_required_windows_gui_tools; then
+if ! ensure_required_windows_gui_tools 0; then
     exit 1
 fi
 
@@ -242,12 +252,6 @@ if [ ! -d "$GUI_DIR/node_modules" ]; then
     info "Installing GUI npm dependencies..."
     (cd "$GUI_DIR" && npm install)
     check_error "Failed to install GUI npm dependencies"
-fi
-
-section_header "Building Windows sbagenxlib runtime prerequisites..."
-if ! (cd "$REPO_ROOT" && SBAGENX_REQUIRE_PY_RUNTIME=0 ./windows-build-sbagenx.sh); then
-    error "Failed to build Windows sbagenxlib prerequisites for the GUI."
-    exit 1
 fi
 
 NODE_ARCH="$(node -p "process.arch")"
@@ -278,14 +282,39 @@ REQUIRED_GUI_RUNTIMES=(
     "libwinpthread-1-${WIN_SUFFIX}.dll"
 )
 
+gui_runtime_ready() {
+    local runtime
+    for runtime in "${REQUIRED_GUI_RUNTIMES[@]}"; do
+        if [ ! -f "$DIST_DIR/$runtime" ]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
 section_header "Checking staged GUI runtime DLL prerequisites..."
-for runtime in "${REQUIRED_GUI_RUNTIMES[@]}"; do
-    if [ ! -f "$DIST_DIR/$runtime" ]; then
-        error "Required GUI runtime dependency is missing: dist/$runtime"
+if gui_runtime_ready && [ "$GUI_FORCE_RUNTIME_REBUILD" != "1" ]; then
+    success "Required GUI runtime DLLs are already present for ${WIN_SUFFIX}; skipping CLI/library rebuild."
+else
+    warning "Current-arch GUI runtime DLLs are missing or rebuild was forced."
+    if ! ensure_required_windows_gui_tools 1; then
+        error "The CLI/library rebuild path still requires both MinGW cross-compilers."
+        info "If you already have the required ${WIN_SUFFIX} runtime DLLs in dist/, rerun without forcing a rebuild."
+        info "To force a rebuild later: SBAGENX_GUI_FORCE_RUNTIME_REBUILD=1 bash windows-build-gui.sh"
         exit 1
     fi
-done
-success "Required GUI runtime DLLs are present."
+
+    section_header "Building Windows sbagenxlib runtime prerequisites..."
+    if ! (cd "$REPO_ROOT" && SBAGENX_REQUIRE_PY_RUNTIME=0 ./windows-build-sbagenx.sh); then
+        error "Failed to build Windows sbagenxlib prerequisites for the GUI."
+        exit 1
+    fi
+
+    if ! gui_runtime_ready; then
+        error "Required GUI runtime DLLs are still missing after the CLI/library build."
+        exit 1
+    fi
+fi
 
 section_header "Cleaning previous GUI bundle outputs..."
 rm -rf "$GUI_BUNDLE_DIR"
