@@ -26,6 +26,7 @@ GUI_DIR="$REPO_ROOT/gui"
 DIST_DIR="$REPO_ROOT/dist"
 GUI_DIST_DIR="$DIST_DIR/gui"
 GUI_BUNDLE_DIR="$GUI_DIR/src-tauri/target/release/bundle"
+GUI_RELEASE_DIR="$GUI_DIR/src-tauri/target/release"
 GUI_FORCE_RUNTIME_REBUILD="${SBAGENX_GUI_FORCE_RUNTIME_REBUILD:-0}"
 TAURI_CLI_JS="$GUI_DIR/node_modules/@tauri-apps/cli/tauri.js"
 TEMP_TAURI_WINDOWS_CONFIG="$GUI_DIR/src-tauri/tauri.windows.conf.json"
@@ -565,6 +566,7 @@ mapfile -t NSIS_ARTIFACTS < <(find "$GUI_BUNDLE_DIR" -type f -path "*/nsis/*.exe
 mapfile -t MSI_ARTIFACTS < <(find "$GUI_BUNDLE_DIR" -type f -path "*/msi/*.msi" | sort)
 
 GUI_PORTABLE_EXE="$GUI_DIR/src-tauri/target/release/sbagenx-gui.exe"
+WEBVIEW2_LOADER_DLL="$GUI_RELEASE_DIR/WebView2Loader.dll"
 
 if [ "${#NSIS_ARTIFACTS[@]}" -eq 0 ] && [ "${#MSI_ARTIFACTS[@]}" -eq 0 ]; then
     error "No Windows GUI installer artifacts were produced under $GUI_BUNDLE_DIR"
@@ -574,6 +576,15 @@ fi
 rm -f "$GUI_DIST_DIR"/sbagenx-gui-windows-setup.exe
 rm -f "$GUI_DIST_DIR"/sbagenx-gui-windows.msi
 rm -f "$GUI_DIST_DIR"/sbagenx-gui-"${WIN_SUFFIX}".exe
+rm -f "$GUI_DIST_DIR"/WebView2Loader.dll
+
+if [ "$WIN_SUFFIX" = "win64" ] || [ "$WIN_SUFFIX" = "win32" ]; then
+    if [ ! -f "$WEBVIEW2_LOADER_DLL" ]; then
+        error "Missing $WEBVIEW2_LOADER_DLL after GUI build."
+        info "Windows GNU builds require WebView2Loader.dll next to the executable."
+        exit 1
+    fi
+fi
 
 if [ "${#NSIS_ARTIFACTS[@]}" -gt 0 ]; then
     cp "${NSIS_ARTIFACTS[0]}" "$GUI_DIST_DIR/sbagenx-gui-windows-setup.exe"
@@ -593,6 +604,12 @@ if [ -f "$GUI_PORTABLE_EXE" ]; then
     success "Staged portable GUI executable: dist/gui/sbagenx-gui-${WIN_SUFFIX}.exe"
 fi
 
+if [ -f "$WEBVIEW2_LOADER_DLL" ]; then
+    cp "$WEBVIEW2_LOADER_DLL" "$GUI_DIST_DIR/WebView2Loader.dll"
+    check_error "Failed to stage WebView2Loader.dll"
+    success "Staged WebView2 loader: dist/gui/WebView2Loader.dll"
+fi
+
 section_header "Windows GUI build completed."
 info "Artifacts:"
 if [ -f "$GUI_DIST_DIR/sbagenx-gui-windows-setup.exe" ]; then
@@ -603,4 +620,7 @@ if [ -f "$GUI_DIST_DIR/sbagenx-gui-windows.msi" ]; then
 fi
 if [ -f "$GUI_DIST_DIR/sbagenx-gui-${WIN_SUFFIX}.exe" ]; then
     info "  dist/gui/sbagenx-gui-${WIN_SUFFIX}.exe"
+fi
+if [ -f "$GUI_DIST_DIR/WebView2Loader.dll" ]; then
+    info "  dist/gui/WebView2Loader.dll"
 fi
