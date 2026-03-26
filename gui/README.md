@@ -69,6 +69,12 @@ Build the desktop app:
 npm run tauri:build
 ```
 
+Build the Windows GUI bundle on a Windows host from the repo root:
+
+```bash
+bash windows-build-gui.sh
+```
+
 Stage the current platform runtime libraries without building:
 
 ```bash
@@ -87,4 +93,10 @@ Notes
     as `libsbagenx.so.3`
   - Windows stages the current `win32` / `win64` `sbagenxlib` DLL plus
     the codec/runtime DLLs it depends on
+- `windows-build-gui.sh` is intentionally separate from
+  `windows-build-sbagenx.sh`.
+  - the CLI/library build remains its own path
+  - the GUI build reuses the Windows `sbagenxlib` artifacts, then runs the
+    Tauri bundle build
+  - staged Windows GUI artifacts are copied into `dist/gui/`
 - The packaged GUI still needs a full Windows installer validation pass.
