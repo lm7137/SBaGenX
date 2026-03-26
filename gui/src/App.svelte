@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
-  import { convertFileSrc } from '@tauri-apps/api/core'
+  import { listen } from '@tauri-apps/api/event'
   import { confirm, message, open, save } from '@tauri-apps/plugin-dialog'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import MonacoEditor from './lib/editor/MonacoEditor.svelte'
@@ -14,15 +14,17 @@
     loadRecentFiles,
     loadSessionDocuments,
     readTextFile,
-    renderPreview,
     saveSessionState,
     sampleBeatPreview,
+    startLivePreview,
+    stopLivePreview,
     validateDocument,
     writeTextFile,
   } from './lib/backend'
   import type {
     DocumentKind,
     DocumentRecord,
+    PlaybackEvent,
     RecentFileEntry,
     ValidationDiagnostic,
   } from './lib/types'
@@ -35,8 +37,6 @@
   let transportMessage = 'ready'
   let selectedDiagnosticId: string | null = null
   let isPlaying = false
-  let audioSource: string | null = null
-  let audioElement: HTMLAudioElement | null = null
   let recentFiles: RecentFileEntry[] = []
   let previewLoadingId: string | null = null
   let curveInfoLoadingId: string | null = null
@@ -433,20 +433,17 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   async function playActiveDocument() {
     if (!activeDocument || activeDocument.kind !== 'sbg') return
     transportBusy = true
-    transportMessage = 'rendering preview audio...'
+    transportMessage = 'starting live preview...'
     try {
       await stopPlayback(false)
-      const result = await renderPreview(activeDocument.content, activeDocument.path ?? activeDocument.name)
-      audioSource = convertFileSrc(result.audioPath)
-      await tick()
-      if (!audioElement) {
-        throw new Error('audio element is not available')
-      }
-      audioElement.load()
-      await audioElement.play()
+      const result = await startLivePreview(
+        activeDocument.content,
+        activeDocument.path ?? activeDocument.name,
+      )
+      isPlaying = true
       transportMessage = result.limited
-        ? `preview playing · ${formatDuration(result.durationSec)} cap`
-        : `preview playing · ${formatDuration(result.durationSec)}`
+        ? `live preview · ${formatDuration(result.durationSec)} cap`
+        : `live preview · ${formatDuration(result.durationSec)}`
     } catch (error) {
       transportMessage = error instanceof Error ? error.message : String(error)
     } finally {
@@ -455,9 +452,11 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   }
 
   async function stopPlayback(updateMessage = true) {
-    if (!audioElement) return
-    audioElement.pause()
-    audioElement.currentTime = 0
+    try {
+      await stopLivePreview()
+    } catch {
+      // Keep local UI state coherent even if the backend has already stopped.
+    }
     isPlaying = false
     if (updateMessage) {
       transportMessage = 'playback stopped'
@@ -571,19 +570,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     }
   }
 
-  function handleAudioPlay() {
-    isPlaying = true
-  }
-
-  function handleAudioPause() {
-    isPlaying = false
-  }
-
-  function handleAudioEnded() {
-    isPlaying = false
-    transportMessage = 'preview finished'
-  }
-
   $: activeDocument = documents.find((doc) => doc.id === activeId) ?? documents[0]
   $: activeDiagnostics = activeDocument?.diagnostics ?? []
   $: activeBeatPreview = activeDocument?.beatPreview ?? null
@@ -597,8 +583,32 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     const onKeydown = (event: KeyboardEvent) => handleGlobalKeydown(event)
     window.addEventListener('keydown', onKeydown)
     let unlistenCloseRequested: (() => void) | null = null
+    let unlistenPlaybackEvents: (() => void) | null = null
 
     void (async () => {
+      unlistenPlaybackEvents = await listen<PlaybackEvent>('playback-state', (event) => {
+        const payload = event.payload
+        switch (payload.state) {
+          case 'started':
+            isPlaying = true
+            break
+          case 'finished':
+            isPlaying = false
+            transportBusy = false
+            transportMessage = 'preview finished'
+            break
+          case 'stopped':
+            isPlaying = false
+            transportBusy = false
+            break
+          case 'error':
+            isPlaying = false
+            transportBusy = false
+            transportMessage = payload.message ?? 'live preview failed'
+            break
+        }
+      })
+
       unlistenCloseRequested = await getCurrentWindow().onCloseRequested(async (event) => {
         event.preventDefault()
         await maybeCloseWindow()
@@ -634,6 +644,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
     return () => {
       window.removeEventListener('keydown', onKeydown)
+      unlistenPlaybackEvents?.()
       unlistenCloseRequested?.()
       if (validationTimer) clearTimeout(validationTimer)
     }
@@ -647,14 +658,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     content="Library-backed desktop editor and player for .sbg and .sbgf files."
   />
 </svelte:head>
-
-<audio
-  bind:this={audioElement}
-  src={audioSource ?? undefined}
-  on:play={handleAudioPlay}
-  on:pause={handleAudioPause}
-  on:ended={handleAudioEnded}
-></audio>
 
 <div class="bg-overlay" aria-hidden="true"></div>
 <div class="noise-overlay" aria-hidden="true"></div>

@@ -66,6 +66,26 @@ export interface PreviewResult {
   engineVersion: string
 }
 
+export interface LivePreviewResult {
+  durationSec: number
+  limited: boolean
+  sampleRateHz: number
+  channels: number
+  bridge: string
+  engineVersion: string
+}
+
+export interface PlaybackEvent {
+  state: 'started' | 'stopped' | 'finished' | 'error'
+  message?: string | null
+  durationSec?: number | null
+  limited?: boolean | null
+  sampleRateHz?: number | null
+  channels?: number | null
+  bridge: string
+  engineVersion?: string | null
+}
+
 export interface ExportResult {
   outputPath: string
   durationSec: number

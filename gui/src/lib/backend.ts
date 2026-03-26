@@ -5,7 +5,9 @@ import type {
   CurveInfoResult,
   ExportResult,
   FileDocument,
+  LivePreviewResult,
   PreviewResult,
+  PlaybackEvent,
   RecentFileEntry,
   SessionDocumentState,
   ValidationResult,
@@ -83,6 +85,23 @@ export async function renderPreview(
   })
 }
 
+export async function startLivePreview(
+  text: string,
+  sourceName?: string | null,
+): Promise<LivePreviewResult> {
+  return invoke<LivePreviewResult>('start_live_preview', {
+    args: {
+      kind: 'sbg',
+      text,
+      sourceName,
+    },
+  })
+}
+
+export async function stopLivePreview(): Promise<void> {
+  await invoke('stop_live_preview')
+}
+
 export async function exportDocument(
   text: string,
   outputPath: string,
@@ -123,3 +142,5 @@ export async function inspectCurveInfo(
     },
   })
 }
+
+export type { PlaybackEvent }

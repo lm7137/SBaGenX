@@ -1,9 +1,16 @@
 mod sbagenxlib;
 
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::Manager;
+use std::sync::{
+  atomic::{AtomicBool, Ordering},
+  Arc, Mutex,
+};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+use tauri::{Emitter, Manager, State};
 
 use crate::sbagenxlib::{kind_from_path, normalize_source_name};
 
@@ -80,6 +87,57 @@ struct ExportResult {
   format: String,
   bridge: &'static str,
   engine_version: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct LivePreviewResult {
+  duration_sec: f64,
+  limited: bool,
+  sample_rate_hz: u32,
+  channels: u16,
+  bridge: &'static str,
+  engine_version: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct PlaybackEvent {
+  state: &'static str,
+  message: Option<String>,
+  duration_sec: Option<f64>,
+  limited: Option<bool>,
+  sample_rate_hz: Option<u32>,
+  channels: Option<u16>,
+  bridge: &'static str,
+  engine_version: Option<String>,
+}
+
+struct PlaybackRenderState {
+  live: sbagenxlib::LivePlaybackContext,
+  output_channels: usize,
+  scratch: Vec<f32>,
+  finished: bool,
+  error: Option<String>,
+}
+
+struct LivePlaybackSession {
+  stop_flag: Arc<AtomicBool>,
+  thread: Option<JoinHandle<()>>,
+}
+
+impl LivePlaybackSession {
+  fn stop(mut self) {
+    self.stop_flag.store(true, Ordering::SeqCst);
+    if let Some(handle) = self.thread.take() {
+      let _ = handle.join();
+    }
+  }
+}
+
+#[derive(Default)]
+struct PlaybackController {
+  session: Mutex<Option<LivePlaybackSession>>,
 }
 
 #[derive(Serialize)]
@@ -240,6 +298,378 @@ fn remember_recent_path(app: &tauri::AppHandle, path: &str) -> Result<(), String
     recent.truncate(12);
   }
   save_recent_paths(app, &recent)
+}
+
+fn emit_playback_event(app: &tauri::AppHandle, event: PlaybackEvent) {
+  let _ = app.emit("playback-state", event);
+}
+
+fn stop_active_session(controller: &PlaybackController) {
+  if let Ok(mut guard) = controller.session.lock() {
+    if let Some(session) = guard.take() {
+      drop(guard);
+      session.stop();
+    }
+  }
+}
+
+fn render_into_output<T>(data: &mut [T], shared: &Arc<Mutex<PlaybackRenderState>>, stop: &Arc<AtomicBool>)
+where
+  T: cpal::Sample + cpal::FromSample<f32>,
+{
+  if data.is_empty() {
+    return;
+  }
+
+  let output_channels = {
+    let guard = match shared.lock() {
+      Ok(guard) => guard,
+      Err(_) => {
+        for sample in data.iter_mut() {
+          *sample = T::from_sample(0.0);
+        }
+        return;
+      }
+    };
+    guard.output_channels.max(1)
+  };
+
+  if stop.load(Ordering::SeqCst) {
+    for sample in data.iter_mut() {
+      *sample = T::from_sample(0.0);
+    }
+    return;
+  }
+
+  let frames = data.len() / output_channels;
+  if frames == 0 {
+    return;
+  }
+
+  let mut guard = match shared.lock() {
+    Ok(guard) => guard,
+    Err(_) => {
+      for sample in data.iter_mut() {
+        *sample = T::from_sample(0.0);
+      }
+      return;
+    }
+  };
+
+  if guard.finished {
+    for sample in data.iter_mut() {
+      *sample = T::from_sample(0.0);
+    }
+    return;
+  }
+
+  let mut scratch = std::mem::take(&mut guard.scratch);
+  if scratch.len() < frames * 2 {
+    scratch.resize(frames * 2, 0.0);
+  }
+
+  let render_result = guard.live.render_interleaved_f32(&mut scratch[..frames * 2]);
+  let mut restore_now = false;
+  let rendered_frames = match render_result {
+    Ok(rendered_frames) => rendered_frames,
+    Err(err) => {
+      guard.error = Some(err);
+      guard.finished = true;
+      restore_now = true;
+      0
+    }
+  };
+
+  if restore_now {
+    guard.scratch = scratch;
+    for sample in data.iter_mut() {
+      *sample = T::from_sample(0.0);
+    }
+    return;
+  }
+
+  for frame_idx in 0..frames {
+    let (left, right) = if frame_idx < rendered_frames {
+      let base = frame_idx * 2;
+      (scratch[base], scratch[base + 1])
+    } else {
+      (0.0, 0.0)
+    };
+
+    let out_base = frame_idx * output_channels;
+    if output_channels == 1 {
+      data[out_base] = T::from_sample((left + right) * 0.5);
+      continue;
+    }
+
+    data[out_base] = T::from_sample(left);
+    data[out_base + 1] = T::from_sample(right);
+    for ch in 2..output_channels {
+      data[out_base + ch] = T::from_sample(0.0);
+    }
+  }
+
+  if rendered_frames < frames || guard.live.is_finished() {
+    guard.finished = true;
+  }
+  guard.scratch = scratch;
+}
+
+fn spawn_playback_thread(
+  app: tauri::AppHandle,
+  text: String,
+  source_name: String,
+  stop_flag: Arc<AtomicBool>,
+  startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
+) -> JoinHandle<()> {
+  thread::spawn(move || {
+    let host = cpal::default_host();
+    let device = match host.default_output_device() {
+      Some(device) => device,
+      None => {
+        let _ = startup_tx.send(Err("no default audio output device is available".to_string()));
+        return;
+      }
+    };
+    let default_config = match device.default_output_config() {
+      Ok(config) => config,
+      Err(err) => {
+        let _ = startup_tx.send(Err(format!(
+          "failed to query default audio output device: {}",
+          err
+        )));
+        return;
+      }
+    };
+    let sample_rate_hz = default_config.sample_rate().0;
+    let output_channels = default_config.channels() as usize;
+
+    let live = match sbagenxlib::create_live_preview(&text, &source_name, sample_rate_hz) {
+      Ok(live) => live,
+      Err(err) => {
+        let _ = startup_tx.send(Err(err));
+        return;
+      }
+    };
+
+    let shared = Arc::new(Mutex::new(PlaybackRenderState {
+      live,
+      output_channels,
+      scratch: Vec::new(),
+      finished: false,
+      error: None,
+    }));
+
+    let stream_config: cpal::StreamConfig = default_config.config();
+    let stream = match default_config.sample_format() {
+      cpal::SampleFormat::F32 => {
+        let shared = shared.clone();
+        let stop = stop_flag.clone();
+        let app_for_errors = app.clone();
+        let stop_for_errors = stop_flag.clone();
+        device.build_output_stream(
+          &stream_config,
+          move |data: &mut [f32], _| render_into_output(data, &shared, &stop),
+          move |err| {
+            emit_playback_event(
+              &app_for_errors,
+              PlaybackEvent {
+                state: "error",
+                message: Some(format!("audio output stream error: {}", err)),
+                duration_sec: None,
+                limited: None,
+                sample_rate_hz: Some(sample_rate_hz),
+                channels: Some(output_channels as u16),
+                bridge: "tauri-rust",
+                engine_version: None,
+              },
+            );
+            stop_for_errors.store(true, Ordering::SeqCst);
+          },
+          None,
+        )
+      }
+      cpal::SampleFormat::I16 => {
+        let shared = shared.clone();
+        let stop = stop_flag.clone();
+        let app_for_errors = app.clone();
+        let stop_for_errors = stop_flag.clone();
+        device.build_output_stream(
+          &stream_config,
+          move |data: &mut [i16], _| render_into_output(data, &shared, &stop),
+          move |err| {
+            emit_playback_event(
+              &app_for_errors,
+              PlaybackEvent {
+                state: "error",
+                message: Some(format!("audio output stream error: {}", err)),
+                duration_sec: None,
+                limited: None,
+                sample_rate_hz: Some(sample_rate_hz),
+                channels: Some(output_channels as u16),
+                bridge: "tauri-rust",
+                engine_version: None,
+              },
+            );
+            stop_for_errors.store(true, Ordering::SeqCst);
+          },
+          None,
+        )
+      }
+      cpal::SampleFormat::U16 => {
+        let shared = shared.clone();
+        let stop = stop_flag.clone();
+        let app_for_errors = app.clone();
+        let stop_for_errors = stop_flag.clone();
+        device.build_output_stream(
+          &stream_config,
+          move |data: &mut [u16], _| render_into_output(data, &shared, &stop),
+          move |err| {
+            emit_playback_event(
+              &app_for_errors,
+              PlaybackEvent {
+                state: "error",
+                message: Some(format!("audio output stream error: {}", err)),
+                duration_sec: None,
+                limited: None,
+                sample_rate_hz: Some(sample_rate_hz),
+                channels: Some(output_channels as u16),
+                bridge: "tauri-rust",
+                engine_version: None,
+              },
+            );
+            stop_for_errors.store(true, Ordering::SeqCst);
+          },
+          None,
+        )
+      }
+      other => {
+        let _ = startup_tx.send(Err(format!(
+          "unsupported audio output sample format for live preview: {:?}",
+          other
+        )));
+        return;
+      }
+    };
+
+    let stream = match stream {
+      Ok(stream) => stream,
+      Err(err) => {
+        let _ = startup_tx.send(Err(format!(
+          "failed to create audio output stream: {}",
+          err
+        )));
+        return;
+      }
+    };
+
+    if let Err(err) = stream.play() {
+      let _ = startup_tx.send(Err(format!(
+        "failed to start audio output stream: {}",
+        err
+      )));
+      return;
+    }
+
+    let (duration_sec, limited, engine_version) = {
+      let guard = match shared.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+          let _ = startup_tx.send(Err("failed to read live playback state".to_string()));
+          return;
+        }
+      };
+      (
+        guard.live.duration_sec(),
+        guard.live.limited(),
+        guard.live.engine_version(),
+      )
+    };
+
+    let start_result = LivePreviewResult {
+      duration_sec,
+      limited,
+      sample_rate_hz,
+      channels: output_channels as u16,
+      bridge: "tauri-rust",
+      engine_version: engine_version.clone(),
+    };
+    let _ = startup_tx.send(Ok(start_result.clone()));
+    emit_playback_event(
+      &app,
+      PlaybackEvent {
+        state: "started",
+        message: None,
+        duration_sec: Some(duration_sec),
+        limited: Some(limited),
+        sample_rate_hz: Some(sample_rate_hz),
+        channels: Some(output_channels as u16),
+        bridge: "tauri-rust",
+        engine_version: Some(engine_version),
+      },
+    );
+
+    loop {
+      if stop_flag.load(Ordering::SeqCst) {
+        break;
+      }
+
+      let (finished, error, engine_version, duration_sec, limited) = {
+        let mut guard = match shared.lock() {
+          Ok(guard) => guard,
+          Err(_) => break,
+        };
+        let error = guard.error.take();
+        (
+          guard.finished,
+          error,
+          guard.live.engine_version(),
+          guard.live.duration_sec(),
+          guard.live.limited(),
+        )
+      };
+
+      if let Some(message) = error {
+        emit_playback_event(
+          &app,
+          PlaybackEvent {
+            state: "error",
+            message: Some(message),
+            duration_sec: Some(duration_sec),
+            limited: Some(limited),
+            sample_rate_hz: Some(sample_rate_hz),
+            channels: Some(output_channels as u16),
+            bridge: "tauri-rust",
+            engine_version: Some(engine_version),
+          },
+        );
+        stop_flag.store(true, Ordering::SeqCst);
+        break;
+      }
+
+      if finished {
+        emit_playback_event(
+          &app,
+          PlaybackEvent {
+            state: "finished",
+            message: None,
+            duration_sec: Some(duration_sec),
+            limited: Some(limited),
+            sample_rate_hz: Some(sample_rate_hz),
+            channels: Some(output_channels as u16),
+            bridge: "tauri-rust",
+            engine_version: Some(engine_version),
+          },
+        );
+        stop_flag.store(true, Ordering::SeqCst);
+        break;
+      }
+
+      thread::sleep(Duration::from_millis(60));
+    }
+
+    drop(stream);
+  })
 }
 
 #[tauri::command]
@@ -471,6 +901,77 @@ fn render_preview(args: RenderDocumentArgs) -> Result<PreviewResult, String> {
 }
 
 #[tauri::command]
+fn start_live_preview(
+  app: tauri::AppHandle,
+  controller: State<'_, PlaybackController>,
+  args: RenderDocumentArgs,
+) -> Result<LivePreviewResult, String> {
+  if args.kind != "sbg" {
+    return Err("live preview is currently available only for .sbg documents".to_string());
+  }
+
+  stop_active_session(controller.inner());
+
+  let source_name = normalize_source_name(args.source_name, &args.kind);
+  let stop_flag = Arc::new(AtomicBool::new(false));
+  let (startup_tx, startup_rx) = std::sync::mpsc::channel();
+  let playback_thread = spawn_playback_thread(
+    app.clone(),
+    args.text,
+    source_name,
+    stop_flag.clone(),
+    startup_tx,
+  );
+
+  match startup_rx.recv_timeout(Duration::from_secs(5)) {
+    Ok(Ok(result)) => {
+      let session = LivePlaybackSession {
+        stop_flag,
+        thread: Some(playback_thread),
+      };
+      let mut guard = controller
+        .inner()
+        .session
+        .lock()
+        .map_err(|_| "failed to store live playback session".to_string())?;
+      *guard = Some(session);
+      Ok(result)
+    }
+    Ok(Err(err)) => {
+      let _ = playback_thread.join();
+      Err(err)
+    }
+    Err(_) => {
+      stop_flag.store(true, Ordering::SeqCst);
+      let _ = playback_thread.join();
+      Err("timed out while starting live preview".to_string())
+    }
+  }
+}
+
+#[tauri::command]
+fn stop_live_preview(
+  app: tauri::AppHandle,
+  controller: State<'_, PlaybackController>,
+) -> Result<(), String> {
+  stop_active_session(controller.inner());
+  emit_playback_event(
+    &app,
+    PlaybackEvent {
+      state: "stopped",
+      message: None,
+      duration_sec: None,
+      limited: None,
+      sample_rate_hz: None,
+      channels: None,
+      bridge: "tauri-rust",
+      engine_version: None,
+    },
+  );
+  Ok(())
+}
+
+#[tauri::command]
 fn export_document(args: ExportDocumentArgs) -> Result<ExportResult, String> {
   if args.kind != "sbg" {
     return Err("export is currently available only for .sbg documents".to_string());
@@ -557,6 +1058,7 @@ fn inspect_curve_info(args: RenderDocumentArgs) -> Result<CurveInfoResult, Strin
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .manage(PlaybackController::default())
     .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -578,6 +1080,8 @@ pub fn run() {
       write_text_file,
       validate_document,
       render_preview,
+      start_live_preview,
+      stop_live_preview,
       export_document,
       sample_beat_preview,
       inspect_curve_info

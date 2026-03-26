@@ -436,6 +436,93 @@ impl Drop for LoadedSbgContext {
   }
 }
 
+pub(crate) struct LivePlaybackContext {
+  loaded: LoadedSbgContext,
+  volume_mul: f32,
+  remaining_frames: usize,
+  finished: bool,
+  duration_sec: f64,
+  limited: bool,
+}
+
+unsafe impl Send for LivePlaybackContext {}
+
+impl LivePlaybackContext {
+  pub(crate) fn channel_count(&self) -> usize {
+    self.loaded.engine_cfg.channels.max(1) as usize
+  }
+
+  pub(crate) fn engine_version(&self) -> String {
+    self.loaded.api.version_string()
+  }
+
+  pub(crate) fn duration_sec(&self) -> f64 {
+    self.duration_sec
+  }
+
+  pub(crate) fn limited(&self) -> bool {
+    self.limited
+  }
+
+  pub(crate) fn is_finished(&self) -> bool {
+    self.finished
+  }
+
+  pub(crate) fn render_interleaved_f32(&mut self, out: &mut [f32]) -> Result<usize, String> {
+    if self.finished {
+      out.fill(0.0);
+      return Ok(0);
+    }
+
+    let channels = self.channel_count();
+    if channels == 0 || out.is_empty() {
+      return Ok(0);
+    }
+
+    let requested_frames = out.len() / channels;
+    if requested_frames == 0 {
+      return Ok(0);
+    }
+
+    let frames = requested_frames.min(self.remaining_frames);
+    if frames == 0 {
+      self.finished = true;
+      out.fill(0.0);
+      return Ok(0);
+    }
+
+    let sample_count = frames * channels;
+    let rc = unsafe {
+      (self.loaded.api.sbx_context_render_f32)(self.loaded.ctx, out.as_mut_ptr(), frames)
+    };
+    if rc != SBX_OK {
+      let msg = unsafe { cstr_to_string((self.loaded.api.sbx_context_last_error)(self.loaded.ctx)) };
+      return Err(if msg.is_empty() {
+        "failed to render live preview frames from sbagenxlib".to_string()
+      } else {
+        msg
+      });
+    }
+
+    if self.volume_mul != 1.0 {
+      for sample in out.iter_mut().take(sample_count) {
+        *sample *= self.volume_mul;
+      }
+    }
+
+    if sample_count < out.len() {
+      out[sample_count..].fill(0.0);
+    }
+
+    self.remaining_frames = self.remaining_frames.saturating_sub(frames);
+    if self.remaining_frames == 0 {
+      self.finished = true;
+    }
+
+    Ok(frames)
+  }
+}
+
 impl Api {
   unsafe fn load_symbol<T: Copy>(lib: &Library, name: &[u8]) -> Result<T, String> {
     lib
@@ -670,7 +757,11 @@ fn apply_sequence_overrides(loaded: &mut LoadedSbgContext) -> Result<(), String>
   Ok(())
 }
 
-fn load_sbg_context(text: &str, source_name: &str) -> Result<LoadedSbgContext, String> {
+fn load_sbg_context_with_rate(
+  text: &str,
+  source_name: &str,
+  sample_rate_override: Option<f64>,
+) -> Result<LoadedSbgContext, String> {
   let api = Api::load()?;
   let c_text = CString::new(text).map_err(|_| "document contains embedded NUL byte".to_string())?;
   let mut errbuf = vec![0 as c_char; 512];
@@ -702,7 +793,9 @@ fn load_sbg_context(text: &str, source_name: &str) -> Result<LoadedSbgContext, S
     channels: 0,
   };
   unsafe { (api.sbx_default_engine_config)(&mut engine_cfg) };
-  if preamble.have_r != 0 {
+  if let Some(rate) = sample_rate_override {
+    engine_cfg.sample_rate = rate;
+  } else if preamble.have_r != 0 {
     engine_cfg.sample_rate = preamble.rate as f64;
   }
 
@@ -753,6 +846,10 @@ fn load_sbg_context(text: &str, source_name: &str) -> Result<LoadedSbgContext, S
   }
 
   Ok(loaded)
+}
+
+fn load_sbg_context(text: &str, source_name: &str) -> Result<LoadedSbgContext, String> {
+  load_sbg_context_with_rate(text, source_name, None)
 }
 
 fn writer_config_for_path(
@@ -1072,6 +1169,48 @@ pub fn validate_sbgf(text: &str, source_name: &str) -> Result<ValidationOutcome,
     valid: diagnostics.is_empty(),
     diagnostics,
     engine_version: format!("{} (api {})", api.version_string(), api.api_version()),
+  })
+}
+
+pub fn create_live_preview(
+  text: &str,
+  source_name: &str,
+  sample_rate_hz: u32,
+) -> Result<LivePlaybackContext, String> {
+  if sample_rate_hz == 0 {
+    return Err("live playback requires a valid output sample rate".to_string());
+  }
+
+  let loaded = load_sbg_context_with_rate(text, source_name, Some(sample_rate_hz as f64))?;
+  let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
+  let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
+  let mut render_sec = duration_sec;
+  let mut limited = false;
+
+  if is_looping || render_sec <= 0.0 || render_sec > PREVIEW_LIMIT_SEC {
+    render_sec = PREVIEW_LIMIT_SEC;
+    limited = true;
+  }
+
+  if !render_sec.is_finite() || render_sec <= 0.0 {
+    return Err("live preview requires a finite preview span".to_string());
+  }
+
+  let volume_mul = if loaded.preamble.have_V != 0 {
+    loaded.preamble.volume_pct as f32 / 100.0
+  } else {
+    1.0
+  };
+
+  let remaining_frames = (render_sec * loaded.engine_cfg.sample_rate).ceil().max(1.0) as usize;
+
+  Ok(LivePlaybackContext {
+    loaded,
+    volume_mul,
+    remaining_frames,
+    finished: false,
+    duration_sec: render_sec,
+    limited,
   })
 }
 
