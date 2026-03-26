@@ -85,9 +85,9 @@ The Windows GUI build script now tries to bootstrap missing prerequisites:
   available
 - it intentionally installs the actual toolchain/runtime rather than
   trying to install `nvm`
-- on MSYS2 GNU shells such as `UCRT64`, it also auto-installs the
-  matching native `@tauri-apps/cli-win32-x64-gnu` package when npm's
-  optional dependency handling omits it
+- on MSYS2 GNU shells such as `UCRT64`, it prefers a native Windows
+  Node.js installation for Tauri packaging instead of the MSYS2 GNU
+  `node` runtime
 
 Stage the current platform runtime libraries without building:
 
