@@ -73,6 +73,56 @@ load_rust_env() {
     fi
 }
 
+resolve_tauri_cli_version() {
+    if [ ! -f "$GUI_DIR/package-lock.json" ]; then
+        return 1
+    fi
+
+    node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); const pkgs=j.packages||{}; const pkg=pkgs['node_modules/@tauri-apps/cli']; if(!pkg||!pkg.version){process.exit(1)} process.stdout.write(pkg.version);" "$GUI_DIR/package-lock.json"
+}
+
+ensure_tauri_cli_native_binding() {
+    local binding_pkg=""
+    local tauri_version=""
+    local node_arch=""
+
+    if (cd "$GUI_DIR" && node -e "require('@tauri-apps/cli')") >/dev/null 2>&1; then
+        return 0
+    fi
+
+    node_arch="$(node -p "process.arch")"
+    case "$node_arch" in
+        x64)
+            binding_pkg="@tauri-apps/cli-win32-x64-gnu"
+            ;;
+        *)
+            error "Unsupported Windows GNU Node architecture for Tauri CLI native binding: ${node_arch}"
+            return 1
+            ;;
+    esac
+
+    tauri_version="$(resolve_tauri_cli_version || true)"
+    if [ -z "$tauri_version" ]; then
+        error "Could not resolve @tauri-apps/cli version from gui/package-lock.json"
+        return 1
+    fi
+
+    warning "Tauri CLI native binding is missing for this MSYS2 GNU environment."
+    info "Installing ${binding_pkg}@${tauri_version}..."
+    if ! (cd "$GUI_DIR" && npm install --no-save "${binding_pkg}@${tauri_version}"); then
+        error "Failed to install ${binding_pkg}@${tauri_version}"
+        return 1
+    fi
+
+    if ! (cd "$GUI_DIR" && node -e "require('@tauri-apps/cli')") >/dev/null 2>&1; then
+        error "Tauri CLI native binding is still unavailable after install."
+        return 1
+    fi
+
+    success "Installed Tauri CLI native binding for Windows GNU."
+    return 0
+}
+
 find_winget() {
     if command -v winget >/dev/null 2>&1; then
         command -v winget
@@ -252,6 +302,12 @@ if [ ! -d "$GUI_DIR/node_modules" ]; then
     info "Installing GUI npm dependencies..."
     (cd "$GUI_DIR" && npm install)
     check_error "Failed to install GUI npm dependencies"
+fi
+
+section_header "Checking Tauri CLI native binding..."
+if ! ensure_tauri_cli_native_binding; then
+    error "Tauri CLI native binding is unavailable for the Windows GUI build."
+    exit 1
 fi
 
 NODE_ARCH="$(node -p "process.arch")"
