@@ -203,6 +203,31 @@ resolve_tauri_cli_version() {
     "$NODE_BIN" -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); const pkgs=j.packages||{}; const pkg=pkgs['node_modules/@tauri-apps/cli']; if(!pkg||!pkg.version){process.exit(1)} process.stdout.write(pkg.version);" "$GUI_DIR/package-lock.json"
 }
 
+resolve_mingw_objdump() {
+    local target="$1"
+    local objdump_path=""
+    objdump_path=$(command -v "${target}-objdump" 2>/dev/null || true)
+    if [ -n "$objdump_path" ]; then
+        echo "$objdump_path"
+        return 0
+    fi
+    return 1
+}
+
+dll_exports_symbol() {
+    local dll_path="$1"
+    local target="$2"
+    local symbol="$3"
+    local objdump_bin=""
+
+    objdump_bin="$(resolve_mingw_objdump "$target" || true)"
+    if [ -z "$objdump_bin" ] || [ ! -f "$dll_path" ]; then
+        return 1
+    fi
+
+    "$objdump_bin" -p "$dll_path" 2>/dev/null | grep -Fq "$symbol"
+}
+
 repair_tauri_cli_binding() {
     local tauri_version=""
     local node_arch=""
@@ -504,6 +529,12 @@ REQUIRED_GUI_RUNTIMES=(
     "libwinpthread-1-${WIN_SUFFIX}.dll"
 )
 
+GUI_REQUIRED_SBAGENXLIB_EXPORTS=(
+    "sbx_validate_sbg_text"
+    "sbx_validate_sbgf_text"
+    "sbx_free_diagnostics"
+)
+
 gui_runtime_ready() {
     local runtime
     for runtime in "${REQUIRED_GUI_RUNTIMES[@]}"; do
@@ -514,11 +545,37 @@ gui_runtime_ready() {
     return 0
 }
 
+gui_sbagenxlib_exports_ready() {
+    local dll_path="$DIST_DIR/sbagenxlib-${WIN_SUFFIX}.dll"
+    local target=""
+    local symbol=""
+
+    case "$WIN_SUFFIX" in
+        win64) target="x86_64-w64-mingw32" ;;
+        win32) target="i686-w64-mingw32" ;;
+        *) return 1 ;;
+    esac
+
+    for symbol in "${GUI_REQUIRED_SBAGENXLIB_EXPORTS[@]}"; do
+        if ! dll_exports_symbol "$dll_path" "$target" "$symbol"; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
 section_header "Checking staged GUI runtime DLL prerequisites..."
-if gui_runtime_ready && [ "$GUI_FORCE_RUNTIME_REBUILD" != "1" ]; then
-    success "Required GUI runtime DLLs are already present for ${WIN_SUFFIX}; skipping CLI/library rebuild."
+if gui_runtime_ready && gui_sbagenxlib_exports_ready && [ "$GUI_FORCE_RUNTIME_REBUILD" != "1" ]; then
+    success "Required GUI runtime DLLs and sbagenxlib exports are already present for ${WIN_SUFFIX}; skipping CLI/library rebuild."
 else
-    warning "Current-arch GUI runtime DLLs are missing or rebuild was forced."
+    if ! gui_runtime_ready; then
+        warning "Current-arch GUI runtime DLLs are missing or rebuild was forced."
+    elif ! gui_sbagenxlib_exports_ready; then
+        warning "Current-arch sbagenxlib DLL is present but missing required GUI exports; rebuilding Windows runtime prerequisites."
+    else
+        warning "Windows GUI runtime rebuild was forced."
+    fi
     if ! ensure_required_windows_gui_tools 1; then
         error "The CLI/library rebuild path still requires both MinGW cross-compilers."
         info "If you already have the required ${WIN_SUFFIX} runtime DLLs in dist/, rerun without forcing a rebuild."
@@ -534,6 +591,11 @@ else
 
     if ! gui_runtime_ready; then
         error "Required GUI runtime DLLs are still missing after the CLI/library build."
+        exit 1
+    fi
+
+    if ! gui_sbagenxlib_exports_ready; then
+        error "sbagenxlib-${WIN_SUFFIX}.dll still does not export the required GUI symbols after rebuild."
         exit 1
     fi
 fi
