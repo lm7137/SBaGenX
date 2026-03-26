@@ -34,6 +34,18 @@ VITE_CLI_JS="$GUI_DIR/node_modules/vite/bin/vite.js"
 PREPARE_RUNTIME_JS="$GUI_DIR/scripts/prepare-runtime.mjs"
 SVELTE_CHECK_JS="$GUI_DIR/node_modules/svelte-check/bin/svelte-check"
 TSC_JS="$GUI_DIR/node_modules/typescript/bin/tsc"
+VERSION_FILE="$REPO_ROOT/VERSION"
+
+LIBMAD_WIN32="$REPO_ROOT/libs/windows-win32-libmad.a"
+LIBMAD_WIN64="$REPO_ROOT/libs/windows-win64-libmad.a"
+OGG_WIN32="$REPO_ROOT/libs/windows-win32-libogg.a"
+OGG_WIN64="$REPO_ROOT/libs/windows-win64-libogg.a"
+TREMOR_WIN32="$REPO_ROOT/libs/windows-win32-libvorbisidec.a"
+TREMOR_WIN64="$REPO_ROOT/libs/windows-win64-libvorbisidec.a"
+SNDFILE_STATIC_WIN32="$REPO_ROOT/libs/windows-win32-libsndfile.a"
+SNDFILE_STATIC_WIN64="$REPO_ROOT/libs/windows-win64-libsndfile.a"
+LAME_STATIC_WIN32="$REPO_ROOT/libs/windows-win32-libmp3lame.a"
+LAME_STATIC_WIN64="$REPO_ROOT/libs/windows-win64-libmp3lame.a"
 
 create_dir_if_not_exists "$DIST_DIR"
 create_dir_if_not_exists "$GUI_DIST_DIR"
@@ -212,6 +224,90 @@ resolve_mingw_objdump() {
         return 0
     fi
     return 1
+}
+
+resolve_current_arch_target() {
+    case "$WIN_SUFFIX" in
+        win64) echo "x86_64-w64-mingw32" ;;
+        win32) echo "i686-w64-mingw32" ;;
+        *) echo "" ;;
+    esac
+}
+
+resolve_current_arch_gcc() {
+    local target
+    target="$(resolve_current_arch_target)"
+    if [ -z "$target" ]; then
+        return 1
+    fi
+    command -v "${target}-gcc" 2>/dev/null || true
+}
+
+build_current_arch_sbagenxlib_shared() {
+    local target=""
+    local gcc_bin=""
+    local version=""
+    local cflags="-DT_MINGW -DFLAC_DECODE -Wall -O3 -I. -Ilibs"
+    local libs="-lwinmm"
+    local output=""
+    local implib=""
+
+    target="$(resolve_current_arch_target)"
+    gcc_bin="$(resolve_current_arch_gcc)"
+    if [ -z "$target" ] || [ -z "$gcc_bin" ]; then
+        return 1
+    fi
+
+    if [ ! -f "$VERSION_FILE" ]; then
+        error "Missing VERSION file at $VERSION_FILE"
+        return 1
+    fi
+    version="$(cat "$VERSION_FILE")"
+
+    case "$WIN_SUFFIX" in
+        win64)
+            if [ -f "$LIBMAD_WIN64" ]; then
+                cflags="$cflags -DMP3_DECODE"
+                libs="$libs $LIBMAD_WIN64"
+            fi
+            if [ -f "$OGG_WIN64" ] && [ -f "$TREMOR_WIN64" ]; then
+                cflags="$cflags -DOGG_DECODE"
+                libs="$libs $TREMOR_WIN64 $OGG_WIN64"
+            fi
+            if [ -f "$SNDFILE_STATIC_WIN64" ] && [ -f "$LAME_STATIC_WIN64" ]; then
+                cflags="$cflags -DSTATIC_OUTPUT_ENCODERS"
+                libs="$libs $SNDFILE_STATIC_WIN64 $LAME_STATIC_WIN64 ${SBAGENX_STATIC_ENCODER_DEPS_WIN64}"
+            fi
+            output="$DIST_DIR/sbagenxlib-win64.dll"
+            implib="$DIST_DIR/libsbagenx-win64.dll.a"
+            ;;
+        win32)
+            if [ -f "$LIBMAD_WIN32" ]; then
+                cflags="$cflags -DMP3_DECODE"
+                libs="$libs $LIBMAD_WIN32"
+            fi
+            if [ -f "$OGG_WIN32" ] && [ -f "$TREMOR_WIN32" ]; then
+                cflags="$cflags -DOGG_DECODE"
+                libs="$libs $TREMOR_WIN32 $OGG_WIN32"
+            fi
+            if [ -f "$SNDFILE_STATIC_WIN32" ] && [ -f "$LAME_STATIC_WIN32" ]; then
+                cflags="$cflags -DSTATIC_OUTPUT_ENCODERS"
+                libs="$libs $SNDFILE_STATIC_WIN32 $LAME_STATIC_WIN32 ${SBAGENX_STATIC_ENCODER_DEPS_WIN32}"
+            fi
+            output="$DIST_DIR/sbagenxlib-win32.dll"
+            implib="$DIST_DIR/libsbagenx-win32.dll.a"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    create_dir_if_not_exists "$DIST_DIR"
+    info "Rebuilding current-arch sbagenxlib shared library for ${WIN_SUFFIX}..."
+    (cd "$REPO_ROOT" && "$gcc_bin" ${cflags} -DSBAGENXLIB_VERSION="\"${version}\"" -shared sbagenxlib.c \
+        -Wl,--out-implib,"$implib" \
+        -Wl,--export-all-symbols -Wl,--enable-auto-import \
+        -o "$output" ${libs})
 }
 
 dll_exports_symbol() {
@@ -572,31 +668,39 @@ else
     if ! gui_runtime_ready; then
         warning "Current-arch GUI runtime DLLs are missing or rebuild was forced."
     elif ! gui_sbagenxlib_exports_ready; then
-        warning "Current-arch sbagenxlib DLL is present but missing required GUI exports; rebuilding Windows runtime prerequisites."
+        warning "Current-arch sbagenxlib DLL is present but missing required GUI exports."
+        if build_current_arch_sbagenxlib_shared && gui_sbagenxlib_exports_ready; then
+            success "Rebuilt current-arch sbagenxlib DLL with required GUI exports."
+        else
+            warning "Current-arch sbagenxlib refresh did not complete; falling back to full Windows runtime rebuild."
+        fi
     else
         warning "Windows GUI runtime rebuild was forced."
     fi
-    if ! ensure_required_windows_gui_tools 1; then
+
+    if gui_runtime_ready && gui_sbagenxlib_exports_ready && [ "$GUI_FORCE_RUNTIME_REBUILD" != "1" ]; then
+        :
+    elif ! ensure_required_windows_gui_tools 1; then
         error "The CLI/library rebuild path still requires both MinGW cross-compilers."
         info "If you already have the required ${WIN_SUFFIX} runtime DLLs in dist/, rerun without forcing a rebuild."
         info "To force a rebuild later: SBAGENX_GUI_FORCE_RUNTIME_REBUILD=1 bash windows-build-gui.sh"
         exit 1
-    fi
+    else
+        section_header "Building Windows sbagenxlib runtime prerequisites..."
+        if ! (cd "$REPO_ROOT" && SBAGENX_REQUIRE_PY_RUNTIME=0 ./windows-build-sbagenx.sh); then
+            error "Failed to build Windows sbagenxlib prerequisites for the GUI."
+            exit 1
+        fi
 
-    section_header "Building Windows sbagenxlib runtime prerequisites..."
-    if ! (cd "$REPO_ROOT" && SBAGENX_REQUIRE_PY_RUNTIME=0 ./windows-build-sbagenx.sh); then
-        error "Failed to build Windows sbagenxlib prerequisites for the GUI."
-        exit 1
-    fi
+        if ! gui_runtime_ready; then
+            error "Required GUI runtime DLLs are still missing after the CLI/library build."
+            exit 1
+        fi
 
-    if ! gui_runtime_ready; then
-        error "Required GUI runtime DLLs are still missing after the CLI/library build."
-        exit 1
-    fi
-
-    if ! gui_sbagenxlib_exports_ready; then
-        error "sbagenxlib-${WIN_SUFFIX}.dll still does not export the required GUI symbols after rebuild."
-        exit 1
+        if ! gui_sbagenxlib_exports_ready; then
+            error "sbagenxlib-${WIN_SUFFIX}.dll still does not export the required GUI symbols after rebuild."
+            exit 1
+        fi
     fi
 fi
 
