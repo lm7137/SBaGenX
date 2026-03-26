@@ -27,6 +27,7 @@ DIST_DIR="$REPO_ROOT/dist"
 GUI_DIST_DIR="$DIST_DIR/gui"
 GUI_BUNDLE_DIR="$GUI_DIR/src-tauri/target/release/bundle"
 GUI_FORCE_RUNTIME_REBUILD="${SBAGENX_GUI_FORCE_RUNTIME_REBUILD:-0}"
+TAURI_CLI_JS="$GUI_DIR/node_modules/@tauri-apps/cli/tauri.js"
 
 create_dir_if_not_exists "$DIST_DIR"
 create_dir_if_not_exists "$GUI_DIST_DIR"
@@ -134,6 +135,14 @@ load_rust_env() {
 
 tauri_cli_binding_usable() {
     (cd "$GUI_DIR" && "$NODE_BIN" -e "require('@tauri-apps/cli')") >/dev/null 2>&1
+}
+
+run_tauri_cli() {
+    if [ ! -f "$TAURI_CLI_JS" ]; then
+        error "Tauri CLI entrypoint not found at $TAURI_CLI_JS"
+        return 1
+    fi
+    (cd "$GUI_DIR" && "$NODE_BIN" "$TAURI_CLI_JS" "$@")
 }
 
 resolve_tauri_cli_version() {
@@ -487,7 +496,7 @@ section_header "Typechecking GUI..."
 check_error "GUI typecheck failed"
 
 section_header "Building Windows GUI bundle..."
-(cd "$GUI_DIR" && "$NPM_BIN" run tauri:build)
+run_tauri_cli build
 check_error "Windows GUI bundle build failed"
 
 section_header "Collecting Windows GUI artifacts..."
