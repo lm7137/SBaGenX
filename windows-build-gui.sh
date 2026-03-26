@@ -89,6 +89,18 @@ find_native_windows_npm() {
     return 1
 }
 
+resolve_tauri_binding_package() {
+    local node_arch="$1"
+    case "$node_arch" in
+        x64) echo "@tauri-apps/cli-win32-x64-msvc" ;;
+        ia32|x86) echo "@tauri-apps/cli-win32-ia32-msvc" ;;
+        arm64) echo "@tauri-apps/cli-win32-arm64-msvc" ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
 select_node_toolchain() {
     local node_path=""
     local npm_path=""
@@ -118,6 +130,48 @@ load_rust_env() {
     if [ -f "$HOME/.cargo/env" ]; then
         . "$HOME/.cargo/env"
     fi
+}
+
+tauri_cli_binding_usable() {
+    (cd "$GUI_DIR" && "$NODE_BIN" -e "require('@tauri-apps/cli')") >/dev/null 2>&1
+}
+
+resolve_tauri_cli_version() {
+    if [ ! -f "$GUI_DIR/package-lock.json" ]; then
+        return 1
+    fi
+
+    "$NODE_BIN" -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); const pkgs=j.packages||{}; const pkg=pkgs['node_modules/@tauri-apps/cli']; if(!pkg||!pkg.version){process.exit(1)} process.stdout.write(pkg.version);" "$GUI_DIR/package-lock.json"
+}
+
+repair_tauri_cli_binding() {
+    local tauri_version=""
+    local node_arch=""
+    local binding_pkg=""
+
+    tauri_version="$(resolve_tauri_cli_version || true)"
+    if [ -z "$tauri_version" ]; then
+        return 1
+    fi
+
+    node_arch="$("$NODE_BIN" -p "process.arch")"
+    binding_pkg="$(resolve_tauri_binding_package "$node_arch")"
+    if [ -z "$binding_pkg" ]; then
+        return 1
+    fi
+
+    warning "Tauri CLI native binding is missing; installing ${binding_pkg}@${tauri_version}..."
+    if ! (cd "$GUI_DIR" && "$NPM_BIN" install --no-save "${binding_pkg}@${tauri_version}"); then
+        return 1
+    fi
+
+    tauri_cli_binding_usable
+}
+
+refresh_gui_node_modules() {
+    warning "Refreshing GUI node_modules with native Windows npm..."
+    rm -rf "$GUI_DIR/node_modules"
+    (cd "$GUI_DIR" && "$NPM_BIN" install --include=optional)
 }
 
 ensure_native_windows_node() {
@@ -347,10 +401,20 @@ if [ ! -d "$GUI_DIR/node_modules" ]; then
 fi
 
 section_header "Checking Tauri CLI native binding..."
-if ! (cd "$GUI_DIR" && "$NODE_BIN" -e "require('@tauri-apps/cli')") >/dev/null 2>&1; then
-    error "Tauri CLI native binding is unavailable for the active Node runtime."
-    info "This usually means the shell picked an MSYS2 GNU node build instead of native Windows Node.js."
-    exit 1
+if ! tauri_cli_binding_usable; then
+    if ! repair_tauri_cli_binding; then
+        if ! refresh_gui_node_modules; then
+            error "Failed to refresh GUI npm dependencies with native Windows npm."
+            exit 1
+        fi
+        if ! tauri_cli_binding_usable; then
+            if ! repair_tauri_cli_binding; then
+                error "Tauri CLI native binding is unavailable for the active Node runtime."
+                info "This usually means gui/node_modules was installed under a different host/runtime and must be rebuilt on Windows."
+                exit 1
+            fi
+        fi
+    fi
 fi
 
 NODE_ARCH="$("$NODE_BIN" -p "process.arch")"
