@@ -618,6 +618,13 @@ impl Api {
 }
 
 fn resolve_library_path() -> Result<PathBuf, String> {
+  if let Ok(path) = std::env::var("SBAGENX_GUI_SBAGENXLIB") {
+    let path = PathBuf::from(path);
+    if path.exists() {
+      return Ok(path);
+    }
+  }
+
   let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     .join("../..")
     .canonicalize()

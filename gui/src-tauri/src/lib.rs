@@ -300,6 +300,57 @@ fn remember_recent_path(app: &tauri::AppHandle, path: &str) -> Result<(), String
   save_recent_paths(app, &recent)
 }
 
+fn candidate_runtime_library_names() -> &'static [&'static str] {
+  if cfg!(target_os = "linux") {
+    &["libsbagenx.so", "libsbagenx.so.3"]
+  } else if cfg!(target_os = "windows") {
+    if cfg!(target_pointer_width = "64") {
+      &["sbagenxlib-win64.dll"]
+    } else {
+      &["sbagenxlib-win32.dll"]
+    }
+  } else if cfg!(target_os = "macos") {
+    &["libsbagenx.dylib"]
+  } else {
+    &[]
+  }
+}
+
+fn prime_sbagenxlib_runtime_path(app: &tauri::AppHandle) {
+  if std::env::var("SBAGENX_GUI_SBAGENXLIB")
+    .ok()
+    .map(|path| PathBuf::from(path).exists())
+    .unwrap_or(false)
+  {
+    return;
+  }
+
+  let mut candidates = Vec::<PathBuf>::new();
+
+  if let Ok(resource_dir) = app.path().resource_dir() {
+    for name in candidate_runtime_library_names() {
+      candidates.push(resource_dir.join(name));
+    }
+  }
+
+  if let Ok(exe_path) = std::env::current_exe() {
+    if let Some(exe_dir) = exe_path.parent() {
+      for name in candidate_runtime_library_names() {
+        candidates.push(exe_dir.join(name));
+        candidates.push(exe_dir.join("resources").join(name));
+        candidates.push(exe_dir.join("../lib").join(name));
+      }
+    }
+  }
+
+  for candidate in candidates {
+    if candidate.exists() {
+      let _ = std::env::set_var("SBAGENX_GUI_SBAGENXLIB", candidate);
+      break;
+    }
+  }
+}
+
 fn emit_playback_event(app: &tauri::AppHandle, event: PlaybackEvent) {
   let _ = app.emit("playback-state", event);
 }
@@ -1061,6 +1112,7 @@ pub fn run() {
     .manage(PlaybackController::default())
     .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
+      prime_sbagenxlib_runtime_path(app.handle());
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
