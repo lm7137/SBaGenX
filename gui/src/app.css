@@ -246,6 +246,28 @@ h1 {
   min-height: 24rem;
 }
 
+.monaco-editor .sbagenx-error-range {
+  color: #a31645 !important;
+  font-weight: 700 !important;
+}
+
+.monaco-editor .sbagenx-warning-range {
+  color: #915f00 !important;
+  font-weight: 700 !important;
+}
+
+.monaco-editor .sbagenx-error-decoration {
+  background: rgba(216, 63, 111, 0.18) !important;
+  box-shadow: inset 0 -2px 0 rgba(216, 63, 111, 1) !important;
+  border-radius: 2px !important;
+}
+
+.monaco-editor .sbagenx-warning-decoration {
+  background: rgba(213, 154, 31, 0.18) !important;
+  box-shadow: inset 0 -2px 0 rgba(213, 154, 31, 1) !important;
+  border-radius: 2px !important;
+}
+
 .panel-header,
 .panel-footer {
   padding: 1.05rem 1.05rem 0.9rem;

@@ -761,6 +761,9 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               <span class="location">
                 {#if item.line}
                   L{item.line}{#if item.column}:C{item.column}{/if}
+                  {#if item.endLine || item.endColumn}
+                    →L{item.endLine ?? item.line}:C{item.endColumn ?? item.column}
+                  {/if}
                 {:else}
                   general
                 {/if}

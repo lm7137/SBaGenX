@@ -14,6 +14,14 @@
   let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
   let monacoRef: typeof import('monaco-editor') | null = null
   let applyingExternalValue = false
+  let decorationsCollection: import('monaco-editor').editor.IEditorDecorationsCollection | null = null
+
+  function asPositiveInt(value: unknown): number | null {
+    const n = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(n)) return null
+    const i = Math.floor(n)
+    return i > 0 ? i : null
+  }
 
   export function revealPosition(line: number, column = 1) {
     if (!editor) return
@@ -40,22 +48,65 @@
     if (!editor || !monacoRef) return
     const model = editor.getModel()
     if (!model) return
-    monacoRef.editor.setModelMarkers(
-      model,
-      'sbagenx',
-      diagnostics
-        .filter((diag) => typeof diag.line === 'number' && diag.line > 0)
-        .map((diag) => ({
+    const markerEntries = diagnostics
+      .map((diag) => {
+        const startLine = asPositiveInt(diag.line)
+        if (!startLine) return null
+        const startColumn = asPositiveInt(diag.column) ?? 1
+        const endLine = asPositiveInt(diag.endLine) ?? startLine
+        const endColumn = asPositiveInt(diag.endColumn) ?? startColumn + 1
+        return {
           severity:
             diag.severity === 'error'
               ? monacoRef!.MarkerSeverity.Error
               : monacoRef!.MarkerSeverity.Warning,
           message: diag.message,
-          startLineNumber: diag.line || 1,
-          startColumn: diag.column || 1,
-          endLineNumber: diag.endLine || diag.line || 1,
-          endColumn: diag.endColumn || (diag.column || 1) + 1,
-        })),
+          startLineNumber: startLine,
+          startColumn,
+          endLineNumber: endLine,
+          endColumn: endLine === startLine && endColumn <= startColumn
+            ? startColumn + 1
+            : endColumn,
+        }
+      })
+      .filter((diag): diag is {
+        severity:
+          | import('monaco-editor').MarkerSeverity.Error
+          | import('monaco-editor').MarkerSeverity.Warning
+        message: string
+        startLineNumber: number
+        startColumn: number
+        endLineNumber: number
+        endColumn: number
+      } => !!diag)
+    monacoRef.editor.setModelMarkers(
+      model,
+      'sbagenx',
+      markerEntries,
+    )
+
+    decorationsCollection?.set(
+      markerEntries.map((diag) => ({
+        range: new monacoRef!.Range(
+          diag.startLineNumber,
+          diag.startColumn,
+          diag.endLineNumber,
+          diag.endColumn,
+        ),
+        options: {
+          className:
+            diag.severity === monacoRef!.MarkerSeverity.Error
+              ? 'sbagenx-error-decoration'
+              : 'sbagenx-warning-decoration',
+          inlineClassName:
+            diag.severity === monacoRef!.MarkerSeverity.Error
+              ? 'sbagenx-error-range'
+              : 'sbagenx-warning-range',
+          inlineClassNameAffectsLetterSpacing: true,
+          zIndex: 30,
+          hoverMessage: [{ value: diag.message }],
+        },
+      })),
     )
   }
 
@@ -76,6 +127,7 @@
       value,
       language,
       theme: 'sbagenx-light',
+      renderValidationDecorations: 'on',
       automaticLayout: true,
       minimap: { enabled: false },
       fontFamily: '"Iosevka Term", "Cascadia Code", Consolas, monospace',
@@ -89,6 +141,8 @@
       tabSize: 2,
       readOnly,
     })
+
+    decorationsCollection = editor.createDecorationsCollection()
 
     editor.onDidChangeModelContent(() => {
       if (!editor || applyingExternalValue) return
@@ -111,9 +165,13 @@
     }
   }
 
-  $: applyMarkers()
+  $: if (editor && monacoRef && decorationsCollection) {
+    diagnostics
+    applyMarkers()
+  }
 
   onDestroy(() => {
+    decorationsCollection?.clear()
     editor?.dispose()
   })
 </script>

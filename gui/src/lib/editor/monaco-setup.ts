@@ -70,6 +70,14 @@ function registerTheme(monaco: typeof Monaco) {
       'editor.lineHighlightBackground': '#f5ecdf',
       'editor.selectionBackground': '#d7e8f7',
       'editor.inactiveSelectionBackground': '#e9decf',
+      'editorError.foreground': '#d83f6f',
+      'editorWarning.foreground': '#d59a1f',
+      'editorError.border': '#d83f6f',
+      'editorWarning.border': '#d59a1f',
+      'editorError.background': '#ffd7e3',
+      'editorWarning.background': '#fff0c8',
+      'editorMarkerNavigationError.background': '#d83f6f',
+      'editorMarkerNavigationWarning.background': '#d59a1f',
     },
   })
 }
