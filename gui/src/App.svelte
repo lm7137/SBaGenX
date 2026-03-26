@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
   import { convertFileSrc } from '@tauri-apps/api/core'
-  import { confirm, open, save } from '@tauri-apps/plugin-dialog'
+  import { confirm, message, open, save } from '@tauri-apps/plugin-dialog'
+  import { getCurrentWindow } from '@tauri-apps/api/window'
   import MonacoEditor from './lib/editor/MonacoEditor.svelte'
   import BeatPreviewChart from './lib/inspector/BeatPreviewChart.svelte'
   import CurveInfoCard from './lib/inspector/CurveInfoCard.svelte'
@@ -210,6 +211,15 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     await refreshRecentFiles()
     transportMessage = `saved ${path.split(/[\\/]/).pop() ?? path}`
     await persistSessionState()
+  }
+
+  async function saveDocumentById(id: string) {
+    const doc = documents.find((item) => item.id === id)
+    if (!doc) return false
+    const path = doc.path ?? (await promptSavePath(doc))
+    if (!path) return false
+    await writeDocumentToPath(id, path, doc.content)
+    return true
   }
 
   async function refreshRecentFiles() {
@@ -479,6 +489,48 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     }
   }
 
+  async function maybeCloseWindow() {
+    const dirtyDocs = documents.filter((doc) => doc.dirty)
+    if (dirtyDocs.length === 0) {
+      await getCurrentWindow().destroy()
+      return
+    }
+
+    const result = await message(
+      dirtyDocs.length === 1
+        ? `${dirtyDocs[0].name} has unsaved changes.`
+        : `${dirtyDocs.length} documents have unsaved changes.`,
+      {
+        title: 'Unsaved changes',
+        kind: 'warning',
+        buttons: {
+          yes: 'Save and quit',
+          no: 'Discard changes and quit',
+          cancel: 'Keep editing',
+        },
+      },
+    )
+
+    if (result === 'Cancel') {
+      return
+    }
+
+    if (result === 'Yes') {
+      for (const doc of dirtyDocs) {
+        activeId = doc.id
+        await tick()
+        const saved = await saveDocumentById(doc.id)
+        if (!saved) {
+          transportMessage = `close cancelled for ${doc.name}`
+          return
+        }
+      }
+    }
+
+    await stopPlayback(false)
+    await getCurrentWindow().destroy()
+  }
+
   async function jumpToDiagnostic(item: ValidationDiagnostic) {
     selectedDiagnosticId = item.id
     if (!item.line) return
@@ -544,8 +596,14 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   onMount(() => {
     const onKeydown = (event: KeyboardEvent) => handleGlobalKeydown(event)
     window.addEventListener('keydown', onKeydown)
+    let unlistenCloseRequested: (() => void) | null = null
 
     void (async () => {
+      unlistenCloseRequested = await getCurrentWindow().onCloseRequested(async (event) => {
+        event.preventDefault()
+        await maybeCloseWindow()
+      })
+
       const untouchedStarterTabs = documents.every((doc) => !doc.path && !doc.dirty)
       if (untouchedStarterTabs) {
         try {
@@ -576,6 +634,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
     return () => {
       window.removeEventListener('keydown', onKeydown)
+      unlistenCloseRequested?.()
       if (validationTimer) clearTimeout(validationTimer)
     }
   })
