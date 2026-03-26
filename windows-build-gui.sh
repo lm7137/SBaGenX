@@ -29,6 +29,10 @@ GUI_BUNDLE_DIR="$GUI_DIR/src-tauri/target/release/bundle"
 GUI_FORCE_RUNTIME_REBUILD="${SBAGENX_GUI_FORCE_RUNTIME_REBUILD:-0}"
 TAURI_CLI_JS="$GUI_DIR/node_modules/@tauri-apps/cli/tauri.js"
 TEMP_TAURI_WINDOWS_CONFIG="$GUI_DIR/src-tauri/tauri.windows.conf.json"
+VITE_CLI_JS="$GUI_DIR/node_modules/vite/bin/vite.js"
+PREPARE_RUNTIME_JS="$GUI_DIR/scripts/prepare-runtime.mjs"
+SVELTE_CHECK_JS="$GUI_DIR/node_modules/svelte-check/bin/svelte-check"
+TSC_JS="$GUI_DIR/node_modules/typescript/bin/tsc"
 
 create_dir_if_not_exists "$DIST_DIR"
 create_dir_if_not_exists "$GUI_DIST_DIR"
@@ -150,6 +154,34 @@ run_tauri_cli() {
         return 1
     fi
     (cd "$GUI_DIR" && "$NODE_BIN" "$TAURI_CLI_JS" "$@")
+}
+
+run_vite_build() {
+    if [ ! -f "$VITE_CLI_JS" ]; then
+        error "Vite CLI entrypoint not found at $VITE_CLI_JS"
+        return 1
+    fi
+    (cd "$GUI_DIR" && "$NODE_BIN" "$VITE_CLI_JS" build)
+}
+
+run_prepare_runtime() {
+    if [ ! -f "$PREPARE_RUNTIME_JS" ]; then
+        error "Runtime staging script not found at $PREPARE_RUNTIME_JS"
+        return 1
+    fi
+    (cd "$GUI_DIR" && "$NODE_BIN" "$PREPARE_RUNTIME_JS")
+}
+
+run_gui_typecheck() {
+    if [ ! -f "$SVELTE_CHECK_JS" ] || [ ! -f "$TSC_JS" ]; then
+        error "GUI typecheck entrypoints are missing from node_modules"
+        return 1
+    fi
+    (cd "$GUI_DIR" && "$NODE_BIN" "$SVELTE_CHECK_JS" --tsconfig ./tsconfig.app.json)
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+    (cd "$GUI_DIR" && "$NODE_BIN" "$TSC_JS" -p tsconfig.node.json)
 }
 
 write_temp_windows_tauri_config() {
@@ -509,15 +541,15 @@ section_header "Cleaning previous GUI bundle outputs..."
 rm -rf "$GUI_BUNDLE_DIR"
 
 section_header "Typechecking GUI..."
-(cd "$GUI_DIR" && "$NPM_BIN" run check)
+run_gui_typecheck
 check_error "GUI typecheck failed"
 
 section_header "Building frontend assets with native Windows npm..."
-(cd "$GUI_DIR" && "$NPM_BIN" run build)
+run_vite_build
 check_error "GUI frontend build failed"
 
 section_header "Staging GUI runtime bundle..."
-(cd "$GUI_DIR" && "$NPM_BIN" run prepare:runtime)
+run_prepare_runtime
 check_error "GUI runtime staging failed"
 
 section_header "Writing temporary Windows Tauri config override..."
