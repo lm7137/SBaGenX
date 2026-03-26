@@ -28,9 +28,16 @@ GUI_DIST_DIR="$DIST_DIR/gui"
 GUI_BUNDLE_DIR="$GUI_DIR/src-tauri/target/release/bundle"
 GUI_FORCE_RUNTIME_REBUILD="${SBAGENX_GUI_FORCE_RUNTIME_REBUILD:-0}"
 TAURI_CLI_JS="$GUI_DIR/node_modules/@tauri-apps/cli/tauri.js"
+TEMP_TAURI_WINDOWS_CONFIG="$GUI_DIR/src-tauri/tauri.windows.conf.json"
 
 create_dir_if_not_exists "$DIST_DIR"
 create_dir_if_not_exists "$GUI_DIST_DIR"
+
+cleanup() {
+    rm -f "$TEMP_TAURI_WINDOWS_CONFIG"
+}
+
+trap cleanup EXIT
 
 MSYS_REPO=""
 NODE_BIN=""
@@ -143,6 +150,16 @@ run_tauri_cli() {
         return 1
     fi
     (cd "$GUI_DIR" && "$NODE_BIN" "$TAURI_CLI_JS" "$@")
+}
+
+write_temp_windows_tauri_config() {
+    cat > "$TEMP_TAURI_WINDOWS_CONFIG" <<'EOF'
+{
+  "build": {
+    "beforeBuildCommand": ""
+  }
+}
+EOF
 }
 
 resolve_tauri_cli_version() {
@@ -494,6 +511,18 @@ rm -rf "$GUI_BUNDLE_DIR"
 section_header "Typechecking GUI..."
 (cd "$GUI_DIR" && "$NPM_BIN" run check)
 check_error "GUI typecheck failed"
+
+section_header "Building frontend assets with native Windows npm..."
+(cd "$GUI_DIR" && "$NPM_BIN" run build)
+check_error "GUI frontend build failed"
+
+section_header "Staging GUI runtime bundle..."
+(cd "$GUI_DIR" && "$NPM_BIN" run prepare:runtime)
+check_error "GUI runtime staging failed"
+
+section_header "Writing temporary Windows Tauri config override..."
+write_temp_windows_tauri_config
+check_error "Failed to write temporary Windows Tauri config override"
 
 section_header "Building Windows GUI bundle..."
 run_tauri_cli build
