@@ -44,6 +44,7 @@
     revealPosition: (line: number, column?: number) => void
     focusEditor: () => void
   } | null = null
+  let allowWindowClose = false
 
   function makeUntitledDocument(kind: DocumentKind): DocumentRecord {
     const base =
@@ -488,10 +489,15 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     }
   }
 
+  async function finalizeWindowClose() {
+    allowWindowClose = true
+    await getCurrentWindow().close()
+  }
+
   async function maybeCloseWindow() {
     const dirtyDocs = documents.filter((doc) => doc.dirty)
     if (dirtyDocs.length === 0) {
-      await getCurrentWindow().destroy()
+      await finalizeWindowClose()
       return
     }
 
@@ -527,7 +533,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     }
 
     await stopPlayback(false)
-    await getCurrentWindow().destroy()
+    await finalizeWindowClose()
   }
 
   async function jumpToDiagnostic(item: ValidationDiagnostic) {
@@ -610,6 +616,9 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       })
 
       unlistenCloseRequested = await getCurrentWindow().onCloseRequested(async (event) => {
+        if (allowWindowClose) {
+          return
+        }
         event.preventDefault()
         await maybeCloseWindow()
       })
