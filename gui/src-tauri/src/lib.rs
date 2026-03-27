@@ -1113,6 +1113,12 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .setup(|app| {
       prime_sbagenxlib_runtime_path(app.handle());
+      if let (Some(window), Some(icon)) = (
+        app.get_webview_window("main"),
+        app.default_window_icon().cloned(),
+      ) {
+        let _ = window.set_icon(icon);
+      }
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
