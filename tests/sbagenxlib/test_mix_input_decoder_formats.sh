@@ -45,7 +45,8 @@ fi
 
 if command -v ffmpeg >/dev/null 2>&1; then
   ffmpeg -y -hide_banner -loglevel error -i "$tmpdir/mix_source.wav" \
-    -c:a libvorbis "$tmpdir/mix.ogg" >/dev/null 2>&1
+    -c:a libvorbis -fflags +bitexact -flags:a +bitexact \
+    "$tmpdir/mix.ogg" >/dev/null 2>&1
   "$ROOT_DIR/dist/sbagenx-linux64" -Q -W -m "$tmpdir/mix.ogg" \
     -o "$tmpdir/from_ogg.wav" -L 0:00:01 -i 210+5/20 mix/10 \
     >/dev/null 2>"$tmpdir/render.log"
