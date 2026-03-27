@@ -635,7 +635,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             if (examples.length > 0) {
               documents = examples.map((example) => makeDocumentRecord(example))
               activeId = documents[0].id
-              transportMessage = 'loaded development examples'
+              transportMessage = 'loaded example files'
             }
           }
         } catch (error) {

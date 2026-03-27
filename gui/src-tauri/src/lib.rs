@@ -859,28 +859,17 @@ fn save_session_state(
   save_session_store(&app, &store)
 }
 
-#[tauri::command]
-fn load_development_examples() -> Result<Vec<FileDocument>, String> {
-  let repo_root = match PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize() {
-    Ok(path) => path,
-    Err(_) => return Ok(Vec::new()),
-  };
-
-  let paths = [
-    repo_root.join("examples/basics/prog-custom-envelope-binaural-demo.sbg"),
-    repo_root.join("examples/basics/curve-expfit-solve-demo.sbgf"),
-  ];
-
+fn collect_example_documents(paths: &[PathBuf]) -> Result<Vec<FileDocument>, String> {
   let mut docs = Vec::new();
   for path_buf in paths {
     if !path_buf.exists() {
       continue;
     }
-    let kind = match kind_from_path(&path_buf) {
+    let kind = match kind_from_path(path_buf) {
       Some(kind) => kind,
       None => continue,
     };
-    let content = fs::read_to_string(&path_buf)
+    let content = fs::read_to_string(path_buf)
       .map_err(|err| format!("failed to read {}: {}", path_buf.display(), err))?;
     let name = path_buf
       .file_name()
@@ -894,8 +883,32 @@ fn load_development_examples() -> Result<Vec<FileDocument>, String> {
       content,
     });
   }
-
   Ok(docs)
+}
+
+#[tauri::command]
+fn load_development_examples(app: tauri::AppHandle) -> Result<Vec<FileDocument>, String> {
+  if let Ok(document_dir) = app.path().document_dir() {
+    let installed_examples = document_dir.join("SBaGenX").join("Examples");
+    let installed_paths = [
+      installed_examples.join("plus").join("creativity-boost.sbg"),
+      installed_examples.join("basics").join("curve-expfit-solve-demo.sbgf"),
+    ];
+    let docs = collect_example_documents(&installed_paths)?;
+    if !docs.is_empty() {
+      return Ok(docs);
+    }
+  }
+
+  let repo_root = match PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize() {
+    Ok(path) => path,
+    Err(_) => return Ok(Vec::new()),
+  };
+  let dev_paths = [
+    repo_root.join("examples/plus/creativity-boost.sbg"),
+    repo_root.join("examples/basics/curve-expfit-solve-demo.sbgf"),
+  ];
+  collect_example_documents(&dev_paths)
 }
 
 #[tauri::command]
