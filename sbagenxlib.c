@@ -2646,8 +2646,6 @@ sbx_validate_sbg_text(const char *text,
   }
 
   rc = sbx_context_load_sbg_timing_text(ctx, prepared, 0);
-  if (rc != SBX_OK)
-    rc = sbx_context_load_sequence_text(ctx, prepared, 0);
   if (rc != SBX_OK) {
     rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
                             "sbg-parse",

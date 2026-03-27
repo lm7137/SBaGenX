@@ -7221,8 +7221,6 @@ sbx_try_readSeq_runtime(int ac, char **av) {
    }
 
    rc= sbx_context_load_sbg_timing_text(ctx, seq_text, 0);
-   if (rc != SBX_OK)
-      rc= sbx_context_load_sequence_text(ctx, seq_text, 0);
    if (rc != SBX_OK) {
       sbx_set_runtime_reject_reason("%s", sbx_context_last_error(ctx));
       sbx_context_destroy(ctx);
