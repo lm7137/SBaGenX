@@ -35,7 +35,7 @@ PY
 cat >"$tmpdir/bell.sbg" <<'EOF'
 quiet: 200+0/0
 cue: bell300/100
-00:00 quiet
+00:00 quiet step
 00:00:03 cue
 00:00:04 quiet
 EOF
