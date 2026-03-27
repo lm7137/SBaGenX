@@ -861,10 +861,10 @@ fn save_session_state(
 
 #[tauri::command]
 fn load_development_examples() -> Result<Vec<FileDocument>, String> {
-  let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    .join("../..")
-    .canonicalize()
-    .map_err(|err| format!("failed to resolve repo root: {}", err))?;
+  let repo_root = match PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize() {
+    Ok(path) => path,
+    Err(_) => return Ok(Vec::new()),
+  };
 
   let paths = [
     repo_root.join("examples/basics/prog-custom-envelope-binaural-demo.sbg"),
