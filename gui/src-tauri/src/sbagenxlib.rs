@@ -1,7 +1,11 @@
-use libc::free;
+use libc::{free, FILE};
 use libloading::Library;
 use std::ffi::{CStr, CString};
 use std::fs;
+#[cfg(not(target_os = "windows"))]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStrExt;
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -182,6 +186,22 @@ struct SbxAudioWriter {
 }
 
 #[repr(C)]
+struct SbxMixInput {
+  _private: [u8; 0],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxMixInputConfig {
+  mix_section: c_int,
+  output_rate_hz: c_int,
+  output_rate_is_default: c_int,
+  take_stream_ownership: c_int,
+  warn_cb: Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
+  warn_user: *mut c_void,
+}
+
+#[repr(C)]
 struct SbxDiagnosticRaw {
   severity: c_int,
   code: [c_char; SBX_DIAG_CODE_MAX],
@@ -227,6 +247,7 @@ type SbxDefaultPcmConvertState = unsafe extern "C" fn(*mut SbxPcmConvertState);
 type SbxDefaultAudioWriterConfig = unsafe extern "C" fn(*mut SbxAudioWriterConfig);
 type SbxDefaultSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
 type SbxFreeSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
+type SbxDefaultMixInputConfig = unsafe extern "C" fn(*mut SbxMixInputConfig);
 type SbxCurveCreate = unsafe extern "C" fn() -> *mut SbxCurveProgram;
 type SbxCurveDestroy = unsafe extern "C" fn(*mut SbxCurveProgram);
 type SbxCurveLoadText =
@@ -263,7 +284,17 @@ type SbxContextLastError = unsafe extern "C" fn(*const SbxContext) -> *const c_c
 type SbxContextDurationSec = unsafe extern "C" fn(*const SbxContext) -> f64;
 type SbxContextIsLooping = unsafe extern "C" fn(*const SbxContext) -> c_int;
 type SbxContextHasMixEffects = unsafe extern "C" fn(*const SbxContext) -> c_int;
+type SbxContextTimeSec = unsafe extern "C" fn(*const SbxContext) -> f64;
 type SbxContextRenderF32 = unsafe extern "C" fn(*mut SbxContext, *mut f32, usize) -> c_int;
+type SbxContextMixStreamSample = unsafe extern "C" fn(
+  *mut SbxContext,
+  f64,
+  c_int,
+  c_int,
+  f64,
+  *mut f64,
+  *mut f64,
+) -> c_int;
 type SbxContextVoiceCount = unsafe extern "C" fn(*const SbxContext) -> usize;
 type SbxContextSampleProgramBeatVoice =
   unsafe extern "C" fn(*mut SbxContext, usize, f64, f64, usize, *mut f64, *mut f64) -> c_int;
@@ -292,6 +323,12 @@ type SbxConvertF32ToS16Ex =
   unsafe extern "C" fn(*const f32, *mut i16, usize, *mut SbxPcmConvertState) -> c_int;
 type SbxConvertF32ToS24_32 =
   unsafe extern "C" fn(*const f32, *mut i32, usize, *mut SbxPcmConvertState) -> c_int;
+type SbxMixInputCreateStdio =
+  unsafe extern "C" fn(*mut FILE, *const c_char, *const SbxMixInputConfig) -> *mut SbxMixInput;
+type SbxMixInputRead = unsafe extern "C" fn(*mut SbxMixInput, *mut c_int, c_int) -> c_int;
+type SbxMixInputDestroy = unsafe extern "C" fn(*mut SbxMixInput);
+type SbxMixInputLastError = unsafe extern "C" fn(*const SbxMixInput) -> *const c_char;
+type SbxMixInputOutputRate = unsafe extern "C" fn(*const SbxMixInput) -> c_int;
 
 pub struct ValidationDiagnostic {
   pub severity: &'static str,
@@ -373,6 +410,7 @@ struct Api {
   sbx_default_pcm_convert_state: SbxDefaultPcmConvertState,
   sbx_default_audio_writer_config: SbxDefaultAudioWriterConfig,
   sbx_default_safe_seqfile_preamble: SbxDefaultSafeSeqfilePreamble,
+  sbx_default_mix_input_config: SbxDefaultMixInputConfig,
   sbx_free_safe_seqfile_preamble: SbxFreeSafeSeqfilePreamble,
   sbx_curve_create: SbxCurveCreate,
   sbx_curve_destroy: SbxCurveDestroy,
@@ -397,7 +435,9 @@ struct Api {
   sbx_context_duration_sec: SbxContextDurationSec,
   sbx_context_is_looping: SbxContextIsLooping,
   sbx_context_has_mix_effects: SbxContextHasMixEffects,
+  sbx_context_time_sec: SbxContextTimeSec,
   sbx_context_render_f32: SbxContextRenderF32,
+  sbx_context_mix_stream_sample: SbxContextMixStreamSample,
   sbx_context_voice_count: SbxContextVoiceCount,
   sbx_context_sample_program_beat_voice: SbxContextSampleProgramBeatVoice,
   sbx_context_sample_tones_voice: SbxContextSampleTonesVoice,
@@ -412,6 +452,15 @@ struct Api {
   sbx_audio_writer_write_i32: SbxAudioWriterWriteI32,
   sbx_convert_f32_to_s16_ex: SbxConvertF32ToS16Ex,
   sbx_convert_f32_to_s24_32: SbxConvertF32ToS24_32,
+  sbx_mix_input_create_stdio: SbxMixInputCreateStdio,
+  sbx_mix_input_read: SbxMixInputRead,
+  sbx_mix_input_destroy: SbxMixInputDestroy,
+  sbx_mix_input_last_error: SbxMixInputLastError,
+  sbx_mix_input_output_rate: SbxMixInputOutputRate,
+}
+
+struct MixInputResource {
+  handle: *mut SbxMixInput,
 }
 
 struct LoadedSbgContext {
@@ -420,11 +469,15 @@ struct LoadedSbgContext {
   prepared_text: *mut c_char,
   preamble: SbxSafeSeqfilePreamble,
   engine_cfg: SbxEngineConfig,
+  mix_input: Option<MixInputResource>,
 }
 
 impl Drop for LoadedSbgContext {
   fn drop(&mut self) {
     unsafe {
+      if let Some(mix_input) = self.mix_input.take() {
+        (self.api.sbx_mix_input_destroy)(mix_input.handle);
+      }
       if !self.ctx.is_null() {
         (self.api.sbx_context_destroy)(self.ctx);
       }
@@ -443,6 +496,7 @@ pub(crate) struct LivePlaybackContext {
   finished: bool,
   duration_sec: f64,
   limited: bool,
+  mix_buf: Vec<i32>,
 }
 
 unsafe impl Send for LivePlaybackContext {}
@@ -492,35 +546,119 @@ impl LivePlaybackContext {
     }
 
     let sample_count = frames * channels;
-    let rc = unsafe {
-      (self.loaded.api.sbx_context_render_f32)(self.loaded.ctx, out.as_mut_ptr(), frames)
-    };
-    if rc != SBX_OK {
-      let msg = unsafe { cstr_to_string((self.loaded.api.sbx_context_last_error)(self.loaded.ctx)) };
-      return Err(if msg.is_empty() {
-        "failed to render live preview frames from sbagenxlib".to_string()
-      } else {
-        msg
-      });
-    }
-
-    if self.volume_mul != 1.0 {
-      for sample in out.iter_mut().take(sample_count) {
-        *sample *= self.volume_mul;
-      }
+    let rendered_frames = render_frames_with_mix(
+      &mut self.loaded,
+      &mut self.mix_buf,
+      &mut out[..sample_count],
+      frames,
+      self.volume_mul,
+    )?;
+    if rendered_frames == 0 {
+      self.finished = true;
+      out.fill(0.0);
+      return Ok(0);
     }
 
     if sample_count < out.len() {
       out[sample_count..].fill(0.0);
     }
 
-    self.remaining_frames = self.remaining_frames.saturating_sub(frames);
+    self.remaining_frames = self.remaining_frames.saturating_sub(rendered_frames);
     if self.remaining_frames == 0 {
       self.finished = true;
     }
 
-    Ok(frames)
+    Ok(rendered_frames)
   }
+}
+
+fn render_frames_with_mix(
+  loaded: &mut LoadedSbgContext,
+  mix_buf: &mut Vec<i32>,
+  out: &mut [f32],
+  frames: usize,
+  volume_mul: f32,
+) -> Result<usize, String> {
+  let channels = loaded.engine_cfg.channels.max(1) as usize;
+  let sample_count = frames * channels;
+  let t0 = unsafe { (loaded.api.sbx_context_time_sec)(loaded.ctx) };
+  let rc = unsafe { (loaded.api.sbx_context_render_f32)(loaded.ctx, out.as_mut_ptr(), frames) };
+  if rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) };
+    return Err(if msg.is_empty() {
+      "failed to render audio frames from sbagenxlib".to_string()
+    } else {
+      msg
+    });
+  }
+
+  if let Some(mix_input) = loaded.mix_input.as_mut() {
+    let mix_sample_count = frames * 2;
+    if mix_buf.len() < mix_sample_count {
+      mix_buf.resize(mix_sample_count, 0);
+    }
+    let read_count = unsafe {
+      (loaded.api.sbx_mix_input_read)(mix_input.handle, mix_buf.as_mut_ptr(), mix_sample_count as c_int)
+    };
+    if read_count < 0 {
+      let msg = unsafe { cstr_to_string((loaded.api.sbx_mix_input_last_error)(mix_input.handle)) };
+      return Err(if msg.is_empty() {
+        "failed to read sequence mix input stream".to_string()
+      } else {
+        msg
+      });
+    }
+    if read_count == 0 {
+      return Ok(0);
+    }
+    if read_count < mix_sample_count as c_int {
+      mix_buf[read_count as usize..mix_sample_count].fill(0);
+    }
+
+    let sample_rate_hz = loaded.engine_cfg.sample_rate;
+    for frame_idx in 0..frames {
+      let mix_base = frame_idx * 2;
+      let mut add_l = 0.0;
+      let mut add_r = 0.0;
+      let rc = unsafe {
+        (loaded.api.sbx_context_mix_stream_sample)(
+          loaded.ctx,
+          t0 + (frame_idx as f64 / sample_rate_hz),
+          mix_buf[mix_base],
+          mix_buf[mix_base + 1],
+          1.0,
+          &mut add_l,
+          &mut add_r,
+        )
+      };
+      if rc != SBX_OK {
+        let msg = unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) };
+        return Err(if msg.is_empty() {
+          "sbagenxlib mix stream processing failed".to_string()
+        } else {
+          msg
+        });
+      }
+
+      if channels == 1 {
+        let mono = out[frame_idx] as f64 + ((add_l + add_r) * 0.5 / 32767.0);
+        out[frame_idx] = mono as f32;
+        continue;
+      }
+
+      let frame_base = frame_idx * channels;
+      out[frame_base] += (add_l / 32767.0) as f32;
+      out[frame_base + 1] += (add_r / 32767.0) as f32;
+    }
+  }
+
+  if volume_mul != 1.0 {
+    for sample in out.iter_mut().take(sample_count) {
+      *sample *= volume_mul;
+    }
+  }
+
+  Ok(frames)
 }
 
 impl Api {
@@ -546,6 +684,8 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_default_audio_writer_config\0")?,
         sbx_default_safe_seqfile_preamble:
           Self::load_symbol(&lib, b"sbx_default_safe_seqfile_preamble\0")?,
+        sbx_default_mix_input_config:
+          Self::load_symbol(&lib, b"sbx_default_mix_input_config\0")?,
         sbx_free_safe_seqfile_preamble:
           Self::load_symbol(&lib, b"sbx_free_safe_seqfile_preamble\0")?,
         sbx_curve_create: Self::load_symbol(&lib, b"sbx_curve_create\0")?,
@@ -577,7 +717,10 @@ impl Api {
         sbx_context_is_looping: Self::load_symbol(&lib, b"sbx_context_is_looping\0")?,
         sbx_context_has_mix_effects:
           Self::load_symbol(&lib, b"sbx_context_has_mix_effects\0")?,
+        sbx_context_time_sec: Self::load_symbol(&lib, b"sbx_context_time_sec\0")?,
         sbx_context_render_f32: Self::load_symbol(&lib, b"sbx_context_render_f32\0")?,
+        sbx_context_mix_stream_sample:
+          Self::load_symbol(&lib, b"sbx_context_mix_stream_sample\0")?,
         sbx_context_voice_count: Self::load_symbol(&lib, b"sbx_context_voice_count\0")?,
         sbx_context_sample_program_beat_voice:
           Self::load_symbol(&lib, b"sbx_context_sample_program_beat_voice\0")?,
@@ -603,6 +746,13 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_convert_f32_to_s16_ex\0")?,
         sbx_convert_f32_to_s24_32:
           Self::load_symbol(&lib, b"sbx_convert_f32_to_s24_32\0")?,
+        sbx_mix_input_create_stdio:
+          Self::load_symbol(&lib, b"sbx_mix_input_create_stdio\0")?,
+        sbx_mix_input_read: Self::load_symbol(&lib, b"sbx_mix_input_read\0")?,
+        sbx_mix_input_destroy: Self::load_symbol(&lib, b"sbx_mix_input_destroy\0")?,
+        sbx_mix_input_last_error: Self::load_symbol(&lib, b"sbx_mix_input_last_error\0")?,
+        sbx_mix_input_output_rate:
+          Self::load_symbol(&lib, b"sbx_mix_input_output_rate\0")?,
         _lib: lib,
       })
     }
@@ -727,6 +877,118 @@ fn format_from_path(path: &Path) -> Result<(c_int, &'static str), String> {
   }
 }
 
+fn split_mix_path_spec(spec: &str) -> (&str, i32) {
+  let bytes = spec.as_bytes();
+  if bytes.last().is_some_and(|byte| byte.is_ascii_digit()) {
+    let mut start = bytes.len();
+    while start > 0 && bytes[start - 1].is_ascii_digit() {
+      start -= 1;
+    }
+    if start > 0 && bytes[start - 1] == b'#' {
+      if let Ok(section) = spec[start..].parse::<i32>() {
+        return (&spec[..start - 1], section);
+      }
+    }
+  }
+  (spec, -1)
+}
+
+fn resolve_mix_input_path(source_name: &str, mix_spec: &str) -> Result<(PathBuf, i32), String> {
+  let (mix_path, mix_section) = split_mix_path_spec(mix_spec.trim());
+  if mix_path.is_empty() {
+    return Err("sequence mix input path (-m) is empty".to_string());
+  }
+
+  let mix_path_buf = PathBuf::from(mix_path);
+  if mix_path_buf.is_absolute() {
+    return Ok((mix_path_buf, mix_section));
+  }
+
+  let source_path = PathBuf::from(source_name);
+  let source_dir = source_path.parent().filter(|dir| !dir.as_os_str().is_empty());
+  let Some(source_dir) = source_dir else {
+    return Err(format!(
+      "sequence mix input path '{}' is relative, but the document has not been saved to disk",
+      mix_path
+    ));
+  };
+  Ok((source_dir.join(mix_path_buf), mix_section))
+}
+
+#[cfg(target_os = "windows")]
+fn open_file_read_binary(path: &Path) -> Result<*mut FILE, String> {
+  let mut wide_path: Vec<u16> = path.as_os_str().encode_wide().collect();
+  wide_path.push(0);
+  let mut wide_mode: Vec<u16> = "rb".encode_utf16().collect();
+  wide_mode.push(0);
+  let file = unsafe { libc::_wfopen(wide_path.as_ptr(), wide_mode.as_ptr()) };
+  if file.is_null() {
+    return Err(format!("failed to open mix input file {} for reading", path.display()));
+  }
+  Ok(file)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_file_read_binary(path: &Path) -> Result<*mut FILE, String> {
+  let c_path = CString::new(path.as_os_str().as_bytes())
+    .map_err(|_| format!("mix input path contains embedded NUL byte: {}", path.display()))?;
+  let file = unsafe { libc::fopen(c_path.as_ptr(), b"rb\0".as_ptr() as *const c_char) };
+  if file.is_null() {
+    return Err(format!("failed to open mix input file {} for reading", path.display()));
+  }
+  Ok(file)
+}
+
+fn open_mix_input_resource(
+  api: &Api,
+  preamble: &SbxSafeSeqfilePreamble,
+  source_name: &str,
+  output_rate_hz: i32,
+  output_rate_is_default: bool,
+) -> Result<(Option<MixInputResource>, f64), String> {
+  if preamble.mix_path.is_null() {
+    return Ok((None, output_rate_hz as f64));
+  }
+
+  let mix_spec = cstr_to_string(preamble.mix_path);
+  let (resolved_path, mix_section) = resolve_mix_input_path(source_name, &mix_spec)?;
+  let file = open_file_read_binary(&resolved_path)?;
+  let mut cfg = SbxMixInputConfig {
+    mix_section: -1,
+    output_rate_hz: 0,
+    output_rate_is_default: 0,
+    take_stream_ownership: 0,
+    warn_cb: None,
+    warn_user: std::ptr::null_mut(),
+  };
+  unsafe { (api.sbx_default_mix_input_config)(&mut cfg) };
+  cfg.mix_section = mix_section;
+  cfg.output_rate_hz = output_rate_hz;
+  cfg.output_rate_is_default = if output_rate_is_default { 1 } else { 0 };
+  cfg.take_stream_ownership = 1;
+
+  let path_hint = CString::new(resolved_path.to_string_lossy().as_bytes())
+    .map_err(|_| format!("mix input path contains embedded NUL byte: {}", resolved_path.display()))?;
+  let handle = unsafe { (api.sbx_mix_input_create_stdio)(file, path_hint.as_ptr(), &cfg) };
+  if handle.is_null() {
+    unsafe {
+      libc::fclose(file);
+    }
+    return Err("out of memory creating mix input decoder".to_string());
+  }
+
+  let error = unsafe { cstr_to_string((api.sbx_mix_input_last_error)(handle)) };
+  if !error.is_empty() {
+    unsafe {
+      (api.sbx_mix_input_destroy)(handle);
+    }
+    return Err(error);
+  }
+
+  let effective_rate_hz = unsafe { (api.sbx_mix_input_output_rate)(handle) } as f64;
+  Ok((Some(MixInputResource { handle }), effective_rate_hz))
+}
+
 fn preview_path() -> Result<PathBuf, String> {
   let dir = std::env::temp_dir().join("sbagenx-gui");
   fs::create_dir_all(&dir)
@@ -768,6 +1030,7 @@ fn load_sbg_context_with_rate(
   text: &str,
   source_name: &str,
   sample_rate_override: Option<f64>,
+  enable_mix_input: bool,
 ) -> Result<LoadedSbgContext, String> {
   let api = Api::load()?;
   let c_text = CString::new(text).map_err(|_| "document contains embedded NUL byte".to_string())?;
@@ -800,11 +1063,27 @@ fn load_sbg_context_with_rate(
     channels: 0,
   };
   unsafe { (api.sbx_default_engine_config)(&mut engine_cfg) };
-  if let Some(rate) = sample_rate_override {
-    engine_cfg.sample_rate = rate;
+
+  let requested_rate_hz = if let Some(rate) = sample_rate_override {
+    rate.round() as i32
   } else if preamble.have_r != 0 {
-    engine_cfg.sample_rate = preamble.rate as f64;
-  }
+    preamble.rate
+  } else {
+    44100
+  };
+  let output_rate_is_default = sample_rate_override.is_none() && preamble.have_r == 0;
+  let (mix_input, effective_rate_hz) = if enable_mix_input {
+    open_mix_input_resource(
+      &api,
+      &preamble,
+      source_name,
+      requested_rate_hz,
+      output_rate_is_default,
+    )?
+  } else {
+    (None, requested_rate_hz as f64)
+  };
+  engine_cfg.sample_rate = effective_rate_hz;
 
   let ctx = unsafe { (api.sbx_context_create)(&engine_cfg) };
   if ctx.is_null() {
@@ -821,6 +1100,7 @@ fn load_sbg_context_with_rate(
     prepared_text,
     preamble,
     engine_cfg,
+    mix_input,
   };
 
   apply_sequence_overrides(&mut loaded)?;
@@ -834,6 +1114,17 @@ fn load_sbg_context_with_rate(
     } else {
       msg
     });
+  }
+
+  if enable_mix_input {
+    if loaded.preamble.have_A != 0 && loaded.mix_input.is_none() {
+      return Err("-A requires a mix input stream; use -m in the sequence preamble".to_string());
+    }
+    if loaded.mix_input.is_none()
+      && unsafe { (loaded.api.sbx_context_has_mix_effects)(loaded.ctx) } != 0
+    {
+      return Err("sequence file mix effects require a mix input stream (-m)".to_string());
+    }
   }
 
   if loaded.preamble.have_A != 0 {
@@ -856,7 +1147,15 @@ fn load_sbg_context_with_rate(
 }
 
 fn load_sbg_context(text: &str, source_name: &str) -> Result<LoadedSbgContext, String> {
-  load_sbg_context_with_rate(text, source_name, None)
+  load_sbg_context_with_rate(text, source_name, None, false)
+}
+
+fn load_sbg_context_for_audio(
+  text: &str,
+  source_name: &str,
+  sample_rate_override: Option<f64>,
+) -> Result<LoadedSbgContext, String> {
+  load_sbg_context_with_rate(text, source_name, sample_rate_override, true)
 }
 
 fn writer_config_for_path(
@@ -943,17 +1242,10 @@ fn pack_s24le_from_i32(src: &[i32], dst: &mut Vec<u8>, sample_count: usize) {
 }
 
 fn render_context_to_path(
-  loaded: LoadedSbgContext,
+  mut loaded: LoadedSbgContext,
   out_path: &Path,
   preview: bool,
 ) -> Result<(f64, bool, &'static str, String), String> {
-  if !loaded.preamble.mix_path.is_null() {
-    return Err("GUI preview/export does not yet support sequence mix input (-m)".to_string());
-  }
-  if unsafe { (loaded.api.sbx_context_has_mix_effects)(loaded.ctx) } != 0 {
-    return Err("GUI preview/export does not yet support sequence mix-effect playback".to_string());
-  }
-
   let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
   let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
   let mut render_sec = duration_sec;
@@ -990,6 +1282,7 @@ fn render_context_to_path(
   let mut fbuf = vec![0.0_f32; RENDER_CHUNK_FRAMES * channels];
   let mut s16buf = vec![0_i16; RENDER_CHUNK_FRAMES * channels];
   let mut i32buf = vec![0_i32; RENDER_CHUNK_FRAMES * channels];
+  let mut mix_buf = Vec::<i32>::new();
   let mut bytebuf = Vec::<u8>::with_capacity(RENDER_CHUNK_FRAMES * channels * 3);
   let mut remaining_frames = (render_sec * loaded.engine_cfg.sample_rate).ceil() as usize;
   let volume_mul = if loaded.preamble.have_V != 0 {
@@ -1004,28 +1297,33 @@ fn render_context_to_path(
   while remaining_frames > 0 {
     let frames = remaining_frames.min(RENDER_CHUNK_FRAMES);
     let sample_count = frames * channels;
-    let rc = unsafe { (loaded.api.sbx_context_render_f32)(loaded.ctx, fbuf.as_mut_ptr(), frames) };
-    if rc != SBX_OK {
-      writer_error = Some(unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) });
-      break;
-    }
-
-    if volume_mul != 1.0 {
-      for sample in fbuf.iter_mut().take(sample_count) {
-        *sample *= volume_mul;
+    let rendered_frames = match render_frames_with_mix(
+      &mut loaded,
+      &mut mix_buf,
+      &mut fbuf[..sample_count],
+      frames,
+      volume_mul,
+    ) {
+      Ok(rendered_frames) => rendered_frames,
+      Err(err) => {
+        writer_error = Some(err);
+        break;
       }
+    };
+    if rendered_frames == 0 {
+      break;
     }
 
     let write_rc = match input_mode {
       SBX_AUDIO_WRITER_INPUT_F32 => unsafe {
-        (loaded.api.sbx_audio_writer_write_f32)(writer, fbuf.as_ptr(), frames)
+        (loaded.api.sbx_audio_writer_write_f32)(writer, fbuf.as_ptr(), rendered_frames)
       },
       SBX_AUDIO_WRITER_INPUT_S16 => {
         let rc = unsafe {
           (loaded.api.sbx_convert_f32_to_s16_ex)(
             fbuf.as_ptr(),
             s16buf.as_mut_ptr(),
-            sample_count,
+            rendered_frames * channels,
             &mut pcm_state,
           )
         };
@@ -1033,14 +1331,16 @@ fn render_context_to_path(
           writer_error = Some("sbagenxlib PCM16 conversion failed".to_string());
           break;
         }
-        unsafe { (loaded.api.sbx_audio_writer_write_s16)(writer, s16buf.as_ptr(), frames) }
+        unsafe {
+          (loaded.api.sbx_audio_writer_write_s16)(writer, s16buf.as_ptr(), rendered_frames)
+        }
       }
       SBX_AUDIO_WRITER_INPUT_I32 => {
         let rc = unsafe {
           (loaded.api.sbx_convert_f32_to_s24_32)(
             fbuf.as_ptr(),
             i32buf.as_mut_ptr(),
-            sample_count,
+            rendered_frames * channels,
             &mut pcm_state,
           )
         };
@@ -1048,7 +1348,9 @@ fn render_context_to_path(
           writer_error = Some("sbagenxlib PCM24 conversion failed".to_string());
           break;
         }
-        unsafe { (loaded.api.sbx_audio_writer_write_i32)(writer, i32buf.as_ptr(), frames) }
+        unsafe {
+          (loaded.api.sbx_audio_writer_write_i32)(writer, i32buf.as_ptr(), rendered_frames)
+        }
       }
       SBX_AUDIO_WRITER_INPUT_BYTES => {
         match writer_cfg.pcm_bits {
@@ -1057,7 +1359,7 @@ fn render_context_to_path(
               (loaded.api.sbx_convert_f32_to_s16_ex)(
                 fbuf.as_ptr(),
                 s16buf.as_mut_ptr(),
-                sample_count,
+                rendered_frames * channels,
                 &mut pcm_state,
               )
             };
@@ -1069,7 +1371,7 @@ fn render_context_to_path(
               (loaded.api.sbx_audio_writer_write_bytes)(
                 writer,
                 s16buf.as_ptr() as *const c_void,
-                sample_count * std::mem::size_of::<i16>(),
+                rendered_frames * channels * std::mem::size_of::<i16>(),
               )
             }
           }
@@ -1078,7 +1380,7 @@ fn render_context_to_path(
               (loaded.api.sbx_convert_f32_to_s24_32)(
                 fbuf.as_ptr(),
                 i32buf.as_mut_ptr(),
-                sample_count,
+                rendered_frames * channels,
                 &mut pcm_state,
               )
             };
@@ -1086,7 +1388,7 @@ fn render_context_to_path(
               writer_error = Some("sbagenxlib PCM24 conversion failed".to_string());
               break;
             }
-            pack_s24le_from_i32(&i32buf, &mut bytebuf, sample_count);
+            pack_s24le_from_i32(&i32buf, &mut bytebuf, rendered_frames * channels);
             unsafe {
               (loaded.api.sbx_audio_writer_write_bytes)(
                 writer,
@@ -1112,7 +1414,7 @@ fn render_context_to_path(
       break;
     }
 
-    remaining_frames -= frames;
+    remaining_frames -= rendered_frames;
   }
 
   let close_rc = unsafe { (loaded.api.sbx_audio_writer_close)(writer) };
@@ -1188,7 +1490,7 @@ pub fn create_live_preview(
     return Err("live playback requires a valid output sample rate".to_string());
   }
 
-  let loaded = load_sbg_context_with_rate(text, source_name, Some(sample_rate_hz as f64))?;
+  let loaded = load_sbg_context_for_audio(text, source_name, Some(sample_rate_hz as f64))?;
   let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
   let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
   let mut render_sec = duration_sec;
@@ -1218,11 +1520,12 @@ pub fn create_live_preview(
     finished: false,
     duration_sec: render_sec,
     limited,
+    mix_buf: Vec::new(),
   })
 }
 
 pub fn render_preview(text: &str, source_name: &str) -> Result<PreviewOutcome, String> {
-  let loaded = load_sbg_context(text, source_name)?;
+  let loaded = load_sbg_context_for_audio(text, source_name, None)?;
   let out_path = preview_path()?;
   let (duration_sec, limited, _, engine_version) = render_context_to_path(loaded, &out_path, true)?;
   Ok(PreviewOutcome {
@@ -1234,7 +1537,7 @@ pub fn render_preview(text: &str, source_name: &str) -> Result<PreviewOutcome, S
 }
 
 pub fn export_sbg(text: &str, source_name: &str, output_path: &Path) -> Result<ExportOutcome, String> {
-  let loaded = load_sbg_context(text, source_name)?;
+  let loaded = load_sbg_context_for_audio(text, source_name, None)?;
   let (duration_sec, _, format, engine_version) =
     render_context_to_path(loaded, output_path, false)?;
   Ok(ExportOutcome {
@@ -1468,5 +1771,93 @@ pub fn kind_from_path(path: &Path) -> Option<&'static str> {
     Some("sbg") => Some("sbg"),
     Some("sbgf") => Some("sbgf"),
     _ => None,
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::fs;
+  use std::path::Path;
+  use std::time::{SystemTime, UNIX_EPOCH};
+
+  fn write_test_wav(path: &Path, sample_rate_hz: u32, frames: usize) {
+    let channels = 2u16;
+    let bits_per_sample = 16u16;
+    let block_align = channels * (bits_per_sample / 8);
+    let byte_rate = sample_rate_hz * block_align as u32;
+    let data_size = (frames * block_align as usize) as u32;
+    let mut bytes = Vec::with_capacity(44 + data_size as usize);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_size).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate_hz.to_le_bytes());
+    bytes.extend_from_slice(&byte_rate.to_le_bytes());
+    bytes.extend_from_slice(&block_align.to_le_bytes());
+    bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_size.to_le_bytes());
+
+    for frame_idx in 0..frames {
+      let t = frame_idx as f32 / sample_rate_hz as f32;
+      let sample = (t * 2.0 * std::f32::consts::PI * 220.0).sin() * 0.25;
+      let pcm = (sample * i16::MAX as f32) as i16;
+      bytes.extend_from_slice(&pcm.to_le_bytes());
+      bytes.extend_from_slice(&pcm.to_le_bytes());
+    }
+
+    fs::write(path, bytes).expect("write test wav");
+  }
+
+  fn temp_gui_test_dir(name: &str) -> PathBuf {
+    let stamp = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .expect("clock")
+      .as_nanos();
+    let dir = std::env::temp_dir().join(format!("sbagenx-gui-{}-{}", name, stamp));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    dir
+  }
+
+  #[test]
+  fn split_mix_path_spec_parses_section_suffix() {
+    let (path, section) = split_mix_path_spec("river1.ogg#12");
+    assert_eq!(path, "river1.ogg");
+    assert_eq!(section, 12);
+
+    let (plain_path, plain_section) = split_mix_path_spec("mix.wav");
+    assert_eq!(plain_path, "mix.wav");
+    assert_eq!(plain_section, -1);
+  }
+
+  #[test]
+  fn resolve_mix_input_path_uses_source_directory() {
+    let source = "/tmp/project/example.sbg";
+    let (path, section) = resolve_mix_input_path(source, "mix.wav#3").expect("resolve mix path");
+    assert_eq!(path, PathBuf::from("/tmp/project/mix.wav"));
+    assert_eq!(section, 3);
+  }
+
+  #[test]
+  fn export_sbg_supports_relative_mix_input() {
+    let dir = temp_gui_test_dir("mix-export");
+    let mix_path = dir.join("mix.wav");
+    let sbg_path = dir.join("mix-demo.sbg");
+    let out_path = dir.join("out.wav");
+
+    write_test_wav(&mix_path, 44_100, 44_100);
+    let seq = "-SE -m mix.wav\nbase: 200+6/20 mix/100\n00:00 base\n00:01 -\n";
+    fs::write(&sbg_path, seq).expect("write sbg");
+
+    let result = export_sbg(seq, &sbg_path.to_string_lossy(), &out_path).expect("export sbg");
+    assert_eq!(result.format, "wav");
+    let meta = fs::metadata(&out_path).expect("stat exported wav");
+    assert!(meta.len() > 44, "expected exported wav payload");
+
+    let _ = fs::remove_dir_all(dir);
   }
 }
