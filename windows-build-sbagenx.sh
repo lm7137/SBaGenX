@@ -678,7 +678,6 @@ copy_python_runtime_tree() {
     return 0
 }
 
-if [ "$BUILD_WIN32" -eq 1 ]; then
 # Replace VERSION with the actual version number once for any requested arch.
 sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 if [ $? -ne 0 ] || [ ! -f sbagenx.tmp.c ]; then
@@ -687,6 +686,16 @@ if [ $? -ne 0 ] || [ ! -f sbagenx.tmp.c ]; then
     exit 1
 fi
 
+# Remove stale outputs for the requested architectures so failures cannot be
+# masked by old artifacts from earlier builds.
+if [ "$BUILD_WIN32" -eq 1 ]; then
+    rm -f dist/sbagenx-win32.exe dist/libsbagenx-win32.a dist/libsbagenx-win32.dll.a dist/sbagenxlib-win32.dll
+fi
+if [ "$BUILD_WIN64" -eq 1 ]; then
+    rm -f dist/sbagenx-win64.exe dist/libsbagenx-win64.a dist/libsbagenx-win64.dll.a dist/sbagenxlib-win64.dll
+fi
+
+if [ "$BUILD_WIN32" -eq 1 ]; then
 # Build 32-bit version
 section_header "Building 32-bit version..."
 
