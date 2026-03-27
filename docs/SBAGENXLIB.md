@@ -758,6 +758,8 @@ Public header: `sbagenxlib.h`
   - `sbx_parse_tone_spec_ex()`
   - `sbx_parse_sbg_clock_token()`
   - `sbx_format_mix_fx_spec()`
+  - `sbx_validate_sbg_text()` / `sbx_validate_sbgf_text()`
+  - `sbx_free_diagnostics()`
   - `sbx_parse_mix_fx_spec()`
   - `sbx_parse_extra_token()`
   - `sbx_context_create()` / `sbx_context_destroy()`

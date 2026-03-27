@@ -17,11 +17,13 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 37  /* public API contract revision */
+#define SBX_API_VERSION 38  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
 #define SBX_PLOT_TEXT_MAX 256
+#define SBX_DIAG_CODE_MAX 32
+#define SBX_DIAG_MESSAGE_MAX 256
 
 /* Status codes returned by sbagenxlib APIs. */
 enum {
@@ -178,6 +180,21 @@ typedef struct SbxContext SbxContext;
 typedef struct SbxCurveProgram SbxCurveProgram;
 typedef struct SbxAudioWriter SbxAudioWriter;
 typedef struct SbxMixInput SbxMixInput;
+
+typedef enum {
+  SBX_DIAG_ERROR = 1,
+  SBX_DIAG_WARNING = 2
+} SbxDiagnosticSeverity;
+
+typedef struct {
+  int severity; /* SBX_DIAG_* */
+  char code[SBX_DIAG_CODE_MAX];
+  uint32_t line;
+  uint32_t column;
+  uint32_t end_line;
+  uint32_t end_column;
+  char message[SBX_DIAG_MESSAGE_MAX];
+} SbxDiagnostic;
 
 typedef struct {
   double carrier_start_hz;
@@ -680,6 +697,23 @@ int sbx_prepare_safe_seqfile_text(const char *path,
                                   SbxSafeSeqfilePreamble *out_cfg,
                                   char *errbuf,
                                   size_t errbuf_sz);
+
+/*
+ * Validate `.sbg` / `.sbgf` text and return structured diagnostics suitable
+ * for editor integrations. Validation success returns `SBX_OK`; syntax/runtime
+ * issues are reported via the diagnostics array rather than the return code.
+ * The caller owns the returned array and must free it with
+ * sbx_free_diagnostics().
+ */
+int sbx_validate_sbg_text(const char *text,
+                          const char *source_name,
+                          SbxDiagnostic **out_diags,
+                          size_t *out_count);
+int sbx_validate_sbgf_text(const char *text,
+                           const char *source_name,
+                           SbxDiagnostic **out_diags,
+                           size_t *out_count);
+void sbx_free_diagnostics(SbxDiagnostic *diags);
 
 /*
  * Recognize/execute an option-only historical `.sbg` wrapper.
