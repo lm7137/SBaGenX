@@ -26,6 +26,11 @@ const SBX_AUDIO_WRITER_INPUT_I32: c_int = 3;
 const PREVIEW_LIMIT_SEC: f64 = 120.0;
 const RENDER_CHUNK_FRAMES: usize = 2048;
 
+#[cfg(target_os = "windows")]
+unsafe extern "C" {
+  fn _wfopen(filename: *const u16, mode: *const u16) -> *mut FILE;
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct SbxAmpAdjustPoint {
@@ -921,7 +926,7 @@ fn open_file_read_binary(path: &Path) -> Result<*mut FILE, String> {
   wide_path.push(0);
   let mut wide_mode: Vec<u16> = "rb".encode_utf16().collect();
   wide_mode.push(0);
-  let file = unsafe { libc::_wfopen(wide_path.as_ptr(), wide_mode.as_ptr()) };
+  let file = unsafe { _wfopen(wide_path.as_ptr(), wide_mode.as_ptr()) };
   if file.is_null() {
     return Err(format!("failed to open mix input file {} for reading", path.display()));
   }
