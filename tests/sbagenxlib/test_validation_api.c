@@ -61,6 +61,18 @@ main(void) {
     "alloff: -\n"
     "\n"
     "NOW alloff\n";
+  const char *bad_sbg_custom =
+    "custom00: e=2 0 0.1 0.85 1 1 0.85 0.1 0\n"
+    "\n"
+    "base: custom00:196+6/35 xyz\n"
+    "drift: custom00:180+4/30\n"
+    "alloff: -\n"
+    "\n"
+    "NOW base\n"
+    "+00:02:00 base ->\n"
+    "+00:03:00 drift\n"
+    "+00:05:00 drift ->\n"
+    "+00:06:00 alloff\n";
   const char *bad_sbgf =
     "title \"broken\"\n"
     "beat =\n";
@@ -86,6 +98,20 @@ main(void) {
     fail("invalid safe preamble line should report line 2");
   if (!strstr(diags[0].message, "FLAC compression level"))
     fail("invalid .sbg diagnostic message mismatch");
+  sbx_free_diagnostics(diags);
+  diags = 0;
+  count = 0;
+
+  rc = sbx_validate_sbg_text(bad_sbg_custom, "bad-custom.sbg", &diags, &count);
+  if (rc != SBX_OK) fail("sbx_validate_sbg_text custom invalid case failed");
+  if (!diags || count != 1)
+    fail("invalid custom .sbg should emit one diagnostic");
+  if (diags[0].line != 3)
+    fail("invalid custom .sbg should report edited tone-set line");
+  if (diags[0].column != 25 || diags[0].end_column != 28)
+    fail("invalid custom .sbg diagnostic should highlight offending token span");
+  if (!strstr(diags[0].message, "invalid named tone-set token 'xyz'"))
+    fail("invalid custom .sbg diagnostic should preserve native timing error");
   sbx_free_diagnostics(diags);
   diags = 0;
   count = 0;

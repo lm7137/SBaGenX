@@ -810,6 +810,108 @@ sbx_diag_alloc_one(SbxDiagnostic **out_diags,
   return SBX_OK;
 }
 
+static int
+sbx_diag_extract_quoted_token(const char *message,
+                              char *out,
+                              size_t out_sz) {
+  const char *start;
+  const char *end;
+  size_t len;
+
+  if (!message || !out || out_sz == 0)
+    return 0;
+  out[0] = 0;
+  start = strchr(message, '\'');
+  if (!start) return 0;
+  start++;
+  end = strchr(start, '\'');
+  if (!end || end <= start) return 0;
+  len = (size_t)(end - start);
+  if (len >= out_sz)
+    len = out_sz - 1;
+  memcpy(out, start, len);
+  out[len] = 0;
+  return len > 0;
+}
+
+static int
+sbx_diag_line_bounds(const char *text,
+                     uint32_t line_no,
+                     const char **out_start,
+                     const char **out_end) {
+  const char *line_start;
+  const char *p;
+  uint32_t current;
+
+  if (!text || !out_start || !out_end || line_no == 0)
+    return 0;
+
+  line_start = text;
+  current = 1;
+  p = text;
+  while (*p && current < line_no) {
+    if (*p == '\n') {
+      current++;
+      line_start = p + 1;
+    }
+    p++;
+  }
+  if (current != line_no)
+    return 0;
+
+  p = line_start;
+  while (*p && *p != '\n' && *p != '\r')
+    p++;
+  *out_start = line_start;
+  *out_end = p;
+  return 1;
+}
+
+static void
+sbx_diag_refine_span_from_source(SbxDiagnostic *diag, const char *text) {
+  const char *line_start;
+  const char *line_end;
+  char token[SBX_DIAG_MESSAGE_MAX];
+  const char *p;
+  size_t token_len;
+
+  if (!diag || !text || diag->line == 0)
+    return;
+  if (diag->column != 0 && diag->end_column > diag->column)
+    return;
+  if (!sbx_diag_extract_quoted_token(diag->message, token, sizeof(token)))
+    return;
+  if (!sbx_diag_line_bounds(text, diag->line, &line_start, &line_end))
+    return;
+
+  token_len = strlen(token);
+  if (token_len == 0)
+    return;
+
+  for (p = line_start; p + token_len <= line_end; p++) {
+    if (memcmp(p, token, token_len) == 0) {
+      uint32_t col = (uint32_t)(p - line_start) + 1U;
+      diag->column = col;
+      diag->end_line = diag->line;
+      diag->end_column = col + (uint32_t)token_len;
+      return;
+    }
+  }
+}
+
+static int
+sbx_diag_alloc_one_from_text(SbxDiagnostic **out_diags,
+                             size_t *out_count,
+                             int severity,
+                             const char *code,
+                             const char *message,
+                             const char *text) {
+  int rc = sbx_diag_alloc_one(out_diags, out_count, severity, code, message);
+  if (rc == SBX_OK && out_diags && *out_diags)
+    sbx_diag_refine_span_from_source(*out_diags, text);
+  return rc;
+}
+
 #if defined(_WIN32) || defined(T_MINGW) || defined(T_MSVC)
 static SbxDLibHandle
 sbx_dlib_open_one(const char *name) {
@@ -2593,8 +2695,10 @@ sbx_validate_sbg_text(const char *text,
   if (rc != SBX_OK) {
     sbx_free_safe_seqfile_preamble(&cfg);
     if (rc == SBX_EINVAL)
-      return sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
-                                "sbg-parse", errbuf[0] ? errbuf : "SBaGenX validation failed");
+      return sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
+                                          "sbg-parse",
+                                          errbuf[0] ? errbuf : "SBaGenX validation failed",
+                                          text);
     return rc;
   }
 
@@ -2610,8 +2714,8 @@ sbx_validate_sbg_text(const char *text,
 
   if (cfg.have_w &&
       SBX_OK != sbx_context_set_default_waveform(ctx, cfg.waveform)) {
-    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
-                            "sbg-parse", sbx_context_last_error(ctx));
+    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
+                                      "sbg-parse", sbx_context_last_error(ctx), text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2619,8 +2723,8 @@ sbx_validate_sbg_text(const char *text,
   }
   if (cfg.have_I &&
       SBX_OK != sbx_context_set_sequence_iso_override(ctx, &cfg.iso_env)) {
-    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
-                            "sbg-parse", sbx_context_last_error(ctx));
+    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
+                                      "sbg-parse", sbx_context_last_error(ctx), text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2628,8 +2732,8 @@ sbx_validate_sbg_text(const char *text,
   }
   if (cfg.have_H &&
       SBX_OK != sbx_context_set_sequence_mixam_override(ctx, &cfg.mixam_env)) {
-    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
-                            "sbg-parse", sbx_context_last_error(ctx));
+    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
+                                      "sbg-parse", sbx_context_last_error(ctx), text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2637,8 +2741,8 @@ sbx_validate_sbg_text(const char *text,
   }
   if (cfg.have_c &&
       SBX_OK != sbx_context_set_amp_adjust(ctx, &cfg.amp_adjust)) {
-    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
-                            "sbg-parse", sbx_context_last_error(ctx));
+    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
+                                      "sbg-parse", sbx_context_last_error(ctx), text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2647,11 +2751,12 @@ sbx_validate_sbg_text(const char *text,
 
   rc = sbx_context_load_sbg_timing_text(ctx, prepared, 0);
   if (rc != SBX_OK) {
-    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
-                            "sbg-parse",
-                            sbx_context_last_error(ctx)[0] ?
-                              sbx_context_last_error(ctx) :
-                              "SBaGenX validation failed");
+    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
+                                      "sbg-parse",
+                                      sbx_context_last_error(ctx)[0] ?
+                                        sbx_context_last_error(ctx) :
+                                        "SBaGenX validation failed",
+                                      text);
     sbx_context_destroy(ctx);
     sbx_free_safe_seqfile_preamble(&cfg);
     free(prepared);
@@ -2703,11 +2808,12 @@ sbx_validate_sbgf_text(const char *text,
 
   rc = sbx_curve_load_text(curve, text, source_name ? source_name : "<memory.sbgf>");
   if (rc != SBX_OK) {
-    rc = sbx_diag_alloc_one(out_diags, out_count, SBX_DIAG_ERROR,
-                            "sbgf-parse",
-                            sbx_curve_last_error(curve)[0] ?
-                              sbx_curve_last_error(curve) :
-                              "SBaGenX curve validation failed");
+    rc = sbx_diag_alloc_one_from_text(out_diags, out_count, SBX_DIAG_ERROR,
+                                      "sbgf-parse",
+                                      sbx_curve_last_error(curve)[0] ?
+                                        sbx_curve_last_error(curve) :
+                                        "SBaGenX curve validation failed",
+                                      text);
     sbx_curve_destroy(curve);
     return rc;
   }
