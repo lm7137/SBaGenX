@@ -223,6 +223,27 @@ resolve_mingw_objdump() {
         echo "$objdump_path"
         return 0
     fi
+    objdump_path=$(command -v objdump 2>/dev/null || true)
+    if [ -n "$objdump_path" ]; then
+        echo "$objdump_path"
+        return 0
+    fi
+    return 1
+}
+
+resolve_mingw_nm() {
+    local target="$1"
+    local nm_path=""
+    nm_path=$(command -v "${target}-nm" 2>/dev/null || true)
+    if [ -n "$nm_path" ]; then
+        echo "$nm_path"
+        return 0
+    fi
+    nm_path=$(command -v nm 2>/dev/null || true)
+    if [ -n "$nm_path" ]; then
+        echo "$nm_path"
+        return 0
+    fi
     return 1
 }
 
@@ -315,13 +336,23 @@ dll_exports_symbol() {
     local target="$2"
     local symbol="$3"
     local objdump_bin=""
+    local nm_bin=""
 
-    objdump_bin="$(resolve_mingw_objdump "$target" || true)"
-    if [ -z "$objdump_bin" ] || [ ! -f "$dll_path" ]; then
+    if [ ! -f "$dll_path" ]; then
         return 1
     fi
 
-    "$objdump_bin" -p "$dll_path" 2>/dev/null | grep -Fq "$symbol"
+    objdump_bin="$(resolve_mingw_objdump "$target" || true)"
+    if [ -n "$objdump_bin" ] && "$objdump_bin" -p "$dll_path" 2>/dev/null | grep -Fq "$symbol"; then
+        return 0
+    fi
+
+    nm_bin="$(resolve_mingw_nm "$target" || true)"
+    if [ -n "$nm_bin" ] && "$nm_bin" -g "$dll_path" 2>/dev/null | grep -Fq "$symbol"; then
+        return 0
+    fi
+
+    return 1
 }
 
 repair_tauri_cli_binding() {
