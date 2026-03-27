@@ -8,6 +8,7 @@
   import CurveInfoCard from './lib/inspector/CurveInfoCard.svelte'
   import logoUrl from './lib/assets/sbagenx-logo.svg'
   import {
+    exitApplication,
     exportDocument,
     inspectCurveInfo,
     loadDevelopmentExamples,
@@ -44,7 +45,8 @@
     revealPosition: (line: number, column?: number) => void
     focusEditor: () => void
   } | null = null
-  let allowWindowClose = false
+  let unlistenPlaybackEvents: (() => void) | null = null
+
 
   function makeUntitledDocument(kind: DocumentKind): DocumentRecord {
     const base =
@@ -490,16 +492,12 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   }
 
   async function finalizeWindowClose() {
-    allowWindowClose = true
-    await getCurrentWindow().close()
+    await exitApplication()
   }
+
 
   async function maybeCloseWindow() {
     const dirtyDocs = documents.filter((doc) => doc.dirty)
-    if (dirtyDocs.length === 0) {
-      await finalizeWindowClose()
-      return
-    }
 
     const result = await message(
       dirtyDocs.length === 1
@@ -516,11 +514,11 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       },
     )
 
-    if (result === 'Cancel') {
+    if (result === 'Keep editing' || result === 'Cancel') {
       return
     }
 
-    if (result === 'Yes') {
+    if (result === 'Save and quit' || result === 'Yes') {
       for (const doc of dirtyDocs) {
         activeId = doc.id
         await tick()
@@ -532,7 +530,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       }
     }
 
-    await stopPlayback(false)
     await finalizeWindowClose()
   }
 
@@ -588,8 +585,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   onMount(() => {
     const onKeydown = (event: KeyboardEvent) => handleGlobalKeydown(event)
     window.addEventListener('keydown', onKeydown)
-    let unlistenCloseRequested: (() => void) | null = null
-    let unlistenPlaybackEvents: (() => void) | null = null
 
     void (async () => {
       unlistenPlaybackEvents = await listen<PlaybackEvent>('playback-state', (event) => {
@@ -615,11 +610,13 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         }
       })
 
-      unlistenCloseRequested = await getCurrentWindow().onCloseRequested(async (event) => {
-        if (allowWindowClose) {
+      await getCurrentWindow().onCloseRequested(async (event) => {
+        event.preventDefault()
+        const dirtyDocs = documents.filter((doc) => doc.dirty)
+        if (dirtyDocs.length === 0) {
+          await finalizeWindowClose()
           return
         }
-        event.preventDefault()
         await maybeCloseWindow()
       })
 
@@ -654,7 +651,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     return () => {
       window.removeEventListener('keydown', onKeydown)
       unlistenPlaybackEvents?.()
-      unlistenCloseRequested?.()
       if (validationTimer) clearTimeout(validationTimer)
     }
   })

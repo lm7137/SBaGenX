@@ -1023,6 +1023,13 @@ fn stop_live_preview(
 }
 
 #[tauri::command]
+fn exit_application(app: tauri::AppHandle, controller: State<'_, PlaybackController>) -> Result<(), String> {
+  stop_active_session(controller.inner());
+  app.exit(0);
+  Ok(())
+}
+
+#[tauri::command]
 fn export_document(args: ExportDocumentArgs) -> Result<ExportResult, String> {
   if args.kind != "sbg" {
     return Err("export is currently available only for .sbg documents".to_string());
@@ -1140,6 +1147,7 @@ pub fn run() {
       render_preview,
       start_live_preview,
       stop_live_preview,
+      exit_application,
       export_document,
       sample_beat_preview,
       inspect_curve_info

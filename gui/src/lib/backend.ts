@@ -143,4 +143,9 @@ export async function inspectCurveInfo(
   })
 }
 
+
+export async function exitApplication(): Promise<void> {
+  await invoke('exit_application')
+}
+
 export type { PlaybackEvent }
