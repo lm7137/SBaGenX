@@ -76,6 +76,11 @@ function stageWindows() {
     }
     copyFile(src)
   }
+
+  const webview2Loader = path.join(process.cwd(), 'src-tauri', 'target', 'release', 'WebView2Loader.dll')
+  if (fs.existsSync(webview2Loader)) {
+    copyFile(webview2Loader, 'WebView2Loader.dll')
+  }
 }
 
 function stageMacos() {
