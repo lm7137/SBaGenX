@@ -3199,7 +3199,7 @@ dependencies = [
 
 [[package]]
 name = "sbagenx-gui"
-version = "3.9.0-alpha.1"
+version = "3.9.0-alpha.2"
 dependencies = [
  "cpal",
  "libc",

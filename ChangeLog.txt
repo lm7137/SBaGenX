@@ -1,3 +1,6 @@
+3.9.0-alpha.2: Fixed sbagenxlib spin scaling so plain spin uses the expected non-square modulation pattern.
+3.9.0-alpha.2: Added regression coverage to distinguish default spin from square-wave spin rendering.
+
 3.9.0-alpha.1: First alpha release with the integrated SBaGenX Desktop GUI.
 3.9.0-alpha.1: Added desktop editing for .sbg and .sbgf with Monaco syntax highlighting and inline diagnostics.
 3.9.0-alpha.1: Added structured sbagenxlib validation diagnostics with parser spans for GUI/editor integrations.

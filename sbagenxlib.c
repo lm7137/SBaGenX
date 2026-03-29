@@ -3602,8 +3602,10 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     engine_wave_sample(eng->tone.waveform, eng->phase_l, &spin_mod);
     eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.beat_hz / sr, SBX_TAU);
 
-    // Width is interpreted in microseconds (legacy spin semantics).
-    spin = eng->tone.carrier_hz * 1.0e-6 * sr * spin_mod;
+    // Width is interpreted in microseconds. Match the legacy engine's
+    // spin scaling, which normalizes the width against the 8-bit spin table
+    // amplitude before applying the historical 1.5 intensity boost.
+    spin = eng->tone.carrier_hz * 1.0e-6 * sr * spin_mod / 128.0;
     spin = sbx_dsp_clamp(spin * 1.5, -1.0, 1.0);
     spin_pos = fabs(spin);
 

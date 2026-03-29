@@ -35,6 +35,20 @@ static int has_stereo_difference(const float *buf, size_t frames) {
   return d > 1e-6;
 }
 
+static double stereo_delta_ratio(const float *buf, size_t frames) {
+  size_t i;
+  double diff = 0.0;
+  double total = 0.0;
+  for (i = 0; i < frames; i++) {
+    double l = fabs((double)buf[i * 2]);
+    double r = fabs((double)buf[i * 2 + 1]);
+    diff += fabs((double)buf[i * 2] - (double)buf[i * 2 + 1]);
+    total += l + r;
+  }
+  if (total <= 1e-12) return 0.0;
+  return diff / total;
+}
+
 static double rms_left_window(const float *buf, size_t i0, size_t i1) {
   size_t i;
   double e = 0.0;
@@ -684,6 +698,33 @@ int main(void) {
     fail("spin render output appears silent");
   if (!has_stereo_difference(buf, frames))
     fail("spin render should produce L/R differences");
+
+  {
+    const size_t spin_frames = (size_t)(cfg.sample_rate * 4.0);
+    float *spin_sine = (float *)calloc(spin_frames * 2, sizeof(float));
+    float *spin_square = (float *)calloc(spin_frames * 2, sizeof(float));
+    double ratio_sine, ratio_square;
+    if (!spin_sine || !spin_square)
+      fail("alloc failed (spin compare)");
+    sbx_context_reset(ctx);
+    if (sbx_context_load_tone_spec(ctx, "spin:300+0.5/20") != SBX_OK)
+      fail("load sine spin tone spec failed");
+    if (sbx_context_render_f32(ctx, spin_sine, spin_frames) != SBX_OK)
+      fail("render sine spin failed");
+    sbx_context_reset(ctx);
+    if (sbx_context_load_tone_spec(ctx, "square:spin:300+0.5/20") != SBX_OK)
+      fail("load square spin tone spec failed");
+    if (sbx_context_render_f32(ctx, spin_square, spin_frames) != SBX_OK)
+      fail("render square spin failed");
+    ratio_sine = stereo_delta_ratio(spin_sine, spin_frames);
+    ratio_square = stereo_delta_ratio(spin_square, spin_frames);
+    if (!(ratio_sine > 0.01 && ratio_sine < 0.40))
+      fail("default sine spin should not saturate into square-like stereo switching");
+    if (!(ratio_square > ratio_sine * 1.7))
+      fail("square spin should produce a stronger stereo delta than default spin");
+    free(spin_sine);
+    free(spin_square);
+  }
 
   if (sbx_context_load_tone_spec(ctx, "bell320/40") != SBX_OK)
     fail("load bell tone spec failed");
