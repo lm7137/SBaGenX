@@ -201,6 +201,7 @@ struct ValidateDocumentArgs {
   kind: String,
   text: String,
   source_name: Option<String>,
+  mix_path_override: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -209,6 +210,7 @@ struct RenderDocumentArgs {
   kind: String,
   text: String,
   source_name: Option<String>,
+  mix_path_override: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -218,6 +220,7 @@ struct ExportDocumentArgs {
   text: String,
   source_name: Option<String>,
   output_path: String,
+  mix_path_override: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Default)]
@@ -470,6 +473,7 @@ fn spawn_playback_thread(
   app: tauri::AppHandle,
   text: String,
   source_name: String,
+  mix_path_override: Option<String>,
   stop_flag: Arc<AtomicBool>,
   startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
 ) -> JoinHandle<()> {
@@ -495,7 +499,12 @@ fn spawn_playback_thread(
     let sample_rate_hz = default_config.sample_rate().0;
     let output_channels = default_config.channels() as usize;
 
-    let live = match sbagenxlib::create_live_preview(&text, &source_name, sample_rate_hz) {
+    let live = match sbagenxlib::create_live_preview(
+      &text,
+      &source_name,
+      mix_path_override.as_deref(),
+      sample_rate_hz,
+    ) {
       Ok(live) => live,
       Err(err) => {
         let _ = startup_tx.send(Err(err));
@@ -934,7 +943,9 @@ fn write_text_file(app: tauri::AppHandle, path: String, content: String) -> Resu
 fn validate_document(args: ValidateDocumentArgs) -> Result<ValidationResult, String> {
   let source_name = normalize_source_name(args.source_name, &args.kind);
   let outcome = match args.kind.as_str() {
-    "sbg" => sbagenxlib::validate_sbg(&args.text, &source_name)?,
+    "sbg" => {
+      sbagenxlib::validate_sbg(&args.text, &source_name, args.mix_path_override.as_deref())?
+    }
     "sbgf" => sbagenxlib::validate_sbgf(&args.text, &source_name)?,
     _ => return Err(format!("unsupported document kind: {}", args.kind)),
   };
@@ -967,7 +978,8 @@ fn render_preview(args: RenderDocumentArgs) -> Result<PreviewResult, String> {
     return Err("preview is currently available only for .sbg documents".to_string());
   }
   let source_name = normalize_source_name(args.source_name, &args.kind);
-  let outcome = sbagenxlib::render_preview(&args.text, &source_name)?;
+  let outcome =
+    sbagenxlib::render_preview(&args.text, &source_name, args.mix_path_override.as_deref())?;
   Ok(PreviewResult {
     audio_path: outcome.audio_path,
     duration_sec: outcome.duration_sec,
@@ -996,6 +1008,7 @@ fn start_live_preview(
     app.clone(),
     args.text,
     source_name,
+    args.mix_path_override,
     stop_flag.clone(),
     startup_tx,
   );
@@ -1062,7 +1075,12 @@ fn export_document(args: ExportDocumentArgs) -> Result<ExportResult, String> {
   }
   let source_name = normalize_source_name(args.source_name, &args.kind);
   let out_path = PathBuf::from(&args.output_path);
-  let outcome = sbagenxlib::export_sbg(&args.text, &source_name, &out_path)?;
+  let outcome = sbagenxlib::export_sbg(
+    &args.text,
+    &source_name,
+    &out_path,
+    args.mix_path_override.as_deref(),
+  )?;
   Ok(ExportResult {
     output_path: outcome.output_path,
     duration_sec: outcome.duration_sec,

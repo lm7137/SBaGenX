@@ -243,6 +243,19 @@ h1 {
   gap: 0;
 }
 
+.mix-badge {
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(58, 124, 255, 0.12);
+  border: 1px solid rgba(58, 124, 255, 0.2);
+  color: #1f4ea9;
+  font-weight: 700;
+}
+
 .monaco-host {
   width: 100%;
   height: 100%;

@@ -88,6 +88,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       name: kind === 'sbg' ? 'untitled.sbg' : 'untitled.sbgf',
       path: null,
       kind,
+      mixPathOverride: null,
       dirty: false,
       content: base,
       lines: base.split('\n'),
@@ -117,6 +118,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       name: source.name,
       path: source.path,
       kind: source.kind,
+      mixPathOverride: null,
       dirty: false,
       content: source.content,
       lines: source.content.split('\n'),
@@ -180,6 +182,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             name: loaded.name,
             path: loaded.path,
             kind: loaded.kind,
+            mixPathOverride: existing.mixPathOverride ?? null,
             dirty: false,
             content: loaded.content,
             lines: loaded.content.split('\n'),
@@ -274,6 +277,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             name: loaded.name,
             path: loaded.path,
             kind: loaded.kind,
+            mixPathOverride: existing.mixPathOverride ?? null,
             dirty: false,
             content: loaded.content,
             lines: loaded.content.split('\n'),
@@ -377,7 +381,12 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     if (!doc) return
     const contentSnapshot = doc.content
     try {
-      const result = await validateDocument(doc.kind, doc.content, doc.path ?? doc.name)
+      const result = await validateDocument(
+        doc.kind,
+        doc.content,
+        doc.path ?? doc.name,
+        doc.kind === 'sbg' ? doc.mixPathOverride : null,
+      )
       if (!currentDocumentMatches(doc.id, contentSnapshot)) return
       updateDocument(doc.id, {
         diagnostics: result.diagnostics,
@@ -465,6 +474,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       const result = await startLivePreview(
         activeDocument.content,
         activeDocument.path ?? activeDocument.name,
+        activeDocument.mixPathOverride,
       )
       isPlaying = true
       transportMessage = result.limited
@@ -505,7 +515,12 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     transportBusy = true
     transportMessage = 'exporting audio...'
     try {
-      const result = await exportDocument(activeDocument.content, target, activeDocument.path ?? activeDocument.name)
+      const result = await exportDocument(
+        activeDocument.content,
+        target,
+        activeDocument.path ?? activeDocument.name,
+        activeDocument.mixPathOverride,
+      )
       transportMessage = `exported ${result.format.toUpperCase()} · ${formatDuration(result.durationSec)}`
     } catch (error) {
       transportMessage = error instanceof Error ? error.message : String(error)
@@ -516,6 +531,36 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
   async function finalizeWindowClose() {
     await exitApplication()
+  }
+
+  async function loadMixForActiveDocument() {
+    if (!activeDocument || activeDocument.kind !== 'sbg') return
+
+    const selection = await open({
+      multiple: false,
+      filters: [{ name: 'Audio files', extensions: ['wav', 'flac', 'ogg', 'mp3'] }],
+    })
+    if (!selection || Array.isArray(selection)) return
+
+    updateDocument(activeDocument.id, {
+      mixPathOverride: selection,
+      beatPreview: null,
+      beatPreviewError: null,
+    })
+    transportMessage = `loaded mix ${selection.split(/[\\/]/).pop() ?? selection}`
+    queueValidation(activeDocument.id)
+  }
+
+  function clearMixForActiveDocument() {
+    if (!activeDocument || activeDocument.kind !== 'sbg' || !activeDocument.mixPathOverride) return
+
+    updateDocument(activeDocument.id, {
+      mixPathOverride: null,
+      beatPreview: null,
+      beatPreviewError: null,
+    })
+    transportMessage = 'cleared loaded mix'
+    queueValidation(activeDocument.id)
   }
 
 
@@ -721,6 +766,16 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       <button class="button ghost" on:click={saveActiveDocumentAs}>Save As</button>
       <button class="button ghost" on:click={() => createDocument('sbg')}>New `.sbg`</button>
       <button class="button ghost" on:click={() => createDocument('sbgf')}>New `.sbgf`</button>
+      {#if activeDocument?.kind === 'sbg'}
+        <button class="button ghost" on:click={loadMixForActiveDocument}>Load Mix</button>
+        <button
+          class="button ghost"
+          disabled={!activeDocument.mixPathOverride}
+          on:click={clearMixForActiveDocument}
+        >
+          Clear Mix
+        </button>
+      {/if}
       <span class="toolbar-divider"></span>
       <button class="button accent" disabled={!canRunActive} on:click={playActiveDocument}>Play</button>
       <button class="button ghost" disabled={!isPlaying} on:click={() => stopPlayback()}>Stop</button>
@@ -792,6 +847,11 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           <div class="editor-meta">
             <span>{activeDocument?.kind ?? 'unknown'}</span>
             <span>{activeDocument?.path ?? 'unsaved'}</span>
+            {#if activeDocument?.kind === 'sbg' && activeDocument.mixPathOverride}
+              <span class="mix-badge">
+                mix: {activeDocument.mixPathOverride.split(/[\\/]/).pop() ?? activeDocument.mixPathOverride}
+              </span>
+            {/if}
             <span class:busy={transportBusy || validatingId === activeDocument?.id} class="editor-status">
               {#if validatingId === activeDocument?.id}
                 validating...

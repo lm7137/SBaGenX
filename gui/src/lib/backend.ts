@@ -62,12 +62,14 @@ export async function validateDocument(
   kind: 'sbg' | 'sbgf',
   text: string,
   sourceName?: string | null,
+  mixPathOverride?: string | null,
 ): Promise<ValidationResult> {
   return invoke<ValidationResult>('validate_document', {
     args: {
       kind,
       text,
       sourceName,
+      mixPathOverride,
     },
   })
 }
@@ -75,12 +77,14 @@ export async function validateDocument(
 export async function renderPreview(
   text: string,
   sourceName?: string | null,
+  mixPathOverride?: string | null,
 ): Promise<PreviewResult> {
   return invoke<PreviewResult>('render_preview', {
     args: {
       kind: 'sbg',
       text,
       sourceName,
+      mixPathOverride,
     },
   })
 }
@@ -88,12 +92,14 @@ export async function renderPreview(
 export async function startLivePreview(
   text: string,
   sourceName?: string | null,
+  mixPathOverride?: string | null,
 ): Promise<LivePreviewResult> {
   return invoke<LivePreviewResult>('start_live_preview', {
     args: {
       kind: 'sbg',
       text,
       sourceName,
+      mixPathOverride,
     },
   })
 }
@@ -106,6 +112,7 @@ export async function exportDocument(
   text: string,
   outputPath: string,
   sourceName?: string | null,
+  mixPathOverride?: string | null,
 ): Promise<ExportResult> {
   return invoke<ExportResult>('export_document', {
     args: {
@@ -113,6 +120,7 @@ export async function exportDocument(
       text,
       outputPath,
       sourceName,
+      mixPathOverride,
     },
   })
 }

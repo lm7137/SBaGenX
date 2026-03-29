@@ -5,6 +5,7 @@ export interface DocumentRecord {
   name: string
   path: string | null
   kind: DocumentKind
+  mixPathOverride: string | null
   dirty: boolean
   content: string
   lines: string[]
