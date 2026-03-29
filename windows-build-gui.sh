@@ -35,6 +35,7 @@ PREPARE_RUNTIME_JS="$GUI_DIR/scripts/prepare-runtime.mjs"
 SVELTE_CHECK_JS="$GUI_DIR/node_modules/svelte-check/bin/svelte-check"
 TSC_JS="$GUI_DIR/node_modules/typescript/bin/tsc"
 VERSION_FILE="$REPO_ROOT/VERSION"
+RELEASE_VERSION=""
 
 LIBMAD_WIN32="$REPO_ROOT/libs/windows-win32-libmad.a"
 LIBMAD_WIN64="$REPO_ROOT/libs/windows-win64-libmad.a"
@@ -198,6 +199,21 @@ run_gui_typecheck() {
 }
 
 write_temp_windows_tauri_config() {
+    if [ -n "$RELEASE_VERSION" ] && [[ "$RELEASE_VERSION" == *-* ]]; then
+        warning "Windows MSI bundling is skipped for prerelease GUI versions (${RELEASE_VERSION}); building NSIS installer only."
+        cat > "$TEMP_TAURI_WINDOWS_CONFIG" <<'EOF'
+{
+  "build": {
+    "beforeBuildCommand": ""
+  },
+  "bundle": {
+    "targets": ["nsis"]
+  }
+}
+EOF
+        return 0
+    fi
+
     cat > "$TEMP_TAURI_WINDOWS_CONFIG" <<'EOF'
 {
   "build": {
@@ -606,6 +622,10 @@ ensure_current_arch_windows_compiler() {
 MSYS_REPO="$(resolve_msys_repo)"
 load_node_env
 load_rust_env
+
+if [ -f "$VERSION_FILE" ]; then
+    RELEASE_VERSION="$(tr -d '\r\n' < "$VERSION_FILE")"
+fi
 
 if ! ensure_required_windows_gui_tools 0; then
     exit 1
