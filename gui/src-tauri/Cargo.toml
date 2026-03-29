@@ -1,6 +1,6 @@
 [package]
 name = "sbagenx-gui"
-version = "0.1.0"
+version = "3.9.0-alpha.1"
 description = "SBaGenX desktop GUI scaffold"
 authors = ["SBaGenX"]
 license = ""

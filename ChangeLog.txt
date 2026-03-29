@@ -1,3 +1,10 @@
+3.9.0-alpha.1: First alpha release with the integrated SBaGenX Desktop GUI.
+3.9.0-alpha.1: Added desktop editing for .sbg and .sbgf with Monaco syntax highlighting and inline diagnostics.
+3.9.0-alpha.1: Added structured sbagenxlib validation diagnostics with parser spans for GUI/editor integrations.
+3.9.0-alpha.1: Added live .sbg playback, export, preamble -m mix support, and GUI mix loading controls.
+3.9.0-alpha.1: Added Windows GUI installer packaging and Linux/Ubuntu GUI bundle support.
+3.9.0-alpha.1: Added installed example loading, curve solve inspection, dirty-close prompts, and GUI runtime icon support.
+
 1.5.5: Added auto-normalization of amplitude to prevent distortion.
 1.5.5: Added -N option to disable automatic amplitude normalization.
 1.5.5: Added global volume control by -V option.
@@ -38,4 +45,3 @@
 1.5.0: Fixed bug with WAV file duration when using -W option with sequence files
 1.5.0: Improved error handling for Carbon.h inclusion on modern macOS
 1.5.0: Added validation for total amplitude to prevent audio distortion when exceeding 100%
-
