@@ -48,6 +48,9 @@ body,
 body {
   color: var(--text);
   background-color: var(--bg);
+  background-image: url('./lib/assets/bg-tile.gif');
+  background-repeat: repeat;
+  background-attachment: fixed;
 }
 
 .bg-overlay,
