@@ -477,9 +477,13 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         activeDocument.mixPathOverride,
       )
       isPlaying = true
-      transportMessage = result.limited
-        ? `live preview · ${formatDuration(result.durationSec)} cap`
-        : `live preview · ${formatDuration(result.durationSec)}`
+      if (result.durationSec > 0) {
+        transportMessage = result.limited
+          ? `live preview · ${formatDuration(result.durationSec)} cap`
+          : `live preview · ${formatDuration(result.durationSec)}`
+      } else {
+        transportMessage = 'live preview running'
+      }
     } catch (error) {
       transportMessage = error instanceof Error ? error.message : String(error)
     } finally {

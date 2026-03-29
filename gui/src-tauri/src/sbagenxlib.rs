@@ -517,7 +517,7 @@ impl Drop for LoadedSbgContext {
 pub(crate) struct LivePlaybackContext {
   loaded: LoadedSbgContext,
   volume_mul: f32,
-  remaining_frames: usize,
+  remaining_frames: Option<usize>,
   finished: bool,
   duration_sec: f64,
   limited: bool,
@@ -563,7 +563,10 @@ impl LivePlaybackContext {
       return Ok(0);
     }
 
-    let frames = requested_frames.min(self.remaining_frames);
+    let frames = self
+      .remaining_frames
+      .map(|remaining_frames| requested_frames.min(remaining_frames))
+      .unwrap_or(requested_frames);
     if frames == 0 {
       self.finished = true;
       out.fill(0.0);
@@ -588,9 +591,12 @@ impl LivePlaybackContext {
       out[sample_count..].fill(0.0);
     }
 
-    self.remaining_frames = self.remaining_frames.saturating_sub(rendered_frames);
-    if self.remaining_frames == 0 {
-      self.finished = true;
+    if let Some(remaining_frames) = self.remaining_frames {
+      let remaining_frames = remaining_frames.saturating_sub(rendered_frames);
+      self.remaining_frames = Some(remaining_frames);
+      if remaining_frames == 0 {
+        self.finished = true;
+      }
     }
 
     Ok(rendered_frames)
@@ -1576,17 +1582,6 @@ pub fn create_live_preview(
     load_sbg_context_for_audio(text, source_name, mix_path_override, Some(sample_rate_hz as f64))?;
   let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
   let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
-  let mut render_sec = duration_sec;
-  let mut limited = false;
-
-  if is_looping || render_sec <= 0.0 || render_sec > PREVIEW_LIMIT_SEC {
-    render_sec = PREVIEW_LIMIT_SEC;
-    limited = true;
-  }
-
-  if !render_sec.is_finite() || render_sec <= 0.0 {
-    return Err("live preview requires a finite preview span".to_string());
-  }
 
   let volume_mul = if loaded.preamble.have_V != 0 {
     loaded.preamble.volume_pct as f32 / 100.0
@@ -1594,15 +1589,25 @@ pub fn create_live_preview(
     1.0
   };
 
-  let remaining_frames = (render_sec * loaded.engine_cfg.sample_rate).ceil().max(1.0) as usize;
+  let remaining_frames = if is_looping || !duration_sec.is_finite() || duration_sec <= 0.0 {
+    None
+  } else {
+    Some((duration_sec * loaded.engine_cfg.sample_rate).ceil().max(1.0) as usize)
+  };
+
+  let reported_duration_sec = if duration_sec.is_finite() && duration_sec > 0.0 {
+    duration_sec
+  } else {
+    0.0
+  };
 
   Ok(LivePlaybackContext {
     loaded,
     volume_mul,
     remaining_frames,
     finished: false,
-    duration_sec: render_sec,
-    limited,
+    duration_sec: reported_duration_sec,
+    limited: false,
     mix_buf: Vec::new(),
   })
 }
