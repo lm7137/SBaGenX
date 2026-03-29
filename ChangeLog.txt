@@ -2,7 +2,7 @@
 3.9.0-alpha.1: Added desktop editing for .sbg and .sbgf with Monaco syntax highlighting and inline diagnostics.
 3.9.0-alpha.1: Added structured sbagenxlib validation diagnostics with parser spans for GUI/editor integrations.
 3.9.0-alpha.1: Added live .sbg playback, export, preamble -m mix support, and GUI mix loading controls.
-3.9.0-alpha.1: Added Windows GUI installer packaging and Linux/Ubuntu GUI bundle support.
+3.9.0-alpha.1: Added Windows GUI installer packaging (NSIS setup .exe for prerelease builds) and Linux/Ubuntu GUI bundle support.
 3.9.0-alpha.1: Added installed example loading, curve solve inspection, dirty-close prompts, and GUI runtime icon support.
 
 1.5.5: Added auto-normalization of amplitude to prevent distortion.
