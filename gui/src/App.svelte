@@ -47,6 +47,29 @@
   } | null = null
   let unlistenPlaybackEvents: (() => void) | null = null
 
+  const bootstrappedExampleSuffixes = new Set([
+    '/examples/plus/creativity-boost.sbg',
+    '/examples/basics/curve-expfit-solve-demo.sbgf',
+    '/examples/basics/prog-custom-envelope-binaural-demo.sbg',
+    '/examples/sbagenxlib/minimal-sbg-wave-custom.sbg',
+  ])
+
+  function normalizeExamplePath(path: string | null): string {
+    return (path ?? '').replace(/\\/g, '/').toLowerCase()
+  }
+
+  function isBootstrappedExampleSession(
+    docs: Array<{ path: string | null; kind: string }>
+  ): boolean {
+    return (
+      docs.length > 0 &&
+      docs.every((doc) => {
+        const normalized = normalizeExamplePath(doc.path)
+        return Array.from(bootstrappedExampleSuffixes).some((suffix) => normalized.endsWith(suffix))
+      })
+    )
+  }
+
 
   function makeUntitledDocument(kind: DocumentKind): DocumentRecord {
     const base =
@@ -625,11 +648,26 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         try {
           const session = await loadSessionDocuments()
           if (session.documents.length > 0) {
-            documents = session.documents.map((doc) => makeDocumentRecord(doc))
-            activeId =
-              documents.find((doc) => doc.path === session.activePath)?.id ??
-              documents[0].id
-            transportMessage = 'restored previous session'
+            if (import.meta.env.DEV && isBootstrappedExampleSession(session.documents)) {
+              const examples = await loadDevelopmentExamples()
+              if (examples.length > 0) {
+                documents = examples.map((example) => makeDocumentRecord(example))
+                activeId = documents[0].id
+                transportMessage = 'loaded example files'
+              } else {
+                documents = session.documents.map((doc) => makeDocumentRecord(doc))
+                activeId =
+                  documents.find((doc) => doc.path === session.activePath)?.id ??
+                  documents[0].id
+                transportMessage = 'restored previous session'
+              }
+            } else {
+              documents = session.documents.map((doc) => makeDocumentRecord(doc))
+              activeId =
+                documents.find((doc) => doc.path === session.activePath)?.id ??
+                documents[0].id
+              transportMessage = 'restored previous session'
+            }
           } else {
             const examples = await loadDevelopmentExamples()
             if (examples.length > 0) {

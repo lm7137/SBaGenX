@@ -233,6 +233,22 @@ struct SbxCurveInfoRaw {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+struct SbxCurveEvalConfig {
+  carrier_start_hz: f64,
+  carrier_end_hz: f64,
+  carrier_span_sec: f64,
+  beat_start_hz: f64,
+  beat_target_hz: f64,
+  beat_span_sec: f64,
+  hold_min: f64,
+  total_min: f64,
+  wake_min: f64,
+  beat_amp0_pct: f64,
+  mix_amp0_pct: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 struct SbxToneSpec {
   mode: c_int,
   carrier_hz: f64,
@@ -253,10 +269,12 @@ type SbxDefaultAudioWriterConfig = unsafe extern "C" fn(*mut SbxAudioWriterConfi
 type SbxDefaultSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
 type SbxFreeSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
 type SbxDefaultMixInputConfig = unsafe extern "C" fn(*mut SbxMixInputConfig);
+type SbxDefaultCurveEvalConfig = unsafe extern "C" fn(*mut SbxCurveEvalConfig);
 type SbxCurveCreate = unsafe extern "C" fn() -> *mut SbxCurveProgram;
 type SbxCurveDestroy = unsafe extern "C" fn(*mut SbxCurveProgram);
 type SbxCurveLoadText =
   unsafe extern "C" fn(*mut SbxCurveProgram, *const c_char, *const c_char) -> c_int;
+type SbxCurvePrepare = unsafe extern "C" fn(*mut SbxCurveProgram, *const SbxCurveEvalConfig) -> c_int;
 type SbxCurveGetInfo = unsafe extern "C" fn(*const SbxCurveProgram, *mut SbxCurveInfoRaw) -> c_int;
 type SbxCurveParamCount = unsafe extern "C" fn(*const SbxCurveProgram) -> usize;
 type SbxCurveGetParam =
@@ -416,10 +434,12 @@ struct Api {
   sbx_default_audio_writer_config: SbxDefaultAudioWriterConfig,
   sbx_default_safe_seqfile_preamble: SbxDefaultSafeSeqfilePreamble,
   sbx_default_mix_input_config: SbxDefaultMixInputConfig,
+  sbx_default_curve_eval_config: SbxDefaultCurveEvalConfig,
   sbx_free_safe_seqfile_preamble: SbxFreeSafeSeqfilePreamble,
   sbx_curve_create: SbxCurveCreate,
   sbx_curve_destroy: SbxCurveDestroy,
   sbx_curve_load_text: SbxCurveLoadText,
+  sbx_curve_prepare: SbxCurvePrepare,
   sbx_curve_get_info: SbxCurveGetInfo,
   sbx_curve_param_count: SbxCurveParamCount,
   sbx_curve_get_param: SbxCurveGetParam,
@@ -691,11 +711,14 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_default_safe_seqfile_preamble\0")?,
         sbx_default_mix_input_config:
           Self::load_symbol(&lib, b"sbx_default_mix_input_config\0")?,
+        sbx_default_curve_eval_config:
+          Self::load_symbol(&lib, b"sbx_default_curve_eval_config\0")?,
         sbx_free_safe_seqfile_preamble:
           Self::load_symbol(&lib, b"sbx_free_safe_seqfile_preamble\0")?,
         sbx_curve_create: Self::load_symbol(&lib, b"sbx_curve_create\0")?,
         sbx_curve_destroy: Self::load_symbol(&lib, b"sbx_curve_destroy\0")?,
         sbx_curve_load_text: Self::load_symbol(&lib, b"sbx_curve_load_text\0")?,
+        sbx_curve_prepare: Self::load_symbol(&lib, b"sbx_curve_prepare\0")?,
         sbx_curve_get_info: Self::load_symbol(&lib, b"sbx_curve_get_info\0")?,
         sbx_curve_param_count: Self::load_symbol(&lib, b"sbx_curve_param_count\0")?,
         sbx_curve_get_param: Self::load_symbol(&lib, b"sbx_curve_get_param\0")?,
@@ -1707,6 +1730,31 @@ pub fn inspect_curve_info(text: &str, source_name: &str) -> Result<CurveInfoOutc
     });
   }
 
+  let mut eval_cfg = SbxCurveEvalConfig {
+    carrier_start_hz: 0.0,
+    carrier_end_hz: 0.0,
+    carrier_span_sec: 0.0,
+    beat_start_hz: 0.0,
+    beat_target_hz: 0.0,
+    beat_span_sec: 0.0,
+    hold_min: 0.0,
+    total_min: 0.0,
+    wake_min: 0.0,
+    beat_amp0_pct: 0.0,
+    mix_amp0_pct: 0.0,
+  };
+  unsafe { (api.sbx_default_curve_eval_config)(&mut eval_cfg) };
+  let prepare_rc = unsafe { (api.sbx_curve_prepare)(curve, &eval_cfg) };
+  if prepare_rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+    unsafe { (api.sbx_curve_destroy)(curve) };
+    return Err(if msg.is_empty() {
+      "failed to prepare curve metadata in sbagenxlib".to_string()
+    } else {
+      msg
+    });
+  }
+
   let mut info = SbxCurveInfoRaw {
     parameter_count: 0,
     has_solve: 0,
@@ -1864,5 +1912,31 @@ mod tests {
     assert!(meta.len() > 44, "expected exported wav payload");
 
     let _ = fs::remove_dir_all(dir);
+  }
+
+  #[test]
+  fn inspect_curve_info_solves_equations() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("../..")
+      .join("examples/basics/curve-expfit-solve-demo.sbgf");
+    let text = fs::read_to_string(&path).expect("read solve example");
+    let outcome = inspect_curve_info(&text, &path.to_string_lossy()).expect("inspect solve curve");
+
+    let a = outcome
+      .parameters
+      .iter()
+      .find(|param| param.name == "A")
+      .map(|param| param.value)
+      .expect("solved A");
+    let c = outcome
+      .parameters
+      .iter()
+      .find(|param| param.name == "C")
+      .map(|param| param.value)
+      .expect("solved C");
+
+    assert!(outcome.has_solve);
+    assert!((a - 7.58425).abs() < 1e-4, "expected solved A, got {}", a);
+    assert!((c - 2.41575).abs() < 1e-4, "expected solved C, got {}", c);
   }
 }

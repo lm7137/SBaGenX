@@ -888,6 +888,19 @@ fn collect_example_documents(paths: &[PathBuf]) -> Result<Vec<FileDocument>, Str
 
 #[tauri::command]
 fn load_development_examples(app: tauri::AppHandle) -> Result<Vec<FileDocument>, String> {
+  if cfg!(debug_assertions) {
+    if let Ok(repo_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize() {
+      let dev_paths = [
+        repo_root.join("examples/plus/creativity-boost.sbg"),
+        repo_root.join("examples/basics/curve-expfit-solve-demo.sbgf"),
+      ];
+      let docs = collect_example_documents(&dev_paths)?;
+      if !docs.is_empty() {
+        return Ok(docs);
+      }
+    }
+  }
+
   if let Ok(document_dir) = app.path().document_dir() {
     let installed_examples = document_dir.join("SBaGenX").join("Examples");
     let installed_paths = [
@@ -904,11 +917,11 @@ fn load_development_examples(app: tauri::AppHandle) -> Result<Vec<FileDocument>,
     Ok(path) => path,
     Err(_) => return Ok(Vec::new()),
   };
-  let dev_paths = [
+  let fallback_paths = [
     repo_root.join("examples/plus/creativity-boost.sbg"),
     repo_root.join("examples/basics/curve-expfit-solve-demo.sbgf"),
   ];
-  collect_example_documents(&dev_paths)
+  collect_example_documents(&fallback_paths)
 }
 
 #[tauri::command]
