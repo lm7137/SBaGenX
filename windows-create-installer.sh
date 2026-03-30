@@ -283,6 +283,17 @@ if [ "${#MISSING_WINDOWS_EXES[@]}" -ne 0 ]; then
     exit 1
 fi
 
+if [ ! -f dist/gui/sbagenx-gui-win32.exe ] && [ ! -f dist/gui/sbagenx-gui-win64.exe ]; then
+    error "Unified installer requires a staged GUI executable under dist/gui/."
+    info "Run ./windows-build-gui.sh first or use ./windows-build-all.sh."
+    exit 1
+fi
+if [ ! -f dist/gui/WebView2Loader.dll ]; then
+    error "Unified installer requires dist/gui/WebView2Loader.dll."
+    info "Run ./windows-build-gui.sh first or use ./windows-build-all.sh."
+    exit 1
+fi
+
 # Python+Cairo runtimes are required in current Windows packaging.
 if [ ! -f dist/python-win32/python.exe ] || [ ! -f dist/python-win64/python.exe ]; then
     error "Required bundled Python+Cairo runtimes not found in dist/."

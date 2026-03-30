@@ -346,6 +346,33 @@ fn candidate_runtime_library_names() -> &'static [&'static str] {
   }
 }
 
+#[cfg(target_os = "linux")]
+fn installed_linux_runtime_candidates() -> Vec<PathBuf> {
+  let mut candidates = Vec::new();
+
+  if cfg!(target_arch = "x86_64") {
+    candidates.push(PathBuf::from("/usr/lib/x86_64-linux-gnu/libsbagenx.so"));
+    candidates.push(PathBuf::from("/usr/lib/x86_64-linux-gnu/libsbagenx.so.3"));
+  } else if cfg!(target_arch = "aarch64") {
+    candidates.push(PathBuf::from("/usr/lib/aarch64-linux-gnu/libsbagenx.so"));
+    candidates.push(PathBuf::from("/usr/lib/aarch64-linux-gnu/libsbagenx.so.3"));
+  } else if cfg!(target_arch = "x86") {
+    candidates.push(PathBuf::from("/usr/lib/i386-linux-gnu/libsbagenx.so"));
+    candidates.push(PathBuf::from("/usr/lib/i386-linux-gnu/libsbagenx.so.3"));
+  }
+
+  candidates.extend([
+    PathBuf::from("/usr/lib/libsbagenx.so"),
+    PathBuf::from("/usr/lib/libsbagenx.so.3"),
+    PathBuf::from("/usr/lib/sbagenx/libsbagenx.so"),
+    PathBuf::from("/usr/lib/sbagenx/libsbagenx.so.3"),
+    PathBuf::from("/usr/local/lib/libsbagenx.so"),
+    PathBuf::from("/usr/local/lib/libsbagenx.so.3"),
+  ]);
+
+  candidates
+}
+
 fn prime_sbagenxlib_runtime_path(app: &tauri::AppHandle) {
   if std::env::var("SBAGENX_GUI_SBAGENXLIB")
     .ok()
@@ -371,6 +398,11 @@ fn prime_sbagenxlib_runtime_path(app: &tauri::AppHandle) {
         candidates.push(exe_dir.join("../lib").join(name));
       }
     }
+  }
+
+  #[cfg(target_os = "linux")]
+  {
+    candidates.extend(installed_linux_runtime_candidates());
   }
 
   for candidate in candidates {

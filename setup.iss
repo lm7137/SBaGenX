@@ -72,6 +72,9 @@ Source: "dist\sbagenx-win32.exe"; DestDir: "{app}"; DestName: "sbagenx-win32.exe
 Source: "dist\sbagenx-win64.exe"; DestDir: "{app}"; DestName: "sbagenx-win64.exe"; Flags: ignoreversion
 Source: "dist\sbagenxlib-win32.dll"; DestDir: "{app}"; DestName: "sbagenxlib-win32.dll"; Flags: ignoreversion
 Source: "dist\sbagenxlib-win64.dll"; DestDir: "{app}"; DestName: "sbagenxlib-win64.dll"; Flags: ignoreversion
+Source: "dist\gui\sbagenx-gui-win32.exe"; DestDir: "{app}"; DestName: "sbagenx-gui.exe"; Flags: ignoreversion skipifsourcedoesntexist; Check: not IsWin64
+Source: "dist\gui\sbagenx-gui-win64.exe"; DestDir: "{app}"; DestName: "sbagenx-gui.exe"; Flags: ignoreversion skipifsourcedoesntexist; Check: IsWin64
+Source: "dist\gui\WebView2Loader.dll"; DestDir: "{app}"; DestName: "WebView2Loader.dll"; Flags: ignoreversion skipifsourcedoesntexist
 ; Bundled ambient mix tracks (kept beside sbagenx.exe for direct -m usage)
 Source: "assets\river1.ogg"; DestDir: "{app}"; DestName: "river1.ogg"; Flags: ignoreversion
 Source: "assets\river2.ogg"; DestDir: "{app}"; DestName: "river2.ogg"; Flags: ignoreversion
@@ -132,6 +135,7 @@ Name: "{#MyAppUserDocsDir}\Plots"; Flags: uninsalwaysuninstall
 
 [Icons]
 ; Program shortcuts
+Name: "{group}\SBaGenX GUI"; Filename: "{app}\sbagenx-gui.exe"; Check: HasGuiExecutable
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 
 ; Desktop shortcut to Documents folder
@@ -256,6 +260,11 @@ end;
 function IsUpgrade(): Boolean;
 begin
   Result := (GetUninstallString() <> '');
+end;
+
+function HasGuiExecutable(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\sbagenx-gui.exe'));
 end;
 
 function InitializeSetup(): Boolean;

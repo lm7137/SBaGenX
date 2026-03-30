@@ -1117,49 +1117,77 @@ fn resolve_library_path() -> Result<PathBuf, String> {
     }
   }
 
-  let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+  let mut candidates = Vec::<PathBuf>::new();
+
+  if let Ok(repo_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     .join("../..")
     .canonicalize()
-    .map_err(|err| format!("failed to resolve repo root: {}", err))?;
-  let dist = repo_root.join("dist");
-
-  let mut candidates = if cfg!(target_os = "linux") {
-    vec![dist.join("libsbagenx.so"), dist.join("libsbagenx.so.3")]
-  } else if cfg!(target_os = "windows") {
-    if cfg!(target_pointer_width = "64") {
-      vec![dist.join("sbagenxlib-win64.dll")]
-    } else {
-      vec![dist.join("sbagenxlib-win32.dll")]
+  {
+    let dist = repo_root.join("dist");
+    if cfg!(target_os = "linux") {
+      candidates.push(dist.join("libsbagenx.so"));
+      candidates.push(dist.join("libsbagenx.so.3"));
+    } else if cfg!(target_os = "windows") {
+      if cfg!(target_pointer_width = "64") {
+        candidates.push(dist.join("sbagenxlib-win64.dll"));
+      } else {
+        candidates.push(dist.join("sbagenxlib-win32.dll"));
+      }
+    } else if cfg!(target_os = "macos") {
+      candidates.push(dist.join("libsbagenx.dylib"));
     }
-  } else if cfg!(target_os = "macos") {
-    vec![dist.join("libsbagenx.dylib")]
-  } else {
-    Vec::new()
-  };
+
+    if cfg!(target_os = "linux") {
+      if let Ok(entries) = fs::read_dir(&dist) {
+        let mut versioned: Vec<PathBuf> = entries
+          .filter_map(Result::ok)
+          .map(|entry| entry.path())
+          .filter(|path| {
+            path
+              .file_name()
+              .and_then(|name| name.to_str())
+              .map(|name| name.starts_with("libsbagenx.so."))
+              .unwrap_or(false)
+          })
+          .collect();
+        versioned.sort();
+        versioned.reverse();
+        candidates.extend(versioned);
+      }
+    }
+  }
 
   if cfg!(target_os = "linux") {
-    if let Ok(entries) = fs::read_dir(&dist) {
-      let mut versioned: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-          path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| name.starts_with("libsbagenx.so."))
-            .unwrap_or(false)
-        })
-        .collect();
-      versioned.sort();
-      versioned.reverse();
-      candidates.extend(versioned);
+    if cfg!(target_arch = "x86_64") {
+      candidates.extend([
+        PathBuf::from("/usr/lib/x86_64-linux-gnu/libsbagenx.so"),
+        PathBuf::from("/usr/lib/x86_64-linux-gnu/libsbagenx.so.3"),
+      ]);
+    } else if cfg!(target_arch = "aarch64") {
+      candidates.extend([
+        PathBuf::from("/usr/lib/aarch64-linux-gnu/libsbagenx.so"),
+        PathBuf::from("/usr/lib/aarch64-linux-gnu/libsbagenx.so.3"),
+      ]);
+    } else if cfg!(target_arch = "x86") {
+      candidates.extend([
+        PathBuf::from("/usr/lib/i386-linux-gnu/libsbagenx.so"),
+        PathBuf::from("/usr/lib/i386-linux-gnu/libsbagenx.so.3"),
+      ]);
     }
+    candidates.extend([
+      PathBuf::from("/usr/lib/libsbagenx.so"),
+      PathBuf::from("/usr/lib/libsbagenx.so.3"),
+      PathBuf::from("/usr/lib/sbagenx/libsbagenx.so"),
+      PathBuf::from("/usr/lib/sbagenx/libsbagenx.so.3"),
+      PathBuf::from("/usr/local/lib/libsbagenx.so"),
+      PathBuf::from("/usr/local/lib/libsbagenx.so.3"),
+    ]);
   }
 
   candidates
     .into_iter()
     .find(|path| path.exists())
-    .ok_or_else(|| "unable to locate a usable sbagenxlib runtime library in dist/".to_string())
+    .ok_or_else(|| "unable to locate a usable sbagenxlib runtime library".to_string())
 }
 
 fn cstr_to_string(ptr: *const c_char) -> String {

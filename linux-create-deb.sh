@@ -14,6 +14,9 @@ BINARY_PATH="${SBAGENX_DEB_BINARY:-}"
 DEB_ARCH_OVERRIDE="${SBAGENX_DEB_ARCH:-}"
 DEB_REVISION="${SBAGENX_DEB_REVISION:-1}"
 OUTPUT_DEB="${SBAGENX_DEB_OUTPUT:-}"
+INCLUDE_GUI="${SBAGENX_DEB_WITH_GUI:-1}"
+GUI_BINARY_PATH="${SBAGENX_DEB_GUI_BINARY:-gui/src-tauri/target/release/sbagenx-gui}"
+GUI_DESKTOP_NAME="sbagenx-gui.desktop"
 
 usage() {
     cat <<USAGE
@@ -264,6 +267,12 @@ if [ -z "$BINARY_PATH" ] || [ ! -f "$BINARY_PATH" ]; then
     exit 1
 fi
 
+if [ "$INCLUDE_GUI" = "1" ] && [ ! -f "$GUI_BINARY_PATH" ]; then
+    error "No Linux GUI binary found to package at $GUI_BINARY_PATH"
+    info "Build the GUI first or set SBAGENX_DEB_WITH_GUI=0 for a CLI-only package."
+    exit 1
+fi
+
 if [ -z "$DEB_ARCH_OVERRIDE" ]; then
     DEB_ARCH=$(detect_deb_arch_from_binary "$BINARY_PATH")
 else
@@ -318,9 +327,18 @@ create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/examples"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/scripts"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/assets"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/doc/${PKG_NAME}"
+if [ "$INCLUDE_GUI" = "1" ]; then
+    create_dir_if_not_exists "$STAGE_DIR/usr/share/applications"
+    create_dir_if_not_exists "$STAGE_DIR/usr/share/icons/hicolor/32x32/apps"
+    create_dir_if_not_exists "$STAGE_DIR/usr/share/icons/hicolor/128x128/apps"
+    create_dir_if_not_exists "$STAGE_DIR/usr/share/icons/hicolor/256x256/apps"
+fi
 
 # Program binary
 cp "$BINARY_PATH" "$STAGE_DIR/usr/bin/${APP_NAME}"
+if [ "$INCLUDE_GUI" = "1" ]; then
+    cp "$GUI_BINARY_PATH" "$STAGE_DIR/usr/bin/sbagenx-gui"
+fi
 
 # Library development/runtime artifacts
 if [ -f "dist/include/sbagenxlib.h" ]; then
@@ -407,6 +425,26 @@ if [ -d licenses ]; then
     cp -a licenses "$STAGE_DIR/usr/share/doc/${PKG_NAME}/"
 fi
 
+if [ "$INCLUDE_GUI" = "1" ]; then
+    cat > "$STAGE_DIR/usr/share/applications/${GUI_DESKTOP_NAME}" <<'EOF'
+[Desktop Entry]
+Categories=AudioVideo;Audio;
+Comment=SBaGenX desktop GUI
+Exec=sbagenx-gui
+StartupWMClass=sbagenx-gui
+Icon=sbagenx-gui
+Name=SBaGenX GUI
+Terminal=false
+Type=Application
+EOF
+    install -m 644 "gui/src-tauri/icons/32x32.png" \
+        "$STAGE_DIR/usr/share/icons/hicolor/32x32/apps/sbagenx-gui.png"
+    install -m 644 "gui/src-tauri/icons/128x128.png" \
+        "$STAGE_DIR/usr/share/icons/hicolor/128x128/apps/sbagenx-gui.png"
+    install -m 644 "gui/src-tauri/icons/128x128@2x.png" \
+        "$STAGE_DIR/usr/share/icons/hicolor/256x256/apps/sbagenx-gui.png"
+fi
+
 cat > "$STAGE_DIR/usr/share/doc/${PKG_NAME}/copyright" <<COPYRIGHT
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: SBaGenX
@@ -426,6 +464,9 @@ COPYRIGHT
 find "$STAGE_DIR" -type d -exec chmod 755 {} +
 find "$STAGE_DIR" -type f -exec chmod 644 {} +
 chmod 755 "$STAGE_DIR/usr/bin/${APP_NAME}"
+if [ "$INCLUDE_GUI" = "1" ]; then
+    chmod 755 "$STAGE_DIR/usr/bin/sbagenx-gui"
+fi
 
 # Keep helper scripts executable in installed tree.
 if [ -d "$STAGE_DIR/usr/share/${PKG_NAME}/scripts" ]; then
@@ -434,6 +475,13 @@ fi
 
 INSTALLED_SIZE=$(du -sk "$STAGE_DIR" | awk '{print $1}')
 
+GUI_DEPENDS=""
+GUI_DESC=""
+if [ "$INCLUDE_GUI" = "1" ]; then
+    GUI_DEPENDS=", libwebkit2gtk-4.1-0, libgtk-3-0"
+    GUI_DESC=" This package also installs the SBaGenX desktop GUI."
+fi
+
 cat > "$STAGE_DIR/DEBIAN/control" <<CONTROL
 Package: ${PKG_NAME}
 Version: ${PKG_FULL_VERSION}
@@ -441,7 +489,7 @@ Section: sound
 Priority: optional
 Architecture: ${DEB_ARCH}
 Maintainer: ${MAINTAINER}
-Depends: libc6 (>= 2.17), libasound2 (>= 1.0.16)
+Depends: libc6 (>= 2.17), libasound2 (>= 1.0.16)${GUI_DEPENDS}
 Recommends: python3, python3-cairo
 Installed-Size: ${INSTALLED_SIZE}
 Homepage: ${HOMEPAGE_URL}
@@ -452,6 +500,7 @@ Description: Sequenced Brainwave Generator command-line synthesizer
  .
  This package also installs the reusable sbagenxlib C library,
  public headers, and pkg-config metadata for frontend/binding development.
+${GUI_DESC}
 CONTROL
 
 # Optional package metadata integrity list.
