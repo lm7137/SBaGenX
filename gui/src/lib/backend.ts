@@ -6,6 +6,7 @@ import type {
   ExportResult,
   FileDocument,
   LivePreviewResult,
+  ProgramRuntimeRequest,
   PreviewResult,
   PlaybackEvent,
   RecentFileEntry,
@@ -148,6 +149,42 @@ export async function inspectCurveInfo(
       text,
       sourceName,
     },
+  })
+}
+
+export async function validateProgram(
+  request: ProgramRuntimeRequest,
+): Promise<ValidationResult> {
+  return invoke<ValidationResult>('validate_program', {
+    args: request,
+  })
+}
+
+export async function startProgramLivePreview(
+  request: ProgramRuntimeRequest,
+): Promise<LivePreviewResult> {
+  return invoke<LivePreviewResult>('start_program_live_preview', {
+    args: request,
+  })
+}
+
+export async function exportProgram(
+  request: ProgramRuntimeRequest,
+  outputPath: string,
+): Promise<ExportResult> {
+  return invoke<ExportResult>('export_program', {
+    args: {
+      ...request,
+      outputPath,
+    },
+  })
+}
+
+export async function sampleProgramBeatPreview(
+  request: ProgramRuntimeRequest,
+): Promise<BeatPreviewResult> {
+  return invoke<BeatPreviewResult>('sample_program_beat_preview', {
+    args: request,
   })
 }
 

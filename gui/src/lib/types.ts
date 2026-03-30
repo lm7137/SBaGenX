@@ -1,4 +1,6 @@
 export type DocumentKind = 'sbg' | 'sbgf'
+export type RuntimeMode = 'sequence' | 'program'
+export type ProgramKind = 'drop' | 'sigmoid' | 'slide' | 'curve'
 
 export interface DocumentRecord {
   id: string
@@ -138,4 +140,15 @@ export interface CurveInfoResult {
   parameters: CurveParameter[]
   bridge: string
   engineVersion: string
+}
+
+export interface ProgramRuntimeRequest {
+  programKind: ProgramKind
+  mainArg: string
+  dropTimeSec: number
+  holdTimeSec: number
+  wakeTimeSec: number
+  curveText?: string | null
+  sourceName?: string | null
+  mixPath?: string | null
 }

@@ -223,6 +223,33 @@ struct ExportDocumentArgs {
   mix_path_override: Option<String>,
 }
 
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProgramRequestArgs {
+  program_kind: String,
+  main_arg: String,
+  drop_time_sec: i32,
+  hold_time_sec: i32,
+  wake_time_sec: i32,
+  curve_text: Option<String>,
+  source_name: Option<String>,
+  mix_path: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProgramExportArgs {
+  program_kind: String,
+  main_arg: String,
+  drop_time_sec: i32,
+  hold_time_sec: i32,
+  wake_time_sec: i32,
+  curve_text: Option<String>,
+  source_name: Option<String>,
+  mix_path: Option<String>,
+  output_path: String,
+}
+
 #[derive(Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct SessionStore {
@@ -469,14 +496,28 @@ where
   guard.scratch = scratch;
 }
 
-fn spawn_playback_thread(
+fn program_request_from_args(args: ProgramRequestArgs) -> Result<sbagenxlib::ProgramRuntimeRequest, String> {
+  Ok(sbagenxlib::ProgramRuntimeRequest {
+    kind: sbagenxlib::ProgramKind::from_str(&args.program_kind)?,
+    main_arg: args.main_arg,
+    drop_time_sec: args.drop_time_sec,
+    hold_time_sec: args.hold_time_sec,
+    wake_time_sec: args.wake_time_sec,
+    curve_text: args.curve_text,
+    source_name: args.source_name.unwrap_or_default(),
+    mix_path: args.mix_path,
+  })
+}
+
+fn spawn_playback_thread_with_factory<F>(
   app: tauri::AppHandle,
-  text: String,
-  source_name: String,
-  mix_path_override: Option<String>,
   stop_flag: Arc<AtomicBool>,
   startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
-) -> JoinHandle<()> {
+  build_live: F,
+) -> JoinHandle<()>
+where
+  F: FnOnce(u32) -> Result<sbagenxlib::LivePlaybackContext, String> + Send + 'static,
+{
   thread::spawn(move || {
     let host = cpal::default_host();
     let device = match host.default_output_device() {
@@ -499,12 +540,7 @@ fn spawn_playback_thread(
     let sample_rate_hz = default_config.sample_rate().0;
     let output_channels = default_config.channels() as usize;
 
-    let live = match sbagenxlib::create_live_preview(
-      &text,
-      &source_name,
-      mix_path_override.as_deref(),
-      sample_rate_hz,
-    ) {
+    let live = match build_live(sample_rate_hz) {
       Ok(live) => live,
       Err(err) => {
         let _ = startup_tx.send(Err(err));
@@ -729,6 +765,35 @@ fn spawn_playback_thread(
     }
 
     drop(stream);
+  })
+}
+
+fn spawn_sequence_playback_thread(
+  app: tauri::AppHandle,
+  text: String,
+  source_name: String,
+  mix_path_override: Option<String>,
+  stop_flag: Arc<AtomicBool>,
+  startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
+) -> JoinHandle<()> {
+  spawn_playback_thread_with_factory(app, stop_flag, startup_tx, move |sample_rate_hz| {
+    sbagenxlib::create_live_preview(
+      &text,
+      &source_name,
+      mix_path_override.as_deref(),
+      sample_rate_hz,
+    )
+  })
+}
+
+fn spawn_program_playback_thread(
+  app: tauri::AppHandle,
+  request: sbagenxlib::ProgramRuntimeRequest,
+  stop_flag: Arc<AtomicBool>,
+  startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
+) -> JoinHandle<()> {
+  spawn_playback_thread_with_factory(app, stop_flag, startup_tx, move |sample_rate_hz| {
+    sbagenxlib::create_live_program_preview(&request, sample_rate_hz)
   })
 }
 
@@ -973,6 +1038,38 @@ fn validate_document(args: ValidateDocumentArgs) -> Result<ValidationResult, Str
 }
 
 #[tauri::command]
+fn validate_program(args: ProgramRequestArgs) -> Result<ValidationResult, String> {
+  let request = program_request_from_args(args)?;
+  let outcome = sbagenxlib::validate_program(&request)?;
+  let document_id = if request.kind == sbagenxlib::ProgramKind::Curve {
+    normalize_source_name(Some(request.source_name.clone()), "sbgf")
+  } else {
+    format!("program:{}", request.kind.as_str())
+  };
+  let diagnostics = outcome
+    .diagnostics
+    .into_iter()
+    .enumerate()
+    .map(|(index, diag)| ValidationDiagnostic {
+      id: format!("diag-program-{}", index),
+      document_id: document_id.clone(),
+      severity: diag.severity.to_string(),
+      line: diag.line,
+      column: diag.column,
+      end_line: diag.end_line,
+      end_column: diag.end_column,
+      message: diag.message,
+    })
+    .collect();
+  Ok(ValidationResult {
+    valid: outcome.valid,
+    diagnostics,
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
+#[tauri::command]
 fn render_preview(args: RenderDocumentArgs) -> Result<PreviewResult, String> {
   if args.kind != "sbg" {
     return Err("preview is currently available only for .sbg documents".to_string());
@@ -1004,7 +1101,7 @@ fn start_live_preview(
   let source_name = normalize_source_name(args.source_name, &args.kind);
   let stop_flag = Arc::new(AtomicBool::new(false));
   let (startup_tx, startup_rx) = std::sync::mpsc::channel();
-  let playback_thread = spawn_playback_thread(
+  let playback_thread = spawn_sequence_playback_thread(
     app.clone(),
     args.text,
     source_name,
@@ -1012,6 +1109,46 @@ fn start_live_preview(
     stop_flag.clone(),
     startup_tx,
   );
+
+  match startup_rx.recv_timeout(Duration::from_secs(5)) {
+    Ok(Ok(result)) => {
+      let session = LivePlaybackSession {
+        stop_flag,
+        thread: Some(playback_thread),
+      };
+      let mut guard = controller
+        .inner()
+        .session
+        .lock()
+        .map_err(|_| "failed to store live playback session".to_string())?;
+      *guard = Some(session);
+      Ok(result)
+    }
+    Ok(Err(err)) => {
+      let _ = playback_thread.join();
+      Err(err)
+    }
+    Err(_) => {
+      stop_flag.store(true, Ordering::SeqCst);
+      let _ = playback_thread.join();
+      Err("timed out while starting live preview".to_string())
+    }
+  }
+}
+
+#[tauri::command]
+fn start_program_live_preview(
+  app: tauri::AppHandle,
+  controller: State<'_, PlaybackController>,
+  args: ProgramRequestArgs,
+) -> Result<LivePreviewResult, String> {
+  stop_active_session(controller.inner());
+
+  let request = program_request_from_args(args)?;
+  let stop_flag = Arc::new(AtomicBool::new(false));
+  let (startup_tx, startup_rx) = std::sync::mpsc::channel();
+  let playback_thread =
+    spawn_program_playback_thread(app.clone(), request, stop_flag.clone(), startup_tx);
 
   match startup_rx.recv_timeout(Duration::from_secs(5)) {
     Ok(Ok(result)) => {
@@ -1091,12 +1228,69 @@ fn export_document(args: ExportDocumentArgs) -> Result<ExportResult, String> {
 }
 
 #[tauri::command]
+fn export_program(args: ProgramExportArgs) -> Result<ExportResult, String> {
+  let request = program_request_from_args(ProgramRequestArgs {
+    program_kind: args.program_kind,
+    main_arg: args.main_arg,
+    drop_time_sec: args.drop_time_sec,
+    hold_time_sec: args.hold_time_sec,
+    wake_time_sec: args.wake_time_sec,
+    curve_text: args.curve_text,
+    source_name: args.source_name,
+    mix_path: args.mix_path,
+  })?;
+  let out_path = PathBuf::from(&args.output_path);
+  let outcome = sbagenxlib::export_program(&request, &out_path)?;
+  Ok(ExportResult {
+    output_path: outcome.output_path,
+    duration_sec: outcome.duration_sec,
+    format: outcome.format,
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
+#[tauri::command]
 fn sample_beat_preview(args: RenderDocumentArgs) -> Result<BeatPreviewResult, String> {
   if args.kind != "sbg" {
     return Err("beat preview is currently available only for .sbg documents".to_string());
   }
   let source_name = normalize_source_name(args.source_name, &args.kind);
   let outcome = sbagenxlib::sample_beat_preview(&args.text, &source_name)?;
+  Ok(BeatPreviewResult {
+    duration_sec: outcome.duration_sec,
+    sample_count: outcome.sample_count,
+    voice_count: outcome.voice_count,
+    min_hz: outcome.min_hz,
+    max_hz: outcome.max_hz,
+    limited: outcome.limited,
+    time_label: outcome.time_label,
+    series: outcome
+      .series
+      .into_iter()
+      .map(|series| BeatPreviewSeries {
+        voice_index: series.voice_index,
+        label: series.label,
+        active_sample_count: series.active_sample_count,
+        points: series
+          .points
+          .into_iter()
+          .map(|point| BeatPreviewPoint {
+            t_sec: point.t_sec,
+            beat_hz: point.beat_hz,
+          })
+          .collect(),
+      })
+      .collect(),
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
+#[tauri::command]
+fn sample_program_beat_preview(args: ProgramRequestArgs) -> Result<BeatPreviewResult, String> {
+  let request = program_request_from_args(args)?;
+  let outcome = sbagenxlib::sample_program_beat_preview(&request)?;
   Ok(BeatPreviewResult {
     duration_sec: outcome.duration_sec,
     sample_count: outcome.sample_count,
@@ -1188,12 +1382,16 @@ pub fn run() {
       save_session_state,
       write_text_file,
       validate_document,
+      validate_program,
       render_preview,
       start_live_preview,
+      start_program_live_preview,
       stop_live_preview,
       exit_application,
       export_document,
+      export_program,
       sample_beat_preview,
+      sample_program_beat_preview,
       inspect_curve_info
     ])
     .run(tauri::generate_context!())

@@ -25,6 +25,12 @@ const SBX_AUDIO_WRITER_INPUT_F32: c_int = 2;
 const SBX_AUDIO_WRITER_INPUT_I32: c_int = 3;
 const PREVIEW_LIMIT_SEC: f64 = 120.0;
 const RENDER_CHUNK_FRAMES: usize = 2048;
+const DEFAULT_PROGRAM_STEP_LEN_SEC: i32 = 180;
+const SHORT_PROGRAM_STEP_LEN_SEC: i32 = 60;
+const SBX_TONE_BINAURAL: c_int = 1;
+const SBX_TONE_MONAURAL: c_int = 2;
+const SBX_TONE_ISOCHRONIC: c_int = 3;
+const SBX_WAVE_SINE: c_int = 0;
 
 #[cfg(target_os = "windows")]
 unsafe extern "C" {
@@ -84,6 +90,14 @@ struct SbxMixFxSpec {
   mixam_edge_mode: c_int,
   mixam_floor: f64,
   mixam_bind_program_beat: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxMixAmpKeyframe {
+  time_sec: f64,
+  amp_pct: f64,
+  interp: c_int,
 }
 
 #[repr(C)]
@@ -249,6 +263,104 @@ struct SbxCurveEvalConfig {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+struct SbxCurveSourceConfig {
+  mode: c_int,
+  waveform: c_int,
+  duty_cycle: f64,
+  iso_start: f64,
+  iso_attack: f64,
+  iso_release: f64,
+  iso_edge_mode: c_int,
+  amplitude: f64,
+  duration_sec: f64,
+  loop_: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxProgramKeyframe {
+  time_sec: f64,
+  tone: SbxToneSpec,
+  interp: c_int,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxBuiltinDropConfig {
+  start_tone: SbxToneSpec,
+  carrier_end_hz: f64,
+  beat_target_hz: f64,
+  drop_sec: c_int,
+  hold_sec: c_int,
+  wake_sec: c_int,
+  slide: c_int,
+  step_len_sec: c_int,
+  fade_sec: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxBuiltinSigmoidConfig {
+  start_tone: SbxToneSpec,
+  carrier_end_hz: f64,
+  beat_target_hz: f64,
+  drop_sec: c_int,
+  hold_sec: c_int,
+  wake_sec: c_int,
+  slide: c_int,
+  step_len_sec: c_int,
+  fade_sec: f64,
+  sig_l: f64,
+  sig_h: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxBuiltinSlideConfig {
+  start_tone: SbxToneSpec,
+  carrier_end_hz: f64,
+  slide_sec: c_int,
+  fade_sec: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxCurveTimelineConfig {
+  start_tone: SbxToneSpec,
+  sample_span_sec: c_int,
+  main_span_sec: c_int,
+  wake_sec: c_int,
+  step_len_sec: c_int,
+  slide: c_int,
+  mute_program_tone: c_int,
+  fade_sec: f64,
+}
+
+#[repr(C)]
+struct SbxCurveTimeline {
+  program_frames: *mut SbxProgramKeyframe,
+  program_frame_count: usize,
+  mix_frames: *mut SbxMixAmpKeyframe,
+  mix_frame_count: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SbxRuntimeContextConfig {
+  engine: SbxEngineConfig,
+  mix_kfs: *const SbxMixAmpKeyframe,
+  mix_kf_count: usize,
+  default_mix_amp_pct: f64,
+  mix_fx: *const SbxMixFxSpec,
+  mix_fx_count: usize,
+  aux_tones: *const SbxToneSpec,
+  aux_count: usize,
+  mix_mod: *const SbxMixModSpec,
+  amp_adjust: *const SbxAmpAdjustSpec,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 struct SbxToneSpec {
   mode: c_int,
   carrier_hz: f64,
@@ -264,16 +376,25 @@ struct SbxToneSpec {
 }
 
 type SbxDefaultEngineConfig = unsafe extern "C" fn(*mut SbxEngineConfig);
+type SbxDefaultToneSpec = unsafe extern "C" fn(*mut SbxToneSpec);
 type SbxDefaultPcmConvertState = unsafe extern "C" fn(*mut SbxPcmConvertState);
 type SbxDefaultAudioWriterConfig = unsafe extern "C" fn(*mut SbxAudioWriterConfig);
 type SbxDefaultSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
 type SbxFreeSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
 type SbxDefaultMixInputConfig = unsafe extern "C" fn(*mut SbxMixInputConfig);
 type SbxDefaultCurveEvalConfig = unsafe extern "C" fn(*mut SbxCurveEvalConfig);
+type SbxDefaultCurveSourceConfig = unsafe extern "C" fn(*mut SbxCurveSourceConfig);
+type SbxDefaultBuiltinDropConfig = unsafe extern "C" fn(*mut SbxBuiltinDropConfig);
+type SbxDefaultBuiltinSigmoidConfig = unsafe extern "C" fn(*mut SbxBuiltinSigmoidConfig);
+type SbxDefaultBuiltinSlideConfig = unsafe extern "C" fn(*mut SbxBuiltinSlideConfig);
+type SbxDefaultCurveTimelineConfig = unsafe extern "C" fn(*mut SbxCurveTimelineConfig);
+type SbxDefaultRuntimeContextConfig = unsafe extern "C" fn(*mut SbxRuntimeContextConfig);
 type SbxCurveCreate = unsafe extern "C" fn() -> *mut SbxCurveProgram;
 type SbxCurveDestroy = unsafe extern "C" fn(*mut SbxCurveProgram);
 type SbxCurveLoadText =
   unsafe extern "C" fn(*mut SbxCurveProgram, *const c_char, *const c_char) -> c_int;
+type SbxCurveSetParam =
+  unsafe extern "C" fn(*mut SbxCurveProgram, *const c_char, f64) -> c_int;
 type SbxCurvePrepare = unsafe extern "C" fn(*mut SbxCurveProgram, *const SbxCurveEvalConfig) -> c_int;
 type SbxCurveGetInfo = unsafe extern "C" fn(*const SbxCurveProgram, *mut SbxCurveInfoRaw) -> c_int;
 type SbxCurveParamCount = unsafe extern "C" fn(*const SbxCurveProgram) -> usize;
@@ -352,6 +473,34 @@ type SbxMixInputRead = unsafe extern "C" fn(*mut SbxMixInput, *mut c_int, c_int)
 type SbxMixInputDestroy = unsafe extern "C" fn(*mut SbxMixInput);
 type SbxMixInputLastError = unsafe extern "C" fn(*const SbxMixInput) -> *const c_char;
 type SbxMixInputOutputRate = unsafe extern "C" fn(*const SbxMixInput) -> c_int;
+type SbxBuildDropCurveProgram =
+  unsafe extern "C" fn(*const SbxBuiltinDropConfig, *mut *mut SbxCurveProgram) -> c_int;
+type SbxBuildSigmoidCurveProgram =
+  unsafe extern "C" fn(*const SbxBuiltinSigmoidConfig, *mut *mut SbxCurveProgram) -> c_int;
+type SbxBuildDropKeyframes =
+  unsafe extern "C" fn(*const SbxBuiltinDropConfig, *mut *mut SbxProgramKeyframe, *mut usize) -> c_int;
+type SbxBuildSigmoidKeyframes =
+  unsafe extern "C" fn(*const SbxBuiltinSigmoidConfig, *mut *mut SbxProgramKeyframe, *mut usize) -> c_int;
+type SbxBuildSlideKeyframes =
+  unsafe extern "C" fn(*const SbxBuiltinSlideConfig, *mut *mut SbxProgramKeyframe, *mut usize) -> c_int;
+type SbxBuildCurveTimeline =
+  unsafe extern "C" fn(*mut SbxCurveProgram, *const SbxCurveTimelineConfig, *mut SbxCurveTimeline) -> c_int;
+type SbxFreeCurveTimeline = unsafe extern "C" fn(*mut SbxCurveTimeline);
+type SbxRuntimeContextCreateFromKeyframes = unsafe extern "C" fn(
+  *const SbxProgramKeyframe,
+  usize,
+  c_int,
+  *const SbxRuntimeContextConfig,
+  *mut f64,
+  *mut *mut SbxContext,
+) -> c_int;
+type SbxRuntimeContextCreateFromCurveProgram = unsafe extern "C" fn(
+  *mut SbxCurveProgram,
+  *const SbxCurveSourceConfig,
+  *const SbxRuntimeContextConfig,
+  *mut f64,
+  *mut *mut SbxContext,
+) -> c_int;
 
 pub struct ValidationDiagnostic {
   pub severity: &'static str,
@@ -425,20 +574,79 @@ pub struct CurveInfoOutcome {
   pub engine_version: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ProgramKind {
+  Drop,
+  Sigmoid,
+  Slide,
+  Curve,
+}
+
+pub struct ProgramRuntimeRequest {
+  pub kind: ProgramKind,
+  pub main_arg: String,
+  pub drop_time_sec: i32,
+  pub hold_time_sec: i32,
+  pub wake_time_sec: i32,
+  pub curve_text: Option<String>,
+  pub source_name: String,
+  pub mix_path: Option<String>,
+}
+
+#[derive(Clone)]
+struct CurveParameterOverride {
+  name: String,
+  value: f64,
+}
+
+struct DropLikeMainArg {
+  mute_program_tone: bool,
+  slide: bool,
+  include_hold: bool,
+  wake_enabled: bool,
+  is_isochronic: bool,
+  is_monaural: bool,
+  step_len_sec: i32,
+  carrier_base_hz: f64,
+  beat_target_hz: f64,
+  beat_start_hz: f64,
+  amp_pct: f64,
+  sig_l: f64,
+  sig_h: f64,
+  curve_overrides: Vec<CurveParameterOverride>,
+}
+
+struct SlideMainArg {
+  is_isochronic: bool,
+  is_monaural: bool,
+  carrier_start_hz: f64,
+  carrier_end_hz: f64,
+  beat_hz: f64,
+  amp_pct: f64,
+}
+
 struct Api {
   _lib: Library,
   sbx_version: SbxVersion,
   sbx_api_version: SbxApiVersion,
   sbx_default_engine_config: SbxDefaultEngineConfig,
+  sbx_default_tone_spec: SbxDefaultToneSpec,
   sbx_default_pcm_convert_state: SbxDefaultPcmConvertState,
   sbx_default_audio_writer_config: SbxDefaultAudioWriterConfig,
   sbx_default_safe_seqfile_preamble: SbxDefaultSafeSeqfilePreamble,
   sbx_default_mix_input_config: SbxDefaultMixInputConfig,
   sbx_default_curve_eval_config: SbxDefaultCurveEvalConfig,
+  sbx_default_curve_source_config: SbxDefaultCurveSourceConfig,
+  sbx_default_builtin_drop_config: SbxDefaultBuiltinDropConfig,
+  sbx_default_builtin_sigmoid_config: SbxDefaultBuiltinSigmoidConfig,
+  sbx_default_builtin_slide_config: SbxDefaultBuiltinSlideConfig,
+  sbx_default_curve_timeline_config: SbxDefaultCurveTimelineConfig,
+  sbx_default_runtime_context_config: SbxDefaultRuntimeContextConfig,
   sbx_free_safe_seqfile_preamble: SbxFreeSafeSeqfilePreamble,
   sbx_curve_create: SbxCurveCreate,
   sbx_curve_destroy: SbxCurveDestroy,
   sbx_curve_load_text: SbxCurveLoadText,
+  sbx_curve_set_param: SbxCurveSetParam,
   sbx_curve_prepare: SbxCurvePrepare,
   sbx_curve_get_info: SbxCurveGetInfo,
   sbx_curve_param_count: SbxCurveParamCount,
@@ -482,6 +690,15 @@ struct Api {
   sbx_mix_input_destroy: SbxMixInputDestroy,
   sbx_mix_input_last_error: SbxMixInputLastError,
   sbx_mix_input_output_rate: SbxMixInputOutputRate,
+  sbx_build_drop_curve_program: SbxBuildDropCurveProgram,
+  sbx_build_sigmoid_curve_program: SbxBuildSigmoidCurveProgram,
+  sbx_build_drop_keyframes: SbxBuildDropKeyframes,
+  sbx_build_sigmoid_keyframes: SbxBuildSigmoidKeyframes,
+  sbx_build_slide_keyframes: SbxBuildSlideKeyframes,
+  sbx_build_curve_timeline: SbxBuildCurveTimeline,
+  sbx_free_curve_timeline: SbxFreeCurveTimeline,
+  sbx_runtime_context_create_from_keyframes: SbxRuntimeContextCreateFromKeyframes,
+  sbx_runtime_context_create_from_curve_program: SbxRuntimeContextCreateFromCurveProgram,
 }
 
 struct MixInputResource {
@@ -514,8 +731,49 @@ impl Drop for LoadedSbgContext {
   }
 }
 
+struct LoadedProgramContext {
+  api: Api,
+  ctx: *mut SbxContext,
+  engine_cfg: SbxEngineConfig,
+  mix_input: Option<MixInputResource>,
+}
+
+impl Drop for LoadedProgramContext {
+  fn drop(&mut self) {
+    unsafe {
+      if let Some(mix_input) = self.mix_input.take() {
+        (self.api.sbx_mix_input_destroy)(mix_input.handle);
+      }
+      if !self.ctx.is_null() {
+        (self.api.sbx_context_destroy)(self.ctx);
+      }
+    }
+  }
+}
+
+enum LiveLoadedContext {
+  Sequence(LoadedSbgContext),
+  Program(LoadedProgramContext),
+}
+
+impl LiveLoadedContext {
+  fn api(&self) -> &Api {
+    match self {
+      Self::Sequence(loaded) => &loaded.api,
+      Self::Program(loaded) => &loaded.api,
+    }
+  }
+
+  fn engine_cfg(&self) -> &SbxEngineConfig {
+    match self {
+      Self::Sequence(loaded) => &loaded.engine_cfg,
+      Self::Program(loaded) => &loaded.engine_cfg,
+    }
+  }
+}
+
 pub(crate) struct LivePlaybackContext {
-  loaded: LoadedSbgContext,
+  loaded: LiveLoadedContext,
   volume_mul: f32,
   remaining_frames: Option<usize>,
   finished: bool,
@@ -528,11 +786,11 @@ unsafe impl Send for LivePlaybackContext {}
 
 impl LivePlaybackContext {
   pub(crate) fn channel_count(&self) -> usize {
-    self.loaded.engine_cfg.channels.max(1) as usize
+    self.loaded.engine_cfg().channels.max(1) as usize
   }
 
   pub(crate) fn engine_version(&self) -> String {
-    self.loaded.api.version_string()
+    self.loaded.api().version_string()
   }
 
   pub(crate) fn duration_sec(&self) -> f64 {
@@ -574,13 +832,28 @@ impl LivePlaybackContext {
     }
 
     let sample_count = frames * channels;
-    let rendered_frames = render_frames_with_mix(
-      &mut self.loaded,
-      &mut self.mix_buf,
-      &mut out[..sample_count],
-      frames,
-      self.volume_mul,
-    )?;
+    let rendered_frames = match &mut self.loaded {
+      LiveLoadedContext::Sequence(loaded) => render_frames_with_mix(
+        &loaded.api,
+        loaded.ctx,
+        &loaded.engine_cfg,
+        &mut loaded.mix_input,
+        &mut self.mix_buf,
+        &mut out[..sample_count],
+        frames,
+        self.volume_mul,
+      )?,
+      LiveLoadedContext::Program(loaded) => render_frames_with_mix(
+        &loaded.api,
+        loaded.ctx,
+        &loaded.engine_cfg,
+        &mut loaded.mix_input,
+        &mut self.mix_buf,
+        &mut out[..sample_count],
+        frames,
+        self.volume_mul,
+      )?,
+    };
     if rendered_frames == 0 {
       self.finished = true;
       out.fill(0.0);
@@ -604,18 +877,21 @@ impl LivePlaybackContext {
 }
 
 fn render_frames_with_mix(
-  loaded: &mut LoadedSbgContext,
+  api: &Api,
+  ctx: *mut SbxContext,
+  engine_cfg: &SbxEngineConfig,
+  mix_input: &mut Option<MixInputResource>,
   mix_buf: &mut Vec<i32>,
   out: &mut [f32],
   frames: usize,
   volume_mul: f32,
 ) -> Result<usize, String> {
-  let channels = loaded.engine_cfg.channels.max(1) as usize;
+  let channels = engine_cfg.channels.max(1) as usize;
   let sample_count = frames * channels;
-  let t0 = unsafe { (loaded.api.sbx_context_time_sec)(loaded.ctx) };
-  let rc = unsafe { (loaded.api.sbx_context_render_f32)(loaded.ctx, out.as_mut_ptr(), frames) };
+  let t0 = unsafe { (api.sbx_context_time_sec)(ctx) };
+  let rc = unsafe { (api.sbx_context_render_f32)(ctx, out.as_mut_ptr(), frames) };
   if rc != SBX_OK {
-    let msg = unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) };
+    let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
     return Err(if msg.is_empty() {
       "failed to render audio frames from sbagenxlib".to_string()
     } else {
@@ -623,16 +899,16 @@ fn render_frames_with_mix(
     });
   }
 
-  if let Some(mix_input) = loaded.mix_input.as_mut() {
+  if let Some(mix_input) = mix_input.as_mut() {
     let mix_sample_count = frames * 2;
     if mix_buf.len() < mix_sample_count {
       mix_buf.resize(mix_sample_count, 0);
     }
     let read_count = unsafe {
-      (loaded.api.sbx_mix_input_read)(mix_input.handle, mix_buf.as_mut_ptr(), mix_sample_count as c_int)
+      (api.sbx_mix_input_read)(mix_input.handle, mix_buf.as_mut_ptr(), mix_sample_count as c_int)
     };
     if read_count < 0 {
-      let msg = unsafe { cstr_to_string((loaded.api.sbx_mix_input_last_error)(mix_input.handle)) };
+      let msg = unsafe { cstr_to_string((api.sbx_mix_input_last_error)(mix_input.handle)) };
       return Err(if msg.is_empty() {
         "failed to read sequence mix input stream".to_string()
       } else {
@@ -646,14 +922,14 @@ fn render_frames_with_mix(
       mix_buf[read_count as usize..mix_sample_count].fill(0);
     }
 
-    let sample_rate_hz = loaded.engine_cfg.sample_rate;
+    let sample_rate_hz = engine_cfg.sample_rate;
     for frame_idx in 0..frames {
       let mix_base = frame_idx * 2;
       let mut add_l = 0.0;
       let mut add_r = 0.0;
       let rc = unsafe {
-        (loaded.api.sbx_context_mix_stream_sample)(
-          loaded.ctx,
+        (api.sbx_context_mix_stream_sample)(
+          ctx,
           t0 + (frame_idx as f64 / sample_rate_hz),
           mix_buf[mix_base],
           mix_buf[mix_base + 1],
@@ -663,7 +939,7 @@ fn render_frames_with_mix(
         )
       };
       if rc != SBX_OK {
-        let msg = unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) };
+        let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
         return Err(if msg.is_empty() {
           "sbagenxlib mix stream processing failed".to_string()
         } else {
@@ -709,6 +985,7 @@ impl Api {
         sbx_version: Self::load_symbol(&lib, b"sbx_version\0")?,
         sbx_api_version: Self::load_symbol(&lib, b"sbx_api_version\0")?,
         sbx_default_engine_config: Self::load_symbol(&lib, b"sbx_default_engine_config\0")?,
+        sbx_default_tone_spec: Self::load_symbol(&lib, b"sbx_default_tone_spec\0")?,
         sbx_default_pcm_convert_state:
           Self::load_symbol(&lib, b"sbx_default_pcm_convert_state\0")?,
         sbx_default_audio_writer_config:
@@ -719,11 +996,24 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_default_mix_input_config\0")?,
         sbx_default_curve_eval_config:
           Self::load_symbol(&lib, b"sbx_default_curve_eval_config\0")?,
+        sbx_default_curve_source_config:
+          Self::load_symbol(&lib, b"sbx_default_curve_source_config\0")?,
+        sbx_default_builtin_drop_config:
+          Self::load_symbol(&lib, b"sbx_default_builtin_drop_config\0")?,
+        sbx_default_builtin_sigmoid_config:
+          Self::load_symbol(&lib, b"sbx_default_builtin_sigmoid_config\0")?,
+        sbx_default_builtin_slide_config:
+          Self::load_symbol(&lib, b"sbx_default_builtin_slide_config\0")?,
+        sbx_default_curve_timeline_config:
+          Self::load_symbol(&lib, b"sbx_default_curve_timeline_config\0")?,
+        sbx_default_runtime_context_config:
+          Self::load_symbol(&lib, b"sbx_default_runtime_context_config\0")?,
         sbx_free_safe_seqfile_preamble:
           Self::load_symbol(&lib, b"sbx_free_safe_seqfile_preamble\0")?,
         sbx_curve_create: Self::load_symbol(&lib, b"sbx_curve_create\0")?,
         sbx_curve_destroy: Self::load_symbol(&lib, b"sbx_curve_destroy\0")?,
         sbx_curve_load_text: Self::load_symbol(&lib, b"sbx_curve_load_text\0")?,
+        sbx_curve_set_param: Self::load_symbol(&lib, b"sbx_curve_set_param\0")?,
         sbx_curve_prepare: Self::load_symbol(&lib, b"sbx_curve_prepare\0")?,
         sbx_curve_get_info: Self::load_symbol(&lib, b"sbx_curve_get_info\0")?,
         sbx_curve_param_count: Self::load_symbol(&lib, b"sbx_curve_param_count\0")?,
@@ -787,6 +1077,24 @@ impl Api {
         sbx_mix_input_last_error: Self::load_symbol(&lib, b"sbx_mix_input_last_error\0")?,
         sbx_mix_input_output_rate:
           Self::load_symbol(&lib, b"sbx_mix_input_output_rate\0")?,
+        sbx_build_drop_curve_program:
+          Self::load_symbol(&lib, b"sbx_build_drop_curve_program\0")?,
+        sbx_build_sigmoid_curve_program:
+          Self::load_symbol(&lib, b"sbx_build_sigmoid_curve_program\0")?,
+        sbx_build_drop_keyframes:
+          Self::load_symbol(&lib, b"sbx_build_drop_keyframes\0")?,
+        sbx_build_sigmoid_keyframes:
+          Self::load_symbol(&lib, b"sbx_build_sigmoid_keyframes\0")?,
+        sbx_build_slide_keyframes:
+          Self::load_symbol(&lib, b"sbx_build_slide_keyframes\0")?,
+        sbx_build_curve_timeline:
+          Self::load_symbol(&lib, b"sbx_build_curve_timeline\0")?,
+        sbx_free_curve_timeline:
+          Self::load_symbol(&lib, b"sbx_free_curve_timeline\0")?,
+        sbx_runtime_context_create_from_keyframes:
+          Self::load_symbol(&lib, b"sbx_runtime_context_create_from_keyframes\0")?,
+        sbx_runtime_context_create_from_curve_program:
+          Self::load_symbol(&lib, b"sbx_runtime_context_create_from_curve_program\0")?,
         _lib: lib,
       })
     }
@@ -865,6 +1173,387 @@ fn fixed_cstr_to_string(buf: &[c_char]) -> String {
   let len = buf.iter().position(|ch| *ch == 0).unwrap_or(buf.len());
   let bytes: Vec<u8> = buf[..len].iter().map(|ch| *ch as u8).collect();
   String::from_utf8_lossy(&bytes).into_owned()
+}
+
+impl ProgramKind {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Drop => "drop",
+      Self::Sigmoid => "sigmoid",
+      Self::Slide => "slide",
+      Self::Curve => "curve",
+    }
+  }
+
+  pub fn from_str(value: &str) -> Result<Self, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+      "drop" => Ok(Self::Drop),
+      "sigmoid" => Ok(Self::Sigmoid),
+      "slide" => Ok(Self::Slide),
+      "curve" => Ok(Self::Curve),
+      other => Err(format!("unsupported built-in program kind: {}", other)),
+    }
+  }
+}
+
+fn program_default_source_name(kind: ProgramKind) -> String {
+  format!("program:{}", kind.as_str())
+}
+
+fn curve_name_char(ch: char, first: bool) -> bool {
+  ch.is_ascii_alphabetic() || ch == '_' || (!first && (ch.is_ascii_digit() || ch == '.'))
+}
+
+fn parse_program_target_spec(text: &str) -> Option<(usize, f64)> {
+  const TARGET_VALS: [f64; 12] = [4.4, 3.7, 3.1, 2.5, 2.0, 1.5, 1.2, 0.9, 0.7, 0.5, 0.4, 0.3];
+
+  if text.is_empty() {
+    return None;
+  }
+
+  let bytes = text.as_bytes();
+  let mut index = 0usize;
+  let mut negative = false;
+  if bytes[index] == b'+' || bytes[index] == b'-' {
+    negative = bytes[index] == b'-';
+    index += 1;
+    if index >= bytes.len() {
+      return None;
+    }
+  }
+
+  let ch = bytes[index].to_ascii_lowercase();
+  if !ch.is_ascii_lowercase() {
+    return None;
+  }
+  let target_index = (ch - b'a') as usize;
+  if target_index >= TARGET_VALS.len() {
+    return None;
+  }
+  index += 1;
+
+  let mut frac = 0.0;
+  if index < bytes.len() && bytes[index] == b'.' {
+    let start = index;
+    index += 1;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+      index += 1;
+    }
+    if index == start + 1 {
+      return None;
+    }
+    frac = text[start..index].parse::<f64>().ok()?;
+    if !(0.0..1.0).contains(&frac) {
+      return None;
+    }
+  }
+
+  let current = TARGET_VALS[target_index];
+  let next = TARGET_VALS.get(target_index + 1).copied().unwrap_or(0.2);
+  let mut target = current + frac * (next - current);
+  if negative {
+    target = 2.0 * TARGET_VALS[0] - target;
+  }
+
+  Some((index, target))
+}
+
+fn parse_drop_like_main_arg(
+  main_arg: &str,
+  kind: ProgramKind,
+) -> Result<DropLikeMainArg, String> {
+  let trimmed = main_arg.trim();
+  if trimmed.is_empty() {
+    return Err(format!(
+      "built-in {} requires a main argument",
+      kind.as_str()
+    ));
+  }
+
+  let mut parsed = DropLikeMainArg {
+    mute_program_tone: false,
+    slide: false,
+    include_hold: false,
+    wake_enabled: false,
+    is_isochronic: false,
+    is_monaural: false,
+    step_len_sec: DEFAULT_PROGRAM_STEP_LEN_SEC,
+    carrier_base_hz: 200.0,
+    beat_target_hz: 2.5,
+    beat_start_hz: 10.0,
+    amp_pct: 100.0,
+    sig_l: 0.125,
+    sig_h: 0.0,
+    curve_overrides: Vec::new(),
+  };
+
+  let mut cursor = trimmed;
+  if let Some(rest) = cursor.strip_prefix('N').or_else(|| cursor.strip_prefix('n')) {
+    parsed.mute_program_tone = true;
+    parsed.carrier_base_hz = 200.0;
+    cursor = rest;
+  } else {
+    let level_end = cursor
+      .find(|ch: char| !(ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+'))
+      .unwrap_or(cursor.len());
+    let level = cursor[..level_end]
+      .parse::<f64>()
+      .map_err(|_| format!("invalid {} level prefix", kind.as_str()))?;
+    parsed.carrier_base_hz = 200.0 - 2.0 * level;
+    if !(parsed.carrier_base_hz.is_finite() && parsed.carrier_base_hz >= 0.0) {
+      return Err(format!(
+        "invalid {} carrier start derived from the level prefix",
+        kind.as_str()
+      ));
+    }
+    cursor = &cursor[level_end..];
+  }
+
+  let Some((target_len, beat_target_hz)) = parse_program_target_spec(cursor) else {
+    return Err(format!("invalid {} target spec", kind.as_str()));
+  };
+  parsed.beat_target_hz = beat_target_hz;
+  cursor = &cursor[target_len..];
+
+  let mut have_step_mode = false;
+  while !cursor.is_empty() {
+    let ch = cursor.chars().next().unwrap();
+    if ch.is_ascii_whitespace() {
+      cursor = &cursor[ch.len_utf8()..];
+      continue;
+    }
+
+    match ch {
+      's' | 'k' => {
+        if have_step_mode {
+          return Err(format!(
+            "duplicate step/slide flag in {} main argument",
+            kind.as_str()
+          ));
+        }
+        have_step_mode = true;
+        parsed.step_len_sec = SHORT_PROGRAM_STEP_LEN_SEC;
+        parsed.slide = ch == 's';
+        cursor = &cursor[1..];
+      }
+      '+' => {
+        parsed.include_hold = true;
+        cursor = &cursor[1..];
+      }
+      '^' => {
+        parsed.wake_enabled = true;
+        cursor = &cursor[1..];
+      }
+      '@' => {
+        parsed.is_isochronic = true;
+        cursor = &cursor[1..];
+      }
+      'M' => {
+        parsed.is_monaural = true;
+        cursor = &cursor[1..];
+      }
+      '/' => {
+        cursor = &cursor[1..];
+        let end = cursor
+          .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+          .unwrap_or(cursor.len());
+        let amp_pct = cursor[..end]
+          .parse::<f64>()
+          .map_err(|_| format!("invalid amplitude suffix in {} main argument", kind.as_str()))?;
+        if !amp_pct.is_finite() || amp_pct < 0.0 {
+          return Err(format!("invalid amplitude suffix in {} main argument", kind.as_str()));
+        }
+        parsed.amp_pct = amp_pct;
+        cursor = &cursor[end..];
+      }
+      ':' => {
+        cursor = &cursor[1..];
+        if let Some(rest) = cursor.strip_prefix("S=") {
+          let end = rest
+            .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+            .unwrap_or(rest.len());
+          let beat_start = rest[..end]
+            .parse::<f64>()
+            .map_err(|_| format!("invalid :S= value in {} main argument", kind.as_str()))?;
+          if !beat_start.is_finite() || beat_start <= 0.0 {
+            return Err(format!("invalid :S= value in {} main argument", kind.as_str()));
+          }
+          parsed.beat_start_hz = beat_start;
+          cursor = &rest[end..];
+          continue;
+        }
+
+        if kind == ProgramKind::Sigmoid
+          && ((cursor.starts_with("l=")) || cursor.starts_with("h="))
+        {
+          let which = cursor.as_bytes()[0] as char;
+          let rest = &cursor[2..];
+          let end = rest
+            .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+            .unwrap_or(rest.len());
+          let value = rest[..end]
+            .parse::<f64>()
+            .map_err(|_| format!("invalid :{}= value in sigmoid main argument", which))?;
+          if !value.is_finite() {
+            return Err(format!("invalid :{}= value in sigmoid main argument", which));
+          }
+          if which == 'l' {
+            parsed.sig_l = value;
+          } else {
+            parsed.sig_h = value;
+          }
+          cursor = &rest[end..];
+          continue;
+        }
+
+        if kind == ProgramKind::Curve {
+          let mut chars = cursor.chars();
+          let Some(first) = chars.next() else {
+            return Err("invalid curve parameter override name".to_string());
+          };
+          if !curve_name_char(first, true) {
+            return Err("invalid curve parameter override name".to_string());
+          }
+          let mut name_end = first.len_utf8();
+          for ch in chars {
+            if !curve_name_char(ch, false) {
+              break;
+            }
+            name_end += ch.len_utf8();
+          }
+          let name = &cursor[..name_end];
+          let rest = &cursor[name_end..];
+          let Some(rest) = rest.strip_prefix('=') else {
+            return Err("invalid curve parameter override syntax".to_string());
+          };
+          let value_end = rest
+            .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+            .unwrap_or(rest.len());
+          let value = rest[..value_end]
+            .parse::<f64>()
+            .map_err(|_| "invalid curve parameter override value".to_string())?;
+          if !value.is_finite() {
+            return Err("invalid curve parameter override value".to_string());
+          }
+          parsed.curve_overrides.push(CurveParameterOverride {
+            name: name.to_string(),
+            value,
+          });
+          cursor = &rest[value_end..];
+          continue;
+        }
+
+        return Err(format!(
+          "unsupported : option in {} main argument",
+          kind.as_str()
+        ));
+      }
+      _ => {
+        return Err(format!(
+          "trailing text in {} main argument",
+          kind.as_str()
+        ));
+      }
+    }
+  }
+
+  if parsed.is_monaural && parsed.is_isochronic {
+    return Err(format!(
+      "monaural mode cannot be combined with isochronic mode for {}",
+      kind.as_str()
+    ));
+  }
+
+  if parsed.mute_program_tone {
+    parsed.amp_pct = 0.0;
+  }
+
+  Ok(parsed)
+}
+
+fn parse_slide_main_arg(main_arg: &str) -> Result<SlideMainArg, String> {
+  let trimmed = main_arg.trim();
+  if trimmed.is_empty() {
+    return Err("built-in slide requires a main argument".to_string());
+  }
+
+  let carrier_end = trimmed
+    .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+    .unwrap_or(trimmed.len());
+  let carrier_hz = trimmed[..carrier_end]
+    .parse::<f64>()
+    .map_err(|_| "invalid slide carrier frequency".to_string())?;
+  if !carrier_hz.is_finite() || carrier_hz <= 0.0 {
+    return Err("invalid slide carrier frequency".to_string());
+  }
+
+  let mut cursor = &trimmed[carrier_end..];
+  let Some(signal) = cursor.chars().next() else {
+    return Err("slide expects +, -, @, or M between carrier and beat".to_string());
+  };
+  if !matches!(signal, '+' | '-' | '@' | 'M') {
+    return Err("slide expects +, -, @, or M between carrier and beat".to_string());
+  }
+  cursor = &cursor[1..];
+
+  let beat_end = cursor
+    .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+    .unwrap_or(cursor.len());
+  let beat_hz = cursor[..beat_end]
+    .parse::<f64>()
+    .map_err(|_| "invalid slide beat value".to_string())?;
+  if !beat_hz.is_finite() {
+    return Err("invalid slide beat value".to_string());
+  }
+  cursor = &cursor[beat_end..];
+
+  let Some(cursor_after_slash) = cursor.strip_prefix('/') else {
+    return Err("slide expects /<amp> after the beat value".to_string());
+  };
+  let amp_end = cursor_after_slash
+    .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+    .unwrap_or(cursor_after_slash.len());
+  let amp_pct = cursor_after_slash[..amp_end]
+    .parse::<f64>()
+    .map_err(|_| "invalid slide amplitude value".to_string())?;
+  if !amp_pct.is_finite() || amp_pct < 0.0 {
+    return Err("invalid slide amplitude value".to_string());
+  }
+  if !cursor_after_slash[amp_end..].trim().is_empty() {
+    return Err("trailing text in slide main argument".to_string());
+  }
+
+  Ok(SlideMainArg {
+    is_isochronic: signal == '@',
+    is_monaural: signal == 'M',
+    carrier_start_hz: carrier_hz,
+    carrier_end_hz: beat_hz / 2.0,
+    beat_hz: if signal == '-' { -beat_hz.abs() } else { beat_hz.abs() },
+    amp_pct,
+  })
+}
+
+fn fill_program_tone_spec(
+  api: &Api,
+  tone: &mut SbxToneSpec,
+  is_isochronic: bool,
+  is_monaural: bool,
+  carrier_hz: f64,
+  beat_hz: f64,
+  amp_pct: f64,
+) {
+  unsafe { (api.sbx_default_tone_spec)(tone) };
+  tone.mode = if is_isochronic {
+    SBX_TONE_ISOCHRONIC
+  } else if is_monaural {
+    SBX_TONE_MONAURAL
+  } else {
+    SBX_TONE_BINAURAL
+  };
+  tone.carrier_hz = carrier_hz;
+  tone.beat_hz = beat_hz;
+  tone.amplitude = amp_pct / 100.0;
+  tone.waveform = SBX_WAVE_SINE;
 }
 
 fn collect_validation_diagnostics(
@@ -975,25 +1664,17 @@ fn open_file_read_binary(path: &Path) -> Result<*mut FILE, String> {
 
 fn open_mix_input_resource(
   api: &Api,
-  preamble: &SbxSafeSeqfilePreamble,
   source_name: &str,
   output_rate_hz: i32,
   output_rate_is_default: bool,
-  mix_spec_override: Option<&str>,
+  mix_spec: &str,
 ) -> Result<(Option<MixInputResource>, f64), String> {
-  let mix_spec = if let Some(mix_spec) = mix_spec_override {
-    mix_spec.trim().to_string()
-  } else if preamble.mix_path.is_null() {
-    String::new()
-  } else {
-    cstr_to_string(preamble.mix_path)
-  };
-
+  let mix_spec = mix_spec.trim();
   if mix_spec.is_empty() {
     return Ok((None, output_rate_hz as f64));
   }
 
-  let (resolved_path, mix_section) = resolve_mix_input_path(source_name, &mix_spec)?;
+  let (resolved_path, mix_section) = resolve_mix_input_path(source_name, mix_spec)?;
   let file = open_file_read_binary(&resolved_path)?;
   let mut cfg = SbxMixInputConfig {
     mix_section: -1,
@@ -1029,6 +1710,29 @@ fn open_mix_input_resource(
 
   let effective_rate_hz = unsafe { (api.sbx_mix_input_output_rate)(handle) } as f64;
   Ok((Some(MixInputResource { handle }), effective_rate_hz))
+}
+
+fn open_mix_input_from_preamble(
+  api: &Api,
+  preamble: &SbxSafeSeqfilePreamble,
+  source_name: &str,
+  output_rate_hz: i32,
+  output_rate_is_default: bool,
+  mix_spec_override: Option<&str>,
+) -> Result<(Option<MixInputResource>, f64), String> {
+  let mix_spec = if let Some(mix_spec) = mix_spec_override {
+    mix_spec.trim().to_string()
+  } else if preamble.mix_path.is_null() {
+    String::new()
+  } else {
+    cstr_to_string(preamble.mix_path)
+  };
+
+  if mix_spec.is_empty() {
+    return Ok((None, output_rate_hz as f64));
+  }
+
+  open_mix_input_resource(api, source_name, output_rate_hz, output_rate_is_default, &mix_spec)
 }
 
 fn preview_path() -> Result<PathBuf, String> {
@@ -1116,7 +1820,7 @@ fn load_sbg_context_with_rate(
   };
   let output_rate_is_default = sample_rate_override.is_none() && preamble.have_r == 0;
   let (mix_input, effective_rate_hz) = if enable_mix_input {
-    open_mix_input_resource(
+    open_mix_input_from_preamble(
       &api,
       &preamble,
       source_name,
@@ -1207,6 +1911,593 @@ fn load_sbg_context_for_audio(
   sample_rate_override: Option<f64>,
 ) -> Result<LoadedSbgContext, String> {
   load_sbg_context_with_rate(text, source_name, mix_path_override, sample_rate_override, true)
+}
+
+fn create_runtime_context_from_keyframes(
+  api: &Api,
+  engine_cfg: SbxEngineConfig,
+  frames: *const SbxProgramKeyframe,
+  frame_count: usize,
+  mix_frames: *const SbxMixAmpKeyframe,
+  mix_frame_count: usize,
+) -> Result<(*mut SbxContext, f64), String> {
+  let mut runtime_cfg = SbxRuntimeContextConfig {
+    engine: engine_cfg,
+    mix_kfs: std::ptr::null(),
+    mix_kf_count: 0,
+    default_mix_amp_pct: 0.0,
+    mix_fx: std::ptr::null(),
+    mix_fx_count: 0,
+    aux_tones: std::ptr::null(),
+    aux_count: 0,
+    mix_mod: std::ptr::null(),
+    amp_adjust: std::ptr::null(),
+  };
+  unsafe { (api.sbx_default_runtime_context_config)(&mut runtime_cfg) };
+  runtime_cfg.engine = engine_cfg;
+  runtime_cfg.mix_kfs = mix_frames;
+  runtime_cfg.mix_kf_count = mix_frame_count;
+  runtime_cfg.default_mix_amp_pct = 100.0;
+
+  let mut duration_sec = 0.0;
+  let mut ctx: *mut SbxContext = std::ptr::null_mut();
+  let rc = unsafe {
+    (api.sbx_runtime_context_create_from_keyframes)(
+      frames,
+      frame_count,
+      0,
+      &runtime_cfg,
+      &mut duration_sec,
+      &mut ctx,
+    )
+  };
+  if rc != SBX_OK || ctx.is_null() {
+    let msg = if !ctx.is_null() {
+      unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) }
+    } else {
+      String::new()
+    };
+    if !ctx.is_null() {
+      unsafe { (api.sbx_context_destroy)(ctx) };
+    }
+    return Err(if msg.is_empty() {
+      "failed to create built-in program runtime".to_string()
+    } else {
+      msg
+    });
+  }
+
+  Ok((ctx, duration_sec))
+}
+
+fn create_runtime_context_from_curve_program(
+  api: &Api,
+  engine_cfg: SbxEngineConfig,
+  curve: *mut SbxCurveProgram,
+  source_cfg: &SbxCurveSourceConfig,
+) -> Result<(*mut SbxContext, f64), String> {
+  let mut runtime_cfg = SbxRuntimeContextConfig {
+    engine: engine_cfg,
+    mix_kfs: std::ptr::null(),
+    mix_kf_count: 0,
+    default_mix_amp_pct: 0.0,
+    mix_fx: std::ptr::null(),
+    mix_fx_count: 0,
+    aux_tones: std::ptr::null(),
+    aux_count: 0,
+    mix_mod: std::ptr::null(),
+    amp_adjust: std::ptr::null(),
+  };
+  unsafe { (api.sbx_default_runtime_context_config)(&mut runtime_cfg) };
+  runtime_cfg.engine = engine_cfg;
+  runtime_cfg.default_mix_amp_pct = 100.0;
+
+  let mut duration_sec = 0.0;
+  let mut ctx: *mut SbxContext = std::ptr::null_mut();
+  let rc = unsafe {
+    (api.sbx_runtime_context_create_from_curve_program)(
+      curve,
+      source_cfg,
+      &runtime_cfg,
+      &mut duration_sec,
+      &mut ctx,
+    )
+  };
+  if rc != SBX_OK || ctx.is_null() {
+    let msg = if !ctx.is_null() {
+      unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) }
+    } else {
+      String::new()
+    };
+    if !ctx.is_null() {
+      unsafe { (api.sbx_context_destroy)(ctx) };
+    }
+    return Err(if msg.is_empty() {
+      "failed to create built-in curve runtime".to_string()
+    } else {
+      msg
+    });
+  }
+
+  Ok((ctx, duration_sec))
+}
+
+fn load_program_context_with_rate(
+  request: &ProgramRuntimeRequest,
+  sample_rate_override: Option<f64>,
+  enable_mix_input: bool,
+) -> Result<LoadedProgramContext, String> {
+  let api = Api::load()?;
+  let source_name = if request.source_name.trim().is_empty() {
+    program_default_source_name(request.kind)
+  } else {
+    request.source_name.clone()
+  };
+
+  let mut engine_cfg = SbxEngineConfig {
+    sample_rate: 0.0,
+    channels: 0,
+  };
+  unsafe { (api.sbx_default_engine_config)(&mut engine_cfg) };
+
+  let requested_rate_hz = sample_rate_override
+    .map(|rate| rate.round() as i32)
+    .unwrap_or(44_100);
+  let output_rate_is_default = sample_rate_override.is_none();
+  let (mix_input, effective_rate_hz) = if enable_mix_input {
+    open_mix_input_resource(
+      &api,
+      &source_name,
+      requested_rate_hz,
+      output_rate_is_default,
+      request.mix_path.as_deref().unwrap_or(""),
+    )?
+  } else {
+    (None, requested_rate_hz as f64)
+  };
+  engine_cfg.sample_rate = effective_rate_hz;
+
+  let (ctx, _duration_sec) = match request.kind {
+    ProgramKind::Slide => {
+      if request.drop_time_sec <= 0 {
+        return Err("slide duration must be greater than zero".to_string());
+      }
+      let parsed = parse_slide_main_arg(&request.main_arg)?;
+      let mut prog_cfg = SbxBuiltinSlideConfig {
+        start_tone: unsafe { std::mem::zeroed() },
+        carrier_end_hz: 0.0,
+        slide_sec: 0,
+        fade_sec: 0.0,
+      };
+      unsafe { (api.sbx_default_builtin_slide_config)(&mut prog_cfg) };
+      fill_program_tone_spec(
+        &api,
+        &mut prog_cfg.start_tone,
+        parsed.is_isochronic,
+        parsed.is_monaural,
+        parsed.carrier_start_hz,
+        parsed.beat_hz,
+        parsed.amp_pct,
+      );
+      prog_cfg.carrier_end_hz = parsed.carrier_end_hz;
+      prog_cfg.slide_sec = request.drop_time_sec;
+
+      let mut raw_frames: *mut SbxProgramKeyframe = std::ptr::null_mut();
+      let mut frame_count = 0usize;
+      let build_status =
+        unsafe { (api.sbx_build_slide_keyframes)(&prog_cfg, &mut raw_frames, &mut frame_count) };
+      if build_status != SBX_OK || raw_frames.is_null() {
+        return Err("failed to build the built-in slide program".to_string());
+      }
+
+      let result = create_runtime_context_from_keyframes(
+        &api,
+        engine_cfg,
+        raw_frames,
+        frame_count,
+        std::ptr::null(),
+        0,
+      );
+      unsafe { free(raw_frames as *mut c_void) };
+      result?
+    }
+    ProgramKind::Drop | ProgramKind::Sigmoid | ProgramKind::Curve => {
+      if request.drop_time_sec <= 0 {
+        return Err("drop-time must be greater than zero".to_string());
+      }
+
+      let parsed = parse_drop_like_main_arg(&request.main_arg, request.kind)?;
+      let hold_sec = if parsed.include_hold {
+        request.hold_time_sec.max(0)
+      } else {
+        0
+      };
+      let wake_sec = if parsed.wake_enabled {
+        request.wake_time_sec.max(0)
+      } else {
+        0
+      };
+      let main_sec = request.drop_time_sec + hold_sec;
+      let carrier_start_hz = parsed.carrier_base_hz + 5.0;
+      let carrier_end_hz = if parsed.include_hold {
+        parsed.carrier_base_hz
+          - (5.0 * f64::from(hold_sec) / f64::from(request.drop_time_sec))
+      } else {
+        parsed.carrier_base_hz
+      };
+
+      match request.kind {
+        ProgramKind::Drop | ProgramKind::Sigmoid if parsed.slide => {
+          let mut raw_curve: *mut SbxCurveProgram = std::ptr::null_mut();
+          let build_status = if request.kind == ProgramKind::Drop {
+            let mut prog_cfg = SbxBuiltinDropConfig {
+              start_tone: unsafe { std::mem::zeroed() },
+              carrier_end_hz: 0.0,
+              beat_target_hz: 0.0,
+              drop_sec: 0,
+              hold_sec: 0,
+              wake_sec: 0,
+              slide: 0,
+              step_len_sec: 0,
+              fade_sec: 0.0,
+            };
+            unsafe { (api.sbx_default_builtin_drop_config)(&mut prog_cfg) };
+            fill_program_tone_spec(
+              &api,
+              &mut prog_cfg.start_tone,
+              parsed.is_isochronic,
+              parsed.is_monaural,
+              carrier_start_hz,
+              parsed.beat_start_hz,
+              parsed.amp_pct,
+            );
+            prog_cfg.carrier_end_hz = carrier_end_hz;
+            prog_cfg.beat_target_hz = parsed.beat_target_hz;
+            prog_cfg.drop_sec = request.drop_time_sec;
+            prog_cfg.hold_sec = hold_sec;
+            prog_cfg.wake_sec = wake_sec;
+            prog_cfg.slide = 1;
+            prog_cfg.step_len_sec = parsed.step_len_sec;
+            unsafe { (api.sbx_build_drop_curve_program)(&prog_cfg, &mut raw_curve) }
+          } else {
+            let mut prog_cfg = SbxBuiltinSigmoidConfig {
+              start_tone: unsafe { std::mem::zeroed() },
+              carrier_end_hz: 0.0,
+              beat_target_hz: 0.0,
+              drop_sec: 0,
+              hold_sec: 0,
+              wake_sec: 0,
+              slide: 0,
+              step_len_sec: 0,
+              fade_sec: 0.0,
+              sig_l: 0.0,
+              sig_h: 0.0,
+            };
+            unsafe { (api.sbx_default_builtin_sigmoid_config)(&mut prog_cfg) };
+            fill_program_tone_spec(
+              &api,
+              &mut prog_cfg.start_tone,
+              parsed.is_isochronic,
+              parsed.is_monaural,
+              carrier_start_hz,
+              parsed.beat_start_hz,
+              parsed.amp_pct,
+            );
+            prog_cfg.carrier_end_hz = carrier_end_hz;
+            prog_cfg.beat_target_hz = parsed.beat_target_hz;
+            prog_cfg.drop_sec = request.drop_time_sec;
+            prog_cfg.hold_sec = hold_sec;
+            prog_cfg.wake_sec = wake_sec;
+            prog_cfg.slide = 1;
+            prog_cfg.step_len_sec = parsed.step_len_sec;
+            prog_cfg.sig_l = parsed.sig_l;
+            prog_cfg.sig_h = parsed.sig_h;
+            unsafe { (api.sbx_build_sigmoid_curve_program)(&prog_cfg, &mut raw_curve) }
+          };
+
+          if build_status != SBX_OK || raw_curve.is_null() {
+            return Err(format!(
+              "failed to build the built-in {} runtime",
+              request.kind.as_str()
+            ));
+          }
+
+          let mut source_cfg = SbxCurveSourceConfig {
+            mode: 0,
+            waveform: 0,
+            duty_cycle: 0.0,
+            iso_start: 0.0,
+            iso_attack: 0.0,
+            iso_release: 0.0,
+            iso_edge_mode: 0,
+            amplitude: 0.0,
+            duration_sec: 0.0,
+            loop_: 0,
+          };
+          unsafe { (api.sbx_default_curve_source_config)(&mut source_cfg) };
+          source_cfg.mode = if parsed.is_isochronic {
+            SBX_TONE_ISOCHRONIC
+          } else if parsed.is_monaural {
+            SBX_TONE_MONAURAL
+          } else {
+            SBX_TONE_BINAURAL
+          };
+          source_cfg.waveform = SBX_WAVE_SINE;
+          source_cfg.amplitude = 1.0;
+          source_cfg.duration_sec = f64::from(main_sec + wake_sec) + 10.0;
+
+          let result =
+            create_runtime_context_from_curve_program(&api, engine_cfg, raw_curve, &source_cfg);
+          if result.is_err() {
+            unsafe { (api.sbx_curve_destroy)(raw_curve) };
+          }
+          result?
+        }
+        ProgramKind::Drop | ProgramKind::Sigmoid => {
+          let mut raw_frames: *mut SbxProgramKeyframe = std::ptr::null_mut();
+          let mut frame_count = 0usize;
+          let build_status = if request.kind == ProgramKind::Drop {
+            let mut prog_cfg = SbxBuiltinDropConfig {
+              start_tone: unsafe { std::mem::zeroed() },
+              carrier_end_hz: 0.0,
+              beat_target_hz: 0.0,
+              drop_sec: 0,
+              hold_sec: 0,
+              wake_sec: 0,
+              slide: 0,
+              step_len_sec: 0,
+              fade_sec: 0.0,
+            };
+            unsafe { (api.sbx_default_builtin_drop_config)(&mut prog_cfg) };
+            fill_program_tone_spec(
+              &api,
+              &mut prog_cfg.start_tone,
+              parsed.is_isochronic,
+              parsed.is_monaural,
+              carrier_start_hz,
+              parsed.beat_start_hz,
+              parsed.amp_pct,
+            );
+            prog_cfg.carrier_end_hz = carrier_end_hz;
+            prog_cfg.beat_target_hz = parsed.beat_target_hz;
+            prog_cfg.drop_sec = request.drop_time_sec;
+            prog_cfg.hold_sec = hold_sec;
+            prog_cfg.wake_sec = wake_sec;
+            prog_cfg.slide = 0;
+            prog_cfg.step_len_sec = parsed.step_len_sec;
+            unsafe { (api.sbx_build_drop_keyframes)(&prog_cfg, &mut raw_frames, &mut frame_count) }
+          } else {
+            let mut prog_cfg = SbxBuiltinSigmoidConfig {
+              start_tone: unsafe { std::mem::zeroed() },
+              carrier_end_hz: 0.0,
+              beat_target_hz: 0.0,
+              drop_sec: 0,
+              hold_sec: 0,
+              wake_sec: 0,
+              slide: 0,
+              step_len_sec: 0,
+              fade_sec: 0.0,
+              sig_l: 0.0,
+              sig_h: 0.0,
+            };
+            unsafe { (api.sbx_default_builtin_sigmoid_config)(&mut prog_cfg) };
+            fill_program_tone_spec(
+              &api,
+              &mut prog_cfg.start_tone,
+              parsed.is_isochronic,
+              parsed.is_monaural,
+              carrier_start_hz,
+              parsed.beat_start_hz,
+              parsed.amp_pct,
+            );
+            prog_cfg.carrier_end_hz = carrier_end_hz;
+            prog_cfg.beat_target_hz = parsed.beat_target_hz;
+            prog_cfg.drop_sec = request.drop_time_sec;
+            prog_cfg.hold_sec = hold_sec;
+            prog_cfg.wake_sec = wake_sec;
+            prog_cfg.slide = 0;
+            prog_cfg.step_len_sec = parsed.step_len_sec;
+            prog_cfg.sig_l = parsed.sig_l;
+            prog_cfg.sig_h = parsed.sig_h;
+            unsafe {
+              (api.sbx_build_sigmoid_keyframes)(&prog_cfg, &mut raw_frames, &mut frame_count)
+            }
+          };
+          if build_status != SBX_OK || raw_frames.is_null() {
+            return Err(format!(
+              "failed to build the built-in {} keyframes",
+              request.kind.as_str()
+            ));
+          }
+
+          let result = create_runtime_context_from_keyframes(
+            &api,
+            engine_cfg,
+            raw_frames,
+            frame_count,
+            std::ptr::null(),
+            0,
+          );
+          unsafe { free(raw_frames as *mut c_void) };
+          result?
+        }
+        ProgramKind::Curve => {
+          let curve_text = request
+            .curve_text
+            .as_deref()
+            .ok_or_else(|| "the curve program requires .sbgf source text".to_string())?;
+          if curve_text.trim().is_empty() {
+            return Err("the curve program requires .sbgf source text".to_string());
+          }
+
+          let curve = unsafe { (api.sbx_curve_create)() };
+          if curve.is_null() {
+            return Err("failed to create sbagenxlib curve program".to_string());
+          }
+
+          let c_curve_text =
+            CString::new(curve_text).map_err(|_| "curve text contains embedded NUL byte".to_string())?;
+          let c_source = CString::new(source_name.as_str())
+            .map_err(|_| "curve source name contains embedded NUL byte".to_string())?;
+          let load_rc = unsafe { (api.sbx_curve_load_text)(curve, c_curve_text.as_ptr(), c_source.as_ptr()) };
+          if load_rc != SBX_OK {
+            let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+            unsafe { (api.sbx_curve_destroy)(curve) };
+            return Err(if msg.is_empty() {
+              "failed to load .sbgf curve text".to_string()
+            } else {
+              msg
+            });
+          }
+
+          for override_value in &parsed.curve_overrides {
+            let c_name = CString::new(override_value.name.as_str())
+              .map_err(|_| "curve parameter name contains embedded NUL byte".to_string())?;
+            let rc =
+              unsafe { (api.sbx_curve_set_param)(curve, c_name.as_ptr(), override_value.value) };
+            if rc != SBX_OK {
+              let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+              unsafe { (api.sbx_curve_destroy)(curve) };
+              return Err(if msg.is_empty() {
+                "failed to apply a curve parameter override".to_string()
+              } else {
+                msg
+              });
+            }
+          }
+
+          let mut eval_cfg = SbxCurveEvalConfig {
+            carrier_start_hz: 0.0,
+            carrier_end_hz: 0.0,
+            carrier_span_sec: 0.0,
+            beat_start_hz: 0.0,
+            beat_target_hz: 0.0,
+            beat_span_sec: 0.0,
+            hold_min: 0.0,
+            total_min: 0.0,
+            wake_min: 0.0,
+            beat_amp0_pct: 0.0,
+            mix_amp0_pct: 0.0,
+          };
+          unsafe { (api.sbx_default_curve_eval_config)(&mut eval_cfg) };
+          eval_cfg.carrier_start_hz = carrier_start_hz;
+          eval_cfg.carrier_end_hz = carrier_end_hz;
+          eval_cfg.carrier_span_sec = f64::from(main_sec);
+          eval_cfg.beat_start_hz = parsed.beat_start_hz;
+          eval_cfg.beat_target_hz = parsed.beat_target_hz;
+          eval_cfg.beat_span_sec = f64::from(request.drop_time_sec);
+          eval_cfg.hold_min = f64::from(hold_sec) / 60.0;
+          eval_cfg.total_min = f64::from(main_sec) / 60.0;
+          eval_cfg.wake_min = f64::from(wake_sec) / 60.0;
+          eval_cfg.beat_amp0_pct = parsed.amp_pct;
+          eval_cfg.mix_amp0_pct = 100.0;
+
+          let prepare_rc = unsafe { (api.sbx_curve_prepare)(curve, &eval_cfg) };
+          if prepare_rc != SBX_OK {
+            let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+            unsafe { (api.sbx_curve_destroy)(curve) };
+            return Err(if msg.is_empty() {
+              "failed to prepare the .sbgf curve".to_string()
+            } else {
+              msg
+            });
+          }
+
+          if parsed.slide {
+            let mut source_cfg = SbxCurveSourceConfig {
+              mode: 0,
+              waveform: 0,
+              duty_cycle: 0.0,
+              iso_start: 0.0,
+              iso_attack: 0.0,
+              iso_release: 0.0,
+              iso_edge_mode: 0,
+              amplitude: 0.0,
+              duration_sec: 0.0,
+              loop_: 0,
+            };
+            unsafe { (api.sbx_default_curve_source_config)(&mut source_cfg) };
+            source_cfg.mode = if parsed.is_isochronic {
+              SBX_TONE_ISOCHRONIC
+            } else if parsed.is_monaural {
+              SBX_TONE_MONAURAL
+            } else {
+              SBX_TONE_BINAURAL
+            };
+            source_cfg.waveform = SBX_WAVE_SINE;
+            source_cfg.amplitude = 1.0;
+            source_cfg.duration_sec = f64::from(main_sec + wake_sec) + 10.0;
+
+            let result =
+              create_runtime_context_from_curve_program(&api, engine_cfg, curve, &source_cfg);
+            if result.is_err() {
+              unsafe { (api.sbx_curve_destroy)(curve) };
+            }
+            result?
+          } else {
+            let mut timeline_cfg = SbxCurveTimelineConfig {
+              start_tone: unsafe { std::mem::zeroed() },
+              sample_span_sec: 0,
+              main_span_sec: 0,
+              wake_sec: 0,
+              step_len_sec: 0,
+              slide: 0,
+              mute_program_tone: 0,
+              fade_sec: 0.0,
+            };
+            unsafe { (api.sbx_default_curve_timeline_config)(&mut timeline_cfg) };
+            fill_program_tone_spec(
+              &api,
+              &mut timeline_cfg.start_tone,
+              parsed.is_isochronic,
+              parsed.is_monaural,
+              carrier_start_hz,
+              parsed.beat_start_hz,
+              parsed.amp_pct,
+            );
+            timeline_cfg.sample_span_sec = request.drop_time_sec;
+            timeline_cfg.main_span_sec = main_sec;
+            timeline_cfg.wake_sec = wake_sec;
+            timeline_cfg.step_len_sec = parsed.step_len_sec;
+            timeline_cfg.slide = 0;
+            timeline_cfg.mute_program_tone = if parsed.mute_program_tone { 1 } else { 0 };
+
+            let mut timeline = SbxCurveTimeline {
+              program_frames: std::ptr::null_mut(),
+              program_frame_count: 0,
+              mix_frames: std::ptr::null_mut(),
+              mix_frame_count: 0,
+            };
+            let timeline_rc =
+              unsafe { (api.sbx_build_curve_timeline)(curve, &timeline_cfg, &mut timeline) };
+            unsafe { (api.sbx_curve_destroy)(curve) };
+            if timeline_rc != SBX_OK {
+              return Err("failed to build the stepped curve runtime".to_string());
+            }
+
+            let result = create_runtime_context_from_keyframes(
+              &api,
+              engine_cfg,
+              timeline.program_frames,
+              timeline.program_frame_count,
+              timeline.mix_frames,
+              timeline.mix_frame_count,
+            );
+            unsafe { (api.sbx_free_curve_timeline)(&mut timeline) };
+            result?
+          }
+        }
+        ProgramKind::Slide => unreachable!(),
+      }
+    }
+  };
+
+  Ok(LoadedProgramContext {
+    api,
+    ctx,
+    engine_cfg,
+    mix_input,
+  })
 }
 
 fn writer_config_for_path(
@@ -1349,7 +2640,10 @@ fn render_context_to_path(
     let frames = remaining_frames.min(RENDER_CHUNK_FRAMES);
     let sample_count = frames * channels;
     let rendered_frames = match render_frames_with_mix(
-      &mut loaded,
+      &loaded.api,
+      loaded.ctx,
+      &loaded.engine_cfg,
+      &mut loaded.mix_input,
       &mut mix_buf,
       &mut fbuf[..sample_count],
       frames,
@@ -1485,6 +2779,346 @@ fn render_context_to_path(
   Ok((render_sec, limited, format_name, loaded.api.version_string()))
 }
 
+fn writer_config_for_program_path(
+  loaded: &LoadedProgramContext,
+  out_path: &Path,
+) -> Result<(SbxAudioWriterConfig, &'static str), String> {
+  let (format, format_name) = format_from_path(out_path)?;
+  let mut cfg = SbxAudioWriterConfig {
+    sample_rate: 0.0,
+    channels: 0,
+    format: 0,
+    pcm_bits: 0,
+    ogg_quality: 0.0,
+    ogg_quality_set: 0,
+    flac_compression: 0.0,
+    flac_compression_set: 0,
+    mp3_bitrate: 0,
+    mp3_bitrate_set: 0,
+    mp3_quality: 0,
+    mp3_quality_set: 0,
+    mp3_vbr_quality: 0.0,
+    mp3_vbr_quality_set: 0,
+    prefer_float_input: 0,
+  };
+  unsafe { (loaded.api.sbx_default_audio_writer_config)(&mut cfg) };
+  cfg.sample_rate = loaded.engine_cfg.sample_rate;
+  cfg.channels = loaded.engine_cfg.channels;
+  cfg.format = format;
+  cfg.prefer_float_input = 1;
+  if format == SBX_AUDIO_FILE_WAV {
+    cfg.pcm_bits = 16;
+  }
+  Ok((cfg, format_name))
+}
+
+fn render_program_context_to_path(
+  mut loaded: LoadedProgramContext,
+  out_path: &Path,
+) -> Result<(f64, &'static str, String), String> {
+  let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
+  let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
+  if is_looping || !duration_sec.is_finite() || duration_sec <= 0.0 {
+    return Err("GUI export currently requires a finite non-looping program duration".to_string());
+  }
+
+  let (writer_cfg, format_name) = writer_config_for_program_path(&loaded, out_path)?;
+  let out_path_str = out_path.to_string_lossy().to_string();
+  let c_out_path = CString::new(out_path_str.clone())
+    .map_err(|_| "output path contains embedded NUL byte".to_string())?;
+  let writer = unsafe { (loaded.api.sbx_audio_writer_create_path)(c_out_path.as_ptr(), &writer_cfg) };
+  if writer.is_null() {
+    return Err(format!("failed to create audio writer for {}", out_path.display()));
+  }
+
+  let mut pcm_state = SbxPcmConvertState {
+    rng_state: 0,
+    dither_mode: 0,
+  };
+  unsafe { (loaded.api.sbx_default_pcm_convert_state)(&mut pcm_state) };
+
+  let channels = loaded.engine_cfg.channels as usize;
+  let mut fbuf = vec![0.0_f32; RENDER_CHUNK_FRAMES * channels];
+  let mut s16buf = vec![0_i16; RENDER_CHUNK_FRAMES * channels];
+  let mut i32buf = vec![0_i32; RENDER_CHUNK_FRAMES * channels];
+  let mut mix_buf = Vec::<i32>::new();
+  let mut bytebuf = Vec::<u8>::with_capacity(RENDER_CHUNK_FRAMES * channels * 3);
+  let mut remaining_frames = (duration_sec * loaded.engine_cfg.sample_rate).ceil() as usize;
+  let input_mode = unsafe { (loaded.api.sbx_audio_writer_input_mode)(writer) };
+  let mut writer_error: Option<String> = None;
+
+  while remaining_frames > 0 {
+    let frames = remaining_frames.min(RENDER_CHUNK_FRAMES);
+    let sample_count = frames * channels;
+    let rendered_frames = match render_frames_with_mix(
+      &loaded.api,
+      loaded.ctx,
+      &loaded.engine_cfg,
+      &mut loaded.mix_input,
+      &mut mix_buf,
+      &mut fbuf[..sample_count],
+      frames,
+      1.0,
+    ) {
+      Ok(rendered_frames) => rendered_frames,
+      Err(err) => {
+        writer_error = Some(err);
+        break;
+      }
+    };
+    if rendered_frames == 0 {
+      break;
+    }
+
+    let write_rc = match input_mode {
+      SBX_AUDIO_WRITER_INPUT_F32 => unsafe {
+        (loaded.api.sbx_audio_writer_write_f32)(writer, fbuf.as_ptr(), rendered_frames)
+      },
+      SBX_AUDIO_WRITER_INPUT_S16 => {
+        let rc = unsafe {
+          (loaded.api.sbx_convert_f32_to_s16_ex)(
+            fbuf.as_ptr(),
+            s16buf.as_mut_ptr(),
+            rendered_frames * channels,
+            &mut pcm_state,
+          )
+        };
+        if rc != SBX_OK {
+          writer_error = Some("sbagenxlib PCM16 conversion failed".to_string());
+          break;
+        }
+        unsafe {
+          (loaded.api.sbx_audio_writer_write_s16)(writer, s16buf.as_ptr(), rendered_frames)
+        }
+      }
+      SBX_AUDIO_WRITER_INPUT_I32 => {
+        let rc = unsafe {
+          (loaded.api.sbx_convert_f32_to_s24_32)(
+            fbuf.as_ptr(),
+            i32buf.as_mut_ptr(),
+            rendered_frames * channels,
+            &mut pcm_state,
+          )
+        };
+        if rc != SBX_OK {
+          writer_error = Some("sbagenxlib PCM24 conversion failed".to_string());
+          break;
+        }
+        unsafe {
+          (loaded.api.sbx_audio_writer_write_i32)(writer, i32buf.as_ptr(), rendered_frames)
+        }
+      }
+      SBX_AUDIO_WRITER_INPUT_BYTES => match writer_cfg.pcm_bits {
+        16 => {
+          let rc = unsafe {
+            (loaded.api.sbx_convert_f32_to_s16_ex)(
+              fbuf.as_ptr(),
+              s16buf.as_mut_ptr(),
+              rendered_frames * channels,
+              &mut pcm_state,
+            )
+          };
+          if rc != SBX_OK {
+            writer_error = Some("sbagenxlib PCM16 conversion failed".to_string());
+            break;
+          }
+          unsafe {
+            (loaded.api.sbx_audio_writer_write_bytes)(
+              writer,
+              s16buf.as_ptr() as *const c_void,
+              rendered_frames * channels * std::mem::size_of::<i16>(),
+            )
+          }
+        }
+        24 => {
+          let rc = unsafe {
+            (loaded.api.sbx_convert_f32_to_s24_32)(
+              fbuf.as_ptr(),
+              i32buf.as_mut_ptr(),
+              rendered_frames * channels,
+              &mut pcm_state,
+            )
+          };
+          if rc != SBX_OK {
+            writer_error = Some("sbagenxlib PCM24 conversion failed".to_string());
+            break;
+          }
+          pack_s24le_from_i32(&i32buf, &mut bytebuf, rendered_frames * channels);
+          unsafe {
+            (loaded.api.sbx_audio_writer_write_bytes)(
+              writer,
+              bytebuf.as_ptr() as *const c_void,
+              bytebuf.len(),
+            )
+          }
+        }
+        other => {
+          writer_error = Some(format!("unsupported byte-output PCM depth: {}", other));
+          break;
+        }
+      },
+      other => {
+        writer_error = Some(format!("unsupported sbagenxlib writer input mode: {}", other));
+        break;
+      }
+    };
+
+    if write_rc != SBX_OK {
+      writer_error = Some(unsafe { cstr_to_string((loaded.api.sbx_audio_writer_last_error)(writer)) });
+      break;
+    }
+
+    remaining_frames -= rendered_frames;
+  }
+
+  let close_rc = unsafe { (loaded.api.sbx_audio_writer_close)(writer) };
+  if writer_error.is_none() && close_rc != SBX_OK {
+    writer_error = Some(unsafe { cstr_to_string((loaded.api.sbx_audio_writer_last_error)(writer)) });
+  }
+  unsafe { (loaded.api.sbx_audio_writer_destroy)(writer) };
+
+  if let Some(err) = writer_error {
+    return Err(if err.is_empty() {
+      format!("failed to render audio to {}", out_path.display())
+    } else {
+      err
+    });
+  }
+
+  Ok((duration_sec, format_name, loaded.api.version_string()))
+}
+
+fn sample_context_beat_preview(api: &Api, ctx: *mut SbxContext) -> Result<BeatPreviewOutcome, String> {
+  let duration_sec = unsafe { (api.sbx_context_duration_sec)(ctx) };
+  let is_looping = unsafe { (api.sbx_context_is_looping)(ctx) } != 0;
+  let voice_count = unsafe { (api.sbx_context_voice_count)(ctx) };
+  let mut sample_span_sec = duration_sec;
+  let mut limited = false;
+
+  if is_looping || sample_span_sec <= 0.0 {
+    sample_span_sec = PREVIEW_LIMIT_SEC;
+    limited = true;
+  }
+
+  if !sample_span_sec.is_finite() || sample_span_sec <= 0.0 {
+    return Err("beat preview currently requires a finite timeline".to_string());
+  }
+
+  let sample_count = 240usize;
+  let mut min_hz = f64::INFINITY;
+  let mut max_hz = f64::NEG_INFINITY;
+  let mut series = Vec::with_capacity(voice_count.max(1));
+  for voice_index in 0..voice_count.max(1) {
+    let mut t_sec = vec![0.0_f64; sample_count];
+    let mut hz = vec![0.0_f64; sample_count];
+    let mut tones = vec![
+      SbxToneSpec {
+        mode: 0,
+        carrier_hz: 0.0,
+        beat_hz: 0.0,
+        amplitude: 0.0,
+        waveform: 0,
+        envelope_waveform: 0,
+        duty_cycle: 0.0,
+        iso_start: 0.0,
+        iso_attack: 0.0,
+        iso_release: 0.0,
+        iso_edge_mode: 0,
+      };
+      sample_count
+    ];
+    let beat_rc = unsafe {
+      (api.sbx_context_sample_program_beat_voice)(
+        ctx,
+        voice_index,
+        0.0,
+        sample_span_sec,
+        sample_count,
+        t_sec.as_mut_ptr(),
+        hz.as_mut_ptr(),
+      )
+    };
+    if beat_rc != SBX_OK {
+      let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
+      return Err(if msg.is_empty() {
+        "failed to sample beat preview from sbagenxlib".to_string()
+      } else {
+        msg
+      });
+    }
+
+    let tone_rc = unsafe {
+      (api.sbx_context_sample_tones_voice)(
+        ctx,
+        voice_index,
+        0.0,
+        sample_span_sec,
+        sample_count,
+        std::ptr::null_mut(),
+        tones.as_mut_ptr(),
+      )
+    };
+    if tone_rc != SBX_OK {
+      let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
+      return Err(if msg.is_empty() {
+        "failed to sample tone activity from sbagenxlib".to_string()
+      } else {
+        msg
+      });
+    }
+
+    let mut points = Vec::with_capacity(sample_count);
+    let mut active_sample_count = 0usize;
+    for index in 0..sample_count {
+      let tone = tones[index];
+      let beat_hz = if tone.mode == 0 {
+        None
+      } else {
+        let beat_hz = hz[index];
+        if beat_hz.is_finite() {
+          active_sample_count += 1;
+          if beat_hz < min_hz {
+            min_hz = beat_hz;
+          }
+          if beat_hz > max_hz {
+            max_hz = beat_hz;
+          }
+          Some(beat_hz)
+        } else {
+          None
+        }
+      };
+      points.push(BeatPreviewPoint {
+        t_sec: t_sec[index],
+        beat_hz,
+      });
+    }
+
+    series.push(BeatPreviewSeries {
+      voice_index,
+      label: format!("Voice {}", voice_index + 1),
+      active_sample_count,
+      points,
+    });
+  }
+
+  Ok(BeatPreviewOutcome {
+    duration_sec: sample_span_sec,
+    sample_count,
+    voice_count: voice_count.max(1),
+    min_hz: if min_hz.is_finite() { Some(min_hz) } else { None },
+    max_hz: if max_hz.is_finite() { Some(max_hz) } else { None },
+    limited,
+    time_label: if sample_span_sec >= 180.0 {
+      "TIME MIN".to_string()
+    } else {
+      "TIME SEC".to_string()
+    },
+    series,
+    engine_version: api.version_string(),
+  })
+}
+
 pub fn backend_status() -> Result<(String, i32), String> {
   let api = Api::load()?;
   Ok((api.version_string(), api.api_version()))
@@ -1561,6 +3195,42 @@ pub fn validate_sbgf(text: &str, source_name: &str) -> Result<ValidationOutcome,
   })
 }
 
+pub fn validate_program(request: &ProgramRuntimeRequest) -> Result<ValidationOutcome, String> {
+  let api = Api::load()?;
+  let engine_version = format!("{} (api {})", api.version_string(), api.api_version());
+
+  if request.kind == ProgramKind::Curve {
+    let curve_text = request
+      .curve_text
+      .as_deref()
+      .ok_or_else(|| "the curve program requires .sbgf source text".to_string())?;
+    let curve_validation = validate_sbgf(curve_text, &request.source_name)?;
+    if !curve_validation.valid {
+      return Ok(curve_validation);
+    }
+  }
+
+  match load_program_context_with_rate(request, None, true) {
+    Ok(loaded) => Ok(ValidationOutcome {
+      valid: true,
+      diagnostics: Vec::new(),
+      engine_version: loaded.api.version_string(),
+    }),
+    Err(err) => Ok(ValidationOutcome {
+      valid: false,
+      diagnostics: vec![ValidationDiagnostic {
+        severity: "error",
+        line: None,
+        column: None,
+        end_line: None,
+        end_column: None,
+        message: err,
+      }],
+      engine_version,
+    }),
+  }
+}
+
 fn diagnostics_only_require_mix_input(diagnostics: &[ValidationDiagnostic]) -> bool {
   !diagnostics.is_empty()
     && diagnostics
@@ -1602,8 +3272,43 @@ pub fn create_live_preview(
   };
 
   Ok(LivePlaybackContext {
-    loaded,
+    loaded: LiveLoadedContext::Sequence(loaded),
     volume_mul,
+    remaining_frames,
+    finished: false,
+    duration_sec: reported_duration_sec,
+    limited: false,
+    mix_buf: Vec::new(),
+  })
+}
+
+pub fn create_live_program_preview(
+  request: &ProgramRuntimeRequest,
+  sample_rate_hz: u32,
+) -> Result<LivePlaybackContext, String> {
+  if sample_rate_hz == 0 {
+    return Err("live playback requires a valid output sample rate".to_string());
+  }
+
+  let loaded = load_program_context_with_rate(request, Some(sample_rate_hz as f64), true)?;
+  let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
+  let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
+
+  let remaining_frames = if is_looping || !duration_sec.is_finite() || duration_sec <= 0.0 {
+    None
+  } else {
+    Some((duration_sec * loaded.engine_cfg.sample_rate).ceil().max(1.0) as usize)
+  };
+
+  let reported_duration_sec = if duration_sec.is_finite() && duration_sec > 0.0 {
+    duration_sec
+  } else {
+    0.0
+  };
+
+  Ok(LivePlaybackContext {
+    loaded: LiveLoadedContext::Program(loaded),
+    volume_mul: 1.0,
     remaining_frames,
     finished: false,
     duration_sec: reported_duration_sec,
@@ -1645,136 +3350,30 @@ pub fn export_sbg(
   })
 }
 
+pub fn export_program(
+  request: &ProgramRuntimeRequest,
+  output_path: &Path,
+) -> Result<ExportOutcome, String> {
+  let loaded = load_program_context_with_rate(request, None, true)?;
+  let (duration_sec, format, engine_version) = render_program_context_to_path(loaded, output_path)?;
+  Ok(ExportOutcome {
+    output_path: output_path.to_string_lossy().to_string(),
+    duration_sec,
+    format: format.to_string(),
+    engine_version,
+  })
+}
+
 pub fn sample_beat_preview(text: &str, source_name: &str) -> Result<BeatPreviewOutcome, String> {
   let loaded = load_sbg_context(text, source_name)?;
-  let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
-  let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
-  let voice_count = unsafe { (loaded.api.sbx_context_voice_count)(loaded.ctx) };
-  let mut sample_span_sec = duration_sec;
-  let mut limited = false;
+  sample_context_beat_preview(&loaded.api, loaded.ctx)
+}
 
-  if is_looping || sample_span_sec <= 0.0 {
-    sample_span_sec = PREVIEW_LIMIT_SEC;
-    limited = true;
-  }
-
-  if !sample_span_sec.is_finite() || sample_span_sec <= 0.0 {
-    return Err("beat preview currently requires a finite timeline".to_string());
-  }
-
-  let sample_count = 240usize;
-  let mut min_hz = f64::INFINITY;
-  let mut max_hz = f64::NEG_INFINITY;
-  let mut series = Vec::with_capacity(voice_count.max(1));
-  for voice_index in 0..voice_count.max(1) {
-    let mut t_sec = vec![0.0_f64; sample_count];
-    let mut hz = vec![0.0_f64; sample_count];
-    let mut tones = vec![
-      SbxToneSpec {
-        mode: 0,
-        carrier_hz: 0.0,
-        beat_hz: 0.0,
-        amplitude: 0.0,
-        waveform: 0,
-        envelope_waveform: 0,
-        duty_cycle: 0.0,
-        iso_start: 0.0,
-        iso_attack: 0.0,
-        iso_release: 0.0,
-        iso_edge_mode: 0,
-      };
-      sample_count
-    ];
-    let beat_rc = unsafe {
-      (loaded.api.sbx_context_sample_program_beat_voice)(
-        loaded.ctx,
-        voice_index,
-        0.0,
-        sample_span_sec,
-        sample_count,
-        t_sec.as_mut_ptr(),
-        hz.as_mut_ptr(),
-      )
-    };
-    if beat_rc != SBX_OK {
-      let msg = unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) };
-      return Err(if msg.is_empty() {
-        "failed to sample beat preview from sbagenxlib".to_string()
-      } else {
-        msg
-      });
-    }
-
-    let tone_rc = unsafe {
-      (loaded.api.sbx_context_sample_tones_voice)(
-        loaded.ctx,
-        voice_index,
-        0.0,
-        sample_span_sec,
-        sample_count,
-        std::ptr::null_mut(),
-        tones.as_mut_ptr(),
-      )
-    };
-    if tone_rc != SBX_OK {
-      let msg = unsafe { cstr_to_string((loaded.api.sbx_context_last_error)(loaded.ctx)) };
-      return Err(if msg.is_empty() {
-        "failed to sample tone activity from sbagenxlib".to_string()
-      } else {
-        msg
-      });
-    }
-
-    let mut points = Vec::with_capacity(sample_count);
-    let mut active_sample_count = 0usize;
-    for index in 0..sample_count {
-      let tone = tones[index];
-      let beat_hz = if tone.mode == 0 {
-        None
-      } else {
-        let beat_hz = hz[index];
-        if beat_hz.is_finite() {
-          active_sample_count += 1;
-          if beat_hz < min_hz {
-            min_hz = beat_hz;
-          }
-          if beat_hz > max_hz {
-            max_hz = beat_hz;
-          }
-          Some(beat_hz)
-        } else {
-          None
-        }
-      };
-      points.push(BeatPreviewPoint {
-        t_sec: t_sec[index],
-        beat_hz,
-      });
-    }
-
-    series.push(BeatPreviewSeries {
-      voice_index,
-      label: format!("Voice {}", voice_index + 1),
-      active_sample_count,
-      points,
-    });
-  }
-
-  Ok(BeatPreviewOutcome {
-    duration_sec: sample_span_sec,
-    sample_count,
-    voice_count: voice_count.max(1),
-    min_hz: if min_hz.is_finite() { Some(min_hz) } else { None },
-    max_hz: if max_hz.is_finite() { Some(max_hz) } else { None },
-    limited,
-    time_label: if sample_span_sec >= 180.0 {
-      "TIME MIN".to_string()
-    } else {
-      "TIME SEC".to_string()
-    },
-    series,
-    engine_version: loaded.api.version_string(),
-  })
+pub fn sample_program_beat_preview(
+  request: &ProgramRuntimeRequest,
+) -> Result<BeatPreviewOutcome, String> {
+  let loaded = load_program_context_with_rate(request, None, false)?;
+  sample_context_beat_preview(&loaded.api, loaded.ctx)
 }
 
 pub fn inspect_curve_info(text: &str, source_name: &str) -> Result<CurveInfoOutcome, String> {

@@ -3,7 +3,7 @@
 
   export let preview: BeatPreviewResult | null = null
   export let error: string | null = null
-  export let kind: 'sbg' | 'sbgf' | null = null
+  export let kind: 'sbg' | 'sbgf' | 'curve-program' | null = null
   export let validating = false
 
   const width = 560
@@ -75,7 +75,11 @@
     <div>
       <p class="panel-title">Beat Preview</p>
       <p class="panel-note">
-        Sampled directly from `sbagenxlib` over the current sequence duration.
+        {#if kind === 'curve-program'}
+          Sampled directly from `sbagenxlib` for the active built-in `curve` program.
+        {:else}
+          Sampled directly from `sbagenxlib` over the current sequence duration.
+        {/if}
       </p>
     </div>
     {#if preview}
@@ -88,7 +92,7 @@
     {/if}
   </div>
 
-  {#if kind !== 'sbg'}
+  {#if kind === 'sbgf'}
     <div class="preview-empty">
       `.sbgf` documents remain editor/validation only for now.
     </div>
@@ -178,7 +182,11 @@
     {/if}
   {:else}
     <div class="preview-empty">
-      Beat preview appears here once the active `.sbg` validates cleanly.
+      {#if kind === 'curve-program'}
+        Beat preview appears here once the active built-in `curve` program validates cleanly.
+      {:else}
+        Beat preview appears here once the active `.sbg` validates cleanly.
+      {/if}
     </div>
   {/if}
 </div>
