@@ -8,6 +8,82 @@
 
 section_header "Building SBaGenX for Windows (32-bit and 64-bit) with FLAC, MP3 and OGG support..."
 
+AUTO_INSTALL_DEPS="${SBAGENX_AUTO_INSTALL_DEPS:-1}"
+MSYS_REPO=""
+
+resolve_msys_repo() {
+    case "${MSYSTEM:-}" in
+        UCRT64) echo "ucrt64" ;;
+        MINGW64) echo "mingw64" ;;
+        MINGW32) echo "mingw32" ;;
+        CLANG64) echo "clang64" ;;
+        CLANG32) echo "clang32" ;;
+        CLANGARM64) echo "clangarm64" ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+pacman_install() {
+    local pkg="$1"
+
+    if ! command -v pacman >/dev/null 2>&1; then
+        return 1
+    fi
+
+    info "Installing ${pkg} with pacman..."
+    pacman -Sy --noconfirm --needed "$pkg" >/dev/null 2>&1 || return 1
+    hash -r
+    return 0
+}
+
+resolve_msys_package_for_command() {
+    local cmd="$1"
+
+    case "$cmd" in
+        x86_64-w64-mingw32-gcc|x86_64-w64-mingw32-ar|x86_64-w64-mingw32-gcc-ar|x86_64-w64-mingw32-windres)
+            case "$MSYS_REPO" in
+                ucrt64) echo "mingw-w64-ucrt-x86_64-gcc" ;;
+                mingw64) echo "mingw-w64-x86_64-gcc" ;;
+                *)
+                    echo ""
+                    ;;
+            esac
+            ;;
+        i686-w64-mingw32-gcc|i686-w64-mingw32-ar|i686-w64-mingw32-gcc-ar|i686-w64-mingw32-windres)
+            echo "mingw-w64-i686-gcc"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+ensure_command_available() {
+    local cmd="$1"
+    local pacman_pkg=""
+
+    if command -v "$cmd" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [ "$AUTO_INSTALL_DEPS" = "0" ]; then
+        return 1
+    fi
+
+    pacman_pkg="$(resolve_msys_package_for_command "$cmd")"
+    if [ -n "$pacman_pkg" ] && pacman_install "$pacman_pkg"; then
+        if command -v "$cmd" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+MSYS_REPO="$(resolve_msys_repo)"
+
 REQUESTED_WINDOWS_ARCHES="${SBAGENX_WINDOWS_ARCHES:-win32,win64}"
 BUILD_WIN32=0
 BUILD_WIN64=0
@@ -26,14 +102,14 @@ if [ "$BUILD_WIN32" -eq 0 ] && [ "$BUILD_WIN64" -eq 0 ]; then
 fi
 
 # Check for MinGW cross-compilers
-if [ "$BUILD_WIN32" -eq 1 ] && ! command -v i686-w64-mingw32-gcc &> /dev/null; then
+if [ "$BUILD_WIN32" -eq 1 ] && ! ensure_command_available i686-w64-mingw32-gcc; then
     error "32-bit MinGW cross-compiler not found. Please install it."
     info "On Debian/Ubuntu: sudo apt-get install mingw-w64"
     info "On Fedora: sudo dnf install mingw32-gcc"
     info "On Arch/MSYS2: sudo pacman -S mingw-w64-i686-gcc"
     exit 1
 fi
-if [ "$BUILD_WIN64" -eq 1 ] && ! command -v x86_64-w64-mingw32-gcc &> /dev/null; then
+if [ "$BUILD_WIN64" -eq 1 ] && ! ensure_command_available x86_64-w64-mingw32-gcc; then
     error "64-bit MinGW cross-compiler not found. Please install it."
     info "On Debian/Ubuntu: sudo apt-get install mingw-w64"
     info "On Fedora: sudo dnf install mingw64-gcc"
@@ -154,9 +230,17 @@ EOF
 
 # Compile resource file for requested architectures
 if [ "$BUILD_WIN32" -eq 1 ]; then
+    if ! ensure_command_available i686-w64-mingw32-windres; then
+        error "32-bit MinGW resource compiler not found."
+        exit 1
+    fi
     i686-w64-mingw32-windres /tmp/sbagen.rc -O coff -o /tmp/sbagen32.res
 fi
 if [ "$BUILD_WIN64" -eq 1 ]; then
+    if ! ensure_command_available x86_64-w64-mingw32-windres; then
+        error "64-bit MinGW resource compiler not found."
+        exit 1
+    fi
     x86_64-w64-mingw32-windres /tmp/sbagen.rc -O coff -o /tmp/sbagen64.res
 fi
 
