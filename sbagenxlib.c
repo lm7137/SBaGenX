@@ -1,3 +1,7 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "sbagenxlib.h"
 #include "sbagenxlib_dsp.h"
 #include "libs/tinyexpr.h"
@@ -1046,6 +1050,10 @@ sbx_dlib_close(SbxDLibHandle lib) {
 
 static char sbx_dlib_exec_dir[PATH_MAX];
 static int sbx_dlib_exec_dir_init;
+#if !defined(_WIN32) && !defined(T_MINGW) && !defined(T_MSVC)
+static char sbx_dlib_module_dir[PATH_MAX];
+static int sbx_dlib_module_dir_init;
+#endif
 
 static void
 sbx_dlib_init_exec_dir(void) {
@@ -1104,12 +1112,45 @@ sbx_dlib_init_exec_dir(void) {
     strcpy(sbx_dlib_exec_dir, ".");
 }
 
+#if !defined(_WIN32) && !defined(T_MINGW) && !defined(T_MSVC)
+static void
+sbx_dlib_init_module_dir(void) {
+  if (sbx_dlib_module_dir_init) return;
+  sbx_dlib_module_dir_init = 1;
+  sbx_dlib_module_dir[0] = 0;
+
+  {
+    Dl_info info;
+    char path[PATH_MAX];
+    if (dladdr((void *)&sbx_dlib_init_module_dir, &info) &&
+        info.dli_fname && info.dli_fname[0]) {
+      char *p1, *p2, *p;
+      strncpy(path, info.dli_fname, sizeof(path) - 1);
+      path[sizeof(path) - 1] = 0;
+      p1 = strrchr(path, '/');
+      p2 = strrchr(path, '\\');
+      p = p1 > p2 ? p1 : p2;
+      if (p) *p = 0;
+      else strcpy(path, ".");
+      strncpy(sbx_dlib_module_dir, path, sizeof(sbx_dlib_module_dir) - 1);
+      sbx_dlib_module_dir[sizeof(sbx_dlib_module_dir) - 1] = 0;
+    }
+  }
+
+  if (!sbx_dlib_module_dir[0])
+    strcpy(sbx_dlib_module_dir, sbx_dlib_exec_dir);
+}
+#endif
+
 static SbxDLibHandle
 sbx_dlib_open_best(const char **names) {
   int i;
   char cand[PATH_MAX * 2];
 
   sbx_dlib_init_exec_dir();
+#if !defined(_WIN32) && !defined(T_MINGW) && !defined(T_MSVC)
+  sbx_dlib_init_module_dir();
+#endif
   for (i = 0; names[i]; i++) {
     const char *name = names[i];
     SbxDLibHandle mod;
@@ -1120,6 +1161,20 @@ sbx_dlib_open_best(const char **names) {
       continue;
     }
 
+#if !defined(_WIN32) && !defined(T_MINGW) && !defined(T_MSVC)
+    if (sbx_dlib_module_dir[0]) {
+      snprintf(cand, sizeof(cand), "%s%c%s%c%s",
+               sbx_dlib_module_dir, SBX_DLIB_PATH_SEP, "libs", SBX_DLIB_PATH_SEP, name);
+      mod = sbx_dlib_open_one(cand);
+      if (mod) return mod;
+
+      snprintf(cand, sizeof(cand), "%s%c%s",
+               sbx_dlib_module_dir, SBX_DLIB_PATH_SEP, name);
+      mod = sbx_dlib_open_one(cand);
+      if (mod) return mod;
+    }
+#endif
+
     snprintf(cand, sizeof(cand), "%s%c%s%c%s",
              sbx_dlib_exec_dir, SBX_DLIB_PATH_SEP, "libs", SBX_DLIB_PATH_SEP, name);
     mod = sbx_dlib_open_one(cand);
@@ -1127,6 +1182,17 @@ sbx_dlib_open_best(const char **names) {
 
     snprintf(cand, sizeof(cand), "%s%c%s",
              sbx_dlib_exec_dir, SBX_DLIB_PATH_SEP, name);
+    mod = sbx_dlib_open_one(cand);
+    if (mod) return mod;
+
+    snprintf(cand, sizeof(cand), "%s%c..%clib%c%s%c%s",
+             sbx_dlib_exec_dir,
+             SBX_DLIB_PATH_SEP,
+             SBX_DLIB_PATH_SEP,
+             SBX_DLIB_PATH_SEP,
+             "sbagenx",
+             SBX_DLIB_PATH_SEP,
+             name);
     mod = sbx_dlib_open_one(cand);
     if (mod) return mod;
 

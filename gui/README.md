@@ -104,7 +104,8 @@ Notes
   `src-tauri/runtime-bundle/` before bundle creation.
 - Runtime staging is platform-specific:
   - Linux stages the newest stable `libsbagenx.so.X.Y.Z` from `dist/`
-    as `libsbagenx.so.3`
+    as `libsbagenx.so.3`, plus the codec/runtime shared libraries used
+    by export and encoded mix playback
   - Windows stages the current `win32` / `win64` `sbagenxlib` DLL plus
     the codec/runtime DLLs it depends on
 - `windows-build-gui.sh` is intentionally separate from

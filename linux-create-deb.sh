@@ -109,6 +109,70 @@ map_deb_arch_to_multiarch_libdir() {
     esac
 }
 
+linux_runtime_arch_hint() {
+    case "$1" in
+        amd64)
+            echo "x86-64|x86_64-linux-gnu"
+            ;;
+        i386)
+            echo "i386-linux-gnu|libc6"
+            ;;
+        arm64)
+            echo "aarch64|aarch64-linux-gnu|arm64"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+resolve_linux_runtime_soname_path() {
+    local soname="$1"
+    local deb_arch="$2"
+    local hint
+    local line
+    local path=""
+
+    hint="$(linux_runtime_arch_hint "$deb_arch")"
+
+    if command -v ldconfig >/dev/null 2>&1; then
+        while IFS= read -r line; do
+            case "$line" in
+                *"$soname"*"=>"*)
+                    if [ -n "$hint" ] && echo "$line" | grep -Eqi "$hint"; then
+                        path="$(echo "$line" | sed 's/.*=>[[:space:]]*//')"
+                        break
+                    fi
+                    if [ -z "$path" ]; then
+                        path="$(echo "$line" | sed 's/.*=>[[:space:]]*//')"
+                    fi
+                    ;;
+            esac
+        done < <(ldconfig -p 2>/dev/null)
+    fi
+
+    if [ -z "$path" ]; then
+        for candidate in \
+            "/lib/${MULTIARCH_LIBDIR}/${soname}" \
+            "/usr/lib/${MULTIARCH_LIBDIR}/${soname}" \
+            "/lib64/${soname}" \
+            "/usr/lib64/${soname}" \
+            "/lib/${soname}" \
+            "/usr/lib/${soname}"; do
+            if [ -e "$candidate" ]; then
+                path="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [ -n "$path" ] && [ -e "$path" ]; then
+        readlink -f "$path"
+        return 0
+    fi
+    return 1
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         -b|--binary)
@@ -248,6 +312,7 @@ create_dir_if_not_exists "$STAGE_DIR/usr/bin"
 create_dir_if_not_exists "$STAGE_DIR/usr/include"
 create_dir_if_not_exists "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}"
 create_dir_if_not_exists "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/pkgconfig"
+create_dir_if_not_exists "$STAGE_DIR/usr/lib/${PKG_NAME}"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/docs"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/examples"
 create_dir_if_not_exists "$STAGE_DIR/usr/share/${PKG_NAME}/scripts"
@@ -298,6 +363,24 @@ if [ -f "dist/pkgconfig/sbagenxlib.pc" ]; then
         "dist/pkgconfig/sbagenxlib.pc" \
         > "$STAGE_DIR/usr/lib/${MULTIARCH_LIBDIR}/pkgconfig/sbagenxlib.pc"
 fi
+
+# Private bundled runtime codec libraries for export/mix decoding.
+for runtime_soname in \
+    libsndfile.so.1 \
+    libmp3lame.so.0 \
+    libFLAC.so.12 \
+    libmpg123.so.0 \
+    libogg.so.0 \
+    libvorbis.so.0 \
+    libvorbisenc.so.2 \
+    libopus.so.0; do
+    runtime_src="$(resolve_linux_runtime_soname_path "$runtime_soname" "$DEB_ARCH" || true)"
+    if [ -z "$runtime_src" ] || [ ! -f "$runtime_src" ]; then
+        error "Required Linux runtime codec library not found for packaging: $runtime_soname"
+        exit 1
+    fi
+    install -m 644 "$runtime_src" "$STAGE_DIR/usr/lib/${PKG_NAME}/${runtime_soname}"
+done
 
 # Project assets/resources
 if [ -d docs ]; then

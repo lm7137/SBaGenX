@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { execSync } from 'node:child_process'
 
 const repoRoot = path.resolve(process.cwd(), '..')
 const distDir = path.join(repoRoot, 'dist')
@@ -48,9 +49,79 @@ function newestLinuxRuntime() {
   return path.join(distDir, latest.name)
 }
 
+function linuxArchHints() {
+  switch (process.arch) {
+    case 'x64':
+      return [/x86-64/i, /x86_64-linux-gnu/i]
+    case 'ia32':
+      return [/i386/i, /i686/i, /i386-linux-gnu/i]
+    case 'arm64':
+      return [/aarch64/i, /arm64/i, /aarch64-linux-gnu/i]
+    default:
+      return []
+  }
+}
+
+function resolveLinuxRuntimeLib(soname) {
+  const hints = linuxArchHints()
+  try {
+    const output = execSync('ldconfig -p', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const candidates = output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith(`${soname} `) && line.includes(' => '))
+      .map((line) => {
+        const resolved = line.replace(/^.*=>\s*/, '').trim()
+        const score = hints.some((hint) => hint.test(line)) ? 1 : 0
+        return { resolved, score }
+      })
+      .sort((left, right) => right.score - left.score)
+    if (candidates.length > 0) {
+      return fs.realpathSync(candidates[0].resolved)
+    }
+  } catch {
+    // Fall back to well-known library locations below.
+  }
+
+  const fallbackDirs = [
+    '/lib',
+    '/usr/lib',
+    '/lib64',
+    '/usr/lib64',
+    '/lib/x86_64-linux-gnu',
+    '/usr/lib/x86_64-linux-gnu',
+    '/lib/i386-linux-gnu',
+    '/usr/lib/i386-linux-gnu',
+    '/lib/aarch64-linux-gnu',
+    '/usr/lib/aarch64-linux-gnu',
+  ]
+  for (const dir of fallbackDirs) {
+    const candidate = path.join(dir, soname)
+    if (fs.existsSync(candidate)) {
+      return fs.realpathSync(candidate)
+    }
+  }
+  throw new Error(`required Linux runtime dependency is missing: ${soname}`)
+}
+
 function stageLinux() {
   const src = newestLinuxRuntime()
   copyFile(src, 'libsbagenx.so.3')
+
+  const required = [
+    'libsndfile.so.1',
+    'libmp3lame.so.0',
+    'libFLAC.so.12',
+    'libmpg123.so.0',
+    'libogg.so.0',
+    'libvorbis.so.0',
+    'libvorbisenc.so.2',
+    'libopus.so.0',
+  ]
+
+  for (const soname of required) {
+    copyFile(resolveLinuxRuntimeLib(soname), soname)
+  }
 }
 
 function stageWindows() {
