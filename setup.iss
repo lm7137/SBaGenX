@@ -70,6 +70,8 @@ Name: "addtopath"; Description: "Add {#MyAppName} to PATH environment variable";
 ; Include both 32-bit and 64-bit versions
 Source: "dist\sbagenx-win32.exe"; DestDir: "{app}"; DestName: "sbagenx-win32.exe"; Flags: ignoreversion
 Source: "dist\sbagenx-win64.exe"; DestDir: "{app}"; DestName: "sbagenx-win64.exe"; Flags: ignoreversion
+Source: "dist\sbagenxlib-win32.dll"; DestDir: "{app}"; DestName: "sbagenxlib-win32.dll"; Flags: ignoreversion
+Source: "dist\sbagenxlib-win64.dll"; DestDir: "{app}"; DestName: "sbagenxlib-win64.dll"; Flags: ignoreversion
 ; Bundled ambient mix tracks (kept beside sbagenx.exe for direct -m usage)
 Source: "assets\river1.ogg"; DestDir: "{app}"; DestName: "river1.ogg"; Flags: ignoreversion
 Source: "assets\river2.ogg"; DestDir: "{app}"; DestName: "river2.ogg"; Flags: ignoreversion
@@ -325,6 +327,12 @@ begin
       DeleteFile(ExpandConstant('{app}\sbagenx-win32.exe'));
       DeleteFile(ExpandConstant('{app}\sbagenx-win64.exe'));
     end;
+
+    { Keep only the matching sbagenxlib runtime DLL for the installed architecture }
+    if ArchTag = 'win64' then
+      DeleteFile(ExpandConstant('{app}\sbagenxlib-win32.dll'))
+    else
+      DeleteFile(ExpandConstant('{app}\sbagenxlib-win64.dll'));
 
     { Promote bundled runtime DLLs to canonical names used by the loader }
     PromoteBundledRuntimeDll(ArchTag, 'libsndfile', 'libsndfile-1.dll');

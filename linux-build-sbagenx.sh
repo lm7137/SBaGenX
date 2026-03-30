@@ -14,6 +14,7 @@ check_required_tools gcc ar
 
 # Check distribution directory
 create_dir_if_not_exists "dist"
+create_dir_if_not_exists "build/sbagenxlib"
 
 # Detect host architecture
 HOST_ARCH=$(uname -m)
@@ -34,6 +35,10 @@ TREMOR_LIB_PATH_ARM64="libs/linux-arm64-libvorbisidec.a"
 VERSION=$(cat VERSION)
 SO_MAJOR=$(printf '%s' "$VERSION" | sed -n 's/^\([0-9][0-9]*\).*/\1/p')
 PLOT_SCRIPT_SRC="scripts/sbagenx_plot.py"
+if [ -z "$SO_MAJOR" ]; then
+    warning "Could not derive shared library major version from VERSION='$VERSION'"
+    SO_MAJOR="0"
+fi
 
 # Skip 32-bit build on ARM64
 SKIP_32BIT=0
@@ -105,12 +110,39 @@ if [ $SKIP_32BIT = 0 ]; then
         warning "Run ./linux-build-libs.sh to build the required libraries"
     fi
 
+    # Build linkable 32-bit sbagenxlib shared runtime for the CLI.
+    SBX_SHARED_CFLAGS_32_CLI="-DT_LINUX -DFLAC_DECODE -m32 -Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+    SBX_SHARED_LIBS_32_CLI="-lm -ldl"
+    if [ -f "$LIB_PATH_32" ] && shared_link_libs_are_safe "-m32" "$LIB_PATH_32"; then
+        SBX_SHARED_CFLAGS_32_CLI="$SBX_SHARED_CFLAGS_32_CLI -DMP3_DECODE"
+        SBX_SHARED_LIBS_32_CLI="$SBX_SHARED_LIBS_32_CLI $LIB_PATH_32"
+    fi
+    if [ -f "$OGG_LIB_PATH_32" ] && [ -f "$TREMOR_LIB_PATH_32" ]; then
+        SBX_SHARED_CFLAGS_32_CLI="$SBX_SHARED_CFLAGS_32_CLI -DOGG_DECODE"
+        SBX_SHARED_LIBS_32_CLI="$SBX_SHARED_LIBS_32_CLI $TREMOR_LIB_PATH_32 $OGG_LIB_PATH_32"
+    fi
+    gcc $SBX_SHARED_CFLAGS_32_CLI -fPIC -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux32.pic.o
+    if [ $? -eq 0 ]; then
+        gcc -shared -m32 -Wl,-soname,libsbagenx-linux32.so.$SO_MAJOR \
+            -o dist/libsbagenx-linux32.so.$VERSION \
+            build/sbagenxlib/sbagenxlib-linux32.pic.o $SBX_SHARED_LIBS_32_CLI
+        if [ $? -eq 0 ]; then
+            ln -sfn "libsbagenx-linux32.so.$VERSION" dist/libsbagenx-linux32.so.$SO_MAJOR
+            ln -sfn "libsbagenx-linux32.so.$SO_MAJOR" dist/libsbagenx-linux32.so
+        else
+            error "Failed to link dist/libsbagenx-linux32.so.$VERSION needed by the 32-bit CLI"
+        fi
+    else
+        error "Failed to compile PIC sbagenxlib for 32-bit CLI linkage"
+    fi
+
     # Compile 32-bit version
     info "Compiling 32-bit version with flags: $CFLAGS_32"
     info "Libraries: $LIBS_32"
 
     # Try to compile with 32-bit support
-    gcc $CFLAGS_32 sbagenx.c sbagenxlib.c -o dist/sbagenx-linux32 $LIBS_32
+    gcc $CFLAGS_32 sbagenx.c -o dist/sbagenx-linux32 \
+        -Ldist -Wl,-rpath,'$ORIGIN' -lsbagenx-linux32 $LIBS_32
 
     if [ $? -eq 0 ]; then
         success "32-bit compilation successful! Binary created: sbagenx-linux32"
@@ -182,6 +214,61 @@ else
     fi
 fi
 
+# Build linkable 64-bit/ARM64 sbagenxlib shared runtime for the CLI.
+if [ "$HOST_ARCH" = "aarch64" ]; then
+    SBX_SHARED_CFLAGS_64_CLI="-DT_LINUX -DFLAC_DECODE -Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+else
+    SBX_SHARED_CFLAGS_64_CLI="-m64 -DT_LINUX -DFLAC_DECODE -Wall -O3 -I. -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+fi
+SBX_SHARED_LIBS_64_CLI="-lm -ldl"
+if [ "$HOST_ARCH" = "aarch64" ]; then
+    if [ -f "$LIB_PATH_ARM64" ] && shared_link_libs_are_safe "" "$LIB_PATH_ARM64"; then
+        SBX_SHARED_CFLAGS_64_CLI="$SBX_SHARED_CFLAGS_64_CLI -DMP3_DECODE"
+        SBX_SHARED_LIBS_64_CLI="$SBX_SHARED_LIBS_64_CLI $LIB_PATH_ARM64"
+    fi
+    if [ -f "$OGG_LIB_PATH_ARM64" ] && [ -f "$TREMOR_LIB_PATH_ARM64" ]; then
+        SBX_SHARED_CFLAGS_64_CLI="$SBX_SHARED_CFLAGS_64_CLI -DOGG_DECODE"
+        SBX_SHARED_LIBS_64_CLI="$SBX_SHARED_LIBS_64_CLI $TREMOR_LIB_PATH_ARM64 $OGG_LIB_PATH_ARM64"
+    fi
+    gcc $SBX_SHARED_CFLAGS_64_CLI -fPIC -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux-arm64.pic.o
+    if [ $? -eq 0 ]; then
+        gcc -shared -Wl,-soname,libsbagenx.so.$SO_MAJOR \
+            -o dist/libsbagenx.so.$VERSION \
+            build/sbagenxlib/sbagenxlib-linux-arm64.pic.o $SBX_SHARED_LIBS_64_CLI
+        if [ $? -eq 0 ]; then
+            ln -sfn "libsbagenx.so.$VERSION" dist/libsbagenx.so.$SO_MAJOR
+            ln -sfn "libsbagenx.so.$SO_MAJOR" dist/libsbagenx.so
+        else
+            error "Failed to link dist/libsbagenx.so.$VERSION needed by the ARM64 CLI"
+        fi
+    else
+        error "Failed to compile PIC sbagenxlib for ARM64 CLI linkage"
+    fi
+else
+    if [ -f "$LIB_PATH_64" ] && shared_link_libs_are_safe "-m64" "$LIB_PATH_64"; then
+        SBX_SHARED_CFLAGS_64_CLI="$SBX_SHARED_CFLAGS_64_CLI -DMP3_DECODE"
+        SBX_SHARED_LIBS_64_CLI="$SBX_SHARED_LIBS_64_CLI $LIB_PATH_64"
+    fi
+    if [ -f "$OGG_LIB_PATH_64" ] && [ -f "$TREMOR_LIB_PATH_64" ]; then
+        SBX_SHARED_CFLAGS_64_CLI="$SBX_SHARED_CFLAGS_64_CLI -DOGG_DECODE"
+        SBX_SHARED_LIBS_64_CLI="$SBX_SHARED_LIBS_64_CLI $TREMOR_LIB_PATH_64 $OGG_LIB_PATH_64"
+    fi
+    gcc $SBX_SHARED_CFLAGS_64_CLI -fPIC -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-linux64.pic.o
+    if [ $? -eq 0 ]; then
+        gcc -shared -m64 -Wl,-soname,libsbagenx.so.$SO_MAJOR \
+            -o dist/libsbagenx.so.$VERSION \
+            build/sbagenxlib/sbagenxlib-linux64.pic.o $SBX_SHARED_LIBS_64_CLI
+        if [ $? -eq 0 ]; then
+            ln -sfn "libsbagenx.so.$VERSION" dist/libsbagenx.so.$SO_MAJOR
+            ln -sfn "libsbagenx.so.$SO_MAJOR" dist/libsbagenx.so
+        else
+            error "Failed to link dist/libsbagenx.so.$VERSION needed by the 64-bit CLI"
+        fi
+    else
+        error "Failed to compile PIC sbagenxlib for 64-bit CLI linkage"
+    fi
+fi
+
 # Compile 64-bit version
 info "Compiling 64-bit version with flags: $CFLAGS_64"
 info "Libraries: $LIBS_64"
@@ -190,9 +277,11 @@ info "Libraries: $LIBS_64"
 sed "s/__VERSION__/\"$VERSION\"/" sbagenx.c > sbagenx.tmp.c
 
 if [ "$HOST_ARCH" = "aarch64" ]; then
-    gcc $CFLAGS_64 sbagenx.tmp.c sbagenxlib.c -o dist/sbagenx-linux-arm64 $LIBS_64
+    gcc $CFLAGS_64 sbagenx.tmp.c -o dist/sbagenx-linux-arm64 \
+        -Ldist -Wl,-rpath,'$ORIGIN' -lsbagenx $LIBS_64
 else
-    gcc $CFLAGS_64 sbagenx.tmp.c sbagenxlib.c -o dist/sbagenx-linux64 $LIBS_64
+    gcc $CFLAGS_64 sbagenx.tmp.c -o dist/sbagenx-linux64 \
+        -Ldist -Wl,-rpath,'$ORIGIN' -lsbagenx $LIBS_64
 fi
 
 if [ $? -eq 0 ]; then

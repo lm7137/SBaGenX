@@ -741,7 +741,17 @@ fi
 info "Compiling 32-bit version with flags: $CFLAGS_32"
 info "Libraries: $LIBS_32"
 
-i686-w64-mingw32-gcc $CFLAGS_32 sbagenx.tmp.c sbagenxlib.c /tmp/sbagen32.res -o dist/sbagenx-win32.exe $LIBS_32
+SBX_LIB_CFLAGS_32="$CFLAGS_32 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+i686-w64-mingw32-gcc $SBX_LIB_CFLAGS_32 -shared sbagenxlib.c \
+    -Wl,--out-implib,dist/libsbagenx-win32.dll.a \
+    -Wl,--export-all-symbols -Wl,--enable-auto-import \
+    -o dist/sbagenxlib-win32.dll $LIBS_32
+if [ $? -ne 0 ]; then
+    error "Failed to link dist/sbagenxlib-win32.dll needed by the 32-bit CLI"
+fi
+
+i686-w64-mingw32-gcc $CFLAGS_32 sbagenx.tmp.c /tmp/sbagen32.res -o dist/sbagenx-win32.exe \
+    dist/libsbagenx-win32.dll.a $LIBS_32
 
 if [ $? -eq 0 ]; then
     success "32-bit compilation successful! Created 32-bit binary: dist/sbagenx-win32.exe"
@@ -796,7 +806,17 @@ fi
 info "Compiling 64-bit version with flags: $CFLAGS_64"
 info "Libraries: $LIBS_64"
 
-x86_64-w64-mingw32-gcc $CFLAGS_64 sbagenx.tmp.c sbagenxlib.c /tmp/sbagen64.res -o dist/sbagenx-win64.exe $LIBS_64
+SBX_LIB_CFLAGS_64="$CFLAGS_64 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
+x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS_64 -shared sbagenxlib.c \
+    -Wl,--out-implib,dist/libsbagenx-win64.dll.a \
+    -Wl,--export-all-symbols -Wl,--enable-auto-import \
+    -o dist/sbagenxlib-win64.dll $LIBS_64
+if [ $? -ne 0 ]; then
+    error "Failed to link dist/sbagenxlib-win64.dll needed by the 64-bit CLI"
+fi
+
+x86_64-w64-mingw32-gcc $CFLAGS_64 sbagenx.tmp.c /tmp/sbagen64.res -o dist/sbagenx-win64.exe \
+    dist/libsbagenx-win64.dll.a $LIBS_64
 
 if [ $? -eq 0 ]; then
     success "64-bit compilation successful! Created 64-bit binary: dist/sbagenx-win64.exe"
@@ -828,7 +848,6 @@ create_dir_if_not_exists "build/sbagenxlib"
 create_dir_if_not_exists "dist/include"
 create_dir_if_not_exists "dist/pkgconfig"
 if [ "$BUILD_WIN32" -eq 1 ]; then
-    SBX_LIB_CFLAGS_32="$CFLAGS_32 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
     i686-w64-mingw32-gcc $SBX_LIB_CFLAGS_32 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win32.o
     if [ $? -eq 0 ]; then
         "$AR_32" rcs dist/libsbagenx-win32.a build/sbagenxlib/sbagenxlib-win32.o
@@ -843,7 +862,6 @@ if [ "$BUILD_WIN32" -eq 1 ]; then
 fi
 
 if [ "$BUILD_WIN64" -eq 1 ]; then
-    SBX_LIB_CFLAGS_64="$CFLAGS_64 -DSBAGENXLIB_VERSION=\"\\\"$VERSION\\\"\""
     x86_64-w64-mingw32-gcc $SBX_LIB_CFLAGS_64 -c sbagenxlib.c -o build/sbagenxlib/sbagenxlib-win64.o
     if [ $? -eq 0 ]; then
         "$AR_64" rcs dist/libsbagenx-win64.a build/sbagenxlib/sbagenxlib-win64.o
