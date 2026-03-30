@@ -106,6 +106,15 @@ main(void) {
       "custom00: 0 0.25 1 0.25\n"
       "base: custom00:180@4/20\n"
       "NOW base\n";
+  const char *sbg_custom_integer_envelope_text =
+      "custom00: e=2 0 60 50 70 40 80 20 80 0 100 20 70 50 55 45 60 30 60 35 55 45 55 20 0\n"
+      "custom01: e=2 0 50 60 40 45 40 70 40 50 40 55 40 60 30 100 0 85 80 0\n"
+      "t1: custom00:196+6/35\n"
+      "t2: custom01:180+4/30\n"
+      "alloff: -\n"
+      "NOW t1\n"
+      "+00:01:00 t2 ->\n"
+      "+00:02:00 alloff\n";
   const char *sbg_mix_tokens_text =
       "00:00 mix/70 mixpulse:2/40 180+0/20 ==\n"
       "00:00:02 -\n";
@@ -361,6 +370,27 @@ main(void) {
   if (!(abs_sum_window(buf, (size_t)(0.15 * cfg.sample_rate), (size_t)(0.35 * cfg.sample_rate)) >
         abs_sum_window(buf, 0, (size_t)(0.05 * cfg.sample_rate)) * 4.0))
     fail("customNN isochronic render should honor zero-based custom envelope");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_integer_envelope_text, 0);
+  if (rc != SBX_OK) fail("integer customNN named timing load failed");
+  if (sbx_context_keyframe_count(ctx) != 3)
+    fail("integer customNN named timing should produce 3 keyframes");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("integer customNN first keyframe retrieval failed");
+  if (kf.tone.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+    fail("integer customNN first keyframe should preserve custom00 prefix");
+  if (fabs(kf.tone.carrier_hz - 196.0) > 1e-6 || fabs(kf.tone.beat_hz - 6.0) > 1e-6)
+    fail("integer customNN first keyframe tone mismatch");
+  if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK)
+    fail("integer customNN second keyframe retrieval failed");
+  if (kf.tone.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE + 1)
+    fail("integer customNN second keyframe should preserve custom01 prefix");
+  if (fabs(kf.tone.carrier_hz - 180.0) > 1e-6 || fabs(kf.tone.beat_hz - 4.0) > 1e-6)
+    fail("integer customNN second keyframe tone mismatch");
+  if (sbx_context_get_keyframe(ctx, 2, &kf) != SBX_OK)
+    fail("integer customNN alloff keyframe retrieval failed");
+  if (kf.tone.mode != SBX_TONE_NONE)
+    fail("integer customNN alloff keyframe should be silent");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_mix_tokens_text, 0);
   if (rc != SBX_OK) fail("sbg timing load with direct mix tokens failed");
