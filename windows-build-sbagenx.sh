@@ -11,6 +11,44 @@ section_header "Building SBaGenX for Windows (32-bit and 64-bit) with FLAC, MP3 
 AUTO_INSTALL_DEPS="${SBAGENX_AUTO_INSTALL_DEPS:-1}"
 MSYS_REPO=""
 
+prepend_path_dir() {
+    local dir="$1"
+    case ":$PATH:" in
+        *":$dir:"*) ;;
+        *) PATH="$dir:$PATH" ;;
+    esac
+}
+
+augment_msys_toolchain_path() {
+    [ -d "/usr/bin" ] && prepend_path_dir "/usr/bin"
+
+    case "$MSYS_REPO" in
+        ucrt64)
+            [ -d "/ucrt64/bin" ] && prepend_path_dir "/ucrt64/bin"
+            ;;
+        mingw64)
+            [ -d "/mingw64/bin" ] && prepend_path_dir "/mingw64/bin"
+            ;;
+        mingw32)
+            [ -d "/mingw32/bin" ] && prepend_path_dir "/mingw32/bin"
+            ;;
+        clang64)
+            [ -d "/clang64/bin" ] && prepend_path_dir "/clang64/bin"
+            ;;
+        clang32)
+            [ -d "/clang32/bin" ] && prepend_path_dir "/clang32/bin"
+            ;;
+        clangarm64)
+            [ -d "/clangarm64/bin" ] && prepend_path_dir "/clangarm64/bin"
+            ;;
+    esac
+
+    [ -d "/mingw32/bin" ] && prepend_path_dir "/mingw32/bin"
+    [ -d "/mingw64/bin" ] && prepend_path_dir "/mingw64/bin"
+    [ -d "/ucrt64/bin" ] && prepend_path_dir "/ucrt64/bin"
+    hash -r
+}
+
 resolve_msys_repo() {
     case "${MSYSTEM:-}" in
         UCRT64) echo "ucrt64" ;;
@@ -83,6 +121,7 @@ ensure_command_available() {
 }
 
 MSYS_REPO="$(resolve_msys_repo)"
+augment_msys_toolchain_path
 
 REQUESTED_WINDOWS_ARCHES="${SBAGENX_WINDOWS_ARCHES:-win32,win64}"
 BUILD_WIN32=0
