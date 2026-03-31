@@ -1,3 +1,8 @@
+3.9.0-alpha.3: Unified the Windows installer so CLI and desktop GUI ship together and share the installed sbagenxlib runtime.
+3.9.0-alpha.3: Unified the Ubuntu/Linux .deb so it installs both sbagenx and sbagenx-gui with shared runtime and codec payloads.
+3.9.0-alpha.3: Added built-in program mode to the GUI for drop, slide, sigmoid, and curve, including curve editor/plot support.
+3.9.0-alpha.3: Improved Windows build orchestration with unified build scripts and MSYS2 toolchain auto-detection/installation.
+
 3.9.0-alpha.2: Fixed sbagenxlib spin scaling so plain spin uses the expected non-square modulation pattern.
 3.9.0-alpha.2: Added regression coverage to distinguish default spin from square-wave spin rendering.
 
