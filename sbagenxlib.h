@@ -528,6 +528,9 @@ void sbx_default_curve_file_program_config(SbxCurveFileProgramConfig *cfg);
 void sbx_default_curve_timeline_config(SbxCurveTimelineConfig *cfg);
 void sbx_default_runtime_context_config(SbxRuntimeContextConfig *cfg);
 
+/* Built-in program helpers: default program amp is intentionally tiny. */
+double sbx_builtin_default_mix_amp_pct(double program_amp_pct);
+
 /* Fill dither state with library-default seed. */
 void sbx_default_pcm16_dither_state(SbxPcm16DitherState *state);
 

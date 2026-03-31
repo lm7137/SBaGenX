@@ -8963,7 +8963,7 @@ create_drop(int ac, char **av) {
 	 sbx_runtime_activate_from_curve_program(&curve,
 						 isisochronic, ismono,
 						 (double)end_sec + prog_cfg.fade_sec,
-						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+						 extra_spec.have_mix ? extra_spec.mix_amp_pct : sbx_builtin_default_mix_amp_pct(amp),
 						 extra_spec.aux_tones, extra_spec.aux_count,
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
 						 0, 0);
@@ -8982,7 +8982,7 @@ create_drop(int ac, char **av) {
 	 sbx_emit_periods_from_keyframes_with_extra(frames, frame_count, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(frames, frame_count, 0,
-					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+					     extra_spec.have_mix ? extra_spec.mix_amp_pct : sbx_builtin_default_mix_amp_pct(amp),
 					     extra_spec.aux_tones, extra_spec.aux_count,
 					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);
@@ -9260,7 +9260,7 @@ create_sigmoid(int ac, char **av) {
 	 sbx_runtime_activate_from_curve_program(&curve,
 						 isisochronic, ismono,
 						 (double)end_sec + prog_cfg.fade_sec,
-						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+						 extra_spec.have_mix ? extra_spec.mix_amp_pct : sbx_builtin_default_mix_amp_pct(amp),
 						 extra_spec.aux_tones, extra_spec.aux_count,
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
 						 0, 0);
@@ -9279,7 +9279,7 @@ create_sigmoid(int ac, char **av) {
 	 sbx_emit_periods_from_keyframes_with_extra(frames, frame_count, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(frames, frame_count, 0,
-					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+					     extra_spec.have_mix ? extra_spec.mix_amp_pct : sbx_builtin_default_mix_amp_pct(amp),
 					     extra_spec.aux_tones, extra_spec.aux_count,
 					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);
@@ -9335,7 +9335,7 @@ create_curve(int ac, char **av) {
    double ov_val[CURVE_MAX_PARAMS];
    double level;
    double carr, amp, c0, c2;
-   double base_mix_amp= 100.0;
+   double base_mix_amp= 0.0;
    double beat_target, beat_start= 10.0;
    double beat[40], carr_sam[40];
    double amp_sam[40], mix_sam[40];
@@ -9386,7 +9386,7 @@ create_curve(int ac, char **av) {
       p += sprintf(p, " %s", av[0]);
       ac--; av++;
    }
-   have_mix_in_extra= curve_find_mix_amp_in_extra(extra, &base_mix_amp);
+   have_mix_in_extra= 0;
 
    // Scan the format
    if (fmt[0] == 'N' || fmt[0] == 'n') {
@@ -9474,6 +9474,8 @@ create_curve(int ac, char **av) {
       error("Invalid curve start beat/pulse frequency :S=%g (must be > 0)", beat_start);
    if (mute_prog_tone)
       amp= 0.0;
+   base_mix_amp= sbx_builtin_default_mix_amp_pct(amp);
+   have_mix_in_extra= curve_find_mix_amp_in_extra(extra, &base_mix_amp);
 
 #undef BAD
 
@@ -9620,7 +9622,7 @@ create_curve(int ac, char **av) {
 	 sbx_runtime_activate_from_curve_program(&curve,
 						 isisochronic, ismono,
 						 duration_sec,
-						 extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+						 extra_spec.have_mix ? extra_spec.mix_amp_pct : sbx_builtin_default_mix_amp_pct(amp),
 						 extra_spec.aux_tones, extra_spec.aux_count,
 						 extra_spec.mix_fx, extra_spec.mix_fx_count,
 						 0, 0);
@@ -9650,7 +9652,7 @@ create_curve(int ac, char **av) {
 	 sbx_emit_periods_from_keyframes_with_extra(tl.program_frames, tl.program_frame_count, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(tl.program_frames, tl.program_frame_count, 0,
-					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+					     extra_spec.have_mix ? extra_spec.mix_amp_pct : sbx_builtin_default_mix_amp_pct(amp),
 					     extra_spec.aux_tones, extra_spec.aux_count,
 					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     (have_mixamp_curve && have_mix_in_extra) ? tl.mix_frames : 0,
@@ -9760,7 +9762,7 @@ create_slide(int ac, char **av) {
 	 sbx_emit_periods_from_keyframes_with_extra(frames, frame_count, 0, extra);
       } else {
 	 sbx_runtime_activate_from_keyframes(frames, frame_count, 0,
-					     extra_spec.have_mix ? extra_spec.mix_amp_pct : 100.0,
+					     extra_spec.have_mix ? extra_spec.mix_amp_pct : sbx_builtin_default_mix_amp_pct(amp),
 					     extra_spec.aux_tones, extra_spec.aux_count,
 					     extra_spec.mix_fx, extra_spec.mix_fx_count,
 					     0, 0);

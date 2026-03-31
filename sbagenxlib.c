@@ -5871,6 +5871,7 @@ sbx_default_builtin_drop_config(SbxBuiltinDropConfig *cfg) {
   memset(cfg, 0, sizeof(*cfg));
   sbx_default_tone_spec(&cfg->start_tone);
   cfg->start_tone.mode = SBX_TONE_BINAURAL;
+  cfg->start_tone.amplitude = 0.01;
   cfg->carrier_end_hz = cfg->start_tone.carrier_hz - 5.0;
   cfg->beat_target_hz = 2.5;
   cfg->drop_sec = 1800;
@@ -5884,6 +5885,7 @@ sbx_default_builtin_sigmoid_config(SbxBuiltinSigmoidConfig *cfg) {
   memset(cfg, 0, sizeof(*cfg));
   sbx_default_tone_spec(&cfg->start_tone);
   cfg->start_tone.mode = SBX_TONE_BINAURAL;
+  cfg->start_tone.amplitude = 0.01;
   cfg->carrier_end_hz = cfg->start_tone.carrier_hz - 5.0;
   cfg->beat_target_hz = 2.5;
   cfg->drop_sec = 1800;
@@ -5899,6 +5901,7 @@ sbx_default_builtin_slide_config(SbxBuiltinSlideConfig *cfg) {
   memset(cfg, 0, sizeof(*cfg));
   sbx_default_tone_spec(&cfg->start_tone);
   cfg->start_tone.mode = SBX_TONE_BINAURAL;
+  cfg->start_tone.amplitude = 0.01;
   cfg->carrier_end_hz = 5.0;
   cfg->slide_sec = 1800;
   cfg->fade_sec = 10.0;
@@ -5917,11 +5920,20 @@ sbx_default_curve_timeline_config(SbxCurveTimelineConfig *cfg) {
   memset(cfg, 0, sizeof(*cfg));
   sbx_default_tone_spec(&cfg->start_tone);
   cfg->start_tone.mode = SBX_TONE_BINAURAL;
+  cfg->start_tone.amplitude = 0.01;
   cfg->sample_span_sec = 1800;
   cfg->main_span_sec = 1800;
   cfg->step_len_sec = 180;
   cfg->slide = 1;
   cfg->fade_sec = 10.0;
+}
+
+double
+sbx_builtin_default_mix_amp_pct(double program_amp_pct) {
+  if (!isfinite(program_amp_pct)) return 99.0;
+  if (program_amp_pct < 0.0) program_amp_pct = 0.0;
+  if (program_amp_pct > 100.0) program_amp_pct = 100.0;
+  return 100.0 - program_amp_pct;
 }
 
 void
@@ -6104,7 +6116,8 @@ sbx_build_drop_curve_program(const SbxBuiltinDropConfig *cfg,
   eval_cfg.total_min = (cfg->drop_sec + cfg->hold_sec) / 60.0;
   eval_cfg.wake_min = cfg->wake_sec / 60.0;
   eval_cfg.beat_amp0_pct = cfg->start_tone.amplitude * 100.0;
-  eval_cfg.mix_amp0_pct = 100.0;
+  eval_cfg.mix_amp0_pct =
+      sbx_builtin_default_mix_amp_pct(cfg->start_tone.amplitude * 100.0);
 
   snprintf(text, sizeof(text),
            "beat = ifelse(lt(m,D), b0*exp(ln(b1/b0)*(m/D)), "
@@ -6167,7 +6180,8 @@ sbx_build_sigmoid_curve_program(const SbxBuiltinSigmoidConfig *cfg,
   eval_cfg.total_min = (cfg->drop_sec + cfg->hold_sec) / 60.0;
   eval_cfg.wake_min = cfg->wake_sec / 60.0;
   eval_cfg.beat_amp0_pct = cfg->start_tone.amplitude * 100.0;
-  eval_cfg.mix_amp0_pct = 100.0;
+  eval_cfg.mix_amp0_pct =
+      sbx_builtin_default_mix_amp_pct(cfg->start_tone.amplitude * 100.0);
 
   snprintf(text, sizeof(text),
            "param l = %.17g\n"
