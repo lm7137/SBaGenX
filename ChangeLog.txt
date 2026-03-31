@@ -1,3 +1,7 @@
+3.9.0-alpha.4: Added explicit mix looper overrides via CLI --looper and GUI SBAGEN_LOOPER fields.
+3.9.0-alpha.4: Reused the existing SBAGEN_LOOPER specification so explicit overrides match embedded OGG/FLAC loop metadata.
+3.9.0-alpha.4: Added regression coverage for explicit OGG/FLAC looper overrides and documented cross-platform quoting guidance.
+
 3.9.0-alpha.3: Unified the Windows installer so CLI and desktop GUI ship together and share the installed sbagenxlib runtime.
 3.9.0-alpha.3: Unified the Ubuntu/Linux .deb so it installs both sbagenx and sbagenx-gui with shared runtime and codec payloads.
 3.9.0-alpha.3: Added built-in program mode to the GUI for drop, slide, sigmoid, and curve, including curve editor/plot support.
