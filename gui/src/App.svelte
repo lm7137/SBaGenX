@@ -71,6 +71,7 @@
   let programHoldMinutes = 30
   let programWakeMinutes = 3
   let programMixPath: string | null = null
+  let programMixLooperSpec = ''
   let programDiagnostics: ValidationDiagnostic[] = []
   let programBeatPreview: BeatPreviewResult | null = null
   let programBeatPreviewError: string | null = null
@@ -123,6 +124,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       path: null,
       kind,
       mixPathOverride: null,
+      mixLooperOverride: '',
       dirty: false,
       content: base,
       lines: base.split('\n'),
@@ -141,6 +143,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       path: source.path,
       kind: source.kind,
       mixPathOverride: null,
+      mixLooperOverride: '',
       dirty: false,
       content: source.content,
       lines: source.content.split('\n'),
@@ -219,7 +222,17 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           ? programCurveDocument.path ?? programCurveDocument.name
           : `program:${programKind}`,
       mixPath: programMixPath,
+      mixLooperSpec: programMixLooperSpec.trim() || null,
     }
+  }
+
+  function sequenceDocumentHasPreambleMix(doc: DocumentRecord | null | undefined): boolean {
+    if (!doc || doc.kind !== 'sbg') return false
+    return doc.lines.some((line) => {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#') || !trimmed.startsWith('-')) return false
+      return /(^|\s)-m(\s|$)/.test(trimmed) || /(^|\s)-M(\s|$)/.test(trimmed)
+    })
   }
 
   function programSnapshot(request: ProgramRuntimeRequest = buildProgramRequest()) {
@@ -288,6 +301,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               path: loaded.path,
               kind: loaded.kind,
               mixPathOverride: existing.mixPathOverride ?? null,
+              mixLooperOverride: existing.mixLooperOverride ?? '',
               dirty: false,
               content: loaded.content,
               lines: loaded.content.split('\n'),
@@ -477,6 +491,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               path: loaded.path,
               kind: loaded.kind,
               mixPathOverride: existing.mixPathOverride ?? null,
+              mixLooperOverride: existing.mixLooperOverride ?? '',
               dirty: false,
               content: loaded.content,
               lines: loaded.content.split('\n'),
@@ -641,6 +656,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         doc.content,
         doc.path ?? doc.name,
         doc.kind === 'sbg' ? doc.mixPathOverride : null,
+        doc.kind === 'sbg' ? doc.mixLooperOverride.trim() || null : null,
       )
       if (!currentDocumentMatches(doc.id, contentSnapshot)) return
       updateDocument(doc.id, {
@@ -807,6 +823,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               activeDocument.content,
               activeDocument.path ?? activeDocument.name,
               activeDocument.mixPathOverride,
+              activeDocument.mixLooperOverride.trim() || null,
             )
           : await startProgramLivePreview(buildProgramRequest())
       isPlaying = true
@@ -859,6 +876,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               target,
               activeDocument.path ?? activeDocument.name,
               activeDocument.mixPathOverride,
+              activeDocument.mixLooperOverride.trim() || null,
             )
           : await exportProgram(buildProgramRequest(), target)
       transportMessage = `exported ${result.format.toUpperCase()} · ${formatDuration(result.durationSec)}`
@@ -883,6 +901,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
     updateDocument(activeDocument.id, {
       mixPathOverride: selection,
+      mixLooperOverride: '',
       beatPreview: null,
       beatPreviewError: null,
     })
@@ -894,6 +913,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     if (!activeDocument?.mixPathOverride) return
     updateDocument(activeDocument.id, {
       mixPathOverride: null,
+      mixLooperOverride: '',
       beatPreview: null,
       beatPreviewError: null,
     })
@@ -908,6 +928,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     })
     if (!selection || Array.isArray(selection)) return
     programMixPath = selection
+    programMixLooperSpec = ''
     programBeatPreview = null
     programBeatPreviewError = null
     transportMessage = `loaded mix ${selection.split(/[\\/]/).pop() ?? selection}`
@@ -917,6 +938,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   function clearMixForProgram() {
     if (!programMixPath) return
     programMixPath = null
+    programMixLooperSpec = ''
     programBeatPreview = null
     programBeatPreviewError = null
     transportMessage = 'cleared loaded mix'
@@ -1046,6 +1068,9 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         ? programCurveDocument.path ?? 'unsaved'
         : `program:${programKind}`
   $: activeMixLabel = runtimeMode === 'sequence' ? activeDocument?.mixPathOverride : programMixPath
+  $: sequenceMixLooperVisible =
+    runtimeMode === 'sequence' &&
+    (!!activeDocument?.mixPathOverride || sequenceDocumentHasPreambleMix(activeDocument))
 
   onMount(() => {
     const onKeydown = (event: KeyboardEvent) => handleGlobalKeydown(event)
@@ -1284,6 +1309,29 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             </div>
           </div>
 
+          {#if sequenceMixLooperVisible && activeDocument}
+            <div class='mix-config-row'>
+              <label class='field mix-looper-field'>
+                <span>SBAGEN_LOOPER</span>
+                <input
+                  type='text'
+                  value={activeDocument.mixLooperOverride}
+                  placeholder='i s928 f5 c1 w1 d218-1146'
+                  on:input={(event) => {
+                    const target = event.currentTarget as HTMLInputElement
+                    updateDocument(activeDocument.id, {
+                      mixLooperOverride: target.value,
+                      beatPreview: null,
+                      beatPreviewError: null,
+                    })
+                    queueSequenceValidation(activeDocument.id)
+                  }}
+                />
+              </label>
+              <p class='panel-note'>Leave empty to use the embedded `SBAGEN_LOOPER` tag, if present.</p>
+            </div>
+          {/if}
+
           <div class='editor-surface'>
             {#if activeDocument}
               <MonacoEditor
@@ -1393,6 +1441,21 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
                 <button class='button ghost' disabled={!programMixPath} on:click={clearMixForProgram}>Clear Mix</button>
               </div>
             </div>
+
+            {#if programMixPath}
+              <label class='field field-full mix-looper-field'>
+                <span>SBAGEN_LOOPER</span>
+                <input
+                  type='text'
+                  bind:value={programMixLooperSpec}
+                  placeholder='i s928 f5 c1 w1 d218-1146'
+                  on:input={queueProgramValidation}
+                />
+              </label>
+              <p class='panel-note mix-looper-note'>
+                Leave empty to use the embedded `SBAGEN_LOOPER` tag, if present.
+              </p>
+            {/if}
           </div>
         </section>
 

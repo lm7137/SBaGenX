@@ -219,6 +219,7 @@ struct SbxMixInputConfig {
   output_rate_hz: c_int,
   output_rate_is_default: c_int,
   take_stream_ownership: c_int,
+  looper_spec_override: *const c_char,
   warn_cb: Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
   warn_user: *mut c_void,
 }
@@ -594,6 +595,7 @@ pub struct ProgramRuntimeRequest {
   pub curve_text: Option<String>,
   pub source_name: String,
   pub mix_path: Option<String>,
+  pub mix_looper_spec: Option<String>,
 }
 
 #[derive(Clone)]
@@ -1699,6 +1701,7 @@ fn open_mix_input_resource(
   output_rate_hz: i32,
   output_rate_is_default: bool,
   mix_spec: &str,
+  mix_looper_spec: Option<&str>,
 ) -> Result<(Option<MixInputResource>, f64), String> {
   let mix_spec = mix_spec.trim();
   if mix_spec.is_empty() {
@@ -1712,6 +1715,7 @@ fn open_mix_input_resource(
     output_rate_hz: 0,
     output_rate_is_default: 0,
     take_stream_ownership: 0,
+    looper_spec_override: std::ptr::null(),
     warn_cb: None,
     warn_user: std::ptr::null_mut(),
   };
@@ -1723,6 +1727,22 @@ fn open_mix_input_resource(
 
   let path_hint = CString::new(resolved_path.to_string_lossy().as_bytes())
     .map_err(|_| format!("mix input path contains embedded NUL byte: {}", resolved_path.display()))?;
+  let looper_override = if let Some(spec) = mix_looper_spec {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+      None
+    } else {
+      Some(
+        CString::new(trimmed)
+          .map_err(|_| "mix looper override contains embedded NUL byte".to_string())?,
+      )
+    }
+  } else {
+    None
+  };
+  if let Some(spec) = looper_override.as_ref() {
+    cfg.looper_spec_override = spec.as_ptr();
+  }
   let handle = unsafe { (api.sbx_mix_input_create_stdio)(file, path_hint.as_ptr(), &cfg) };
   if handle.is_null() {
     unsafe {
@@ -1750,6 +1770,7 @@ fn open_mix_input_from_preamble(
   output_rate_hz: i32,
   output_rate_is_default: bool,
   mix_spec_override: Option<&str>,
+  mix_looper_override: Option<&str>,
 ) -> Result<(Option<MixInputResource>, f64), String> {
   let mix_spec = if let Some(mix_spec) = mix_spec_override {
     mix_spec.trim().to_string()
@@ -1763,7 +1784,14 @@ fn open_mix_input_from_preamble(
     return Ok((None, output_rate_hz as f64));
   }
 
-  open_mix_input_resource(api, source_name, output_rate_hz, output_rate_is_default, &mix_spec)
+  open_mix_input_resource(
+    api,
+    source_name,
+    output_rate_hz,
+    output_rate_is_default,
+    &mix_spec,
+    mix_looper_override,
+  )
 }
 
 fn preview_path() -> Result<PathBuf, String> {
@@ -1807,6 +1835,7 @@ fn load_sbg_context_with_rate(
   text: &str,
   source_name: &str,
   mix_path_override: Option<&str>,
+  mix_looper_override: Option<&str>,
   sample_rate_override: Option<f64>,
   enable_mix_input: bool,
 ) -> Result<LoadedSbgContext, String> {
@@ -1858,6 +1887,7 @@ fn load_sbg_context_with_rate(
       requested_rate_hz,
       output_rate_is_default,
       mix_path_override,
+      mix_looper_override,
     )?
   } else {
     (None, requested_rate_hz as f64)
@@ -1932,16 +1962,24 @@ fn load_sbg_context_with_rate(
 }
 
 fn load_sbg_context(text: &str, source_name: &str) -> Result<LoadedSbgContext, String> {
-  load_sbg_context_with_rate(text, source_name, None, None, false)
+  load_sbg_context_with_rate(text, source_name, None, None, None, false)
 }
 
 fn load_sbg_context_for_audio(
   text: &str,
   source_name: &str,
   mix_path_override: Option<&str>,
+  mix_looper_override: Option<&str>,
   sample_rate_override: Option<f64>,
 ) -> Result<LoadedSbgContext, String> {
-  load_sbg_context_with_rate(text, source_name, mix_path_override, sample_rate_override, true)
+  load_sbg_context_with_rate(
+    text,
+    source_name,
+    mix_path_override,
+    mix_looper_override,
+    sample_rate_override,
+    true,
+  )
 }
 
 fn create_runtime_context_from_keyframes(
@@ -2082,6 +2120,7 @@ fn load_program_context_with_rate(
       requested_rate_hz,
       output_rate_is_default,
       request.mix_path.as_deref().unwrap_or(""),
+      request.mix_looper_spec.as_deref(),
     )?
   } else {
     (None, requested_rate_hz as f64)
@@ -3174,6 +3213,7 @@ pub fn validate_sbg(
   text: &str,
   source_name: &str,
   mix_path_override: Option<&str>,
+  mix_looper_override: Option<&str>,
 ) -> Result<ValidationOutcome, String> {
   let api = Api::load()?;
   let c_text = CString::new(text).map_err(|_| "document contains embedded NUL byte".to_string())?;
@@ -3189,7 +3229,14 @@ pub fn validate_sbg(
   }
   let diagnostics = collect_validation_diagnostics(&api, raw_ptr, count);
   if mix_path_override.is_some() && diagnostics_only_require_mix_input(&diagnostics) {
-    match load_sbg_context_with_rate(text, source_name, mix_path_override, None, true) {
+    match load_sbg_context_with_rate(
+      text,
+      source_name,
+      mix_path_override,
+      mix_looper_override,
+      None,
+      true,
+    ) {
       Ok(loaded) => {
         return Ok(ValidationOutcome {
           valid: true,
@@ -3288,14 +3335,20 @@ pub fn create_live_preview(
   text: &str,
   source_name: &str,
   mix_path_override: Option<&str>,
+  mix_looper_override: Option<&str>,
   sample_rate_hz: u32,
 ) -> Result<LivePlaybackContext, String> {
   if sample_rate_hz == 0 {
     return Err("live playback requires a valid output sample rate".to_string());
   }
 
-  let loaded =
-    load_sbg_context_for_audio(text, source_name, mix_path_override, Some(sample_rate_hz as f64))?;
+  let loaded = load_sbg_context_for_audio(
+    text,
+    source_name,
+    mix_path_override,
+    mix_looper_override,
+    Some(sample_rate_hz as f64),
+  )?;
   let duration_sec = unsafe { (loaded.api.sbx_context_duration_sec)(loaded.ctx) };
   let is_looping = unsafe { (loaded.api.sbx_context_is_looping)(loaded.ctx) } != 0;
 
@@ -3367,8 +3420,15 @@ pub fn render_preview(
   text: &str,
   source_name: &str,
   mix_path_override: Option<&str>,
+  mix_looper_override: Option<&str>,
 ) -> Result<PreviewOutcome, String> {
-  let loaded = load_sbg_context_for_audio(text, source_name, mix_path_override, None)?;
+  let loaded = load_sbg_context_for_audio(
+    text,
+    source_name,
+    mix_path_override,
+    mix_looper_override,
+    None,
+  )?;
   let out_path = preview_path()?;
   let (duration_sec, limited, _, engine_version) = render_context_to_path(loaded, &out_path, true)?;
   Ok(PreviewOutcome {
@@ -3384,8 +3444,15 @@ pub fn export_sbg(
   source_name: &str,
   output_path: &Path,
   mix_path_override: Option<&str>,
+  mix_looper_override: Option<&str>,
 ) -> Result<ExportOutcome, String> {
-  let loaded = load_sbg_context_for_audio(text, source_name, mix_path_override, None)?;
+  let loaded = load_sbg_context_for_audio(
+    text,
+    source_name,
+    mix_path_override,
+    mix_looper_override,
+    None,
+  )?;
   let (duration_sec, _, format, engine_version) =
     render_context_to_path(loaded, output_path, false)?;
   Ok(ExportOutcome {
@@ -3620,8 +3687,8 @@ mod tests {
     let seq = "-SE -m mix.wav\nbase: 200+6/20 mix/100\n00:00 base\n00:01 -\n";
     fs::write(&sbg_path, seq).expect("write sbg");
 
-    let result =
-      export_sbg(seq, &sbg_path.to_string_lossy(), &out_path, None).expect("export sbg");
+    let result = export_sbg(seq, &sbg_path.to_string_lossy(), &out_path, None, None)
+      .expect("export sbg");
     assert_eq!(result.format, "wav");
     let meta = fs::metadata(&out_path).expect("stat exported wav");
     assert!(meta.len() > 44, "expected exported wav payload");
@@ -3641,14 +3708,20 @@ mod tests {
     fs::write(&sbg_path, seq).expect("write sbg");
     let mix_source = mix_path.to_string_lossy().to_string();
 
-    let without_mix = match export_sbg(seq, &sbg_path.to_string_lossy(), &out_path, None) {
+    let without_mix = match export_sbg(seq, &sbg_path.to_string_lossy(), &out_path, None, None) {
       Ok(_) => panic!("expected export without mix override to fail"),
       Err(err) => err,
     };
     assert!(!without_mix.is_empty(), "expected a non-empty export failure");
 
-    let with_mix = export_sbg(seq, &sbg_path.to_string_lossy(), &out_path, Some(&mix_source))
-      .expect("export with mix override");
+    let with_mix = export_sbg(
+      seq,
+      &sbg_path.to_string_lossy(),
+      &out_path,
+      Some(&mix_source),
+      None,
+    )
+    .expect("export with mix override");
     assert_eq!(with_mix.format, "wav");
     let meta = fs::metadata(&out_path).expect("stat exported wav");
     assert!(meta.len() > 44, "expected exported wav payload");

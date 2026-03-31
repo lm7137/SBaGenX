@@ -371,6 +371,9 @@ help() {
 	  NL "                     Requires FFmpeg with libx264 support"
 	  NL "          --graph-video-fps n"
 	  NL "                     Frame rate for --graph-video (default 30)"
+	  NL "          --looper spec"
+	  NL "                     Override SBAGEN_LOOPER for OGG/FLAC mix input"
+	  NL "                     Quote spec if it contains spaces"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
 	  NL "          -p        Pre-programmed sequence.  Take the remainder of the command"
@@ -599,7 +602,7 @@ int opt_P_curve;		// Program graph requested for -p curve
 int opt_dry_run;		// Parse/build plan only; do not render audio/plots
 int opt_explain;		// Extended dry-run details
 int opt_M, opt_S, opt_E;
-char *opt_o, *opt_m;
+char *opt_o, *opt_m, *opt_looper;
 int opt_O;
 int opt_W;
 #ifdef ALSA_AUDIO
@@ -3800,6 +3803,8 @@ main(int argc, char **argv) {
 
    if (opt_A && !mix_in)
       error("-A requires a mix input stream; use -m <file> or -M");
+   if (opt_looper && !mix_in)
+      error("--looper requires a mix input stream; use -m <file>, -M, or safe preamble -m");
    
    loop();
    
@@ -3843,6 +3848,15 @@ scanOptions(int *acp, char ***avp) {
 	    error("--graph-video-fps expects a positive integer");
 	 argv++;
 	 opt_G_video_fps= val;
+	 argc--;
+	 argv++;
+	 continue;
+      }
+      if (0 == strcmp(argv[0], "--looper")) {
+	 if (argc-- < 2)
+	    error("--looper expects SBAGEN_LOOPER spec");
+	 argv++;
+	 if (!opt_looper) opt_looper= *argv;
 	 argc--;
 	 argv++;
 	 continue;
@@ -4263,6 +4277,7 @@ open_mix_input_stream_if_requested(void) {
    cfg.output_rate_hz= out_rate;
    cfg.output_rate_is_default= out_rate_def;
    cfg.take_stream_ownership= 0;
+   cfg.looper_spec_override= opt_looper;
    cfg.warn_cb= mix_input_warn_bridge;
    cfg.warn_user= 0;
 

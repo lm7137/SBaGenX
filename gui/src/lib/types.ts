@@ -8,6 +8,7 @@ export interface DocumentRecord {
   path: string | null
   kind: DocumentKind
   mixPathOverride: string | null
+  mixLooperOverride: string
   dirty: boolean
   content: string
   lines: string[]
@@ -151,4 +152,5 @@ export interface ProgramRuntimeRequest {
   curveText?: string | null
   sourceName?: string | null
   mixPath?: string | null
+  mixLooperSpec?: string | null
 }

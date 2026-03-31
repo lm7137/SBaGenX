@@ -202,6 +202,7 @@ struct ValidateDocumentArgs {
   text: String,
   source_name: Option<String>,
   mix_path_override: Option<String>,
+  mix_looper_override: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -211,6 +212,7 @@ struct RenderDocumentArgs {
   text: String,
   source_name: Option<String>,
   mix_path_override: Option<String>,
+  mix_looper_override: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -221,6 +223,7 @@ struct ExportDocumentArgs {
   source_name: Option<String>,
   output_path: String,
   mix_path_override: Option<String>,
+  mix_looper_override: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -234,6 +237,7 @@ struct ProgramRequestArgs {
   curve_text: Option<String>,
   source_name: Option<String>,
   mix_path: Option<String>,
+  mix_looper_spec: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -247,6 +251,7 @@ struct ProgramExportArgs {
   curve_text: Option<String>,
   source_name: Option<String>,
   mix_path: Option<String>,
+  mix_looper_spec: Option<String>,
   output_path: String,
 }
 
@@ -538,6 +543,7 @@ fn program_request_from_args(args: ProgramRequestArgs) -> Result<sbagenxlib::Pro
     curve_text: args.curve_text,
     source_name: args.source_name.unwrap_or_default(),
     mix_path: args.mix_path,
+    mix_looper_spec: args.mix_looper_spec,
   })
 }
 
@@ -805,6 +811,7 @@ fn spawn_sequence_playback_thread(
   text: String,
   source_name: String,
   mix_path_override: Option<String>,
+  mix_looper_override: Option<String>,
   stop_flag: Arc<AtomicBool>,
   startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
 ) -> JoinHandle<()> {
@@ -813,6 +820,7 @@ fn spawn_sequence_playback_thread(
       &text,
       &source_name,
       mix_path_override.as_deref(),
+      mix_looper_override.as_deref(),
       sample_rate_hz,
     )
   })
@@ -1041,7 +1049,12 @@ fn validate_document(args: ValidateDocumentArgs) -> Result<ValidationResult, Str
   let source_name = normalize_source_name(args.source_name, &args.kind);
   let outcome = match args.kind.as_str() {
     "sbg" => {
-      sbagenxlib::validate_sbg(&args.text, &source_name, args.mix_path_override.as_deref())?
+      sbagenxlib::validate_sbg(
+        &args.text,
+        &source_name,
+        args.mix_path_override.as_deref(),
+        args.mix_looper_override.as_deref(),
+      )?
     }
     "sbgf" => sbagenxlib::validate_sbgf(&args.text, &source_name)?,
     _ => return Err(format!("unsupported document kind: {}", args.kind)),
@@ -1108,7 +1121,12 @@ fn render_preview(args: RenderDocumentArgs) -> Result<PreviewResult, String> {
   }
   let source_name = normalize_source_name(args.source_name, &args.kind);
   let outcome =
-    sbagenxlib::render_preview(&args.text, &source_name, args.mix_path_override.as_deref())?;
+    sbagenxlib::render_preview(
+      &args.text,
+      &source_name,
+      args.mix_path_override.as_deref(),
+      args.mix_looper_override.as_deref(),
+    )?;
   Ok(PreviewResult {
     audio_path: outcome.audio_path,
     duration_sec: outcome.duration_sec,
@@ -1138,6 +1156,7 @@ fn start_live_preview(
     args.text,
     source_name,
     args.mix_path_override,
+    args.mix_looper_override,
     stop_flag.clone(),
     startup_tx,
   );
@@ -1249,6 +1268,7 @@ fn export_document(args: ExportDocumentArgs) -> Result<ExportResult, String> {
     &source_name,
     &out_path,
     args.mix_path_override.as_deref(),
+    args.mix_looper_override.as_deref(),
   )?;
   Ok(ExportResult {
     output_path: outcome.output_path,
@@ -1270,6 +1290,7 @@ fn export_program(args: ProgramExportArgs) -> Result<ExportResult, String> {
     curve_text: args.curve_text,
     source_name: args.source_name,
     mix_path: args.mix_path,
+    mix_looper_spec: args.mix_looper_spec,
   })?;
   let out_path = PathBuf::from(&args.output_path);
   let outcome = sbagenxlib::export_program(&request, &out_path)?;

@@ -367,6 +367,7 @@ typedef struct {
   int output_rate_hz;          /* current output rate before mix source opens */
   int output_rate_is_default;  /* 1 => mix source may override output_rate_hz */
   int take_stream_ownership;   /* 1 => destroy closes the supplied FILE * */
+  const char *looper_spec_override; /* optional SBAGEN_LOOPER override (OGG/FLAC) */
   SbxMixWarnCallback warn_cb;  /* optional warning sink for ReplayGain/looper notes */
   void *warn_user;             /* user data for warn_cb */
 } SbxMixInputConfig;

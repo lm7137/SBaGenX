@@ -64,6 +64,7 @@ export async function validateDocument(
   text: string,
   sourceName?: string | null,
   mixPathOverride?: string | null,
+  mixLooperOverride?: string | null,
 ): Promise<ValidationResult> {
   return invoke<ValidationResult>('validate_document', {
     args: {
@@ -71,6 +72,7 @@ export async function validateDocument(
       text,
       sourceName,
       mixPathOverride,
+      mixLooperOverride,
     },
   })
 }
@@ -79,6 +81,7 @@ export async function renderPreview(
   text: string,
   sourceName?: string | null,
   mixPathOverride?: string | null,
+  mixLooperOverride?: string | null,
 ): Promise<PreviewResult> {
   return invoke<PreviewResult>('render_preview', {
     args: {
@@ -86,6 +89,7 @@ export async function renderPreview(
       text,
       sourceName,
       mixPathOverride,
+      mixLooperOverride,
     },
   })
 }
@@ -94,6 +98,7 @@ export async function startLivePreview(
   text: string,
   sourceName?: string | null,
   mixPathOverride?: string | null,
+  mixLooperOverride?: string | null,
 ): Promise<LivePreviewResult> {
   return invoke<LivePreviewResult>('start_live_preview', {
     args: {
@@ -101,6 +106,7 @@ export async function startLivePreview(
       text,
       sourceName,
       mixPathOverride,
+      mixLooperOverride,
     },
   })
 }
@@ -114,6 +120,7 @@ export async function exportDocument(
   outputPath: string,
   sourceName?: string | null,
   mixPathOverride?: string | null,
+  mixLooperOverride?: string | null,
 ): Promise<ExportResult> {
   return invoke<ExportResult>('export_document', {
     args: {
@@ -122,6 +129,7 @@ export async function exportDocument(
       outputPath,
       sourceName,
       mixPathOverride,
+      mixLooperOverride,
     },
   })
 }

@@ -314,6 +314,7 @@ struct SbxMixInput {
   int output_rate_is_default;
   int take_stream_ownership;
   int format;
+  char *looper_spec_override;
   int (*read_fn)(int *dst, int dlen);
   void (*term_fn)(void);
   SbxMixWarnCallback warn_cb;
@@ -578,6 +579,15 @@ sbx_mix_input_sync_back(SbxMixInput *input) {
   input->mix_section = sbx_mix_in_cnt;
   input->output_rate_hz = sbx_mix_out_rate;
   input->output_rate_is_default = sbx_mix_out_rate_def ? 1 : 0;
+}
+
+static const char *
+sbx_mix_input_looper_override(void) {
+  SbxMixInput *input = sbx_mix_active_input;
+
+  if (!input || !input->looper_spec_override || !input->looper_spec_override[0])
+    return 0;
+  return input->looper_spec_override;
 }
 
 static int
@@ -7445,6 +7455,13 @@ sbx_mix_input_create_stdio(FILE *stream,
   input->warn_cb = cfg.warn_cb;
   input->warn_user = cfg.warn_user;
   input->format = SBX_MIX_INPUT_RAW;
+  if (cfg.looper_spec_override && cfg.looper_spec_override[0]) {
+    input->looper_spec_override = strdup(cfg.looper_spec_override);
+    if (!input->looper_spec_override) {
+      free(input);
+      return 0;
+    }
+  }
 
   if (path_hint && *path_hint) {
     dot = strrchr(path_hint, '.');
@@ -7513,6 +7530,15 @@ sbx_mix_input_create_stdio(FILE *stream,
     sbx_mix_input_activate(input);
   }
 
+  if (input->looper_spec_override && input->looper_spec_override[0] &&
+      input->format != SBX_MIX_INPUT_OGG && input->format != SBX_MIX_INPUT_FLAC &&
+      !input->last_error[0]) {
+    mix_input_set_error(
+      input,
+      "SBAGEN_LOOPER override is currently supported only for OGG and FLAC mix inputs"
+    );
+  }
+
   if (!input->read_fn && !input->last_error[0])
     mix_input_set_error(input, "Unsupported or unavailable mix input format");
 
@@ -7558,6 +7584,10 @@ sbx_mix_input_destroy(SbxMixInput *input) {
   if (input->take_stream_ownership && input->fp)
     fclose(input->fp);
   input->fp = 0;
+  if (input->looper_spec_override) {
+    free(input->looper_spec_override);
+    input->looper_spec_override = 0;
+  }
   if (sbx_mix_active_input == input)
     sbx_mix_active_input = 0;
   free(input);

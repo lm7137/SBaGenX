@@ -57,6 +57,7 @@ void
 ogg_init() {
    vorbis_info *vi;
    vorbis_comment *vc;
+   const char *looper_override;
    int len= 2048;
    int a;
    ov_callbacks cbs;
@@ -87,10 +88,16 @@ ogg_init() {
       }
    }
 
+   looper_override= sbx_mix_input_looper_override();
+
    // Check to see is this is a looping OGG
-   for (a= 0; a<vc->comments; a++) {
-      if (0 == memcmp(vc->user_comments[a], "SBAGEN_LOOPER=", 14)) {
-	 vc= 0; break;
+   if (looper_override && *looper_override) {
+      vc= 0;
+   } else {
+      for (a= 0; a<vc->comments; a++) {
+	 if (0 == memcmp(vc->user_comments[a], "SBAGEN_LOOPER=", 14)) {
+	    vc= 0; break;
+	 }
       }
    }
    if (!vc) {
@@ -362,7 +369,8 @@ looper_init() {
    int a;
    ov_callbacks oc;
    vorbis_comment *vc;
-   char *looper;
+   const char *looper;
+   const char *looper_override;
    int intro= 0;
    int prev_flag= 0;
    int on;
@@ -410,10 +418,15 @@ looper_init() {
 
    // Find the SBAGEN_LOOPER tag
    looper= "";
-   vc= ov_comment(&str[0].ogg, -1);
-   for (a= 0; a<vc->comments; a++) 
-      if (0 == memcmp(vc->user_comments[a], "SBAGEN_LOOPER=", 14)) 
-	 looper= vc->user_comments[a] + 14;
+   looper_override= sbx_mix_input_looper_override();
+   if (looper_override && *looper_override) {
+      looper= looper_override;
+   } else {
+      vc= ov_comment(&str[0].ogg, -1);
+      for (a= 0; a<vc->comments; a++) 
+	 if (0 == memcmp(vc->user_comments[a], "SBAGEN_LOOPER=", 14)) 
+	    looper= vc->user_comments[a] + 14;
+   }
    
    // Setup info from SBAGEN_LOOPER tag
    seg0= seg1= datcnt;

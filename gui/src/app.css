@@ -498,6 +498,15 @@ h1 {
   border-top: 1px solid var(--line);
 }
 
+.mix-config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 1.05rem;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.42);
+}
+
 .program-kind-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -575,6 +584,14 @@ h1 {
 
 .field-full {
   margin-top: 0.2rem;
+}
+
+.mix-looper-field {
+  width: 100%;
+}
+
+.mix-looper-note {
+  margin-top: -0.25rem;
 }
 
 .program-mix-row {

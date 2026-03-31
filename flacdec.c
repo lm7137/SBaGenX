@@ -60,7 +60,7 @@ static int flac_zxrand_0_65536();
 static int flac_zxrand_0(int mult);
 static int flac_zxrand(int r0, int r1);
 static int flac_zxrandM(int def, char *fmt, ...);
-static void flac_looper_init(char *looper);
+static void flac_looper_init(const char *looper);
 static int flac_looper_read(int *dst, int dlen);
 static void flac_looper_sched();
 static void flac_looper_sched2();
@@ -261,6 +261,7 @@ flac_decode_all_to_pcm() {
 void
 flac_init() {
    FlacMeta meta;
+   const char *looper_override;
 
    memset(&meta, 0, sizeof(meta));
    meta.mult= 16;
@@ -290,6 +291,17 @@ flac_init() {
    flac_mult= meta.mult;
    if (flac_mult != 16)
       warn("ReplayGain setting detected, FLAC scaling by %.2f", flac_mult/16.0);
+
+   looper_override= sbx_mix_input_looper_override();
+
+   if (looper_override && *looper_override) {
+      flac_decode_all_to_pcm();
+      drflac_close(flac_file);
+      flac_file= 0;
+      flac_looper_init(looper_override);
+      if (meta.looper) free(meta.looper);
+      return;
+   }
 
    if (meta.looper && *meta.looper) {
       flac_decode_all_to_pcm();
@@ -432,7 +444,7 @@ flac_zxrandM(int def, char *fmt, ...) {
 }
 
 static void
-flac_looper_init(char *looper) {
+flac_looper_init(const char *looper) {
    int a;
    int intro= 0;
    int prev_flag= 0;

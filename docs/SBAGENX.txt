@@ -725,6 +725,15 @@ For native FLAC files, set the same tag with:
 
   metaflac --set-tag="SBAGEN_LOOPER=s4-16 f0.2" in.flac
 
+The embedded tag remains supported, but SBaGenX can now also override
+it explicitly from the command line or GUI.  On the command line, use:
+
+  --looper "i s928 f5 c1 w1 d218-1146"
+
+Double quotes are recommended because the spec contains spaces and they
+work on both Linux shells and Windows command prompts.  An explicit
+override takes precedence over any embedded SBAGEN_LOOPER tag.
+
 The tag contains entries as follows, optionally separated by white
 space:
 
