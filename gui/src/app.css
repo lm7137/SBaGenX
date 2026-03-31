@@ -275,7 +275,10 @@ h1 {
 }
 
 .workspace.program-mode {
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) 20rem;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  max-width: 86rem;
+  margin: 0 auto;
+  align-content: start;
 }
 
 .panel {
@@ -358,6 +361,18 @@ h1 {
 .panel-footer {
   padding-top: 0.9rem;
   border-top: 1px solid var(--line);
+}
+
+.panel-header-secondary {
+  padding-top: 0;
+  justify-content: flex-end;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .panel-title {
@@ -914,16 +929,6 @@ h1 {
   font-size: 0.78rem;
 }
 
-.milestone-list {
-  margin: 0.85rem 0 0;
-  padding-left: 1.1rem;
-  color: var(--text);
-}
-
-.milestone-list li + li {
-  margin-top: 0.55rem;
-}
-
 @media (max-width: 1180px) {
   .workspace {
     grid-template-columns: 15rem minmax(0, 1fr);
@@ -931,6 +936,7 @@ h1 {
 
   .workspace.program-mode {
     grid-template-columns: minmax(0, 1fr);
+    max-width: none;
   }
 
   .inspector {

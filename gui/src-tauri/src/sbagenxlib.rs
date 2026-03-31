@@ -30,6 +30,9 @@ const SHORT_PROGRAM_STEP_LEN_SEC: i32 = 60;
 const SBX_TONE_BINAURAL: c_int = 1;
 const SBX_TONE_MONAURAL: c_int = 2;
 const SBX_TONE_ISOCHRONIC: c_int = 3;
+const SBX_TONE_SPIN_PINK: c_int = 7;
+const SBX_TONE_SPIN_BROWN: c_int = 8;
+const SBX_TONE_SPIN_WHITE: c_int = 9;
 const SBX_WAVE_SINE: c_int = 0;
 
 #[cfg(target_os = "windows")]
@@ -3099,7 +3102,7 @@ fn sample_context_beat_preview(api: &Api, ctx: *mut SbxContext) -> Result<BeatPr
     let mut active_sample_count = 0usize;
     for index in 0..sample_count {
       let tone = tones[index];
-      let beat_hz = if tone.mode == 0 {
+      let beat_hz = if !tone_mode_has_beat_preview(tone.mode) {
         None
       } else {
         let beat_hz = hz[index];
@@ -3122,18 +3125,21 @@ fn sample_context_beat_preview(api: &Api, ctx: *mut SbxContext) -> Result<BeatPr
       });
     }
 
-    series.push(BeatPreviewSeries {
-      voice_index,
-      label: format!("Voice {}", voice_index + 1),
-      active_sample_count,
-      points,
-    });
+    if active_sample_count > 0 {
+      let plotted_index = series.len() + 1;
+      series.push(BeatPreviewSeries {
+        voice_index,
+        label: format!("Voice {}", plotted_index),
+        active_sample_count,
+        points,
+      });
+    }
   }
 
   Ok(BeatPreviewOutcome {
     duration_sec: sample_span_sec,
     sample_count,
-    voice_count: voice_count.max(1),
+    voice_count: series.len(),
     min_hz: if min_hz.is_finite() { Some(min_hz) } else { None },
     max_hz: if max_hz.is_finite() { Some(max_hz) } else { None },
     limited,
@@ -3145,6 +3151,18 @@ fn sample_context_beat_preview(api: &Api, ctx: *mut SbxContext) -> Result<BeatPr
     series,
     engine_version: api.version_string(),
   })
+}
+
+fn tone_mode_has_beat_preview(mode: c_int) -> bool {
+  matches!(
+    mode,
+    SBX_TONE_BINAURAL
+      | SBX_TONE_MONAURAL
+      | SBX_TONE_ISOCHRONIC
+      | SBX_TONE_SPIN_PINK
+      | SBX_TONE_SPIN_BROWN
+      | SBX_TONE_SPIN_WHITE
+  )
 }
 
 pub fn backend_status() -> Result<(String, i32), String> {

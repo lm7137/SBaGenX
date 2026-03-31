@@ -997,7 +997,7 @@ fn load_development_examples(app: tauri::AppHandle) -> Result<Vec<FileDocument>,
   if cfg!(debug_assertions) {
     if let Ok(repo_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize() {
       let dev_paths = [
-        repo_root.join("examples/plus/creativity-boost.sbg"),
+        repo_root.join("examples/plus/deep-sleep-aid.sbg"),
         repo_root.join("examples/basics/curve-expfit-solve-demo.sbgf"),
       ];
       let docs = collect_example_documents(&dev_paths)?;
@@ -1010,7 +1010,7 @@ fn load_development_examples(app: tauri::AppHandle) -> Result<Vec<FileDocument>,
   if let Ok(document_dir) = app.path().document_dir() {
     let installed_examples = document_dir.join("SBaGenX").join("Examples");
     let installed_paths = [
-      installed_examples.join("plus").join("creativity-boost.sbg"),
+      installed_examples.join("plus").join("deep-sleep-aid.sbg"),
       installed_examples.join("basics").join("curve-expfit-solve-demo.sbgf"),
     ];
     let docs = collect_example_documents(&installed_paths)?;
@@ -1024,7 +1024,7 @@ fn load_development_examples(app: tauri::AppHandle) -> Result<Vec<FileDocument>,
     Err(_) => return Ok(Vec::new()),
   };
   let fallback_paths = [
-    repo_root.join("examples/plus/creativity-boost.sbg"),
+    repo_root.join("examples/plus").join("deep-sleep-aid.sbg"),
     repo_root.join("examples/basics/curve-expfit-solve-demo.sbgf"),
   ];
   collect_example_documents(&fallback_paths)

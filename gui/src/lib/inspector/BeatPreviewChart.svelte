@@ -100,6 +100,10 @@
     <div class="preview-empty">Sampling beat preview...</div>
   {:else if error}
     <div class="preview-empty error">{error}</div>
+  {:else if preview && preview.series.length === 0}
+    <div class="preview-empty">
+      No beat-bearing voices are active in the current target, so there is nothing meaningful to plot here.
+    </div>
   {:else if preview}
     <div class="preview-stats">
       <div class="preview-stat">

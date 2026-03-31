@@ -47,7 +47,7 @@
   }
 
   const bootstrappedExampleSuffixes = new Set([
-    '/examples/plus/creativity-boost.sbg',
+    '/examples/plus/deep-sleep-aid.sbg',
     '/examples/basics/curve-expfit-solve-demo.sbgf',
   ])
 
@@ -312,6 +312,28 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         queueProgramValidation()
       }
     }
+    await refreshRecentFiles()
+    await persistSessionState()
+  }
+
+  async function openProgramCurveDocument() {
+    const selection = await open({
+      multiple: false,
+      filters: [{ name: 'Curve files', extensions: ['sbgf'] }],
+    })
+    if (!selection || Array.isArray(selection)) return
+    const loaded = await readTextFile(selection)
+    if (loaded.kind !== 'sbgf') {
+      transportMessage = 'selected file is not an .sbgf curve file'
+      return
+    }
+    programCurveDocument = {
+      ...makeDocumentRecord(loaded),
+      id: programCurveDocument.id,
+    }
+    runtimeMode = 'program'
+    programKind = 'curve'
+    queueProgramValidation()
     await refreshRecentFiles()
     await persistSessionState()
   }
@@ -1161,10 +1183,10 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       </div>
 
       <div class='toolbar'>
-        <button class='button ghost' on:click={openDocuments}>Open</button>
-        <button class='button ghost' disabled={saveDisabled} on:click={saveCurrentTarget}>Save</button>
-        <button class='button ghost' disabled={saveDisabled} on:click={saveCurrentTargetAs}>Save As</button>
         {#if runtimeMode === 'sequence'}
+          <button class='button ghost' on:click={openDocuments}>Open</button>
+          <button class='button ghost' disabled={saveDisabled} on:click={saveCurrentTarget}>Save</button>
+          <button class='button ghost' disabled={saveDisabled} on:click={saveCurrentTargetAs}>Save As</button>
           <button class='button ghost' on:click={createSequenceDocument}>New `.sbg`</button>
           <button class='button ghost' on:click={loadMixForSequenceDocument}>Load Mix</button>
           <button
@@ -1174,16 +1196,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           >
             Clear Mix
           </button>
-        {:else}
-          <button class='button ghost' on:click={loadMixForProgram}>Load Mix</button>
-          <button class='button ghost' disabled={!programMixPath} on:click={clearMixForProgram}>
-            Clear Mix
-          </button>
-          {#if programKind === 'curve'}
-            <button class='button ghost' on:click={resetProgramCurveDocument}>New `.sbgf`</button>
-          {/if}
+          <span class='toolbar-divider'></span>
         {/if}
-        <span class='toolbar-divider'></span>
         <button class='button accent' disabled={!canRunCurrent} on:click={playCurrentTarget}>Play</button>
         <button class='button ghost' disabled={!isPlaying} on:click={() => stopPlayback()}>Stop</button>
         <button class='button export' disabled={!canRunCurrent} on:click={exportCurrentTarget}>Export</button>
@@ -1292,9 +1306,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             </div>
             <div class='editor-meta'>
               <span>{`program:${programKind}`}</span>
-              {#if programCurveActive}
-                <span>{activeStatusPath}</span>
-              {/if}
               {#if activeMixLabel}
                 <span class='mix-badge'>mix: {activeMixLabel.split(/[\\/]/).pop() ?? activeMixLabel}</span>
               {/if}
@@ -1391,6 +1402,15 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               <div>
                 <p class='panel-title'>Curve Editor</p>
               </div>
+              <div class='panel-actions'>
+                <button class='button ghost' on:click={openProgramCurveDocument}>Open</button>
+                <button class='button ghost' on:click={saveProgramCurveDocument}>Save</button>
+                <button class='button ghost' on:click={saveProgramCurveDocumentAs}>Save As</button>
+                <button class='button ghost' on:click={resetProgramCurveDocument}>New `.sbgf`</button>
+              </div>
+            </div>
+
+            <div class='panel-header panel-header-secondary'>
               <div class='editor-meta'>
                 <span>sbgf</span>
                 <span>{programCurveDocument.path ?? 'unsaved'}</span>
@@ -1485,19 +1505,6 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             <p class='diagnostic-message'>{item.message}</p>
           </button>
         {/each}
-      </div>
-
-      <div class='inspector-block'>
-        <p class='panel-title'>Current Scope</p>
-        <ul class='milestone-list'>
-          <li>Tabbed `.sbg` editing for sequence mode</li>
-          <li>Built-in `drop`, `slide`, `sigmoid`, and `curve` programs</li>
-          <li>Dedicated `.sbgf` editor for the `curve` program</li>
-          <li>Monaco editor integration</li>
-          <li>Debounced native validation</li>
-          <li>Live playback and export</li>
-          <li>Beat preview sampling and curve metadata inspection</li>
-        </ul>
       </div>
     </aside>
   </main>
