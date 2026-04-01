@@ -1,3 +1,7 @@
+3.9.0-alpha.6: Added customNN support for the compatible mix effects mixpulse, mixspin, and mixbeat.
+3.9.0-alpha.6: Preserved the bipolar semantics of spin-family tones by deliberately excluding spin, bspin, and wspin from customNN support.
+3.9.0-alpha.6: Added parser, formatter, and timed-runtime regression coverage for customNN-driven mix-effect envelopes.
+
 3.9.0-alpha.5: Added MP3 SBAGEN_LOOPER support for embedded metadata and explicit CLI/GUI overrides without full PCM preload.
 3.9.0-alpha.5: Implemented indexed MP3 looper support so long loopable mixes do not require decoded-audio sized memory buffers.
 3.9.0-alpha.5: Refined the desktop GUI glass styling and updated built-in drop/sigmoid defaults to use target level `l`.
