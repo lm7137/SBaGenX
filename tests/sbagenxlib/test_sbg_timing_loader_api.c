@@ -124,6 +124,14 @@ main(void) {
       "00:00 off ==\n"
       "00:00:01 wash ==\n"
       "00:00:02 off\n";
+  const char *sbg_custom_mix_text =
+      "custom00: e=2 0 0.2 1 0.2 0\n"
+      "pulse: mix/70 custom00:mixpulse:2/40 180+0/20\n"
+      "wash: mix/60 custom00:triangle:mixspin:350+3/25 180+0/15\n"
+      "beat: mix/55 custom00:mixbeat:3/25 180+0/15\n"
+      "NOW pulse ==\n"
+      "+00:00:02 wash ==\n"
+      "+00:00:04 beat\n";
   const char *sbg_block_text =
       "off: -\n"
       "base: 180+0/35\n"
@@ -419,6 +427,60 @@ main(void) {
     fail("named mix timing should be silent before entry");
   if (!(sbx_context_mix_amp_at(ctx, 1.2) > 55.0))
     fail("named mix timing should activate mix amplitude in named set");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_mix_text, 0);
+  if (rc != SBX_OK) fail("custom mixfx sbg timing load failed");
+  {
+    double min_mix = 1e9, max_mix = -1e9;
+    for (i = 0; i < (size_t)(0.5 * cfg.sample_rate); i++) {
+      double add_l = 0.0, add_r = 0.0;
+      double t = 0.10 + (double)i / cfg.sample_rate;
+      if (sbx_context_mix_stream_sample(ctx, t, 1600, 1600, 1.0, &add_l, &add_r) != SBX_OK)
+        fail("mix stream sample failed for custom mixpulse timing");
+      if (add_l < min_mix) min_mix = add_l;
+      if (add_l > max_mix) max_mix = add_l;
+    }
+    if (!((max_mix - min_mix) > 5.0))
+      fail("custom mixpulse timing should modulate mix stream over time");
+  }
+  {
+    double min_l = 1e9, max_l = -1e9;
+    double min_r = 1e9, max_r = -1e9;
+    for (i = 0; i < (size_t)(0.5 * cfg.sample_rate); i++) {
+      double add_l = 0.0, add_r = 0.0;
+      double t = 2.10 + (double)i / cfg.sample_rate;
+      if (sbx_context_mix_stream_sample(ctx, t, 1600, 0, 1.0, &add_l, &add_r) != SBX_OK)
+        fail("mix stream sample failed for custom mixspin timing");
+      if (add_l < min_l) min_l = add_l;
+      if (add_l > max_l) max_l = add_l;
+      if (add_r < min_r) min_r = add_r;
+      if (add_r > max_r) max_r = add_r;
+    }
+    if (!((max_l - min_l) > 2.0 || (max_r - min_r) > 2.0))
+      fail("custom mixspin timing should modulate stereo placement over time");
+  }
+  {
+    double min_l = 1e9, max_l = -1e9;
+    for (i = 0; i < (size_t)(0.5 * cfg.sample_rate); i++) {
+      double add_l = 0.0, add_r = 0.0;
+      double t = 4.10 + (double)i / cfg.sample_rate;
+      if (sbx_context_mix_stream_sample(ctx, t, 1600, 1600, 1.0, &add_l, &add_r) != SBX_OK)
+        fail("mix stream sample failed for custom mixbeat timing");
+      if (add_l < min_l) min_l = add_l;
+      if (add_l > max_l) max_l = add_l;
+    }
+    if (!((max_l - min_l) > 2.0))
+      fail("custom mixbeat timing should modulate beat effect intensity over time");
+  }
+  {
+    SbxTimedMixFxKeyframeInfo fx_info;
+    if (sbx_context_timed_mix_effect_keyframe_count(ctx) != 3)
+      fail("custom mixfx timing should expose 3 timed mix-effect keyframes");
+    if (sbx_context_get_timed_mix_effect_keyframe_info(ctx, 0, &fx_info) != SBX_OK)
+      fail("custom mixfx first timed keyframe info failed");
+    if (fabs(fx_info.time_sec - 0.0) > 1e-9)
+      fail("custom mixfx first timed keyframe time mismatch");
+  }
 
   rc = sbx_context_load_sbg_timing_text(ctx, "fx: mixpulse:2/40\n00:00 fx\n", 0);
   if (rc != SBX_EINVAL)

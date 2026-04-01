@@ -89,6 +89,7 @@ typedef enum {
 typedef struct {
   int type;      /* SBX_MIXFX_* */
   int waveform;  /* SBX_WAVE_* */
+  int envelope_waveform; /* SBX_ENV_WAVE_NONE or SBX_ENV_WAVE_CUSTOM_BASE + [0..99] */
   double carr;   /* mixspin width in microseconds */
   double res;    /* modulation/spin frequency in Hz */
   double amp;    /* 0..1 effect amount */

@@ -155,6 +155,29 @@ int main(void) {
   }
   {
     SbxMixFxSpec fx;
+    if (sbx_parse_mix_fx_spec("custom00:mixpulse:1/50", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("custom mixpulse parse failed");
+    if (fx.type != SBX_MIXFX_PULSE ||
+        fx.waveform != SBX_WAVE_SINE ||
+        fx.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+      fail("custom mixpulse parse value mismatch");
+    if (sbx_parse_mix_fx_spec("custom00:triangle:mixspin:400+6/40", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("custom mixspin parse failed");
+    if (fx.type != SBX_MIXFX_SPIN ||
+        fx.waveform != SBX_WAVE_TRIANGLE ||
+        fx.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+      fail("custom mixspin parse value mismatch");
+    if (sbx_parse_mix_fx_spec("custom00:mixbeat:3/25", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("custom mixbeat parse failed");
+    if (fx.type != SBX_MIXFX_BEAT ||
+        fx.waveform != SBX_WAVE_SINE ||
+        fx.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
+      fail("custom mixbeat parse value mismatch");
+    if (sbx_parse_mix_fx_spec("custom00:mixam:8", SBX_WAVE_SINE, &fx) != SBX_EINVAL)
+      fail("custom envelope should be rejected for mixam");
+  }
+  {
+    SbxMixFxSpec fx;
     if (sbx_parse_mix_fx_spec("mixam:8", SBX_WAVE_SINE, &fx) != SBX_OK)
       fail("mixam default parse failed");
     if (fx.type != SBX_MIXFX_AM || fx.mixam_mode != SBX_MIXAM_MODE_COS ||
@@ -235,6 +258,17 @@ int main(void) {
       fail("mix fx format roundtrip type/wave mismatch");
     if (fabs(fx_rt.carr - fx.carr) > 1e-9 || fabs(fx_rt.res - fx.res) > 1e-9 || fabs(fx_rt.amp - fx.amp) > 1e-9)
       fail("mix fx format roundtrip value mismatch");
+    if (sbx_parse_mix_fx_spec("custom00:triangle:mixspin:400+6/40", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("custom mix fx parse for format failed");
+    if (sbx_format_mix_fx_spec(&fx, spec, sizeof(spec)) != SBX_OK)
+      fail("custom mix fx format failed");
+    if (strcmp(spec, "custom00:triangle:mixspin:400+6/40") != 0)
+      fail("custom mix fx format should preserve both prefixes");
+    if (sbx_parse_mix_fx_spec(spec, SBX_WAVE_SINE, &fx_rt) != SBX_OK)
+      fail("custom mix fx parse after format failed");
+    if (fx_rt.type != fx.type || fx_rt.waveform != fx.waveform ||
+        fx_rt.envelope_waveform != fx.envelope_waveform)
+      fail("custom mix fx format roundtrip mismatch");
     if (sbx_parse_mix_fx_spec("mixam:7:d=0.6:a=0.2:r=0.2:e=2:f=0.1", SBX_WAVE_SINE, &fx) != SBX_OK)
       fail("mixam parse for format failed");
     if (sbx_format_mix_fx_spec(&fx, spec, sizeof(spec)) != SBX_OK)
@@ -390,6 +424,29 @@ int main(void) {
       fail("mix effects produced zero contribution");
     if (sbx_context_set_mix_effects(ctx, 0, 0) != SBX_OK)
       fail("clear mix effects failed");
+  }
+  {
+    const char *sbg_custom_mix_text =
+        "custom00: e=2 0 0.2 1 0.2 0\n"
+        "pulse: mix/65 custom00:mixpulse:2/40 180+0/15\n"
+        "wash: mix/40 custom00:triangle:mixspin:400+4/20 200+0/12\n"
+        "beat: mix/55 custom00:mixbeat:3/25 180+0/15\n"
+        "NOW pulse ==\n"
+        "+00:00:02 wash ==\n"
+        "+00:00:04 beat\n";
+    SbxTimedMixFxKeyframeInfo fx_info;
+    if (sbx_context_load_sbg_timing_text(ctx, sbg_custom_mix_text, 0) != SBX_OK)
+      fail("custom mixfx sbg timing load failed");
+    if (sbx_context_timed_mix_effect_keyframe_count(ctx) != 3)
+      fail("custom mixfx timing should expose 3 timed mix-effect keyframes");
+    if (sbx_context_get_timed_mix_effect_keyframe_info(ctx, 0, &fx_info) != SBX_OK)
+      fail("custom mixfx first timed keyframe info failed");
+    if (fabs(fx_info.time_sec - 0.0) > 1e-9)
+      fail("custom mixfx first timed keyframe time mismatch");
+  }
+  {
+    if (sbx_context_load_sbg_timing_text(ctx, "00:00 200+2/20\n", 0) != SBX_OK)
+      fail("reset context after custom mixfx timing load failed");
   }
   {
     SbxMixAmpKeyframe mkf[2];

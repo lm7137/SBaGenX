@@ -341,9 +341,12 @@ global min/max recentering.  Example:
   base: custom00:400@2/20
   00:00 base
 
-`customNN` currently supports binaural and isochronic tones on the
+`customNN` currently supports binaural tones, isochronic tones, and the
+compatible mix-effect envelopes `mixpulse`, `mixspin`, and `mixbeat` on the
 `sbagenxlib` path.  For isochronic tones, the custom envelope replaces the
-default `-I` pulse shape for that tone.  The installer ships a rendered
+default `-I` pulse shape for that tone.  For mix effects, the custom envelope
+modulates effect strength while preserving the underlying sine/explicit
+waveform oscillator used by the effect.  The installer ships a rendered
 reference plot for the example above as:
 
 For new isochronic designs, `-I` is still the recommended first choice.
@@ -2263,8 +2266,10 @@ The waveform specification can be applied to:
 - Mixbeat effects (sine:mixbeat:<beat>/<intensity>)
 
 Note: For mixspin/mixpulse/mixbeat effects, the waveform modulates the
-effect envelope. For mixbeat, a sine waveform is recommended for the
-cleanest spectral result.
+effect envelope. `customNN:` may also be used for these three mix effects
+to provide a hand-shaped unipolar effect envelope. This does not extend to
+`spin`, `bspin`, or `wspin`, whose modulation is inherently bipolar.
+For mixbeat, a sine waveform is recommended for the cleanest spectral result.
 Note: mixam uses explicit envelope parameters (m,s,d,a,r,e,f) via `-H` (or
 inline in the token for compatibility), and does not use waveform prefixes
 for shaping.
