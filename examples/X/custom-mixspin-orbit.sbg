@@ -1,0 +1,19 @@
+## customNN-driven mixspin example.
+##
+## The custom01 envelope keeps the mix mostly centered and only lets the
+## spatial spin bloom strongly during selected parts of the cycle.
+## The triangle waveform still determines the spin motion itself; custom01
+## only shapes the effect strength.
+##
+## Assumes you run from the repo root:
+##   sbagenx -D examples/X/custom-mixspin-orbit.sbg
+##   sbagenx examples/X/custom-mixspin-orbit.sbg
+
+-m assets/river1.ogg
+
+custom01: e=1 0 0.1 0.15 0.2 0.9 1 0.4 0.15 0.1 0
+
+orbit: mix/80 custom01:triangle:mixspin:350+0.06/45 180+3/15
+
+00:00 orbit
+00:10:00 orbit

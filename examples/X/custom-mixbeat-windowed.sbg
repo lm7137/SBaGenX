@@ -1,0 +1,17 @@
+## customNN-driven mixbeat example.
+##
+## The custom02 envelope creates short windows where the embedded-beat
+## effect becomes strong, instead of applying mixbeat continuously.
+##
+## Assumes you run from the repo root:
+##   sbagenx -D examples/X/custom-mixbeat-windowed.sbg
+##   sbagenx examples/X/custom-mixbeat-windowed.sbg
+
+-m assets/river1.ogg
+
+custom02: e=0 0 0 0 1 1 0 0 0
+
+windowed: mix/70 custom02:mixbeat:5.5/40 200+5.5/18
+
+00:00 windowed
+00:10:00 windowed
