@@ -1,3 +1,7 @@
+3.9.0-alpha.5: Added MP3 SBAGEN_LOOPER support for embedded metadata and explicit CLI/GUI overrides without full PCM preload.
+3.9.0-alpha.5: Implemented indexed MP3 looper support so long loopable mixes do not require decoded-audio sized memory buffers.
+3.9.0-alpha.5: Refined the desktop GUI glass styling and updated built-in drop/sigmoid defaults to use target level `l`.
+
 3.9.0-alpha.4: Added explicit mix looper overrides via CLI --looper and GUI SBAGEN_LOOPER fields.
 3.9.0-alpha.4: Reused the existing SBAGEN_LOOPER specification so explicit overrides match embedded OGG/FLAC loop metadata.
 3.9.0-alpha.4: Added regression coverage for explicit OGG/FLAC looper overrides and documented cross-platform quoting guidance.
