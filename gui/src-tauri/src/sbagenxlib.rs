@@ -1511,7 +1511,7 @@ fn parse_slide_main_arg(main_arg: &str) -> Result<SlideMainArg, String> {
   }
 
   let carrier_end = trimmed
-    .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+    .find(|c: char| !(c.is_ascii_digit() || c == '.'))
     .unwrap_or(trimmed.len());
   let carrier_hz = trimmed[..carrier_end]
     .parse::<f64>()
@@ -1530,7 +1530,7 @@ fn parse_slide_main_arg(main_arg: &str) -> Result<SlideMainArg, String> {
   cursor = &cursor[1..];
 
   let beat_end = cursor
-    .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+    .find(|c: char| !(c.is_ascii_digit() || c == '.'))
     .unwrap_or(cursor.len());
   let beat_hz = cursor[..beat_end]
     .parse::<f64>()
@@ -1544,7 +1544,7 @@ fn parse_slide_main_arg(main_arg: &str) -> Result<SlideMainArg, String> {
     return Err("slide expects /<amp> after the beat value".to_string());
   };
   let amp_end = cursor_after_slash
-    .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+'))
+    .find(|c: char| !(c.is_ascii_digit() || c == '.'))
     .unwrap_or(cursor_after_slash.len());
   let amp_pct = cursor_after_slash[..amp_end]
     .parse::<f64>()
@@ -3753,5 +3753,16 @@ mod tests {
     assert!(outcome.has_solve);
     assert!((a - 7.58425).abs() < 1e-4, "expected solved A, got {}", a);
     assert!((c - 2.41575).abs() < 1e-4, "expected solved C, got {}", c);
+  }
+
+  #[test]
+  fn parse_slide_main_arg_accepts_canonical_tone_spec() {
+    let parsed = parse_slide_main_arg("200+10/1").expect("parse slide main arg");
+    assert!(!parsed.is_isochronic);
+    assert!(!parsed.is_monaural);
+    assert!((parsed.carrier_start_hz - 200.0).abs() < 1e-9);
+    assert!((parsed.carrier_end_hz - 5.0).abs() < 1e-9);
+    assert!((parsed.beat_hz - 10.0).abs() < 1e-9);
+    assert!((parsed.amp_pct - 1.0).abs() < 1e-9);
   }
 }

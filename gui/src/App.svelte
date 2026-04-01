@@ -42,7 +42,7 @@
   const DEFAULT_PROGRAM_MAIN_ARGS: Record<ProgramKind, string> = {
     drop: '00ls+^',
     sigmoid: '00ls+^:l=0.125:h=0',
-    slide: '200+10/20',
+    slide: '200+10/1',
     curve: '00ls:l=0.15',
   }
 
@@ -86,6 +86,7 @@
   let recentFiles: RecentFileEntry[] = []
   let previewLoadingId: string | null = null
   let curveInfoLoadingId: string | null = null
+  const hiddenProgramTransportMessages = new Set(['loaded example files'])
   let editorView: {
     revealPosition: (line: number, column?: number) => void
     focusEditor: () => void
@@ -1357,13 +1358,15 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               {#if activeMixLabel}
                 <span class='mix-badge'>mix: {activeMixLabel.split(/[\\/]/).pop() ?? activeMixLabel}</span>
               {/if}
-              <span class:busy={transportBusy || validatingTarget === 'program'} class='editor-status'>
-                {#if validatingTarget === 'program'}
-                  validating...
-                {:else}
-                  {transportMessage}
-                {/if}
-              </span>
+              {#if validatingTarget === 'program' || !hiddenProgramTransportMessages.has(transportMessage)}
+                <span class:busy={transportBusy || validatingTarget === 'program'} class='editor-status'>
+                  {#if validatingTarget === 'program'}
+                    validating...
+                  {:else}
+                    {transportMessage}
+                  {/if}
+                </span>
+              {/if}
             </div>
           </div>
 
@@ -1506,7 +1509,13 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       <BeatPreviewChart
         preview={activeBeatPreview as BeatPreviewResult | null}
         error={activeBeatPreviewError}
-        kind={runtimeMode === 'sequence' ? activeDocument?.kind ?? null : programCurveActive ? 'curve-program' : 'sbg'}
+        kind={
+          runtimeMode === 'sequence'
+            ? activeDocument?.kind ?? null
+            : programCurveActive
+              ? 'curve-program'
+              : 'built-in-program'
+        }
         validating={previewLoadingId === (runtimeMode === 'sequence' ? activeDocument?.id ?? null : 'program')}
       />
 

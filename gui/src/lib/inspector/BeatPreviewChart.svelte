@@ -3,7 +3,7 @@
 
   export let preview: BeatPreviewResult | null = null
   export let error: string | null = null
-  export let kind: 'sbg' | 'sbgf' | 'curve-program' | null = null
+  export let kind: 'sbg' | 'sbgf' | 'curve-program' | 'built-in-program' | null = null
   export let validating = false
 
   const width = 560
@@ -77,6 +77,8 @@
       <p class="panel-note">
         {#if kind === 'curve-program'}
           Sampled directly from `sbagenxlib` for the active built-in `curve` program.
+        {:else if kind === 'built-in-program'}
+          Sampled directly from `sbagenxlib` over the active built-in program preview window.
         {:else}
           Sampled directly from `sbagenxlib` over the current sequence duration.
         {/if}
