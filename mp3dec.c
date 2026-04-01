@@ -1004,6 +1004,7 @@ mp3_init() {
    mp3_index_reset();
 
    mp3_scan_id3_tag(mix_in, &mp3_looper_embedded, &mp3_audio_start);
+   sbx_mix_input_set_embedded_looper(mp3_looper_embedded);
    looper_override= sbx_mix_input_looper_override();
 
    if ((looper_override && *looper_override) || (mp3_looper_embedded && *mp3_looper_embedded)) {

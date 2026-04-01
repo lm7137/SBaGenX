@@ -1045,6 +1045,11 @@ fn write_text_file(app: tauri::AppHandle, path: String, content: String) -> Resu
 }
 
 #[tauri::command]
+fn inspect_mix_embedded_looper(path: String) -> Result<Option<String>, String> {
+  sbagenxlib::inspect_mix_embedded_looper(&path)
+}
+
+#[tauri::command]
 fn validate_document(args: ValidateDocumentArgs) -> Result<ValidationResult, String> {
   let source_name = normalize_source_name(args.source_name, &args.kind);
   let outcome = match args.kind.as_str() {
@@ -1434,6 +1439,7 @@ pub fn run() {
       load_development_examples,
       save_session_state,
       write_text_file,
+      inspect_mix_embedded_looper,
       validate_document,
       validate_program,
       render_preview,

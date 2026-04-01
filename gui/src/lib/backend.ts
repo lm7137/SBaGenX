@@ -59,6 +59,10 @@ export async function writeTextFile(path: string, content: string): Promise<void
   await invoke('write_text_file', { path, content })
 }
 
+export async function inspectMixEmbeddedLooper(path: string): Promise<string | null> {
+  return invoke<string | null>('inspect_mix_embedded_looper', { path })
+}
+
 export async function validateDocument(
   kind: 'sbg' | 'sbgf',
   text: string,

@@ -58,6 +58,7 @@ ogg_init() {
    vorbis_info *vi;
    vorbis_comment *vc;
    const char *looper_override;
+   const char *embedded_looper;
    int len= 2048;
    int a;
    ov_callbacks cbs;
@@ -89,6 +90,7 @@ ogg_init() {
    }
 
    looper_override= sbx_mix_input_looper_override();
+   embedded_looper= 0;
 
    // Check to see is this is a looping OGG
    if (looper_override && *looper_override) {
@@ -96,6 +98,8 @@ ogg_init() {
    } else {
       for (a= 0; a<vc->comments; a++) {
 	 if (0 == memcmp(vc->user_comments[a], "SBAGEN_LOOPER=", 14)) {
+	    embedded_looper= vc->user_comments[a] + 14;
+	    sbx_mix_input_set_embedded_looper(embedded_looper);
 	    vc= 0; break;
 	 }
       }

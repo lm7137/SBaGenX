@@ -292,6 +292,7 @@ flac_init() {
    if (flac_mult != 16)
       warn("ReplayGain setting detected, FLAC scaling by %.2f", flac_mult/16.0);
 
+   sbx_mix_input_set_embedded_looper(meta.looper);
    looper_override= sbx_mix_input_looper_override();
 
    if (looper_override && *looper_override) {

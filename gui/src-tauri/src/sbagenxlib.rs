@@ -477,6 +477,7 @@ type SbxMixInputRead = unsafe extern "C" fn(*mut SbxMixInput, *mut c_int, c_int)
 type SbxMixInputDestroy = unsafe extern "C" fn(*mut SbxMixInput);
 type SbxMixInputLastError = unsafe extern "C" fn(*const SbxMixInput) -> *const c_char;
 type SbxMixInputOutputRate = unsafe extern "C" fn(*const SbxMixInput) -> c_int;
+type SbxMixInputEmbeddedLooper = unsafe extern "C" fn(*const SbxMixInput) -> *const c_char;
 type SbxBuildDropCurveProgram =
   unsafe extern "C" fn(*const SbxBuiltinDropConfig, *mut *mut SbxCurveProgram) -> c_int;
 type SbxBuildSigmoidCurveProgram =
@@ -695,6 +696,7 @@ struct Api {
   sbx_mix_input_destroy: SbxMixInputDestroy,
   sbx_mix_input_last_error: SbxMixInputLastError,
   sbx_mix_input_output_rate: SbxMixInputOutputRate,
+  sbx_mix_input_embedded_looper: SbxMixInputEmbeddedLooper,
   sbx_build_drop_curve_program: SbxBuildDropCurveProgram,
   sbx_build_sigmoid_curve_program: SbxBuildSigmoidCurveProgram,
   sbx_build_drop_keyframes: SbxBuildDropKeyframes,
@@ -1082,6 +1084,8 @@ impl Api {
         sbx_mix_input_last_error: Self::load_symbol(&lib, b"sbx_mix_input_last_error\0")?,
         sbx_mix_input_output_rate:
           Self::load_symbol(&lib, b"sbx_mix_input_output_rate\0")?,
+        sbx_mix_input_embedded_looper:
+          Self::load_symbol(&lib, b"sbx_mix_input_embedded_looper\0")?,
         sbx_build_drop_curve_program:
           Self::load_symbol(&lib, b"sbx_build_drop_curve_program\0")?,
         sbx_build_sigmoid_curve_program:
@@ -1792,6 +1796,28 @@ fn open_mix_input_from_preamble(
     &mix_spec,
     mix_looper_override,
   )
+}
+
+pub fn inspect_mix_embedded_looper(mix_path: &str) -> Result<Option<String>, String> {
+  let trimmed = mix_path.trim();
+  if trimmed.is_empty() {
+    return Ok(None);
+  }
+
+  let api = Api::load()?;
+  let (mix_input, _) = open_mix_input_resource(&api, trimmed, 44_100, true, trimmed, None)?;
+  let looper = mix_input
+    .as_ref()
+    .map(|resource| unsafe { cstr_to_string((api.sbx_mix_input_embedded_looper)(resource.handle)) })
+    .filter(|value| !value.is_empty());
+
+  if let Some(resource) = mix_input {
+    unsafe {
+      (api.sbx_mix_input_destroy)(resource.handle);
+    }
+  }
+
+  Ok(looper)
 }
 
 fn preview_path() -> Result<PathBuf, String> {

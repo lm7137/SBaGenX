@@ -12,6 +12,7 @@
     exportDocument,
     exportProgram,
     inspectCurveInfo,
+    inspectMixEmbeddedLooper,
     loadDevelopmentExamples,
     loadRecentFiles,
     loadSessionDocuments,
@@ -899,10 +900,11 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       filters: [{ name: 'Audio files', extensions: ['wav', 'flac', 'ogg', 'mp3'] }],
     })
     if (!selection || Array.isArray(selection)) return
+    const embeddedLooper = await inspectMixEmbeddedLooper(selection).catch(() => null)
 
     updateDocument(activeDocument.id, {
       mixPathOverride: selection,
-      mixLooperOverride: '',
+      mixLooperOverride: embeddedLooper ?? '',
       beatPreview: null,
       beatPreviewError: null,
     })
@@ -928,8 +930,9 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       filters: [{ name: 'Audio files', extensions: ['wav', 'flac', 'ogg', 'mp3'] }],
     })
     if (!selection || Array.isArray(selection)) return
+    const embeddedLooper = await inspectMixEmbeddedLooper(selection).catch(() => null)
     programMixPath = selection
-    programMixLooperSpec = ''
+    programMixLooperSpec = embeddedLooper ?? ''
     programBeatPreview = null
     programBeatPreviewError = null
     transportMessage = `loaded mix ${selection.split(/[\\/]/).pop() ?? selection}`

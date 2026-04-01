@@ -34,6 +34,11 @@ function compareVersions(a, b) {
 }
 
 function newestLinuxRuntime() {
+  const activeSoname = path.join(distDir, 'libsbagenx.so.3')
+  if (fs.existsSync(activeSoname)) {
+    return fs.realpathSync(activeSoname)
+  }
+
   const prefix = 'libsbagenx.so.'
   const entries = fs
     .readdirSync(distDir, { withFileTypes: true })

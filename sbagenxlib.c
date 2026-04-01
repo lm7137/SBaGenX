@@ -316,6 +316,7 @@ struct SbxMixInput {
   int take_stream_ownership;
   int format;
   char *looper_spec_override;
+  char *embedded_looper_spec;
   int (*read_fn)(int *dst, int dlen);
   void (*term_fn)(void);
   SbxMixWarnCallback warn_cb;
@@ -330,6 +331,8 @@ static FILE *sbx_mix_in_file;
 static int sbx_mix_in_cnt;
 static int sbx_mix_out_rate;
 static int sbx_mix_out_rate_def;
+
+static char *sbx_strdup_local(const char *s);
 
 #define TE_POW_FROM_RIGHT 0
 /*
@@ -606,6 +609,25 @@ sbx_mix_input_looper_override(void) {
   if (!input || !input->looper_spec_override || !input->looper_spec_override[0])
     return 0;
   return input->looper_spec_override;
+}
+
+static void
+sbx_mix_input_set_embedded_looper(const char *spec) {
+  SbxMixInput *input = sbx_mix_active_input;
+  char *copy = 0;
+
+  if (!input) return;
+  if (input->embedded_looper_spec) {
+    free(input->embedded_looper_spec);
+    input->embedded_looper_spec = 0;
+  }
+  if (!spec || !spec[0]) return;
+  copy = sbx_strdup_local(spec);
+  if (!copy) {
+    mix_input_set_error(input, "Out of memory copying embedded SBAGEN_LOOPER");
+    return;
+  }
+  input->embedded_looper_spec = copy;
 }
 
 static int
@@ -7636,6 +7658,10 @@ sbx_mix_input_destroy(SbxMixInput *input) {
     free(input->looper_spec_override);
     input->looper_spec_override = 0;
   }
+  if (input->embedded_looper_spec) {
+    free(input->embedded_looper_spec);
+    input->embedded_looper_spec = 0;
+  }
   if (sbx_mix_active_input == input)
     sbx_mix_active_input = 0;
   free(input);
@@ -7663,6 +7689,12 @@ int
 sbx_mix_input_format(const SbxMixInput *input) {
   if (!input) return SBX_MIX_INPUT_RAW;
   return input->format;
+}
+
+const char *
+sbx_mix_input_embedded_looper(const SbxMixInput *input) {
+  if (!input || !input->embedded_looper_spec || !input->embedded_looper_spec[0]) return 0;
+  return input->embedded_looper_spec;
 }
 
 SbxContext *
