@@ -1,8 +1,10 @@
 :root {
   --bg: #f6f6f2;
-  --panel: rgba(255, 255, 255, 0.74);
-  --panel-strong: rgba(255, 255, 255, 0.84);
+  --panel: linear-gradient(180deg, rgba(232, 237, 243, 0.22), rgba(206, 216, 229, 0.10));
+  --panel-strong: linear-gradient(180deg, rgba(236, 240, 245, 0.28), rgba(214, 221, 231, 0.14));
   --line: rgba(20, 20, 20, 0.12);
+  --glass-stroke: rgba(255, 255, 255, 0.32);
+  --glass-topbar: linear-gradient(180deg, rgba(236, 240, 245, 0.26), rgba(214, 221, 231, 0.12));
   --text: #141414;
   --muted: rgba(20, 20, 20, 0.68);
   --heading: #141414;
@@ -95,14 +97,33 @@ button {
 
 .topbar,
 .panel {
-  backdrop-filter: blur(14px);
+  position: relative;
+  overflow: hidden;
   background: var(--panel);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow2);
+  border: 1px solid var(--glass-stroke);
+  background-clip: padding-box;
+  box-shadow: var(--shadow2), inset 0 1px 0 rgba(255, 255, 255, 0.52);
+}
+
+.topbar::before,
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.02) 44%, rgba(255, 255, 255, 0.06)),
+    radial-gradient(120% 90% at 0% 0%, rgba(255, 255, 255, 0.12), transparent 55%);
+}
+
+.topbar > *,
+.panel > * {
+  position: relative;
+  z-index: 1;
 }
 
 .topbar {
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--glass-topbar);
   border-radius: var(--radius-lg);
   padding: 1.15rem 1.3rem;
   display: flex;

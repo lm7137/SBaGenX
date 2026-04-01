@@ -40,8 +40,8 @@
   } from './lib/types'
 
   const DEFAULT_PROGRAM_MAIN_ARGS: Record<ProgramKind, string> = {
-    drop: '00ds+^',
-    sigmoid: '00ds+^:l=0.125:h=0',
+    drop: '00ls+^',
+    sigmoid: '00ls+^:l=0.125:h=0',
     slide: '200+10/20',
     curve: '00ls:l=0.15',
   }
