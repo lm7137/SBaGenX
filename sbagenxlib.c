@@ -309,6 +309,7 @@ struct SbxAudioWriter {
 
 struct SbxMixInput {
   FILE *fp;
+  char *path_hint;
   int mix_section;
   int output_rate_hz;
   int output_rate_is_default;
@@ -387,6 +388,7 @@ static void sbx_mix_inbuf_start(int(*rout)(int*,int), int len);
 static int sbx_mix_input_find_wav_data_start(SbxMixInput *input);
 static int sbx_mix_input_raw_read(int *dst, int dlen);
 static int sbx_mix_input_host_bigendian(void);
+static FILE *sbx_mix_fopen_utf8(const char *path, const char *mode);
 static void sbx_flac_term(void);
 static int sbx_audio_writer_write_wav_header(FILE *fp,
                                              uint32_t sample_rate,
@@ -562,6 +564,22 @@ sbx_mix_input_host_bigendian(void) {
   return ((const unsigned char *)&v)[0] == 0x01;
 }
 
+static FILE *
+sbx_mix_fopen_utf8(const char *path, const char *mode) {
+  if (!path || !mode) return 0;
+#if defined(_WIN32) || defined(T_MSVC) || defined(T_MINGW)
+  wchar_t wpath[PATH_MAX];
+  wchar_t wmode[16];
+  if (0 == MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, (int)(sizeof(wpath) / sizeof(wpath[0]))))
+    return 0;
+  if (0 == MultiByteToWideChar(CP_UTF8, 0, mode, -1, wmode, (int)(sizeof(wmode) / sizeof(wmode[0]))))
+    return 0;
+  return _wfopen(wpath, wmode);
+#else
+  return fopen(path, mode);
+#endif
+}
+
 static void
 sbx_mix_input_activate(SbxMixInput *input) {
   sbx_mix_active_input = input;
@@ -665,6 +683,7 @@ sbx_mix_input_raw_read(int *dst, int dlen) {
 
 #ifdef MP3_DECODE
 #define mix_in sbx_mix_in_file
+#define mix_cnt sbx_mix_in_cnt
 #define Alloc sbx_mix_alloc
 #define error sbx_mix_error_msg
 #define warn sbx_mix_warn_msg
@@ -678,6 +697,7 @@ sbx_mix_input_raw_read(int *dst, int dlen) {
 #undef warn
 #undef error
 #undef Alloc
+#undef mix_cnt
 #undef mix_in
 #endif
 
@@ -7469,9 +7489,17 @@ sbx_mix_input_create_stdio(FILE *stream,
   input->warn_cb = cfg.warn_cb;
   input->warn_user = cfg.warn_user;
   input->format = SBX_MIX_INPUT_RAW;
+  if (path_hint && *path_hint) {
+    input->path_hint = strdup(path_hint);
+    if (!input->path_hint) {
+      free(input);
+      return 0;
+    }
+  }
   if (cfg.looper_spec_override && cfg.looper_spec_override[0]) {
     input->looper_spec_override = strdup(cfg.looper_spec_override);
     if (!input->looper_spec_override) {
+      if (input->path_hint) free(input->path_hint);
       free(input);
       return 0;
     }
@@ -7545,11 +7573,13 @@ sbx_mix_input_create_stdio(FILE *stream,
   }
 
   if (input->looper_spec_override && input->looper_spec_override[0] &&
-      input->format != SBX_MIX_INPUT_OGG && input->format != SBX_MIX_INPUT_FLAC &&
+      input->format != SBX_MIX_INPUT_OGG &&
+      input->format != SBX_MIX_INPUT_MP3 &&
+      input->format != SBX_MIX_INPUT_FLAC &&
       !input->last_error[0]) {
     mix_input_set_error(
       input,
-      "SBAGEN_LOOPER override is currently supported only for OGG and FLAC mix inputs"
+      "SBAGEN_LOOPER override is currently supported only for OGG, MP3 and FLAC mix inputs"
     );
   }
 
@@ -7598,6 +7628,10 @@ sbx_mix_input_destroy(SbxMixInput *input) {
   if (input->take_stream_ownership && input->fp)
     fclose(input->fp);
   input->fp = 0;
+  if (input->path_hint) {
+    free(input->path_hint);
+    input->path_hint = 0;
+  }
   if (input->looper_spec_override) {
     free(input->looper_spec_override);
     input->looper_spec_override = 0;

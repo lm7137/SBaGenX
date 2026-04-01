@@ -79,11 +79,37 @@ EOF
   ran=1
 }
 
+run_embedded() {
+  local format="$1"
+  local source="$2"
+  local out="$tmpdir/${format}-embedded.wav"
+  local seq="$tmpdir/${format}-embedded.sbg"
+
+  cat >"$seq" <<'EOF'
+base: mix/100 200+0/0
+00:00 base step
+00:00:03 -
+EOF
+
+  "$BIN" -Q -W -m "$source" -o "$out" -E "$seq" >/dev/null 2>"$tmpdir/${format}-embedded.err"
+  check_duration "$out" 1 "$format with embedded SBAGEN_LOOPER"
+  ran=1
+}
+
 if command -v ffmpeg >/dev/null 2>&1; then
   ffmpeg -y -hide_banner -loglevel error -i "$tmpdir/mix_source.wav" \
     -c:a libvorbis -fflags +bitexact -flags:a +bitexact \
     "$tmpdir/mix.ogg" >/dev/null 2>&1
   run_one "ogg" "$tmpdir/mix.ogg"
+
+  ffmpeg -y -hide_banner -loglevel error -i "$tmpdir/mix_source.wav" \
+    -c:a libmp3lame "$tmpdir/mix.mp3" >/dev/null 2>&1
+  run_one "mp3" "$tmpdir/mix.mp3"
+
+  ffmpeg -y -hide_banner -loglevel error -i "$tmpdir/mix_source.wav" \
+    -c:a libmp3lame -id3v2_version 3 -metadata "TXXX:SBAGEN_LOOPER=s1 f0" \
+    "$tmpdir/mix-tagged.mp3" >/dev/null 2>&1
+  run_embedded "mp3" "$tmpdir/mix-tagged.mp3"
 fi
 
 if command -v flac >/dev/null 2>&1; then
@@ -96,4 +122,4 @@ if [[ "$ran" -eq 0 ]]; then
   exit 0
 fi
 
-echo "PASS: explicit --looper override drives OGG/FLAC mix looping"
+echo "PASS: explicit --looper override drives OGG/MP3/FLAC mix looping"

@@ -30,7 +30,7 @@ Contents of this document:
 2.1: Outputting to a pipe or a file
 2.2: Mixing in background sounds
 2.3: Standard background sounds
-2.4: Creating loopable OGG/FLAC mixes
+2.4: Creating loopable OGG/MP3/FLAC mixes
 2.4.1: Using ReplayGain with OGG/FLAC files
 2.5: Compensating for headphone low frequency roll-off
 2.6: The 'drop' sequences
@@ -707,16 +707,16 @@ However, possibly other licensing arrangements could be arranged if
 you contact me.
 
 
-2.4: Creating loopable OGG/FLAC mixes
--------------------------------------
+2.4: Creating loopable OGG/MP3/FLAC mixes
+-----------------------------------------
 
 This section will be of interest only to those people who want to
-create special loopable OGG or FLAC files to use with SBaGen, like the
+create special loopable OGG, MP3 or FLAC files to use with SBaGen, like the
 provided river1.ogg and river2.ogg files.
 
-The cross-fading and looping settings for any particular OGG/FLAC file are
+The cross-fading and looping settings for any particular OGG/MP3/FLAC file are
 controlled by a spec-string embedded in the file with the tag
-"SBAGEN_LOOPER".  This may be set using the standard OGG
+'SBAGEN_LOOPER'.  This may be set using the standard OGG
 'vorbiscomment' tool, for example:
 
   vorbiscomment -a in.ogg out.ogg -t "SBAGEN_LOOPER=s4-16 f0.2" 
@@ -724,6 +724,12 @@ controlled by a spec-string embedded in the file with the tag
 For native FLAC files, set the same tag with:
 
   metaflac --set-tag="SBAGEN_LOOPER=s4-16 f0.2" in.flac
+
+For MP3 files, store the same value in an ID3v2 TXXX frame with
+description SBAGEN_LOOPER.  For example with ffmpeg:
+
+  ffmpeg -i in.wav -c:a libmp3lame -id3v2_version 3 \
+    -metadata "TXXX:SBAGEN_LOOPER=s4-16 f0.2" out.mp3
 
 The embedded tag remains supported, but SBaGenX can now also override
 it explicitly from the command line or GUI.  On the command line, use:
@@ -745,7 +751,7 @@ space:
   f<dur>        Set duration for cross-fades
   c<cnt>        Number of channels: 1 or 2
   w<bool>       Swap stereo on second channel? 0 no, or 1 yes
-  d<min>-<max>  Select section of OGG/FLAC file data to use as source audio
+  d<min>-<max>  Select section of OGG/MP3/FLAC file data to use as source audio
   #<digits>     Following settings apply only to one section
   
 The optional intro mode ('i') only has an effect when d<min> is greater

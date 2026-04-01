@@ -372,7 +372,7 @@ help() {
 	  NL "          --graph-video-fps n"
 	  NL "                     Frame rate for --graph-video (default 30)"
 	  NL "          --looper spec"
-	  NL "                     Override SBAGEN_LOOPER for OGG/FLAC mix input"
+	  NL "                     Override SBAGEN_LOOPER for OGG/MP3/FLAC mix input"
 	  NL "                     Quote spec if it contains spaces"
 	  NL "          -i        Immediate.  Take the remainder of the command line to be"
 	  NL "                     tone-specifications, and play them continuously"
