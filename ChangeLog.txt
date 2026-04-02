@@ -1,3 +1,6 @@
+3.9.0-alpha.8: Fixed a Windows GUI startup crash caused by a Rust/C FFI layout mismatch in mix-effect structs.
+3.9.0-alpha.8: Fixed installed Windows GUI runtime loading to prefer the bundled sbagenxlib DLL over the source-tree dist runtime.
+3.9.0-alpha.8: Added a desktop shortcut for SBaGenX GUI in the unified Windows installer.
 3.9.0-alpha.7: Added spinNN as a bipolar custom motion-shape family for spin, bspin, and wspin.
 3.9.0-alpha.7: Preserved existing spin parameters width, frequency, and amplitude while making the spin waveform itself customizable.
 3.9.0-alpha.7: Added parser, formatter, safe-loader, and runtime regression coverage for spinNN-driven spin-noise tones.
