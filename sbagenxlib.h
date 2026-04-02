@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 38  /* public API contract revision */
+#define SBX_API_VERSION 39  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
@@ -52,7 +52,8 @@ typedef enum {
   SBX_WAVE_SQUARE = 1,
   SBX_WAVE_TRIANGLE = 2,
   SBX_WAVE_SAWTOOTH = 3,
-  SBX_WAVE_CUSTOM_BASE = 1000 /* deprecated legacy placeholder; use SBX_ENV_WAVE_* for custom envelopes */
+  SBX_WAVE_CUSTOM_BASE = 1000, /* deprecated legacy placeholder; use SBX_ENV_WAVE_* for custom envelopes */
+  SBX_WAVE_SPIN_BASE = 2200    /* literal spinNN bipolar motion id: + [0..99], valid only for spin tones */
 } SbxWaveform;
 
 typedef enum {
@@ -153,7 +154,7 @@ typedef struct {
   double carrier_hz;
   double beat_hz;
   double amplitude;  /* 0.0 .. 1.0 */
-  int waveform;      /* SBX_WAVE_* carrier waveform */
+  int waveform;      /* SBX_WAVE_* carrier waveform, or SBX_WAVE_SPIN_BASE+[0..99] for spin tones */
   int envelope_waveform; /* SBX_ENV_WAVE_NONE or SBX_ENV_WAVE_* + [0..99] */
   double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.403014) */
   double iso_start;   /* cycle-relative start phase for isochronic mode (default 0.048493) */

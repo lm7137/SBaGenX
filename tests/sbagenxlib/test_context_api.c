@@ -94,6 +94,7 @@ int main(void) {
   assert_parse("spin:80+1/40", SBX_TONE_SPIN_PINK, 80.0, 1.0, 0.40, 0, SBX_WAVE_SINE);
   assert_parse("triangle:bspin:120-1.5/35", SBX_TONE_SPIN_BROWN, 120.0, -1.5, 0.35, 0, SBX_WAVE_TRIANGLE);
   assert_parse("square:wspin:60+0.75/25", SBX_TONE_SPIN_WHITE, 60.0, 0.75, 0.25, 0, SBX_WAVE_SQUARE);
+  assert_parse("spin00:spin:120+1.25/35", SBX_TONE_SPIN_PINK, 120.0, 1.25, 0.35, 0, SBX_WAVE_SPIN_BASE);
   {
     double sec = 0.0;
     size_t used = 0;
@@ -132,6 +133,20 @@ int main(void) {
       fail("format off tone string mismatch");
     if (sbx_parse_tone_spec(spec, &out) != SBX_OK || out.mode != SBX_TONE_NONE)
       fail("parse off tone roundtrip failed");
+  }
+  {
+    SbxToneSpec in, out;
+    char spec[256];
+    if (sbx_parse_tone_spec("spin00:spin:120+1.25/35", &in) != SBX_OK)
+      fail("parse spinNN tone failed");
+    if (sbx_format_tone_spec(&in, spec, sizeof(spec)) != SBX_OK)
+      fail("format spinNN tone failed");
+    if (strcmp(spec, "spin00:spin:120+1.25/35") != 0)
+      fail("format spinNN tone should preserve prefix");
+    if (sbx_parse_tone_spec(spec, &out) != SBX_OK)
+      fail("parse spinNN tone roundtrip failed");
+    if (out.mode != in.mode || out.waveform != in.waveform)
+      fail("spinNN tone roundtrip waveform mismatch");
   }
   {
     SbxToneSpec t;

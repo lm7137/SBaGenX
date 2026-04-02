@@ -349,6 +349,24 @@ modulates effect strength while preserving the underlying sine/explicit
 waveform oscillator used by the effect.  The installer ships a rendered
 reference plot for the example above as:
 
+For the spin-noise family there is now a separate `spinNN` definition family:
+
+  spin00: e=0 0 0 0 100 100 -100 -100
+  base: spin00:spin:300+1/35
+  00:00 base
+
+Unlike `customNN`, `spinNN` is bipolar.  Samples are normalized around zero
+and drive the motion waveform directly for `spin`, `bspin`, and `wspin`.
+This preserves the existing spin parameters:
+
+  width      maximum excursion / delay width
+  frequency  spin rate in Hz
+  amplitude  output loudness
+
+while replacing the built-in sine/triangle/square/sawtooth motion shape with
+a custom bipolar one.  `spinNN` is specific to the spin-noise tones and is
+not used for `mixspin`, `mixpulse`, or `mixbeat`.
+
 For new isochronic designs, `-I` is still the recommended first choice.
 Use `customNN` when you specifically want a nonstandard hand-shaped
 envelope that cannot be expressed cleanly with the normal `-I`
@@ -2168,6 +2186,9 @@ Here are the different types:
   spin:<width>+<freq>/<amp>           # Spinning variable-delay pink noise
   bspin:<width>+<freq>/<amp>          # Spinning variable-delay brown noise
   wspin:<width>+<freq>/<amp>          # Spinning variable-delay white noise
+  spinNN:spin:<width>+<freq>/<amp>    # Spin with custom bipolar motion shape
+  spinNN:bspin:<width>+<freq>/<amp>   # Brown spin with custom bipolar motion
+  spinNN:wspin:<width>+<freq>/<amp>   # White spin with custom bipolar motion
   mixspin:<width>+<freq>/<intensity>  # Spinning effect on mix input
   mixpulse:<pulse>/<intensity>        # Pulse effect on mix input
   mixbeat:<beat>/<intensity>          # Hilbert-shifted binauralized mix
@@ -2269,6 +2290,8 @@ Note: For mixspin/mixpulse/mixbeat effects, the waveform modulates the
 effect envelope. `customNN:` may also be used for these three mix effects
 to provide a hand-shaped unipolar effect envelope. This does not extend to
 `spin`, `bspin`, or `wspin`, whose modulation is inherently bipolar.
+For those three spin-noise tones, use `spinNN:` instead if you want a
+custom bipolar motion shape.
 For mixbeat, a sine waveform is recommended for the cleanest spectral result.
 Note: mixam uses explicit envelope parameters (m,s,d,a,r,e,f) via `-H` (or
 inline in the token for compatibility), and does not use waveform prefixes
@@ -2784,6 +2807,31 @@ shared amplitude envelope of binaural tones generated from it.
   shipped as `assets/example-plot-iso-cycle-custom00-literal.png`.
 
   The historical derivation below is retained for reference:
+
+  For spin-noise tones there is now also a separate bipolar custom shape
+  family:
+
+    spin<2-digits>: [e=<0..3>] <list of signed samples>
+
+  These samples are normalized against their maximum absolute value and
+  interpolated around the cycle using the same edge modes as `customNN`:
+
+    e=0 hard / step
+    e=1 linear (default)
+    e=2 smoothstep
+    e=3 smootherstep
+
+  A `spinNN` definition does not create an amplitude envelope.  Instead it
+  replaces the motion waveform used by:
+
+    spin:
+    bspin:
+    wspin:
+
+  Example:
+
+    spin00: e=0 0 0 0 100 100 -100 -100
+    spin00:spin:300+1/35
   
   > Let's say we have a brain-wave waveform of f(T) (T is theta),
   > expressed as a fourier series (using complex maths because it's

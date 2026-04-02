@@ -37,6 +37,16 @@ abs_sum_window(const float *buf, size_t i0, size_t i1) {
   return s;
 }
 
+static double
+stereo_diff_window(const float *buf, size_t i0, size_t i1) {
+  size_t i;
+  double s = 0.0;
+  if (i1 <= i0) return 0.0;
+  for (i = i0; i < i1; i++)
+    s += fabs((double)buf[i * 2] - (double)buf[i * 2 + 1]);
+  return s;
+}
+
 static void
 write_text_file(const char *path, const char *text) {
   FILE *fp = fopen(path, "wb");
@@ -115,6 +125,10 @@ main(void) {
       "NOW t1\n"
       "+00:01:00 t2 ->\n"
       "+00:02:00 alloff\n";
+  const char *sbg_spin_wave_text =
+      "spin00: e=0 0 0 0 100 100 -100 -100\n"
+      "base: spin00:spin:300+1/35\n"
+      "NOW base\n";
   const char *sbg_mix_tokens_text =
       "00:00 mix/70 mixpulse:2/40 180+0/20 ==\n"
       "00:00:02 -\n";
@@ -399,6 +413,29 @@ main(void) {
     fail("integer customNN alloff keyframe retrieval failed");
   if (kf.tone.mode != SBX_TONE_NONE)
     fail("integer customNN alloff keyframe should be silent");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_spin_wave_text, 0);
+  if (rc != SBX_OK) fail("spinNN timing load failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("spinNN keyframe retrieval failed");
+  if (kf.tone.waveform != SBX_WAVE_SPIN_BASE)
+    fail("spinNN keyframe should preserve spin00 prefix");
+  {
+    char spec_buf[128];
+    if (sbx_format_tone_spec(&kf.tone, spec_buf, sizeof(spec_buf)) != SBX_OK)
+      fail("spinNN tone format failed");
+    if (strncmp(spec_buf, "spin00:spin:", 12) != 0)
+      fail("spinNN formatted tone should round-trip spin00 prefix");
+  }
+  free(buf);
+  frames = (size_t)(1.1 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (spinNN)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("spinNN render failed");
+  if (!(stereo_diff_window(buf, (size_t)(0.28 * cfg.sample_rate), (size_t)(0.45 * cfg.sample_rate)) >
+        stereo_diff_window(buf, 0, (size_t)(0.18 * cfg.sample_rate)) * 1.5))
+    fail("spinNN render should modulate stereo motion strength over the cycle");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_mix_tokens_text, 0);
   if (rc != SBX_OK) fail("sbg timing load with direct mix tokens failed");

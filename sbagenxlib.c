@@ -151,8 +151,10 @@ struct SbxEngine {
   int bell_tick_period;
   const double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT];
   const double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT];
+  const double *spin_waves[SBX_CUSTOM_WAVE_COUNT];
   const int *legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   const int *custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
+  const int *spin_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   char last_error[256];
 };
 
@@ -205,8 +207,10 @@ struct SbxContext {
   SbxAmpAdjustSpec amp_adjust;
   double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT];
   double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT];
+  double *spin_waves[SBX_CUSTOM_WAVE_COUNT];
   int legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   int custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
+  int spin_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   SbxTelemetryCallback telemetry_cb;
   void *telemetry_user;
   SbxRuntimeTelemetry telemetry_last;
@@ -1437,6 +1441,14 @@ sbx_envelope_wave_custom_index(int waveform) {
 }
 
 static int
+sbx_spin_wave_index(int waveform) {
+  if (waveform >= SBX_WAVE_SPIN_BASE &&
+      waveform < SBX_WAVE_SPIN_BASE + SBX_CUSTOM_WAVE_COUNT)
+    return waveform - SBX_WAVE_SPIN_BASE;
+  return -1;
+}
+
+static int
 sbx_parse_legacy_env_prefix(const char *spec, int *out_waveform, const char **out_after) {
   int idx;
   if (!spec || !out_after) return 0;
@@ -1449,19 +1461,36 @@ sbx_parse_legacy_env_prefix(const char *spec, int *out_waveform, const char **ou
   return 1;
 }
 
+static int
+sbx_parse_spin_wave_prefix(const char *spec, int *out_waveform, const char **out_after) {
+  int idx;
+  if (!spec || !out_after) return 0;
+  if (strncasecmp(spec, "spin", 4) != 0) return 0;
+  if (!isdigit((unsigned char)spec[4]) || !isdigit((unsigned char)spec[5]) || spec[6] != ':')
+    return 0;
+  idx = (spec[4] - '0') * 10 + (spec[5] - '0');
+  if (out_waveform) *out_waveform = SBX_WAVE_SPIN_BASE + idx;
+  *out_after = spec + 7;
+  return 1;
+}
+
 static void
 engine_set_custom_waves(SbxEngine *eng,
                         double *const *legacy_waves,
                         double *const *custom_waves,
+                        double *const *spin_waves,
                         const int *legacy_edge_modes,
-                        const int *custom_edge_modes) {
+                        const int *custom_edge_modes,
+                        const int *spin_edge_modes) {
   size_t i;
   if (!eng) return;
   for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
     eng->legacy_env_waves[i] = legacy_waves ? legacy_waves[i] : 0;
     eng->custom_env_waves[i] = custom_waves ? custom_waves[i] : 0;
+    eng->spin_waves[i] = spin_waves ? spin_waves[i] : 0;
     eng->legacy_env_edge_modes[i] = legacy_edge_modes ? &legacy_edge_modes[i] : 0;
     eng->custom_env_edge_modes[i] = custom_edge_modes ? &custom_edge_modes[i] : 0;
+    eng->spin_edge_modes[i] = spin_edge_modes ? &spin_edge_modes[i] : 0;
   }
 }
 
@@ -1470,16 +1499,22 @@ ctx_sync_custom_waves(SbxContext *ctx) {
   size_t i;
   if (!ctx || !ctx->eng) return;
   engine_set_custom_waves(ctx->eng, ctx->legacy_env_waves, ctx->custom_env_waves,
-                          ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
+                          ctx->spin_waves,
+                          ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
+                          ctx->spin_edge_modes);
   for (i = 0; i + 1 < ctx->mv_voice_count; i++) {
     if (ctx->mv_eng && ctx->mv_eng[i])
       engine_set_custom_waves(ctx->mv_eng[i], ctx->legacy_env_waves, ctx->custom_env_waves,
-                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
+                              ctx->spin_waves,
+                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
+                              ctx->spin_edge_modes);
   }
   for (i = 0; i < ctx->aux_count; i++) {
     if (ctx->aux_eng && ctx->aux_eng[i])
       engine_set_custom_waves(ctx->aux_eng[i], ctx->legacy_env_waves, ctx->custom_env_waves,
-                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
+                              ctx->spin_waves,
+                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
+                              ctx->spin_edge_modes);
   }
 }
 
@@ -1490,10 +1525,13 @@ ctx_clear_custom_waves(SbxContext *ctx) {
   for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
     if (ctx->legacy_env_waves[i]) free(ctx->legacy_env_waves[i]);
     if (ctx->custom_env_waves[i]) free(ctx->custom_env_waves[i]);
+    if (ctx->spin_waves[i]) free(ctx->spin_waves[i]);
     ctx->legacy_env_waves[i] = 0;
     ctx->custom_env_waves[i] = 0;
+    ctx->spin_waves[i] = 0;
     ctx->legacy_env_edge_modes[i] = 1;
     ctx->custom_env_edge_modes[i] = 1;
+    ctx->spin_edge_modes[i] = 1;
   }
   ctx_sync_custom_waves(ctx);
 }
@@ -1502,18 +1540,24 @@ static void
 ctx_replace_custom_waves(SbxContext *ctx,
                          double **legacy_waves,
                          double **custom_waves,
+                         double **spin_waves,
                          const int *legacy_edge_modes,
-                         const int *custom_edge_modes) {
+                         const int *custom_edge_modes,
+                         const int *spin_edge_modes) {
   size_t i;
-  if (!ctx || !legacy_waves || !custom_waves || !legacy_edge_modes || !custom_edge_modes) return;
+  if (!ctx || !legacy_waves || !custom_waves || !spin_waves ||
+      !legacy_edge_modes || !custom_edge_modes || !spin_edge_modes) return;
   ctx_clear_custom_waves(ctx);
   for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
     ctx->legacy_env_waves[i] = legacy_waves[i];
     legacy_waves[i] = 0;
     ctx->custom_env_waves[i] = custom_waves[i];
     custom_waves[i] = 0;
+    ctx->spin_waves[i] = spin_waves[i];
+    spin_waves[i] = 0;
     ctx->legacy_env_edge_modes[i] = legacy_edge_modes[i];
     ctx->custom_env_edge_modes[i] = custom_edge_modes[i];
+    ctx->spin_edge_modes[i] = spin_edge_modes[i];
   }
   ctx_sync_custom_waves(ctx);
 }
@@ -1667,6 +1711,57 @@ sbx_build_literal_custom_env_table_from_samples(const double *samples,
     double frac = pos - floor(pos);
     double v0 = sbx_dsp_clamp(samples[i0] / maxv, 0.0, 1.0);
     double v1 = sbx_dsp_clamp(samples[i1] / maxv, 0.0, 1.0);
+    double u = frac;
+    switch (edge_mode) {
+      case 0:
+        u = 0.0;
+        break;
+      case 2:
+        u = sbx_dsp_smoothstep01(u);
+        break;
+      case 3:
+        u = sbx_dsp_smootherstep01(u);
+        break;
+      case 1:
+      default:
+        break;
+    }
+    tbl[i] = sbx_lerp(v0, v1, u);
+  }
+  *out_table = tbl;
+  return SBX_OK;
+}
+
+static int
+sbx_build_literal_spin_wave_table_from_samples(const double *samples,
+                                               size_t count,
+                                               int edge_mode,
+                                               double **out_table) {
+  double *tbl;
+  double max_abs = 0.0;
+  size_t i;
+
+  if (!samples || count < 2 || !out_table) return SBX_EINVAL;
+  if (edge_mode < 0 || edge_mode > 3) return SBX_EINVAL;
+  for (i = 0; i < count; i++) {
+    double av;
+    if (!isfinite(samples[i]))
+      return SBX_EINVAL;
+    av = fabs(samples[i]);
+    if (av > max_abs) max_abs = av;
+  }
+  if (!(isfinite(max_abs)) || max_abs <= 0.0)
+    return SBX_EINVAL;
+
+  tbl = (double *)calloc(SBX_CUSTOM_WAVE_SAMPLES, sizeof(*tbl));
+  if (!tbl) return SBX_ENOMEM;
+  for (i = 0; i < SBX_CUSTOM_WAVE_SAMPLES; i++) {
+    double pos = ((double)i * (double)count) / (double)SBX_CUSTOM_WAVE_SAMPLES;
+    size_t i0 = (size_t)floor(pos) % count;
+    size_t i1 = (i0 + 1) % count;
+    double frac = pos - floor(pos);
+    double v0 = sbx_dsp_clamp(samples[i0] / max_abs, -1.0, 1.0);
+    double v1 = sbx_dsp_clamp(samples[i1] / max_abs, -1.0, 1.0);
     double u = frac;
     switch (edge_mode) {
       case 0:
@@ -3329,7 +3424,17 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   custom_env_idx = sbx_envelope_wave_custom_index(tone->envelope_waveform);
 
   if (uses_carrier) {
-    if (tone->waveform < SBX_WAVE_SINE || tone->waveform > SBX_WAVE_SAWTOOTH) {
+    int spin_wave_idx = sbx_spin_wave_index(tone->waveform);
+    int tone_is_spin = (tone->mode == SBX_TONE_SPIN_PINK ||
+                        tone->mode == SBX_TONE_SPIN_BROWN ||
+                        tone->mode == SBX_TONE_SPIN_WHITE);
+    if (tone_is_spin) {
+      if (!((tone->waveform >= SBX_WAVE_SINE && tone->waveform <= SBX_WAVE_SAWTOOTH) ||
+            spin_wave_idx >= 0)) {
+        if (err && err_sz) snprintf(err, err_sz, "%s", "spin waveform must be SBX_WAVE_* or spinNN");
+        return SBX_EINVAL;
+      }
+    } else if (tone->waveform < SBX_WAVE_SINE || tone->waveform > SBX_WAVE_SAWTOOTH) {
       if (err && err_sz) snprintf(err, err_sz, "%s", "waveform must be a valid SBX_WAVE_* value");
       return SBX_EINVAL;
     }
@@ -3346,6 +3451,10 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
         tone->mode != SBX_TONE_BINAURAL &&
         tone->mode != SBX_TONE_ISOCHRONIC) {
       if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural or isochronic tones");
+      return SBX_EINVAL;
+    }
+    if (spin_wave_idx >= 0 && !tone_is_spin) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "spinNN waveforms are only valid for spin, bspin, or wspin tones");
       return SBX_EINVAL;
     }
   } else {
@@ -3441,12 +3550,17 @@ engine_apply_tone(SbxEngine *eng, const SbxToneSpec *tone_in, int reset_phase) {
   {
     int legacy_env_idx = sbx_envelope_wave_legacy_index(tone.envelope_waveform);
     int custom_env_idx = sbx_envelope_wave_custom_index(tone.envelope_waveform);
+    int spin_wave_idx = sbx_spin_wave_index(tone.waveform);
     if (legacy_env_idx >= 0 && !eng->legacy_env_waves[legacy_env_idx]) {
       set_last_error(eng, "legacy waveNN envelope is not defined in this context");
       return SBX_EINVAL;
     }
     if (custom_env_idx >= 0 && !eng->custom_env_waves[custom_env_idx]) {
       set_last_error(eng, "customNN envelope is not defined in this context");
+      return SBX_EINVAL;
+    }
+    if (spin_wave_idx >= 0 && !eng->spin_waves[spin_wave_idx]) {
+      set_last_error(eng, "spinNN waveform is not defined in this context");
       return SBX_EINVAL;
     }
   }
@@ -3497,12 +3611,24 @@ engine_wave_sample(int waveform, double phase, double *out_sample) {
 }
 
 static int
+sample_custom_wave_table(const double *tbl, double phase_unit, double *out_sample) {
+  size_t i0, i1;
+  double pos, frac;
+  if (!tbl || !out_sample) return 0;
+  phase_unit = sbx_dsp_wrap_unit(phase_unit);
+  pos = phase_unit * (double)SBX_CUSTOM_WAVE_SAMPLES;
+  i0 = (size_t)floor(pos) % SBX_CUSTOM_WAVE_SAMPLES;
+  i1 = (i0 + 1) % SBX_CUSTOM_WAVE_SAMPLES;
+  frac = pos - floor(pos);
+  *out_sample = sbx_lerp(tbl[i0], tbl[i1], frac);
+  return 1;
+}
+
+static int
 engine_custom_env_sample(const SbxEngine *eng, int waveform, double phase_unit, double *out_env) {
   const double *tbl;
   int legacy_idx = sbx_envelope_wave_legacy_index(waveform);
   int custom_idx = sbx_envelope_wave_custom_index(waveform);
-  size_t i0, i1;
-  double pos, frac;
   if (!out_env) return 0;
   if (legacy_idx < 0 && custom_idx < 0) return 0;
   if (!eng) return -1;
@@ -3513,13 +3639,7 @@ engine_custom_env_sample(const SbxEngine *eng, int waveform, double phase_unit, 
     if (!eng->custom_env_waves[custom_idx]) return -1;
     tbl = eng->custom_env_waves[custom_idx];
   }
-  phase_unit = sbx_dsp_wrap_unit(phase_unit);
-  pos = phase_unit * (double)SBX_CUSTOM_WAVE_SAMPLES;
-  i0 = (size_t)floor(pos) % SBX_CUSTOM_WAVE_SAMPLES;
-  i1 = (i0 + 1) % SBX_CUSTOM_WAVE_SAMPLES;
-  frac = pos - floor(pos);
-  *out_env = sbx_lerp(tbl[i0], tbl[i1], frac);
-  return 1;
+  return sample_custom_wave_table(tbl, phase_unit, out_env);
 }
 
 static int
@@ -3527,8 +3647,6 @@ ctx_custom_env_sample(const SbxContext *ctx, int waveform, double phase_unit, do
   const double *tbl;
   int legacy_idx = sbx_envelope_wave_legacy_index(waveform);
   int custom_idx = sbx_envelope_wave_custom_index(waveform);
-  size_t i0, i1;
-  double pos, frac;
   if (!out_env) return 0;
   if (legacy_idx < 0 && custom_idx < 0) return 0;
   if (!ctx) return -1;
@@ -3539,13 +3657,16 @@ ctx_custom_env_sample(const SbxContext *ctx, int waveform, double phase_unit, do
     if (!ctx->custom_env_waves[custom_idx]) return -1;
     tbl = ctx->custom_env_waves[custom_idx];
   }
-  phase_unit = sbx_dsp_wrap_unit(phase_unit);
-  pos = phase_unit * (double)SBX_CUSTOM_WAVE_SAMPLES;
-  i0 = (size_t)floor(pos) % SBX_CUSTOM_WAVE_SAMPLES;
-  i1 = (i0 + 1) % SBX_CUSTOM_WAVE_SAMPLES;
-  frac = pos - floor(pos);
-  *out_env = sbx_lerp(tbl[i0], tbl[i1], frac);
-  return 1;
+  return sample_custom_wave_table(tbl, phase_unit, out_env);
+}
+
+static int
+engine_spin_wave_sample(const SbxEngine *eng, int waveform, double phase_unit, double *out_sample) {
+  int spin_idx = sbx_spin_wave_index(waveform);
+  if (!out_sample) return 0;
+  if (spin_idx < 0) return 0;
+  if (!eng || !eng->spin_waves[spin_idx]) return -1;
+  return sample_custom_wave_table(eng->spin_waves[spin_idx], phase_unit, out_sample);
 }
 
 static int
@@ -3717,7 +3838,8 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     double g_l, g_r;
 
     base_noise = engine_next_noise_mono_for_mode(eng, eng->tone.mode);
-    engine_wave_sample(eng->tone.waveform, eng->phase_l, &spin_mod);
+    if (engine_spin_wave_sample(eng, eng->tone.waveform, eng->phase_l / SBX_TAU, &spin_mod) != 1)
+      engine_wave_sample(eng->tone.waveform, eng->phase_l, &spin_mod);
     eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.beat_hz / sr, SBX_TAU);
 
     // Width is interpreted in microseconds. Match the legacy engine's
@@ -3982,7 +4104,9 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
         return SBX_ENOMEM;
       }
       engine_set_custom_waves(mv_eng[vi - 1], ctx->legacy_env_waves, ctx->custom_env_waves,
-                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
+                              ctx->spin_waves,
+                              ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
+                              ctx->spin_edge_modes);
     }
   }
 
@@ -5027,6 +5151,8 @@ parse_tone_spec_with_default_waveform(const char *spec,
   const char *next;
   int waveform = SBX_WAVE_SINE;
   int env_waveform = SBX_ENV_WAVE_NONE;
+  int saw_waveform_prefix = 0;
+  int saw_spin_wave_prefix = 0;
   int n = 0;
   double carrier = 0.0, beat = 0.0, amp_pct = 0.0;
   char c = 0;
@@ -5046,11 +5172,21 @@ parse_tone_spec_with_default_waveform(const char *spec,
       p = next;
       out_tone->envelope_waveform = env_waveform;
       advanced = 1;
+    } else if (sbx_parse_spin_wave_prefix(p, &waveform, &next)) {
+      if (saw_waveform_prefix || saw_spin_wave_prefix)
+        return SBX_EINVAL;
+      p = next;
+      out_tone->waveform = waveform;
+      saw_spin_wave_prefix = 1;
+      advanced = 1;
     } else {
       next = skip_optional_waveform_prefix(p, &waveform);
       if (next != p) {
+        if (saw_spin_wave_prefix || saw_waveform_prefix)
+          return SBX_EINVAL;
         p = next;
         out_tone->waveform = waveform;
+        saw_waveform_prefix = 1;
         advanced = 1;
       }
     }
@@ -5597,6 +5733,8 @@ wave_name_for_tone(int waveform) {
 static int
 wave_prefix_for_tone(int waveform, char *out, size_t out_sz) {
   if (!out || out_sz == 0) return 0;
+  if (sbx_spin_wave_index(waveform) >= 0)
+    return 0;
   return snprintf_checked(out, out_sz, "%s", wave_name_for_tone(waveform));
 }
 
@@ -5612,6 +5750,15 @@ env_prefix_for_tone(int env_waveform, char *out, size_t out_sz) {
   if (custom_idx >= 0)
     return snprintf_checked(out, out_sz, "custom%02d", custom_idx);
   return 0;
+}
+
+static int
+spin_prefix_for_tone(int waveform, char *out, size_t out_sz) {
+  int spin_idx = sbx_spin_wave_index(waveform);
+  if (!out || out_sz == 0) return 0;
+  if (spin_idx < 0)
+    return snprintf_checked(out, out_sz, "");
+  return snprintf_checked(out, out_sz, "spin%02d", spin_idx);
 }
 
 static int
@@ -5714,6 +5861,7 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
   SbxToneSpec norm;
   char wprefix[24];
   char eprefix[24];
+  char sprefix[24];
   char prefix[64];
   if (!tone || !out || out_sz == 0) return SBX_EINVAL;
 
@@ -5721,8 +5869,10 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
   if (normalize_tone(&norm, 0, 0) != SBX_OK) return SBX_EINVAL;
   amp_pct = norm.amplitude * 100.0;
   if (!wave_prefix_for_tone(norm.waveform, wprefix, sizeof(wprefix)))
-    return SBX_EINVAL;
+    wprefix[0] = 0;
   if (!env_prefix_for_tone(norm.envelope_waveform, eprefix, sizeof(eprefix)))
+    return SBX_EINVAL;
+  if (!spin_prefix_for_tone(norm.waveform, sprefix, sizeof(sprefix)))
     return SBX_EINVAL;
   if (norm.envelope_waveform != SBX_ENV_WAVE_NONE) {
     if (norm.waveform == SBX_WAVE_SINE) {
@@ -5732,6 +5882,9 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
       if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:", eprefix, wprefix))
         return SBX_EINVAL;
     }
+  } else if (sprefix[0] != 0) {
+    if (!snprintf_checked(prefix, sizeof(prefix), "%s:", sprefix))
+      return SBX_EINVAL;
   } else if (norm.waveform == SBX_WAVE_SINE) {
     if (!snprintf_checked(prefix, sizeof(prefix), "%s:", wprefix))
       return SBX_EINVAL;
@@ -8231,8 +8384,10 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   size_t nblocks = 0, blocks_cap = 0;
   double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
   double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
+  double *spin_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
   int legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   int custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
+  int spin_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   int active_block_idx = -1;
   double active_block_last_off = -1.0;
   double last_abs_sec = -1.0;
@@ -8248,6 +8403,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
       legacy_env_edge_modes[i] = 1;
       custom_env_edge_modes[i] = 1;
+      spin_edge_modes[i] = 1;
     }
   }
 
@@ -8575,8 +8731,13 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           ((strncmp(name, "custom", 6) == 0 &&
             isdigit((unsigned char)name[6]) &&
             isdigit((unsigned char)name[7]) &&
-            name[8] == 0))) {
+            name[8] == 0)) ||
+          ((strncmp(name, "spin", 4) == 0 &&
+            isdigit((unsigned char)name[4]) &&
+            isdigit((unsigned char)name[5]) &&
+            name[6] == 0))) {
         int is_custom = (strncmp(name, "custom", 6) == 0);
+        int is_spin = (!is_custom && strncmp(name, "spin", 4) == 0);
         int wave_idx = is_custom ? ((name[6] - '0') * 10 + (name[7] - '0'))
                                  : ((name[4] - '0') * 10 + (name[5] - '0'));
         double *raw = 0;
@@ -8584,25 +8745,28 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
         char *wr = r;
         int custom_edge_mode = 1;
         int custom_edge_seen = 0;
-        if ((is_custom ? custom_env_waves[wave_idx] : legacy_env_waves[wave_idx])) {
+        if ((is_custom ? custom_env_waves[wave_idx]
+                       : (is_spin ? spin_waves[wave_idx] : legacy_env_waves[wave_idx]))) {
           char emsg[224];
           snprintf(emsg, sizeof(emsg),
                    "line %lu: %s %02d already defined",
-                   (unsigned long)line_no, is_custom ? "customNN" : "waveNN", wave_idx);
+                   (unsigned long)line_no,
+                   is_custom ? "customNN" : (is_spin ? "spinNN" : "waveNN"),
+                   wave_idx);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
         }
         wr = (char *)skip_ws(wr);
-        if (is_custom) {
+        if (is_custom || is_spin) {
           while ((*wr == 'e' || *wr == 'E') && wr[1] == '=') {
             char *end = 0;
             long edge = strtol(wr + 2, &end, 10);
             if (end == wr + 2 || !(*end == 0 || isspace((unsigned char)*end) || *end == ':')) {
               char emsg[224];
               snprintf(emsg, sizeof(emsg),
-                       "line %lu: customNN %02d expects optional e=<0..3> before samples",
-                       (unsigned long)line_no, wave_idx);
+                       "line %lu: %s %02d expects optional e=<0..3> before samples",
+                       (unsigned long)line_no, is_custom ? "customNN" : "spinNN", wave_idx);
               if (raw) free(raw);
               set_ctx_error_token_span(ctx, emsg, line_no, line, wr);
               rc = SBX_EINVAL;
@@ -8611,8 +8775,8 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             if (custom_edge_seen || edge < 0 || edge > 3) {
               char emsg[224];
               snprintf(emsg, sizeof(emsg),
-                       "line %lu: customNN %02d optional e=<0..3> may appear at most once",
-                       (unsigned long)line_no, wave_idx);
+                       "line %lu: %s %02d optional e=<0..3> may appear at most once",
+                       (unsigned long)line_no, is_custom ? "customNN" : "spinNN", wave_idx);
               if (raw) free(raw);
               set_ctx_error_token_span(ctx, emsg, line_no, line, wr);
               rc = SBX_EINVAL;
@@ -8630,7 +8794,9 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             char emsg[224];
             snprintf(emsg, sizeof(emsg),
                      "line %lu: %s %02d expects floating-point samples",
-                     (unsigned long)line_no, is_custom ? "customNN" : "waveNN", wave_idx);
+                     (unsigned long)line_no,
+                     is_custom ? "customNN" : (is_spin ? "spinNN" : "waveNN"),
+                     wave_idx);
             if (raw) free(raw);
             set_ctx_error_token_span(ctx, emsg, line_no, line, wr);
             rc = SBX_EINVAL;
@@ -8651,18 +8817,25 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           raw[raw_count++] = v;
           wr = (char *)skip_ws(end);
         }
-        rc = is_custom
-             ? sbx_build_literal_custom_env_table_from_samples(raw, raw_count, custom_edge_mode,
-                                                               &custom_env_waves[wave_idx])
-             : sbx_build_legacy_custom_wave_table_from_samples(raw, raw_count, &legacy_env_waves[wave_idx]);
-        if (is_custom)
+        if (is_custom) {
+          rc = sbx_build_literal_custom_env_table_from_samples(raw, raw_count, custom_edge_mode,
+                                                               &custom_env_waves[wave_idx]);
           custom_env_edge_modes[wave_idx] = custom_edge_mode;
+        } else if (is_spin) {
+          rc = sbx_build_literal_spin_wave_table_from_samples(raw, raw_count, custom_edge_mode,
+                                                              &spin_waves[wave_idx]);
+          spin_edge_modes[wave_idx] = custom_edge_mode;
+        } else {
+          rc = sbx_build_legacy_custom_wave_table_from_samples(raw, raw_count, &legacy_env_waves[wave_idx]);
+        }
         if (raw) free(raw);
         if (rc != SBX_OK) {
           char emsg[224];
           snprintf(emsg, sizeof(emsg),
                    "line %lu: invalid %s %02d definition",
-                   (unsigned long)line_no, is_custom ? "customNN" : "waveNN", wave_idx);
+                   (unsigned long)line_no,
+                   is_custom ? "customNN" : (is_spin ? "spinNN" : "waveNN"),
+                   wave_idx);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
           goto done;
@@ -9091,8 +9264,8 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     }
   }
 
-  ctx_replace_custom_waves(ctx, legacy_env_waves, custom_env_waves,
-                           legacy_env_edge_modes, custom_env_edge_modes);
+  ctx_replace_custom_waves(ctx, legacy_env_waves, custom_env_waves, spin_waves,
+                           legacy_env_edge_modes, custom_env_edge_modes, spin_edge_modes);
   rc = ctx_activate_keyframes_internal(ctx, primary, count,
                                        mv_frames ? mv_frames : primary,
                                        max_voice_count ? max_voice_count : 1,
@@ -9133,6 +9306,7 @@ done:
     for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
       if (legacy_env_waves[i]) free(legacy_env_waves[i]);
       if (custom_env_waves[i]) free(custom_env_waves[i]);
+      if (spin_waves[i]) free(spin_waves[i]);
     }
   }
   if (buf) free(buf);
@@ -9224,7 +9398,9 @@ sbx_context_set_aux_tones(SbxContext *ctx, const SbxToneSpec *tones, size_t tone
       return SBX_ENOMEM;
     }
     engine_set_custom_waves(engv[i], ctx->legacy_env_waves, ctx->custom_env_waves,
-                            ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes);
+                            ctx->spin_waves,
+                            ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
+                            ctx->spin_edge_modes);
     rc = engine_apply_tone(engv[i], &copy[i], 1);
     if (rc != SBX_OK) {
       size_t j;
