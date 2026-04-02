@@ -1,3 +1,7 @@
+3.9.0-alpha.7: Added spinNN as a bipolar custom motion-shape family for spin, bspin, and wspin.
+3.9.0-alpha.7: Preserved existing spin parameters width, frequency, and amplitude while making the spin waveform itself customizable.
+3.9.0-alpha.7: Added parser, formatter, safe-loader, and runtime regression coverage for spinNN-driven spin-noise tones.
+
 3.9.0-alpha.6: Added customNN support for the compatible mix effects mixpulse, mixspin, and mixbeat.
 3.9.0-alpha.6: Preserved the bipolar semantics of spin-family tones by deliberately excluding spin, bspin, and wspin from customNN support.
 3.9.0-alpha.6: Added parser, formatter, and timed-runtime regression coverage for customNN-driven mix-effect envelopes.
