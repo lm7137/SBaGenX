@@ -138,7 +138,8 @@ Name: "{#MyAppUserDocsDir}\Plots"; Flags: uninsalwaysuninstall
 Name: "{group}\SBaGenX GUI"; Filename: "{app}\sbagenx-gui.exe"; Check: HasGuiExecutable
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 
-; Desktop shortcut to Documents folder
+; Desktop shortcuts
+Name: "{autodesktop}\SBaGenX GUI"; Filename: "{app}\sbagenx-gui.exe"; Check: HasGuiExecutable
 Name: "{autodesktop}\SBaGenX Files"; Filename: "{#MyAppUserDocsDir}"
 
 [Registry]

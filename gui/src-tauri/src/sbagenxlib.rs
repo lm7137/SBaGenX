@@ -1128,6 +1128,23 @@ fn resolve_library_path() -> Result<PathBuf, String> {
 
   let mut candidates = Vec::<PathBuf>::new();
 
+  if let Ok(exe_path) = std::env::current_exe() {
+    if let Some(exe_dir) = exe_path.parent() {
+      if cfg!(target_os = "linux") {
+        candidates.push(exe_dir.join("libsbagenx.so"));
+        candidates.push(exe_dir.join("libsbagenx.so.3"));
+      } else if cfg!(target_os = "windows") {
+        if cfg!(target_pointer_width = "64") {
+          candidates.push(exe_dir.join("sbagenxlib-win64.dll"));
+        } else {
+          candidates.push(exe_dir.join("sbagenxlib-win32.dll"));
+        }
+      } else if cfg!(target_os = "macos") {
+        candidates.push(exe_dir.join("libsbagenx.dylib"));
+      }
+    }
+  }
+
   if let Ok(repo_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     .join("../..")
     .canonicalize()
