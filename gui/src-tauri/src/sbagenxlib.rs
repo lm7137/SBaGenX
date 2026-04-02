@@ -82,6 +82,7 @@ struct SbxIsoEnvelopeSpec {
 struct SbxMixFxSpec {
   type_: c_int,
   waveform: c_int,
+  envelope_waveform: c_int,
   carr: f64,
   res: f64,
   amp: f64,
