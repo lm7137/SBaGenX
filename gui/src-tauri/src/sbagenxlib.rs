@@ -1251,6 +1251,172 @@ impl ProgramKind {
   }
 }
 
+fn curve_info_from_loaded_curve(api: &Api, curve: *mut SbxCurveProgram) -> Result<CurveInfoOutcome, String> {
+  let mut info = SbxCurveInfoRaw {
+    parameter_count: 0,
+    has_solve: 0,
+    has_carrier_expr: 0,
+    has_amp_expr: 0,
+    has_mixamp_expr: 0,
+    beat_piece_count: 0,
+    carrier_piece_count: 0,
+    amp_piece_count: 0,
+    mixamp_piece_count: 0,
+  };
+
+  let info_rc = unsafe { (api.sbx_curve_get_info)(curve, &mut info) };
+  if info_rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+    return Err(if msg.is_empty() {
+      "failed to inspect curve metadata in sbagenxlib".to_string()
+    } else {
+      msg
+    });
+  }
+
+  let mut parameters = Vec::new();
+  let param_count = unsafe { (api.sbx_curve_param_count)(curve) };
+  for index in 0..param_count {
+    let mut name_ptr: *const c_char = std::ptr::null();
+    let mut value = 0.0_f64;
+    let rc = unsafe { (api.sbx_curve_get_param)(curve, index, &mut name_ptr, &mut value) };
+    if rc != SBX_OK {
+      continue;
+    }
+    parameters.push(CurveParameter {
+      name: cstr_to_string(name_ptr),
+      value,
+    });
+  }
+
+  Ok(CurveInfoOutcome {
+    parameter_count: info.parameter_count,
+    has_solve: info.has_solve != 0,
+    has_carrier_expr: info.has_carrier_expr != 0,
+    has_amp_expr: info.has_amp_expr != 0,
+    has_mixamp_expr: info.has_mixamp_expr != 0,
+    beat_piece_count: info.beat_piece_count,
+    carrier_piece_count: info.carrier_piece_count,
+    amp_piece_count: info.amp_piece_count,
+    mixamp_piece_count: info.mixamp_piece_count,
+    parameters,
+    engine_version: api.version_string(),
+  })
+}
+
+fn prepare_curve_for_program_request(
+  api: &Api,
+  request: &ProgramRuntimeRequest,
+) -> Result<*mut SbxCurveProgram, String> {
+  if request.kind != ProgramKind::Curve {
+    return Err("curve inspection requires the built-in curve program".to_string());
+  }
+  if request.drop_time_sec <= 0 {
+    return Err("drop-time must be greater than zero".to_string());
+  }
+
+  let parsed = parse_drop_like_main_arg(&request.main_arg, request.kind)?;
+  let hold_sec = if parsed.include_hold {
+    request.hold_time_sec.max(0)
+  } else {
+    0
+  };
+  let wake_sec = if parsed.wake_enabled {
+    request.wake_time_sec.max(0)
+  } else {
+    0
+  };
+  let main_sec = request.drop_time_sec + hold_sec;
+  let carrier_start_hz = parsed.carrier_base_hz + 5.0;
+  let carrier_end_hz = if parsed.include_hold {
+    parsed.carrier_base_hz - (5.0 * f64::from(hold_sec) / f64::from(request.drop_time_sec))
+  } else {
+    parsed.carrier_base_hz
+  };
+
+  let curve_text = request
+    .curve_text
+    .as_deref()
+    .ok_or_else(|| "the curve program requires .sbgf source text".to_string())?;
+  if curve_text.trim().is_empty() {
+    return Err("the curve program requires .sbgf source text".to_string());
+  }
+
+  let curve = unsafe { (api.sbx_curve_create)() };
+  if curve.is_null() {
+    return Err("failed to create sbagenxlib curve program".to_string());
+  }
+
+  let c_curve_text =
+    CString::new(curve_text).map_err(|_| "curve text contains embedded NUL byte".to_string())?;
+  let c_source = CString::new(request.source_name.as_str())
+    .map_err(|_| "curve source name contains embedded NUL byte".to_string())?;
+  let load_rc = unsafe { (api.sbx_curve_load_text)(curve, c_curve_text.as_ptr(), c_source.as_ptr()) };
+  if load_rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+    unsafe { (api.sbx_curve_destroy)(curve) };
+    return Err(if msg.is_empty() {
+      "failed to load .sbgf curve text".to_string()
+    } else {
+      msg
+    });
+  }
+
+  for override_value in &parsed.curve_overrides {
+    let c_name = CString::new(override_value.name.as_str())
+      .map_err(|_| "curve parameter name contains embedded NUL byte".to_string())?;
+    let rc = unsafe { (api.sbx_curve_set_param)(curve, c_name.as_ptr(), override_value.value) };
+    if rc != SBX_OK {
+      let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+      unsafe { (api.sbx_curve_destroy)(curve) };
+      return Err(if msg.is_empty() {
+        "failed to apply a curve parameter override".to_string()
+      } else {
+        msg
+      });
+    }
+  }
+
+  let mut eval_cfg = SbxCurveEvalConfig {
+    carrier_start_hz: 0.0,
+    carrier_end_hz: 0.0,
+    carrier_span_sec: 0.0,
+    beat_start_hz: 0.0,
+    beat_target_hz: 0.0,
+    beat_span_sec: 0.0,
+    hold_min: 0.0,
+    total_min: 0.0,
+    wake_min: 0.0,
+    beat_amp0_pct: 0.0,
+    mix_amp0_pct: 0.0,
+  };
+  unsafe { (api.sbx_default_curve_eval_config)(&mut eval_cfg) };
+  eval_cfg.carrier_start_hz = carrier_start_hz;
+  eval_cfg.carrier_end_hz = carrier_end_hz;
+  eval_cfg.carrier_span_sec = f64::from(main_sec);
+  eval_cfg.beat_start_hz = parsed.beat_start_hz;
+  eval_cfg.beat_target_hz = parsed.beat_target_hz;
+  eval_cfg.beat_span_sec = f64::from(request.drop_time_sec);
+  eval_cfg.hold_min = f64::from(hold_sec) / 60.0;
+  eval_cfg.total_min = f64::from(main_sec) / 60.0;
+  eval_cfg.wake_min = f64::from(wake_sec) / 60.0;
+  eval_cfg.beat_amp0_pct = parsed.amp_pct;
+  eval_cfg.mix_amp0_pct = 100.0;
+
+  let prepare_rc = unsafe { (api.sbx_curve_prepare)(curve, &eval_cfg) };
+  if prepare_rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
+    unsafe { (api.sbx_curve_destroy)(curve) };
+    return Err(if msg.is_empty() {
+      "failed to prepare the .sbgf curve".to_string()
+    } else {
+      msg
+    });
+  }
+
+  Ok(curve)
+}
+
 fn program_default_source_name(kind: ProgramKind) -> String {
   format!("program:{}", kind.as_str())
 }
@@ -2436,86 +2602,7 @@ fn load_program_context_with_rate(
           result?
         }
         ProgramKind::Curve => {
-          let curve_text = request
-            .curve_text
-            .as_deref()
-            .ok_or_else(|| "the curve program requires .sbgf source text".to_string())?;
-          if curve_text.trim().is_empty() {
-            return Err("the curve program requires .sbgf source text".to_string());
-          }
-
-          let curve = unsafe { (api.sbx_curve_create)() };
-          if curve.is_null() {
-            return Err("failed to create sbagenxlib curve program".to_string());
-          }
-
-          let c_curve_text =
-            CString::new(curve_text).map_err(|_| "curve text contains embedded NUL byte".to_string())?;
-          let c_source = CString::new(source_name.as_str())
-            .map_err(|_| "curve source name contains embedded NUL byte".to_string())?;
-          let load_rc = unsafe { (api.sbx_curve_load_text)(curve, c_curve_text.as_ptr(), c_source.as_ptr()) };
-          if load_rc != SBX_OK {
-            let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
-            unsafe { (api.sbx_curve_destroy)(curve) };
-            return Err(if msg.is_empty() {
-              "failed to load .sbgf curve text".to_string()
-            } else {
-              msg
-            });
-          }
-
-          for override_value in &parsed.curve_overrides {
-            let c_name = CString::new(override_value.name.as_str())
-              .map_err(|_| "curve parameter name contains embedded NUL byte".to_string())?;
-            let rc =
-              unsafe { (api.sbx_curve_set_param)(curve, c_name.as_ptr(), override_value.value) };
-            if rc != SBX_OK {
-              let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
-              unsafe { (api.sbx_curve_destroy)(curve) };
-              return Err(if msg.is_empty() {
-                "failed to apply a curve parameter override".to_string()
-              } else {
-                msg
-              });
-            }
-          }
-
-          let mut eval_cfg = SbxCurveEvalConfig {
-            carrier_start_hz: 0.0,
-            carrier_end_hz: 0.0,
-            carrier_span_sec: 0.0,
-            beat_start_hz: 0.0,
-            beat_target_hz: 0.0,
-            beat_span_sec: 0.0,
-            hold_min: 0.0,
-            total_min: 0.0,
-            wake_min: 0.0,
-            beat_amp0_pct: 0.0,
-            mix_amp0_pct: 0.0,
-          };
-          unsafe { (api.sbx_default_curve_eval_config)(&mut eval_cfg) };
-          eval_cfg.carrier_start_hz = carrier_start_hz;
-          eval_cfg.carrier_end_hz = carrier_end_hz;
-          eval_cfg.carrier_span_sec = f64::from(main_sec);
-          eval_cfg.beat_start_hz = parsed.beat_start_hz;
-          eval_cfg.beat_target_hz = parsed.beat_target_hz;
-          eval_cfg.beat_span_sec = f64::from(request.drop_time_sec);
-          eval_cfg.hold_min = f64::from(hold_sec) / 60.0;
-          eval_cfg.total_min = f64::from(main_sec) / 60.0;
-          eval_cfg.wake_min = f64::from(wake_sec) / 60.0;
-          eval_cfg.beat_amp0_pct = parsed.amp_pct;
-          eval_cfg.mix_amp0_pct = 100.0;
-
-          let prepare_rc = unsafe { (api.sbx_curve_prepare)(curve, &eval_cfg) };
-          if prepare_rc != SBX_OK {
-            let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
-            unsafe { (api.sbx_curve_destroy)(curve) };
-            return Err(if msg.is_empty() {
-              "failed to prepare the .sbgf curve".to_string()
-            } else {
-              msg
-            });
-          }
+          let curve = prepare_curve_for_program_request(&api, request)?;
 
           if parsed.slide {
             let mut source_cfg = SbxCurveSourceConfig {
@@ -3580,59 +3667,19 @@ pub fn inspect_curve_info(text: &str, source_name: &str) -> Result<CurveInfoOutc
     });
   }
 
-  let mut info = SbxCurveInfoRaw {
-    parameter_count: 0,
-    has_solve: 0,
-    has_carrier_expr: 0,
-    has_amp_expr: 0,
-    has_mixamp_expr: 0,
-    beat_piece_count: 0,
-    carrier_piece_count: 0,
-    amp_piece_count: 0,
-    mixamp_piece_count: 0,
-  };
-
-  let info_rc = unsafe { (api.sbx_curve_get_info)(curve, &mut info) };
-  if info_rc != SBX_OK {
-    let msg = unsafe { cstr_to_string((api.sbx_curve_last_error)(curve)) };
-    unsafe { (api.sbx_curve_destroy)(curve) };
-    return Err(if msg.is_empty() {
-      "failed to inspect curve metadata in sbagenxlib".to_string()
-    } else {
-      msg
-    });
-  }
-
-  let mut parameters = Vec::new();
-  let param_count = unsafe { (api.sbx_curve_param_count)(curve) };
-  for index in 0..param_count {
-    let mut name_ptr: *const c_char = std::ptr::null();
-    let mut value = 0.0_f64;
-    let rc = unsafe { (api.sbx_curve_get_param)(curve, index, &mut name_ptr, &mut value) };
-    if rc != SBX_OK {
-      continue;
-    }
-    parameters.push(CurveParameter {
-      name: cstr_to_string(name_ptr),
-      value,
-    });
-  }
-
+  let outcome = curve_info_from_loaded_curve(&api, curve);
   unsafe { (api.sbx_curve_destroy)(curve) };
+  outcome
+}
 
-  Ok(CurveInfoOutcome {
-    parameter_count: info.parameter_count,
-    has_solve: info.has_solve != 0,
-    has_carrier_expr: info.has_carrier_expr != 0,
-    has_amp_expr: info.has_amp_expr != 0,
-    has_mixamp_expr: info.has_mixamp_expr != 0,
-    beat_piece_count: info.beat_piece_count,
-    carrier_piece_count: info.carrier_piece_count,
-    amp_piece_count: info.amp_piece_count,
-    mixamp_piece_count: info.mixamp_piece_count,
-    parameters,
-    engine_version: api.version_string(),
-  })
+pub fn inspect_program_curve_info(
+  request: &ProgramRuntimeRequest,
+) -> Result<CurveInfoOutcome, String> {
+  let api = Api::load()?;
+  let curve = prepare_curve_for_program_request(&api, request)?;
+  let outcome = curve_info_from_loaded_curve(&api, curve);
+  unsafe { (api.sbx_curve_destroy)(curve) };
+  outcome
 }
 
 pub fn normalize_source_name(source_name: Option<String>, fallback_kind: &str) -> String {
@@ -3797,6 +3844,35 @@ mod tests {
     assert!(outcome.has_solve);
     assert!((a - 7.58425).abs() < 1e-4, "expected solved A, got {}", a);
     assert!((c - 2.41575).abs() < 1e-4, "expected solved C, got {}", c);
+  }
+
+  #[test]
+  fn inspect_program_curve_info_applies_main_arg_overrides() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("../..")
+      .join("examples/basics/curve-expfit-solve-demo.sbgf");
+    let text = fs::read_to_string(&path).expect("read solve example");
+    let request = ProgramRuntimeRequest {
+      kind: ProgramKind::Curve,
+      main_arg: "00ls:l=0.3".to_string(),
+      drop_time_sec: 30 * 60,
+      hold_time_sec: 30 * 60,
+      wake_time_sec: 3 * 60,
+      curve_text: Some(text),
+      source_name: path.to_string_lossy().into_owned(),
+      mix_path: None,
+      mix_looper_spec: None,
+    };
+
+    let outcome = inspect_program_curve_info(&request).expect("inspect overridden curve");
+    let l = outcome
+      .parameters
+      .iter()
+      .find(|param| param.name == "l")
+      .map(|param| param.value)
+      .expect("overridden l");
+
+    assert!((l - 0.3).abs() < 1e-9, "expected overridden l, got {}", l);
   }
 
   #[test]

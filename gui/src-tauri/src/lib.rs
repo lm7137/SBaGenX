@@ -1409,6 +1409,33 @@ fn inspect_curve_info(args: RenderDocumentArgs) -> Result<CurveInfoResult, Strin
   })
 }
 
+#[tauri::command]
+fn inspect_program_curve_info(args: ProgramRequestArgs) -> Result<CurveInfoResult, String> {
+  let request = program_request_from_args(args)?;
+  let outcome = sbagenxlib::inspect_program_curve_info(&request)?;
+  Ok(CurveInfoResult {
+    parameter_count: outcome.parameter_count,
+    has_solve: outcome.has_solve,
+    has_carrier_expr: outcome.has_carrier_expr,
+    has_amp_expr: outcome.has_amp_expr,
+    has_mixamp_expr: outcome.has_mixamp_expr,
+    beat_piece_count: outcome.beat_piece_count,
+    carrier_piece_count: outcome.carrier_piece_count,
+    amp_piece_count: outcome.amp_piece_count,
+    mixamp_piece_count: outcome.mixamp_piece_count,
+    parameters: outcome
+      .parameters
+      .into_iter()
+      .map(|param| CurveParameter {
+        name: param.name,
+        value: param.value,
+      })
+      .collect(),
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -1451,7 +1478,8 @@ pub fn run() {
       export_program,
       sample_beat_preview,
       sample_program_beat_preview,
-      inspect_curve_info
+      inspect_curve_info,
+      inspect_program_curve_info
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

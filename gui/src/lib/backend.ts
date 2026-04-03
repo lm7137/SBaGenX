@@ -164,6 +164,14 @@ export async function inspectCurveInfo(
   })
 }
 
+export async function inspectProgramCurveInfo(
+  request: ProgramRuntimeRequest,
+): Promise<CurveInfoResult> {
+  return invoke<CurveInfoResult>('inspect_program_curve_info', {
+    args: request,
+  })
+}
+
 export async function validateProgram(
   request: ProgramRuntimeRequest,
 ): Promise<ValidationResult> {

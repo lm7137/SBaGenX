@@ -11,7 +11,7 @@
     exitApplication,
     exportDocument,
     exportProgram,
-    inspectCurveInfo,
+    inspectProgramCurveInfo,
     inspectMixEmbeddedLooper,
     loadDevelopmentExamples,
     loadRecentFiles,
@@ -792,10 +792,10 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     }
   }
 
-  async function loadProgramCurveInfo(snapshot: string, text: string, sourceName: string) {
+  async function loadProgramCurveInfo(snapshot: string, text: string, _sourceName: string) {
     curveInfoLoadingId = 'program-curve'
     try {
-      const info = await inspectCurveInfo(text, sourceName)
+      const info = await inspectProgramCurveInfo(buildProgramRequest())
       if (!currentProgramMatches(snapshot) || !currentProgramCurveMatches(text)) return
       updateProgramCurveDocument({
         curveInfo: info,
