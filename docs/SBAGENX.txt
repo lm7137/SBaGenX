@@ -2079,13 +2079,15 @@ follows:
               Requires Python+Cairo backend plus ffmpeg with libx264.
             --graph-video-fps n
               Frame rate for --graph-video (default 30).
-  -I [spec] Customize isochronic (@) pulse envelope.
+  -I [spec], --iso-params [spec]
+            Customize isochronic (@) pulse envelope.
               Optional spec:
                 s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>
               Defaults: s=0.0485, d=0.4030, a=0.5, r=0.5, e=2.
               Constraint: a+r <= 1.
               e modes: 0=hard, 1=linear, 2=smoothstep, 3=smootherstep.
-  -H [spec] Customize mixam envelope globally.
+  -H [spec], --mixam-params [spec]
+            Customize mixam envelope globally.
               Optional spec:
                 m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:
                 r=<release>:e=<edge>:f=<floor>

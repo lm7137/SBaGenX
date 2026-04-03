@@ -431,10 +431,12 @@ help() {
 	  NL "          -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid"
 	  NL "                      with mix input; spec is d=<v>:e=<v>:k=<v>:E=<v>"
 	  NL "                      defaults: d=0.3:e=0.3:k=10:E=0.7"
-	  NL "          -I [spec] Customize isochronic (@) pulse envelope; spec is"
+	  NL "          -I [spec], --iso-params [spec]"
+	  NL "                    Customize isochronic (@) pulse envelope; spec is"
 	  NL "                      s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>"
 	  NL "                      defaults s=0.0485:d=0.4030:a=0.5:r=0.5:e=2"
-	  NL "          -H [spec] Customize global mixam envelope for mixam:<pulse|beat>"
+	  NL "          -H [spec], --mixam-params [spec]"
+	  NL "                    Customize global mixam envelope for mixam:<pulse|beat>"
 	  NL "                      spec is m=<pulse|cos>:s=<start-cycle>:d=<duty>:a=<attack>:r=<release>:e=<edge>:f=<floor>"
 	  NL "                      order-independent; omitted params use defaults"
 	  NL "                      defaults m=cos:s=0:d=0.5:a=0.5:r=0.5:e=3:f=0.45"
@@ -3859,6 +3861,40 @@ scanOptions(int *acp, char ***avp) {
 	 if (!opt_looper) opt_looper= *argv;
 	 argc--;
 	 argv++;
+	 continue;
+      }
+      if (0 == strcmp(argv[0], "--iso-params")) {
+	 opt_I= 1;
+	 argv++;
+	 argc--;
+	 if (argc > 0 && is_iso_gate_option_spec(argv[0])) {
+	    parse_iso_gate_option_spec(*argv++);
+	    argc--;
+	 }
+	 continue;
+      }
+      if (0 == strncmp(argv[0], "--iso-params=", 13)) {
+	 opt_I= 1;
+	 parse_iso_gate_option_spec(argv[0] + 13);
+	 argv++;
+	 argc--;
+	 continue;
+      }
+      if (0 == strcmp(argv[0], "--mixam-params")) {
+	 opt_H= 1;
+	 argv++;
+	 argc--;
+	 if (argc > 0 && is_mixam_env_option_spec(argv[0])) {
+	    parse_mixam_env_option_spec(*argv++);
+	    argc--;
+	 }
+	 continue;
+      }
+      if (0 == strncmp(argv[0], "--mixam-params=", 15)) {
+	 opt_H= 1;
+	 parse_mixam_env_option_spec(argv[0] + 15);
+	 argv++;
+	 argc--;
 	 continue;
       }
       if (0 == strcmp(argv[0], "--dry-run")) {
