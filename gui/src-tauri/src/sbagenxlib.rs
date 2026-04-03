@@ -382,6 +382,7 @@ struct SbxToneSpec {
 
 type SbxDefaultEngineConfig = unsafe extern "C" fn(*mut SbxEngineConfig);
 type SbxDefaultToneSpec = unsafe extern "C" fn(*mut SbxToneSpec);
+type SbxDefaultIsoEnvelopeSpec = unsafe extern "C" fn(*mut SbxIsoEnvelopeSpec);
 type SbxDefaultPcmConvertState = unsafe extern "C" fn(*mut SbxPcmConvertState);
 type SbxDefaultAudioWriterConfig = unsafe extern "C" fn(*mut SbxAudioWriterConfig);
 type SbxDefaultSafeSeqfilePreamble = unsafe extern "C" fn(*mut SbxSafeSeqfilePreamble);
@@ -422,6 +423,8 @@ type SbxPrepareSafeSeqText = unsafe extern "C" fn(
   *mut c_char,
   usize,
 ) -> c_int;
+type SbxParseIsoEnvelopeOptionSpec =
+  unsafe extern "C" fn(*const c_char, *mut SbxIsoEnvelopeSpec, *mut c_char, usize) -> c_int;
 type SbxValidateSbgText =
   unsafe extern "C" fn(*const c_char, *const c_char, *mut *mut SbxDiagnosticRaw, *mut usize) -> c_int;
 type SbxValidateSbgfText =
@@ -455,6 +458,15 @@ type SbxContextSampleTonesVoice = unsafe extern "C" fn(
   usize,
   *mut f64,
   *mut SbxToneSpec,
+) -> c_int;
+type SbxContextSampleIsochronicCycle = unsafe extern "C" fn(
+  *const SbxContext,
+  *const SbxToneSpec,
+  *const SbxIsoEnvelopeSpec,
+  usize,
+  *mut f64,
+  *mut f64,
+  *mut f64,
 ) -> c_int;
 type SbxVersion = unsafe extern "C" fn() -> *const c_char;
 type SbxApiVersion = unsafe extern "C" fn() -> c_int;
@@ -561,6 +573,21 @@ pub struct BeatPreviewOutcome {
   pub engine_version: String,
 }
 
+pub struct IsoCyclePreviewPoint {
+  pub t_sec: f64,
+  pub envelope: f64,
+  pub wave: f64,
+}
+
+pub struct IsoCyclePreviewOutcome {
+  pub duration_sec: f64,
+  pub sample_count: usize,
+  pub carrier_hz: f64,
+  pub beat_hz: f64,
+  pub points: Vec<IsoCyclePreviewPoint>,
+  pub engine_version: String,
+}
+
 pub struct CurveParameter {
   pub name: String,
   pub value: f64,
@@ -594,6 +621,7 @@ pub struct ProgramRuntimeRequest {
   pub drop_time_sec: i32,
   pub hold_time_sec: i32,
   pub wake_time_sec: i32,
+  pub iso_params_spec: Option<String>,
   pub curve_text: Option<String>,
   pub source_name: String,
   pub mix_path: Option<String>,
@@ -638,6 +666,7 @@ struct Api {
   sbx_api_version: SbxApiVersion,
   sbx_default_engine_config: SbxDefaultEngineConfig,
   sbx_default_tone_spec: SbxDefaultToneSpec,
+  sbx_default_iso_envelope_spec: SbxDefaultIsoEnvelopeSpec,
   sbx_default_pcm_convert_state: SbxDefaultPcmConvertState,
   sbx_default_audio_writer_config: SbxDefaultAudioWriterConfig,
   sbx_default_safe_seqfile_preamble: SbxDefaultSafeSeqfilePreamble,
@@ -667,6 +696,7 @@ struct Api {
   sbx_context_set_amp_adjust: SbxContextSetAmpAdjust,
   sbx_context_set_mix_mod: SbxContextSetMixMod,
   sbx_prepare_safe_seq_text: SbxPrepareSafeSeqText,
+  sbx_parse_iso_envelope_option_spec: SbxParseIsoEnvelopeOptionSpec,
   sbx_validate_sbg_text: SbxValidateSbgText,
   sbx_validate_sbgf_text: SbxValidateSbgfText,
   sbx_free_diagnostics: SbxFreeDiagnostics,
@@ -681,6 +711,7 @@ struct Api {
   sbx_context_voice_count: SbxContextVoiceCount,
   sbx_context_sample_program_beat_voice: SbxContextSampleProgramBeatVoice,
   sbx_context_sample_tones_voice: SbxContextSampleTonesVoice,
+  sbx_context_sample_isochronic_cycle: SbxContextSampleIsochronicCycle,
   sbx_audio_writer_create_path: SbxAudioWriterCreatePath,
   sbx_audio_writer_close: SbxAudioWriterClose,
   sbx_audio_writer_destroy: SbxAudioWriterDestroy,
@@ -994,6 +1025,8 @@ impl Api {
         sbx_api_version: Self::load_symbol(&lib, b"sbx_api_version\0")?,
         sbx_default_engine_config: Self::load_symbol(&lib, b"sbx_default_engine_config\0")?,
         sbx_default_tone_spec: Self::load_symbol(&lib, b"sbx_default_tone_spec\0")?,
+        sbx_default_iso_envelope_spec:
+          Self::load_symbol(&lib, b"sbx_default_iso_envelope_spec\0")?,
         sbx_default_pcm_convert_state:
           Self::load_symbol(&lib, b"sbx_default_pcm_convert_state\0")?,
         sbx_default_audio_writer_config:
@@ -1039,6 +1072,8 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_context_set_amp_adjust\0")?,
         sbx_context_set_mix_mod: Self::load_symbol(&lib, b"sbx_context_set_mix_mod\0")?,
         sbx_prepare_safe_seq_text: Self::load_symbol(&lib, b"sbx_prepare_safe_seq_text\0")?,
+        sbx_parse_iso_envelope_option_spec:
+          Self::load_symbol(&lib, b"sbx_parse_iso_envelope_option_spec\0")?,
         sbx_validate_sbg_text: Self::load_symbol(&lib, b"sbx_validate_sbg_text\0")?,
         sbx_validate_sbgf_text: Self::load_symbol(&lib, b"sbx_validate_sbgf_text\0")?,
         sbx_free_diagnostics: Self::load_symbol(&lib, b"sbx_free_diagnostics\0")?,
@@ -1058,6 +1093,8 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_context_sample_program_beat_voice\0")?,
         sbx_context_sample_tones_voice:
           Self::load_symbol(&lib, b"sbx_context_sample_tones_voice\0")?,
+        sbx_context_sample_isochronic_cycle:
+          Self::load_symbol(&lib, b"sbx_context_sample_isochronic_cycle\0")?,
         sbx_audio_writer_create_path:
           Self::load_symbol(&lib, b"sbx_audio_writer_create_path\0")?,
         sbx_audio_writer_close: Self::load_symbol(&lib, b"sbx_audio_writer_close\0")?,
@@ -1775,6 +1812,61 @@ fn fill_program_tone_spec(
   tone.beat_hz = beat_hz;
   tone.amplitude = amp_pct / 100.0;
   tone.waveform = SBX_WAVE_SINE;
+}
+
+fn parse_program_iso_override(
+  api: &Api,
+  spec: Option<&str>,
+) -> Result<Option<SbxIsoEnvelopeSpec>, String> {
+  let Some(spec) = spec.map(str::trim).filter(|value| !value.is_empty()) else {
+    return Ok(None);
+  };
+
+  let c_spec = CString::new(spec)
+    .map_err(|_| "isochronic parameter spec contains embedded NUL byte".to_string())?;
+  let mut env = SbxIsoEnvelopeSpec {
+    start: 0.0,
+    duty: 0.0,
+    attack: 0.0,
+    release: 0.0,
+    edge_mode: 0,
+  };
+  unsafe { (api.sbx_default_iso_envelope_spec)(&mut env) };
+  let mut errbuf = vec![0 as c_char; 256];
+  let rc = unsafe {
+    (api.sbx_parse_iso_envelope_option_spec)(c_spec.as_ptr(), &mut env, errbuf.as_mut_ptr(), errbuf.len())
+  };
+  if rc != SBX_OK {
+    let msg = cstr_to_string(errbuf.as_ptr());
+    return Err(if msg.is_empty() {
+      "failed to parse built-in isochronic parameters".to_string()
+    } else {
+      msg
+    });
+  }
+  Ok(Some(env))
+}
+
+fn apply_program_iso_override(
+  api: &Api,
+  ctx: *mut SbxContext,
+  request: &ProgramRuntimeRequest,
+) -> Result<Option<SbxIsoEnvelopeSpec>, String> {
+  let env = parse_program_iso_override(api, request.iso_params_spec.as_deref())?;
+  if let Some(spec) = env {
+    let rc = unsafe { (api.sbx_context_set_sequence_iso_override)(ctx, &spec) };
+    if rc != SBX_OK {
+      let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
+      return Err(if msg.is_empty() {
+        "failed to set built-in isochronic override".to_string()
+      } else {
+        msg
+      });
+    }
+    Ok(Some(spec))
+  } else {
+    Ok(None)
+  }
 }
 
 fn collect_validation_diagnostics(
@@ -2693,6 +2785,8 @@ fn load_program_context_with_rate(
     }
   };
 
+  apply_program_iso_override(&api, ctx, request)?;
+
   Ok(LoadedProgramContext {
     api,
     ctx,
@@ -3335,6 +3429,91 @@ fn tone_mode_has_beat_preview(mode: c_int) -> bool {
   )
 }
 
+fn sample_context_iso_cycle(
+  api: &Api,
+  ctx: *mut SbxContext,
+  env_override: Option<&SbxIsoEnvelopeSpec>,
+) -> Result<IsoCyclePreviewOutcome, String> {
+  let voice_count = unsafe { (api.sbx_context_voice_count)(ctx) };
+  if voice_count == 0 {
+    return Err("isochronic cycle preview requires an active program voice".to_string());
+  }
+
+  let mut tone = SbxToneSpec {
+    mode: 0,
+    carrier_hz: 0.0,
+    beat_hz: 0.0,
+    amplitude: 0.0,
+    waveform: 0,
+    envelope_waveform: 0,
+    duty_cycle: 0.0,
+    iso_start: 0.0,
+    iso_attack: 0.0,
+    iso_release: 0.0,
+    iso_edge_mode: 0,
+  };
+
+  let tone_rc = unsafe {
+    (api.sbx_context_sample_tones_voice)(ctx, 0, 0.0, 0.0, 1, std::ptr::null_mut(), &mut tone)
+  };
+  if tone_rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
+    return Err(if msg.is_empty() {
+      "failed to sample the active program tone".to_string()
+    } else {
+      msg
+    });
+  }
+
+  if tone.mode != SBX_TONE_ISOCHRONIC || !tone.beat_hz.is_finite() || tone.beat_hz <= 0.0 {
+    return Err("isochronic cycle preview requires @ in the current MAIN ARGUMENT".to_string());
+  }
+
+  let sample_count = 240usize;
+  let mut t_sec = vec![0.0_f64; sample_count];
+  let mut envelope = vec![0.0_f64; sample_count];
+  let mut wave = vec![0.0_f64; sample_count];
+  let cycle_rc = unsafe {
+    (api.sbx_context_sample_isochronic_cycle)(
+      ctx,
+      &tone,
+      env_override
+        .map(|env| env as *const SbxIsoEnvelopeSpec)
+        .unwrap_or(std::ptr::null()),
+      sample_count,
+      t_sec.as_mut_ptr(),
+      envelope.as_mut_ptr(),
+      wave.as_mut_ptr(),
+    )
+  };
+  if cycle_rc != SBX_OK {
+    let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
+    return Err(if msg.is_empty() {
+      "failed to sample isochronic cycle from sbagenxlib".to_string()
+    } else {
+      msg
+    });
+  }
+
+  Ok(IsoCyclePreviewOutcome {
+    duration_sec: 1.0 / tone.beat_hz,
+    sample_count,
+    carrier_hz: tone.carrier_hz,
+    beat_hz: tone.beat_hz,
+    points: t_sec
+      .into_iter()
+      .zip(envelope.into_iter())
+      .zip(wave.into_iter())
+      .map(|((t_sec, envelope), wave)| IsoCyclePreviewPoint {
+        t_sec,
+        envelope,
+        wave,
+      })
+      .collect(),
+    engine_version: api.version_string(),
+  })
+}
+
 pub fn backend_status() -> Result<(String, i32), String> {
   let api = Api::load()?;
   Ok((api.version_string(), api.api_version()))
@@ -3620,6 +3799,14 @@ pub fn sample_program_beat_preview(
   sample_context_beat_preview(&loaded.api, loaded.ctx)
 }
 
+pub fn sample_program_iso_cycle(
+  request: &ProgramRuntimeRequest,
+) -> Result<IsoCyclePreviewOutcome, String> {
+  let loaded = load_program_context_with_rate(request, None, false)?;
+  let env_override = parse_program_iso_override(&loaded.api, request.iso_params_spec.as_deref())?;
+  sample_context_iso_cycle(&loaded.api, loaded.ctx, env_override.as_ref())
+}
+
 pub fn inspect_curve_info(text: &str, source_name: &str) -> Result<CurveInfoOutcome, String> {
   let api = Api::load()?;
   let curve = unsafe { (api.sbx_curve_create)() };
@@ -3858,6 +4045,7 @@ mod tests {
       drop_time_sec: 30 * 60,
       hold_time_sec: 30 * 60,
       wake_time_sec: 3 * 60,
+      iso_params_spec: None,
       curve_text: Some(text),
       source_name: path.to_string_lossy().into_owned(),
       mix_path: None,
@@ -3884,5 +4072,29 @@ mod tests {
     assert!((parsed.carrier_end_hz - 5.0).abs() < 1e-9);
     assert!((parsed.beat_hz - 10.0).abs() < 1e-9);
     assert!((parsed.amp_pct - 1.0).abs() < 1e-9);
+  }
+
+  #[test]
+  fn sample_program_iso_cycle_applies_override() {
+    let request = ProgramRuntimeRequest {
+      kind: ProgramKind::Drop,
+      main_arg: "00ls@/20".to_string(),
+      drop_time_sec: 30 * 60,
+      hold_time_sec: 30 * 60,
+      wake_time_sec: 3 * 60,
+      iso_params_spec: Some("s=0:d=1:a=0:r=0:e=0".to_string()),
+      curve_text: None,
+      source_name: "program:drop".to_string(),
+      mix_path: None,
+      mix_looper_spec: None,
+    };
+
+    let outcome = sample_program_iso_cycle(&request).expect("sample isochronic cycle");
+    assert_eq!(outcome.sample_count, 240);
+    assert!(outcome.beat_hz > 0.0);
+    assert!(outcome
+      .points
+      .iter()
+      .all(|point| (point.envelope - 1.0).abs() < 1e-9));
   }
 }

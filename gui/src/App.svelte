@@ -6,6 +6,7 @@
   import MonacoEditor from './lib/editor/MonacoEditor.svelte'
   import BeatPreviewChart from './lib/inspector/BeatPreviewChart.svelte'
   import CurveInfoCard from './lib/inspector/CurveInfoCard.svelte'
+  import IsoCyclePreviewChart from './lib/inspector/IsoCyclePreviewChart.svelte'
   import logoUrl from './lib/assets/sbagenx-logo.svg'
   import {
     exitApplication,
@@ -19,6 +20,7 @@
     readTextFile,
     sampleBeatPreview,
     sampleProgramBeatPreview,
+    sampleProgramIsoCycle,
     saveSessionState,
     startLivePreview,
     startProgramLivePreview,
@@ -32,6 +34,7 @@
     CurveInfoResult,
     DocumentKind,
     DocumentRecord,
+    IsoCyclePreviewResult,
     PlaybackEvent,
     ProgramKind,
     ProgramRuntimeRequest,
@@ -46,6 +49,7 @@
     slide: '200+10/1',
     curve: '00ls:l=0.15',
   }
+  const DEFAULT_ISO_PARAMS_SPEC = 's=0.0485:d=0.4030:a=0.5:r=0.5:e=2'
 
   const bootstrappedExampleSuffixes = new Set([
     '/examples/plus/deep-sleep-aid.sbg',
@@ -71,11 +75,14 @@
   let programDropMinutes = 30
   let programHoldMinutes = 30
   let programWakeMinutes = 3
+  let programIsoParamsSpec = DEFAULT_ISO_PARAMS_SPEC
   let programMixPath: string | null = null
   let programMixLooperSpec = ''
   let programDiagnostics: ValidationDiagnostic[] = []
   let programBeatPreview: BeatPreviewResult | null = null
   let programBeatPreviewError: string | null = null
+  let programIsoCyclePreview: IsoCyclePreviewResult | null = null
+  let programIsoCyclePreviewError: string | null = null
   let programCurveDocument: DocumentRecord = makeUntitledDocument('sbgf')
   let validationTimer: ReturnType<typeof setTimeout> | null = null
   let pendingValidationTask: ValidationTask | null = null
@@ -218,6 +225,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       dropTimeSec: parseMinutesField(programDropMinutes, 30),
       holdTimeSec: parseMinutesField(programHoldMinutes, 30),
       wakeTimeSec: parseMinutesField(programWakeMinutes, 3),
+      isoParamsSpec: currentProgramIsochronic ? programIsoParamsSpec.trim() || null : null,
       curveText: programKind === 'curve' ? programCurveDocument.content : null,
       sourceName:
         programKind === 'curve'
@@ -268,6 +276,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     runtimeMode = 'program'
     programKind = nextKind
     selectedDiagnosticId = null
+    programIsoCyclePreview = null
+    programIsoCyclePreviewError = null
     queueProgramValidation()
     tick().then(() => editorView?.focusEditor())
   }
@@ -613,6 +623,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     })
     programBeatPreview = null
     programBeatPreviewError = null
+    programIsoCyclePreview = null
+    programIsoCyclePreviewError = null
     queueProgramValidation()
   }
 
@@ -716,12 +728,20 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
 
       programBeatPreview = result.valid ? programBeatPreview : null
       programBeatPreviewError = null
+      programIsoCyclePreview = result.valid ? programIsoCyclePreview : null
+      programIsoCyclePreviewError = null
       if (!result.valid) {
         updateProgramCurveDocument({ curveInfo: null, curveInfoError: null })
         return
       }
 
       void loadProgramBeatPreview(snapshot, request)
+      if (currentProgramIsochronic) {
+        void loadProgramIsoCycle(snapshot, request)
+      } else {
+        programIsoCyclePreview = null
+        programIsoCyclePreviewError = null
+      }
       if (programKind === 'curve') {
         void loadProgramCurveInfo(snapshot, request.curveText ?? '', request.sourceName ?? 'curve.sbgf')
       } else {
@@ -745,6 +765,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       })
       programBeatPreview = null
       programBeatPreviewError = null
+      programIsoCyclePreview = null
+      programIsoCyclePreviewError = null
     } finally {
       if (validatingTarget === 'program') {
         validatingTarget = null
@@ -789,6 +811,19 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       if (previewLoadingId === 'program') {
         previewLoadingId = null
       }
+    }
+  }
+
+  async function loadProgramIsoCycle(snapshot: string, request: ProgramRuntimeRequest) {
+    try {
+      const preview = await sampleProgramIsoCycle(request)
+      if (!currentProgramMatches(snapshot)) return
+      programIsoCyclePreview = preview
+      programIsoCyclePreviewError = null
+    } catch (error) {
+      if (!currentProgramMatches(snapshot)) return
+      programIsoCyclePreview = null
+      programIsoCyclePreviewError = error instanceof Error ? error.message : String(error)
     }
   }
 
@@ -935,6 +970,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     programMixLooperSpec = embeddedLooper ?? ''
     programBeatPreview = null
     programBeatPreviewError = null
+    programIsoCyclePreview = null
+    programIsoCyclePreviewError = null
     transportMessage = `loaded mix ${selection.split(/[\\/]/).pop() ?? selection}`
     queueProgramValidation()
   }
@@ -945,6 +982,8 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     programMixLooperSpec = ''
     programBeatPreview = null
     programBeatPreviewError = null
+    programIsoCyclePreview = null
+    programIsoCyclePreviewError = null
     transportMessage = 'cleared loaded mix'
     queueProgramValidation()
   }
@@ -1048,6 +1087,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   $: activeDocument = documents.find((doc) => doc.id === activeId) ?? documents[0]
   $: programCurveActive = runtimeMode === 'program' && programKind === 'curve'
   $: currentProgramMainArg = programMainArgs[programKind]
+  $: currentProgramIsochronic = runtimeMode === 'program' && currentProgramMainArg.includes('@')
   $: activeDiagnostics =
     runtimeMode === 'sequence'
       ? activeDocument?.diagnostics ?? []
@@ -1426,10 +1466,28 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
                     ...programMainArgs,
                     [programKind]: target.value,
                   }
+                  programIsoCyclePreview = null
+                  programIsoCyclePreviewError = null
                   queueProgramValidation()
                 }}
               />
             </label>
+
+            {#if currentProgramIsochronic}
+              <label class='field field-full'>
+                <span>Isochronic Parameters</span>
+                <input
+                  type='text'
+                  bind:value={programIsoParamsSpec}
+                  placeholder={DEFAULT_ISO_PARAMS_SPEC}
+                  on:input={() => {
+                    programIsoCyclePreview = null
+                    programIsoCyclePreviewError = null
+                    queueProgramValidation()
+                  }}
+                />
+              </label>
+            {/if}
 
             <div class='program-mix-row'>
               <div>
@@ -1521,6 +1579,14 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         }
         validating={previewLoadingId === (runtimeMode === 'sequence' ? activeDocument?.id ?? null : 'program')}
       />
+
+      {#if runtimeMode === 'program' && currentProgramIsochronic}
+        <IsoCyclePreviewChart
+          preview={programIsoCyclePreview}
+          error={programIsoCyclePreviewError}
+          validating={validatingTarget === 'program'}
+        />
+      {/if}
 
       {#if programCurveActive}
         <CurveInfoCard

@@ -123,6 +123,22 @@ export interface BeatPreviewResult {
   engineVersion: string
 }
 
+export interface IsoCyclePreviewPoint {
+  tSec: number
+  envelope: number
+  wave: number
+}
+
+export interface IsoCyclePreviewResult {
+  durationSec: number
+  sampleCount: number
+  carrierHz: number
+  beatHz: number
+  points: IsoCyclePreviewPoint[]
+  bridge: string
+  engineVersion: string
+}
+
 export interface CurveParameter {
   name: string
   value: number
@@ -149,6 +165,7 @@ export interface ProgramRuntimeRequest {
   dropTimeSec: number
   holdTimeSec: number
   wakeTimeSec: number
+  isoParamsSpec?: string | null
   curveText?: string | null
   sourceName?: string | null
   mixPath?: string | null

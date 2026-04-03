@@ -5,6 +5,7 @@ import type {
   CurveInfoResult,
   ExportResult,
   FileDocument,
+  IsoCyclePreviewResult,
   LivePreviewResult,
   ProgramRuntimeRequest,
   PreviewResult,
@@ -204,6 +205,14 @@ export async function sampleProgramBeatPreview(
   request: ProgramRuntimeRequest,
 ): Promise<BeatPreviewResult> {
   return invoke<BeatPreviewResult>('sample_program_beat_preview', {
+    args: request,
+  })
+}
+
+export async function sampleProgramIsoCycle(
+  request: ProgramRuntimeRequest,
+): Promise<IsoCyclePreviewResult> {
+  return invoke<IsoCyclePreviewResult>('sample_program_iso_cycle', {
     args: request,
   })
 }

@@ -173,6 +173,26 @@ struct BeatPreviewResult {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct IsoCyclePreviewPoint {
+  t_sec: f64,
+  envelope: f64,
+  wave: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IsoCyclePreviewResult {
+  duration_sec: f64,
+  sample_count: usize,
+  carrier_hz: f64,
+  beat_hz: f64,
+  points: Vec<IsoCyclePreviewPoint>,
+  bridge: &'static str,
+  engine_version: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct CurveParameter {
   name: String,
   value: f64,
@@ -234,6 +254,7 @@ struct ProgramRequestArgs {
   drop_time_sec: i32,
   hold_time_sec: i32,
   wake_time_sec: i32,
+  iso_params_spec: Option<String>,
   curve_text: Option<String>,
   source_name: Option<String>,
   mix_path: Option<String>,
@@ -248,6 +269,7 @@ struct ProgramExportArgs {
   drop_time_sec: i32,
   hold_time_sec: i32,
   wake_time_sec: i32,
+  iso_params_spec: Option<String>,
   curve_text: Option<String>,
   source_name: Option<String>,
   mix_path: Option<String>,
@@ -540,6 +562,7 @@ fn program_request_from_args(args: ProgramRequestArgs) -> Result<sbagenxlib::Pro
     drop_time_sec: args.drop_time_sec,
     hold_time_sec: args.hold_time_sec,
     wake_time_sec: args.wake_time_sec,
+    iso_params_spec: args.iso_params_spec,
     curve_text: args.curve_text,
     source_name: args.source_name.unwrap_or_default(),
     mix_path: args.mix_path,
@@ -1292,6 +1315,7 @@ fn export_program(args: ProgramExportArgs) -> Result<ExportResult, String> {
     drop_time_sec: args.drop_time_sec,
     hold_time_sec: args.hold_time_sec,
     wake_time_sec: args.wake_time_sec,
+    iso_params_spec: args.iso_params_spec,
     curve_text: args.curve_text,
     source_name: args.source_name,
     mix_path: args.mix_path,
@@ -1372,6 +1396,29 @@ fn sample_program_beat_preview(args: ProgramRequestArgs) -> Result<BeatPreviewRe
             beat_hz: point.beat_hz,
           })
           .collect(),
+      })
+      .collect(),
+    bridge: "tauri-rust",
+    engine_version: outcome.engine_version,
+  })
+}
+
+#[tauri::command]
+fn sample_program_iso_cycle(args: ProgramRequestArgs) -> Result<IsoCyclePreviewResult, String> {
+  let request = program_request_from_args(args)?;
+  let outcome = sbagenxlib::sample_program_iso_cycle(&request)?;
+  Ok(IsoCyclePreviewResult {
+    duration_sec: outcome.duration_sec,
+    sample_count: outcome.sample_count,
+    carrier_hz: outcome.carrier_hz,
+    beat_hz: outcome.beat_hz,
+    points: outcome
+      .points
+      .into_iter()
+      .map(|point| IsoCyclePreviewPoint {
+        t_sec: point.t_sec,
+        envelope: point.envelope,
+        wave: point.wave,
       })
       .collect(),
     bridge: "tauri-rust",
@@ -1478,6 +1525,7 @@ pub fn run() {
       export_program,
       sample_beat_preview,
       sample_program_beat_preview,
+      sample_program_iso_cycle,
       inspect_curve_info,
       inspect_program_curve_info
     ])
