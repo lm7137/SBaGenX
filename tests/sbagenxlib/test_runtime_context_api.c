@@ -28,7 +28,12 @@ main(void) {
   SbxCurveProgram *curve = 0;
   SbxCurveEvalConfig curve_eval;
   SbxCurveSourceConfig curve_src;
+  SbxBuiltinDropConfig drop_cfg;
+  SbxProgramKeyframe *built_kfs = 0;
+  size_t built_kf_count = 0;
   double total_sec = 0.0;
+  double sample_t[3];
+  double sample_hz[3];
   char err[256];
   int rc;
 
@@ -167,9 +172,90 @@ main(void) {
   if (!near(sbx_context_duration_sec(ctx), 12.0, 1e-9))
     fail("curve runtime duration mismatch");
   sbx_context_destroy(ctx);
+  ctx = 0;
+
+  sbx_default_builtin_drop_config(&drop_cfg);
+  drop_cfg.start_tone.mode = SBX_TONE_BINAURAL;
+  drop_cfg.start_tone.carrier_hz = 205.0;
+  drop_cfg.start_tone.beat_hz = 10.0;
+  drop_cfg.start_tone.amplitude = 1.0;
+  drop_cfg.carrier_end_hz = 200.0;
+  drop_cfg.beat_target_hz = 2.5;
+  drop_cfg.drop_sec = 30 * 60;
+  drop_cfg.hold_sec = 30 * 60;
+  drop_cfg.wake_sec = 3 * 60;
+  drop_cfg.slide = 1;
+  rc = sbx_build_drop_curve_program(&drop_cfg, &curve);
+  if (rc != SBX_OK || !curve)
+    fail("built-in drop curve program creation failed");
+
+  sbx_default_curve_source_config(&curve_src);
+  curve_src.mode = SBX_TONE_BINAURAL;
+  curve_src.waveform = SBX_WAVE_SINE;
+  curve_src.amplitude = 1.0;
+  curve_src.duration_sec =
+      (double)(drop_cfg.drop_sec + drop_cfg.hold_sec + drop_cfg.wake_sec) + 10.0;
+
+  sbx_default_runtime_context_config(&rt_cfg);
+  rc = sbx_runtime_context_create_from_curve_program(curve, &curve_src, &rt_cfg, &total_sec, &ctx);
+  if (rc != SBX_OK || !ctx)
+    fail("built-in drop curve runtime context failed");
+  curve = 0; /* ownership transferred */
+
+  rc = sbx_context_sample_program_beat(ctx,
+                                       (double)(drop_cfg.drop_sec + drop_cfg.hold_sec),
+                                       (double)(drop_cfg.drop_sec + drop_cfg.hold_sec + drop_cfg.wake_sec),
+                                       3,
+                                       sample_t,
+                                       sample_hz);
+  if (rc != SBX_OK)
+    fail("built-in drop curve beat sampling failed");
+  if (!near(sample_hz[0], 2.5, 1e-6))
+    fail("built-in drop curve wake sample should start at target beat");
+  if (!(sample_hz[1] > 2.5 && sample_hz[1] < 10.0))
+    fail("built-in drop curve wake midpoint should rise above target beat");
+  if (!near(sample_hz[2], 10.0, 1e-6))
+    fail("built-in drop curve wake endpoint should return to initial beat");
+  sbx_context_destroy(ctx);
+  ctx = 0;
+
+  drop_cfg.slide = 0;
+  drop_cfg.step_len_sec = 600;
+  rc = sbx_build_drop_keyframes(&drop_cfg, &built_kfs, &built_kf_count);
+  if (rc != SBX_OK || !built_kfs || built_kf_count == 0)
+    fail("built-in drop keyframe program creation failed");
+
+  sbx_default_runtime_context_config(&rt_cfg);
+  rc = sbx_runtime_context_create_from_keyframes(
+      built_kfs, built_kf_count, 0, &rt_cfg, &total_sec, &ctx);
+  if (rc != SBX_OK || !ctx)
+    fail("built-in drop keyframe runtime context failed");
+
+  rc = sbx_context_sample_program_beat(ctx,
+                                       (double)(drop_cfg.drop_sec + drop_cfg.hold_sec),
+                                       (double)(drop_cfg.drop_sec + drop_cfg.hold_sec + drop_cfg.wake_sec),
+                                       3,
+                                       sample_t,
+                                       sample_hz);
+  if (rc != SBX_OK)
+    fail("built-in drop keyframe beat sampling failed");
+  if (!near(sample_hz[0], 2.5, 1e-6))
+    fail("built-in drop keyframe wake sample should start at target beat");
+  if (!(sample_hz[1] > 2.5 && sample_hz[1] < 10.0))
+    fail("built-in drop keyframe wake midpoint should rise above target beat");
+  if (!near(sample_hz[2], 10.0, 1e-6))
+    fail("built-in drop keyframe wake endpoint should return to initial beat");
+  sbx_context_destroy(ctx);
+  ctx = 0;
+  free(built_kfs);
+  built_kfs = 0;
 
   if (curve)
     sbx_curve_destroy(curve);
+  if (built_kfs)
+    free(built_kfs);
+  if (ctx)
+    sbx_context_destroy(ctx);
 
   puts("PASS: sbagenxlib runtime context helpers activate native sources");
   return 0;

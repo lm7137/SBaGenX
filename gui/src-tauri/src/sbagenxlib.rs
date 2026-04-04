@@ -3283,12 +3283,20 @@ fn render_program_context_to_path(
   Ok((duration_sec, format_name, loaded.api.version_string()))
 }
 
-fn sample_context_beat_preview(api: &Api, ctx: *mut SbxContext) -> Result<BeatPreviewOutcome, String> {
+fn sample_context_beat_preview(
+  api: &Api,
+  ctx: *mut SbxContext,
+  span_override_sec: Option<f64>,
+) -> Result<BeatPreviewOutcome, String> {
   let duration_sec = unsafe { (api.sbx_context_duration_sec)(ctx) };
   let is_looping = unsafe { (api.sbx_context_is_looping)(ctx) } != 0;
   let voice_count = unsafe { (api.sbx_context_voice_count)(ctx) };
-  let mut sample_span_sec = duration_sec;
+  let mut sample_span_sec = span_override_sec.unwrap_or(duration_sec);
   let mut limited = false;
+
+  if duration_sec.is_finite() && duration_sec > 0.0 && sample_span_sec > duration_sec {
+    sample_span_sec = duration_sec;
+  }
 
   if is_looping || sample_span_sec <= 0.0 {
     sample_span_sec = PREVIEW_LIMIT_SEC;
@@ -3789,14 +3797,14 @@ pub fn export_program(
 
 pub fn sample_beat_preview(text: &str, source_name: &str) -> Result<BeatPreviewOutcome, String> {
   let loaded = load_sbg_context(text, source_name)?;
-  sample_context_beat_preview(&loaded.api, loaded.ctx)
+  sample_context_beat_preview(&loaded.api, loaded.ctx, None)
 }
 
 pub fn sample_program_beat_preview(
   request: &ProgramRuntimeRequest,
 ) -> Result<BeatPreviewOutcome, String> {
   let loaded = load_program_context_with_rate(request, None, false)?;
-  sample_context_beat_preview(&loaded.api, loaded.ctx)
+  sample_context_beat_preview(&loaded.api, loaded.ctx, preview_span_for_program_request(request))
 }
 
 pub fn sample_program_iso_cycle(
@@ -3805,6 +3813,30 @@ pub fn sample_program_iso_cycle(
   let loaded = load_program_context_with_rate(request, None, false)?;
   let env_override = parse_program_iso_override(&loaded.api, request.iso_params_spec.as_deref())?;
   sample_context_iso_cycle(&loaded.api, loaded.ctx, env_override.as_ref())
+}
+
+fn preview_span_for_program_request(request: &ProgramRuntimeRequest) -> Option<f64> {
+  match request.kind {
+    ProgramKind::Slide => {
+      let duration_sec = request.drop_time_sec.max(0);
+      (duration_sec > 0).then_some(f64::from(duration_sec))
+    }
+    ProgramKind::Drop | ProgramKind::Sigmoid | ProgramKind::Curve => {
+      let parsed = parse_drop_like_main_arg(&request.main_arg, request.kind).ok()?;
+      let hold_sec = if parsed.include_hold {
+        request.hold_time_sec.max(0)
+      } else {
+        0
+      };
+      let wake_sec = if parsed.wake_enabled {
+        request.wake_time_sec.max(0)
+      } else {
+        0
+      };
+      let duration_sec = request.drop_time_sec.max(0) + hold_sec + wake_sec;
+      (duration_sec > 0).then_some(f64::from(duration_sec))
+    }
+  }
 }
 
 pub fn inspect_curve_info(text: &str, source_name: &str) -> Result<CurveInfoOutcome, String> {
@@ -4096,5 +4128,24 @@ mod tests {
       .points
       .iter()
       .all(|point| (point.envelope - 1.0).abs() < 1e-9));
+  }
+
+  #[test]
+  fn preview_span_for_drop_program_excludes_fade_tail() {
+    let request = ProgramRuntimeRequest {
+      kind: ProgramKind::Drop,
+      main_arg: "00ls+^".to_string(),
+      drop_time_sec: 30 * 60,
+      hold_time_sec: 30 * 60,
+      wake_time_sec: 3 * 60,
+      iso_params_spec: None,
+      curve_text: None,
+      source_name: "program:drop".to_string(),
+      mix_path: None,
+      mix_looper_spec: None,
+    };
+
+    let span = preview_span_for_program_request(&request).expect("preview span");
+    assert!((span - 3780.0).abs() < 1e-9, "expected drop+hold+wake only, got {}", span);
   }
 }

@@ -278,7 +278,7 @@
         {#each xTicks as tick}
           <text
             x={xFor(tick)}
-            y={height - 4}
+            y={height - padBottom + 14}
             class={`preview-label ${tick === 0 ? '' : 'end'}`}
           >
             {formatTimeTick(tick)}

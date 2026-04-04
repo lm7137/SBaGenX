@@ -851,7 +851,6 @@ curve_set_eval_time(SbxCurveProgram *curve, double t_sec) {
   if (!curve) return;
   t = t_sec;
   if (t < 0.0) t = 0.0;
-  if (t > curve->cfg.carrier_span_sec) t = curve->cfg.carrier_span_sec;
   curve->ev_t = t;
   curve->ev_m = t / 60.0;
 }

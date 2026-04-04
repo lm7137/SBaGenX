@@ -6513,7 +6513,8 @@ sbx_build_drop_keyframes(const SbxBuiltinDropConfig *cfg,
                           cfg->carrier_end_hz,
                           cfg->beat_target_hz,
                           cfg->start_tone.amplitude);
-    rc = sbx_builtin_kfb_add(&b, len_main, &tone, SBX_INTERP_STEP);
+    rc = sbx_builtin_kfb_add(&b, len_main, &tone,
+                             cfg->wake_sec > 0 ? SBX_INTERP_LINEAR : SBX_INTERP_STEP);
     if (rc != SBX_OK) goto done;
     end_sec = (int)len_main;
   }
@@ -6629,7 +6630,8 @@ sbx_build_sigmoid_keyframes(const SbxBuiltinSigmoidConfig *cfg,
                           cfg->carrier_end_hz,
                           cfg->beat_target_hz,
                           cfg->start_tone.amplitude);
-    rc = sbx_builtin_kfb_add(&b, len_main, &tone, SBX_INTERP_STEP);
+    rc = sbx_builtin_kfb_add(&b, len_main, &tone,
+                             cfg->wake_sec > 0 ? SBX_INTERP_LINEAR : SBX_INTERP_STEP);
     if (rc != SBX_OK) goto done;
     end_sec = (int)len_main;
   }
@@ -6899,10 +6901,12 @@ sbx_build_curve_timeline(SbxCurveProgram *curve,
       if (rc != SBX_OK) goto done;
       if (have_amp_curve) amp = pt.beat_amp_pct / 100.0;
       sbx_curve_timeline_fill_tone(&tone, &cfg->start_tone, &pt, amp, cfg->mute_program_tone);
-      rc = sbx_builtin_kfb_add(&kb, (double)cfg->main_span_sec, &tone, SBX_INTERP_STEP);
+      rc = sbx_builtin_kfb_add(&kb, (double)cfg->main_span_sec, &tone,
+                               cfg->wake_sec > 0 ? SBX_INTERP_LINEAR : SBX_INTERP_STEP);
       if (rc != SBX_OK) goto done;
       if (have_mixamp_curve) {
-        rc = sbx_curve_mixkfb_add(&mb, (double)cfg->main_span_sec, pt.mix_amp_pct, SBX_INTERP_STEP);
+        rc = sbx_curve_mixkfb_add(&mb, (double)cfg->main_span_sec, pt.mix_amp_pct,
+                                  cfg->wake_sec > 0 ? SBX_INTERP_LINEAR : SBX_INTERP_STEP);
         if (rc != SBX_OK) goto done;
       }
     }
