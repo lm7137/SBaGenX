@@ -1,0 +1,18 @@
+## spinNN example using a custom bipolar motion shape with spinning Brownian noise.
+##
+## The spin00 waveform dwells near the extremes, sweeps quickly through the
+## center, and pauses briefly before reversing. The result should feel more
+## like a slow spatial orbit than a constant sinusoidal sway.
+##
+## Assumes you run from the repo root:
+##   sbagenx -D examples/X/spinNN-brownian-orbit.sbg
+##   sbagenx examples/X/spinNN-brownian-orbit.sbg
+
+spin00: e=1 -100 -100 -95 -80 -35 0 35 80 100 100 95 60 15 0 -15 -60 -95
+
+orbit-bed: spin00:bspin:320+0.07/18 180+3.5/14
+orbit-deep: spin00:bspin:420+0.05/20 140+2.2/16
+
+00:00 orbit-bed
+00:07:30 orbit-deep ->
+00:15:00 orbit-bed

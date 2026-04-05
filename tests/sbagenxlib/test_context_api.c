@@ -96,6 +96,19 @@ int main(void) {
   assert_parse("square:wspin:60+0.75/25", SBX_TONE_SPIN_WHITE, 60.0, 0.75, 0.25, 0, SBX_WAVE_SQUARE);
   assert_parse("spin00:spin:120+1.25/35", SBX_TONE_SPIN_PINK, 120.0, 1.25, 0.35, 0, SBX_WAVE_SPIN_BASE);
   {
+    SbxToneSpec t;
+    if (sbx_parse_tone_spec("noise00/20", &t) != SBX_OK)
+      fail("parse noiseNN tone failed");
+    if (t.mode != SBX_TONE_WHITE_NOISE || t.noise_waveform != SBX_NOISE_WAVE_BASE)
+      fail("noiseNN tone parse mismatch");
+    if (sbx_parse_tone_spec("spin00:noise00:spin:120+1.25/35", &t) != SBX_OK)
+      fail("parse spinNN+noiseNN tone failed");
+    if (t.mode != SBX_TONE_SPIN_WHITE ||
+        t.waveform != SBX_WAVE_SPIN_BASE ||
+        t.noise_waveform != SBX_NOISE_WAVE_BASE)
+      fail("spinNN+noiseNN tone parse mismatch");
+  }
+  {
     double sec = 0.0;
     size_t used = 0;
     if (sbx_parse_sbg_clock_token("00:12:34", &used, &sec) != SBX_OK)
@@ -147,6 +160,26 @@ int main(void) {
       fail("parse spinNN tone roundtrip failed");
     if (out.mode != in.mode || out.waveform != in.waveform)
       fail("spinNN tone roundtrip waveform mismatch");
+  }
+  {
+    SbxToneSpec in, out;
+    char spec[256];
+    if (sbx_parse_tone_spec("noise00/20", &in) != SBX_OK)
+      fail("parse noiseNN tone failed");
+    if (sbx_format_tone_spec(&in, spec, sizeof(spec)) != SBX_OK)
+      fail("format noiseNN tone failed");
+    if (strcmp(spec, "noise00/20") != 0)
+      fail("format noiseNN tone should preserve prefix");
+    if (sbx_parse_tone_spec(spec, &out) != SBX_OK)
+      fail("parse noiseNN tone roundtrip failed");
+    if (out.mode != in.mode || out.noise_waveform != in.noise_waveform)
+      fail("noiseNN tone roundtrip mismatch");
+    if (sbx_parse_tone_spec("spin00:noise00:spin:120+1.25/35", &in) != SBX_OK)
+      fail("parse spinNN+noiseNN tone failed");
+    if (sbx_format_tone_spec(&in, spec, sizeof(spec)) != SBX_OK)
+      fail("format spinNN+noiseNN tone failed");
+    if (strcmp(spec, "spin00:noise00:spin:120+1.25/35") != 0)
+      fail("format spinNN+noiseNN tone should preserve prefixes");
   }
   {
     SbxToneSpec t;
@@ -458,6 +491,45 @@ int main(void) {
       fail("custom mixfx first timed keyframe info failed");
     if (fabs(fx_info.time_sec - 0.0) > 1e-9)
       fail("custom mixfx first timed keyframe time mismatch");
+  }
+  {
+    const char *noise_text =
+        "noise00: 12 12 11 11 10 10 9 8 7 6 5 4 3 2 1 0 -1 -2 -3 -4 -5 -6 -7 -8 -9 -10 -11 -12 -12 -12 -12 -12\n"
+        "base: noise00/20\n"
+        "spin00: e=0 0 0 0 100 100 -100 -100\n"
+        "wash: spin00:noise00:spin:300+1/35\n"
+        "NOW base\n"
+        "+00:01 wash\n";
+    SbxContext *ctx_noise = sbx_context_create(&cfg);
+    SbxContext *ctx_white = sbx_context_create(&cfg);
+    float *buf_noise;
+    float *buf_white;
+    double diff = 0.0;
+    size_t i;
+    if (!ctx_noise || !ctx_white)
+      fail("alloc failed (noiseNN contexts)");
+    if (sbx_context_load_sbg_timing_text(ctx_noise, noise_text, 0) != SBX_OK)
+      fail("noiseNN timing load failed");
+    if (sbx_context_load_sbg_timing_text(ctx_white, "base: white/20\nNOW base\n", 0) != SBX_OK)
+      fail("white timing load failed");
+    buf_noise = (float *)calloc(frames * 2, sizeof(float));
+    buf_white = (float *)calloc(frames * 2, sizeof(float));
+    if (!buf_noise || !buf_white)
+      fail("alloc failed (noiseNN buffers)");
+    if (sbx_context_render_f32(ctx_noise, buf_noise, frames) != SBX_OK)
+      fail("noiseNN render failed");
+    if (sbx_context_render_f32(ctx_white, buf_white, frames) != SBX_OK)
+      fail("white render failed");
+    if (!has_energy(buf_noise, frames * 2))
+      fail("noiseNN render should produce non-zero energy");
+    for (i = 0; i < frames * 2; i++)
+      diff += fabs((double)buf_noise[i] - (double)buf_white[i]);
+    if (!(diff > 1.0))
+      fail("noiseNN render should differ materially from white noise");
+    free(buf_noise);
+    free(buf_white);
+    sbx_context_destroy(ctx_noise);
+    sbx_context_destroy(ctx_white);
   }
   {
     if (sbx_context_load_sbg_timing_text(ctx, "00:00 200+2/20\n", 0) != SBX_OK)

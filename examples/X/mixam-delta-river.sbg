@@ -1,0 +1,18 @@
+## mixam example for broadband amplitude modulation on a mix track.
+##
+## Unlike mixpulse, mixam applies true multiplicative AM directly to the mix
+## stream. This example uses a slow delta-rate AM with a raised-cosine model
+## and a non-zero floor, so the river bed never fully disappears.
+##
+## Assumes you run from the repo root:
+##   sbagenx -D examples/X/mixam-delta-river.sbg
+##   sbagenx examples/X/mixam-delta-river.sbg
+
+-m assets/river1.ogg
+
+river-delta: mix/85 mixam:2.2:m=cos:s=0:f=0.30
+river-deeper: mix/85 mixam:1.2:m=cos:s=0:f=0.20
+
+00:00 river-delta
+00:07:30 river-deeper ->
+00:15:00 river-delta

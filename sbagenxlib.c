@@ -80,6 +80,11 @@ extern int lame_close(lame_t gfp);
 #define SBX_MAX_SBG_MIXFX 8
 #define SBX_CUSTOM_WAVE_COUNT 100
 #define SBX_CUSTOM_WAVE_SAMPLES 4096
+#define SBX_NOISE_BAND_COUNT 32
+#define SBX_NOISE_FIR_TAPS 129
+#define SBX_NOISE_RESP_SAMPLES 2048
+#define SBX_NOISE_MIN_HZ 20.0
+#define SBX_NOISE_MAX_HZ 20000.0
 #define SBX_MIXBEAT_HILBERT_TAPS 31
 #define SBX_CURVE_MAX_PARAMS 32
 #define SBX_CURVE_MAX_PIECES 64
@@ -132,6 +137,11 @@ typedef struct {
 
 typedef struct SbxVoiceSetKeyframe SbxVoiceSetKeyframe;
 typedef struct SbxMixFxKeyframe SbxMixFxKeyframe;
+typedef struct SbxNoiseProfile SbxNoiseProfile;
+
+struct SbxNoiseProfile {
+  double fir[SBX_NOISE_FIR_TAPS];
+};
 
 struct SbxEngine {
   SbxEngineConfig cfg;
@@ -152,9 +162,16 @@ struct SbxEngine {
   const double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT];
   const double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT];
   const double *spin_waves[SBX_CUSTOM_WAVE_COUNT];
+  const SbxNoiseProfile *noise_profiles[SBX_CUSTOM_WAVE_COUNT];
   const int *legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   const int *custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   const int *spin_edge_modes[SBX_CUSTOM_WAVE_COUNT];
+  double noise_hist_l[SBX_NOISE_FIR_TAPS];
+  double noise_hist_r[SBX_NOISE_FIR_TAPS];
+  double noise_hist_m[SBX_NOISE_FIR_TAPS];
+  int noise_hist_pos_l;
+  int noise_hist_pos_r;
+  int noise_hist_pos_m;
   char last_error[256];
 };
 
@@ -208,6 +225,7 @@ struct SbxContext {
   double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT];
   double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT];
   double *spin_waves[SBX_CUSTOM_WAVE_COUNT];
+  SbxNoiseProfile *noise_profiles[SBX_CUSTOM_WAVE_COUNT];
   int legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   int custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   int spin_edge_modes[SBX_CUSTOM_WAVE_COUNT];
@@ -1449,6 +1467,14 @@ sbx_spin_wave_index(int waveform) {
 }
 
 static int
+sbx_noise_wave_index(int waveform) {
+  if (waveform >= SBX_NOISE_WAVE_BASE &&
+      waveform < SBX_NOISE_WAVE_BASE + SBX_CUSTOM_WAVE_COUNT)
+    return waveform - SBX_NOISE_WAVE_BASE;
+  return -1;
+}
+
+static int
 sbx_parse_legacy_env_prefix(const char *spec, int *out_waveform, const char **out_after) {
   int idx;
   if (!spec || !out_after) return 0;
@@ -1474,11 +1500,25 @@ sbx_parse_spin_wave_prefix(const char *spec, int *out_waveform, const char **out
   return 1;
 }
 
+static int
+sbx_parse_noise_wave_prefix(const char *spec, int *out_waveform, const char **out_after) {
+  int idx;
+  if (!spec || !out_after) return 0;
+  if (strncasecmp(spec, "noise", 5) != 0) return 0;
+  if (!isdigit((unsigned char)spec[5]) || !isdigit((unsigned char)spec[6]) || spec[7] != ':')
+    return 0;
+  idx = (spec[5] - '0') * 10 + (spec[6] - '0');
+  if (out_waveform) *out_waveform = SBX_NOISE_WAVE_BASE + idx;
+  *out_after = spec + 8;
+  return 1;
+}
+
 static void
 engine_set_custom_waves(SbxEngine *eng,
                         double *const *legacy_waves,
                         double *const *custom_waves,
                         double *const *spin_waves,
+                        SbxNoiseProfile *const *noise_profiles,
                         const int *legacy_edge_modes,
                         const int *custom_edge_modes,
                         const int *spin_edge_modes) {
@@ -1488,6 +1528,7 @@ engine_set_custom_waves(SbxEngine *eng,
     eng->legacy_env_waves[i] = legacy_waves ? legacy_waves[i] : 0;
     eng->custom_env_waves[i] = custom_waves ? custom_waves[i] : 0;
     eng->spin_waves[i] = spin_waves ? spin_waves[i] : 0;
+    eng->noise_profiles[i] = noise_profiles ? noise_profiles[i] : 0;
     eng->legacy_env_edge_modes[i] = legacy_edge_modes ? &legacy_edge_modes[i] : 0;
     eng->custom_env_edge_modes[i] = custom_edge_modes ? &custom_edge_modes[i] : 0;
     eng->spin_edge_modes[i] = spin_edge_modes ? &spin_edge_modes[i] : 0;
@@ -1499,20 +1540,20 @@ ctx_sync_custom_waves(SbxContext *ctx) {
   size_t i;
   if (!ctx || !ctx->eng) return;
   engine_set_custom_waves(ctx->eng, ctx->legacy_env_waves, ctx->custom_env_waves,
-                          ctx->spin_waves,
+                          ctx->spin_waves, ctx->noise_profiles,
                           ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
                           ctx->spin_edge_modes);
   for (i = 0; i + 1 < ctx->mv_voice_count; i++) {
     if (ctx->mv_eng && ctx->mv_eng[i])
       engine_set_custom_waves(ctx->mv_eng[i], ctx->legacy_env_waves, ctx->custom_env_waves,
-                              ctx->spin_waves,
+                              ctx->spin_waves, ctx->noise_profiles,
                               ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
                               ctx->spin_edge_modes);
   }
   for (i = 0; i < ctx->aux_count; i++) {
     if (ctx->aux_eng && ctx->aux_eng[i])
       engine_set_custom_waves(ctx->aux_eng[i], ctx->legacy_env_waves, ctx->custom_env_waves,
-                              ctx->spin_waves,
+                              ctx->spin_waves, ctx->noise_profiles,
                               ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
                               ctx->spin_edge_modes);
   }
@@ -1526,9 +1567,11 @@ ctx_clear_custom_waves(SbxContext *ctx) {
     if (ctx->legacy_env_waves[i]) free(ctx->legacy_env_waves[i]);
     if (ctx->custom_env_waves[i]) free(ctx->custom_env_waves[i]);
     if (ctx->spin_waves[i]) free(ctx->spin_waves[i]);
+    if (ctx->noise_profiles[i]) free(ctx->noise_profiles[i]);
     ctx->legacy_env_waves[i] = 0;
     ctx->custom_env_waves[i] = 0;
     ctx->spin_waves[i] = 0;
+    ctx->noise_profiles[i] = 0;
     ctx->legacy_env_edge_modes[i] = 1;
     ctx->custom_env_edge_modes[i] = 1;
     ctx->spin_edge_modes[i] = 1;
@@ -1541,11 +1584,12 @@ ctx_replace_custom_waves(SbxContext *ctx,
                          double **legacy_waves,
                          double **custom_waves,
                          double **spin_waves,
+                         SbxNoiseProfile **noise_profiles,
                          const int *legacy_edge_modes,
                          const int *custom_edge_modes,
                          const int *spin_edge_modes) {
   size_t i;
-  if (!ctx || !legacy_waves || !custom_waves || !spin_waves ||
+  if (!ctx || !legacy_waves || !custom_waves || !spin_waves || !noise_profiles ||
       !legacy_edge_modes || !custom_edge_modes || !spin_edge_modes) return;
   ctx_clear_custom_waves(ctx);
   for (i = 0; i < SBX_CUSTOM_WAVE_COUNT; i++) {
@@ -1555,6 +1599,8 @@ ctx_replace_custom_waves(SbxContext *ctx,
     custom_waves[i] = 0;
     ctx->spin_waves[i] = spin_waves[i];
     spin_waves[i] = 0;
+    ctx->noise_profiles[i] = noise_profiles[i];
+    noise_profiles[i] = 0;
     ctx->legacy_env_edge_modes[i] = legacy_edge_modes[i];
     ctx->custom_env_edge_modes[i] = custom_edge_modes[i];
     ctx->spin_edge_modes[i] = spin_edge_modes[i];
@@ -1780,6 +1826,108 @@ sbx_build_literal_spin_wave_table_from_samples(const double *samples,
     tbl[i] = sbx_lerp(v0, v1, u);
   }
   *out_table = tbl;
+  return SBX_OK;
+}
+
+static double
+sbx_noise_band_db_at_freq(const double *bands,
+                          size_t count,
+                          double freq_hz,
+                          double sample_rate) {
+  double nyquist = sample_rate * 0.5;
+  double max_hz = SBX_NOISE_MAX_HZ;
+  double log_min, log_max, log_freq, pos, frac;
+  size_t i0, i1;
+
+  if (!bands || count != SBX_NOISE_BAND_COUNT || sample_rate <= 0.0)
+    return 0.0;
+  if (nyquist < max_hz)
+    max_hz = nyquist;
+  if (max_hz <= SBX_NOISE_MIN_HZ)
+    return bands[count - 1];
+  if (freq_hz <= SBX_NOISE_MIN_HZ)
+    return bands[0];
+  if (freq_hz >= max_hz)
+    return bands[count - 1];
+
+  log_min = log(SBX_NOISE_MIN_HZ);
+  log_max = log(max_hz);
+  log_freq = log(freq_hz);
+  pos = (log_freq - log_min) * (double)(count - 1) / (log_max - log_min);
+  if (pos <= 0.0)
+    return bands[0];
+  if (pos >= (double)(count - 1))
+    return bands[count - 1];
+  i0 = (size_t)floor(pos);
+  i1 = i0 + 1;
+  frac = pos - floor(pos);
+  return sbx_lerp(bands[i0], bands[i1], frac);
+}
+
+static int
+sbx_build_noise_profile_from_db_bands(const double *bands,
+                                      size_t count,
+                                      double sample_rate,
+                                      SbxNoiseProfile **out_profile) {
+  SbxNoiseProfile *profile = 0;
+  double *resp = 0;
+  double rms = 0.0;
+  double nyquist, max_hz;
+  size_t k, n;
+  int mid;
+
+  if (!bands || !out_profile || count != SBX_NOISE_BAND_COUNT || sample_rate <= 0.0)
+    return SBX_EINVAL;
+  for (k = 0; k < count; k++) {
+    if (!isfinite(bands[k]) || bands[k] < -24.0 || bands[k] > 24.0)
+      return SBX_EINVAL;
+  }
+
+  profile = (SbxNoiseProfile *)calloc(1, sizeof(*profile));
+  resp = (double *)calloc(SBX_NOISE_RESP_SAMPLES / 2 + 1, sizeof(*resp));
+  if (!profile || !resp) {
+    if (profile) free(profile);
+    if (resp) free(resp);
+    return SBX_ENOMEM;
+  }
+
+  nyquist = sample_rate * 0.5;
+  max_hz = (nyquist < SBX_NOISE_MAX_HZ) ? nyquist : SBX_NOISE_MAX_HZ;
+  for (k = 0; k <= SBX_NOISE_RESP_SAMPLES / 2; k++) {
+    double freq_hz = ((double)k / (double)(SBX_NOISE_RESP_SAMPLES / 2)) * nyquist;
+    double db = sbx_noise_band_db_at_freq(bands, count, freq_hz, sample_rate);
+    if (freq_hz > max_hz)
+      db = bands[count - 1];
+    resp[k] = pow(10.0, db / 20.0);
+  }
+
+  mid = SBX_NOISE_FIR_TAPS / 2;
+  for (n = 0; n < SBX_NOISE_FIR_TAPS; n++) {
+    int m = (int)n - mid;
+    double sum = resp[0] + resp[SBX_NOISE_RESP_SAMPLES / 2] * cos(M_PI * (double)m);
+    double window =
+        0.42 - 0.5 * cos((2.0 * M_PI * (double)n) / (double)(SBX_NOISE_FIR_TAPS - 1)) +
+        0.08 * cos((4.0 * M_PI * (double)n) / (double)(SBX_NOISE_FIR_TAPS - 1));
+
+    for (k = 1; k < SBX_NOISE_RESP_SAMPLES / 2; k++) {
+      double ang = (2.0 * M_PI * (double)k * (double)m) / (double)SBX_NOISE_RESP_SAMPLES;
+      sum += 2.0 * resp[k] * cos(ang);
+    }
+    profile->fir[n] = (sum / (double)SBX_NOISE_RESP_SAMPLES) * window;
+    rms += profile->fir[n] * profile->fir[n];
+  }
+
+  rms = sqrt(rms);
+  if (!(isfinite(rms)) || rms <= 0.0) {
+    free(resp);
+    free(profile);
+    return SBX_EINVAL;
+  }
+  for (n = 0; n < SBX_NOISE_FIR_TAPS; n++)
+    profile->fir[n] /= rms;
+
+  free(resp);
+  *out_profile = profile;
   return SBX_OK;
 }
 
@@ -3382,6 +3530,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   int strict_carrier_positive;
   int legacy_env_idx;
   int custom_env_idx;
+  int noise_idx;
   if (!tone) return SBX_EINVAL;
   if (err && err_sz) err[0] = 0;
 
@@ -3412,6 +3561,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     tone->amplitude = 0.0;
     tone->waveform = SBX_WAVE_SINE;
     tone->envelope_waveform = SBX_ENV_WAVE_NONE;
+    tone->noise_waveform = SBX_NOISE_WAVE_NONE;
     tone->duty_cycle = 0.403014;
     tone->iso_start = 0.048493;
     tone->iso_attack = 0.5;
@@ -3422,6 +3572,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
 
   legacy_env_idx = sbx_envelope_wave_legacy_index(tone->envelope_waveform);
   custom_env_idx = sbx_envelope_wave_custom_index(tone->envelope_waveform);
+  noise_idx = sbx_noise_wave_index(tone->noise_waveform);
 
   if (uses_carrier) {
     int spin_wave_idx = sbx_spin_wave_index(tone->waveform);
@@ -3457,9 +3608,24 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
       if (err && err_sz) snprintf(err, err_sz, "%s", "spinNN waveforms are only valid for spin, bspin, or wspin tones");
       return SBX_EINVAL;
     }
+    if (noise_idx >= 0 && !tone_is_spin) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "noiseNN spectra are only valid for noise or spin-noise tones");
+      return SBX_EINVAL;
+    }
   } else {
     tone->waveform = SBX_WAVE_SINE;
     tone->envelope_waveform = SBX_ENV_WAVE_NONE;
+  }
+
+  if (tone->noise_waveform != SBX_NOISE_WAVE_NONE && noise_idx < 0) {
+    if (err && err_sz) snprintf(err, err_sz, "%s", "noise_waveform must be a valid SBX_NOISE_WAVE_* value");
+    return SBX_EINVAL;
+  }
+  if (noise_idx >= 0 &&
+      tone->mode != SBX_TONE_WHITE_NOISE &&
+      tone->mode != SBX_TONE_SPIN_WHITE) {
+    if (err && err_sz) snprintf(err, err_sz, "%s", "noiseNN spectra are only valid for noise or spin-noise tones");
+    return SBX_EINVAL;
   }
 
   if (tone->mode != SBX_TONE_NONE) {
@@ -3551,6 +3717,7 @@ engine_apply_tone(SbxEngine *eng, const SbxToneSpec *tone_in, int reset_phase) {
     int legacy_env_idx = sbx_envelope_wave_legacy_index(tone.envelope_waveform);
     int custom_env_idx = sbx_envelope_wave_custom_index(tone.envelope_waveform);
     int spin_wave_idx = sbx_spin_wave_index(tone.waveform);
+    int noise_wave_idx = sbx_noise_wave_index(tone.noise_waveform);
     if (legacy_env_idx >= 0 && !eng->legacy_env_waves[legacy_env_idx]) {
       set_last_error(eng, "legacy waveNN envelope is not defined in this context");
       return SBX_EINVAL;
@@ -3561,6 +3728,10 @@ engine_apply_tone(SbxEngine *eng, const SbxToneSpec *tone_in, int reset_phase) {
     }
     if (spin_wave_idx >= 0 && !eng->spin_waves[spin_wave_idx]) {
       set_last_error(eng, "spinNN waveform is not defined in this context");
+      return SBX_EINVAL;
+    }
+    if (noise_wave_idx >= 0 && !eng->noise_profiles[noise_wave_idx]) {
+      set_last_error(eng, "noiseNN spectrum is not defined in this context");
       return SBX_EINVAL;
     }
   }
@@ -3702,6 +3873,49 @@ engine_next_white(SbxEngine *eng) {
 }
 
 static double
+engine_filter_noise_profile_sample(const SbxNoiseProfile *profile,
+                                   double *hist,
+                                   int *hist_pos,
+                                   double input) {
+  double out = input;
+  int idx;
+  int tap;
+
+  if (!profile || !hist || !hist_pos)
+    return input;
+
+  hist[*hist_pos] = input;
+  idx = *hist_pos;
+  out = 0.0;
+  for (tap = 0; tap < SBX_NOISE_FIR_TAPS; tap++) {
+    out += profile->fir[tap] * hist[idx];
+    idx--;
+    if (idx < 0)
+      idx = SBX_NOISE_FIR_TAPS - 1;
+  }
+  (*hist_pos)++;
+  if (*hist_pos >= SBX_NOISE_FIR_TAPS)
+    *hist_pos = 0;
+  return out;
+}
+
+static double
+engine_next_custom_noise_from_profile(SbxEngine *eng,
+                                      int noise_waveform,
+                                      double *hist,
+                                      int *hist_pos) {
+  int noise_idx = sbx_noise_wave_index(noise_waveform);
+  double input;
+
+  if (!eng || noise_idx < 0 || noise_idx >= SBX_CUSTOM_WAVE_COUNT ||
+      !eng->noise_profiles[noise_idx])
+    return engine_next_white(eng);
+
+  input = engine_next_white(eng);
+  return engine_filter_noise_profile_sample(eng->noise_profiles[noise_idx], hist, hist_pos, input);
+}
+
+static double
 engine_next_pink_from_state(SbxEngine *eng, double state[7]) {
   double w = sbx_rand_signed_unit(eng);
   double p;
@@ -3741,6 +3955,26 @@ engine_next_noise_mono_for_mode(SbxEngine *eng, SbxToneMode mode) {
     default:
       return engine_next_pink_from_state(eng, eng->pink_l);
   }
+}
+
+static double
+engine_next_noise_sample_for_tone(SbxEngine *eng,
+                                  const SbxToneSpec *tone,
+                                  int channel_kind) {
+  if (tone && sbx_noise_wave_index(tone->noise_waveform) >= 0) {
+    switch (channel_kind) {
+      case 0:
+        return engine_next_custom_noise_from_profile(eng, tone->noise_waveform,
+                                                     eng->noise_hist_l, &eng->noise_hist_pos_l);
+      case 1:
+        return engine_next_custom_noise_from_profile(eng, tone->noise_waveform,
+                                                     eng->noise_hist_r, &eng->noise_hist_pos_r);
+      default:
+        return engine_next_custom_noise_from_profile(eng, tone->noise_waveform,
+                                                     eng->noise_hist_m, &eng->noise_hist_pos_m);
+    }
+  }
+  return engine_next_noise_mono_for_mode(eng, tone ? tone->mode : SBX_TONE_PINK_NOISE);
 }
 
 static void
@@ -3820,14 +4054,14 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
       }
     }
   } else if (eng->tone.mode == SBX_TONE_WHITE_NOISE) {
-    left = amp * engine_next_white(eng);
-    right = amp * engine_next_white(eng);
+    left = amp * engine_next_noise_sample_for_tone(eng, &eng->tone, 0);
+    right = amp * engine_next_noise_sample_for_tone(eng, &eng->tone, 1);
   } else if (eng->tone.mode == SBX_TONE_PINK_NOISE) {
-    left = amp * engine_next_pink_from_state(eng, eng->pink_l);
-    right = amp * engine_next_pink_from_state(eng, eng->pink_r);
+    left = amp * engine_next_noise_sample_for_tone(eng, &eng->tone, 0);
+    right = amp * engine_next_noise_sample_for_tone(eng, &eng->tone, 1);
   } else if (eng->tone.mode == SBX_TONE_BROWN_NOISE) {
-    left = amp * engine_next_brown_from_state(eng, &eng->brown_l);
-    right = amp * engine_next_brown_from_state(eng, &eng->brown_r);
+    left = amp * engine_next_noise_sample_for_tone(eng, &eng->tone, 0);
+    right = amp * engine_next_noise_sample_for_tone(eng, &eng->tone, 1);
   } else if (eng->tone.mode == SBX_TONE_SPIN_PINK ||
              eng->tone.mode == SBX_TONE_SPIN_BROWN ||
              eng->tone.mode == SBX_TONE_SPIN_WHITE) {
@@ -3837,7 +4071,7 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     double spin;
     double g_l, g_r;
 
-    base_noise = engine_next_noise_mono_for_mode(eng, eng->tone.mode);
+    base_noise = engine_next_noise_sample_for_tone(eng, &eng->tone, 2);
     if (engine_spin_wave_sample(eng, eng->tone.waveform, eng->phase_l / SBX_TAU, &spin_mod) != 1)
       engine_wave_sample(eng->tone.waveform, eng->phase_l, &spin_mod);
     eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.beat_hz / sr, SBX_TAU);
@@ -4104,7 +4338,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
         return SBX_ENOMEM;
       }
       engine_set_custom_waves(mv_eng[vi - 1], ctx->legacy_env_waves, ctx->custom_env_waves,
-                              ctx->spin_waves,
+                              ctx->spin_waves, ctx->noise_profiles,
                               ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
                               ctx->spin_edge_modes);
     }
@@ -4298,6 +4532,7 @@ sbx_interp_direct_tone(const SbxToneSpec *a,
   out->amplitude = sbx_lerp(a->amplitude, b->amplitude, u);
   out->waveform = a->waveform;
   out->envelope_waveform = a->envelope_waveform;
+  out->noise_waveform = a->noise_waveform;
   out->duty_cycle = sbx_lerp(a->duty_cycle, b->duty_cycle, u);
   out->iso_start = sbx_lerp(a->iso_start, b->iso_start, u);
   out->iso_attack = sbx_lerp(a->iso_attack, b->iso_attack, u);
@@ -5151,8 +5386,10 @@ parse_tone_spec_with_default_waveform(const char *spec,
   const char *next;
   int waveform = SBX_WAVE_SINE;
   int env_waveform = SBX_ENV_WAVE_NONE;
+  int noise_waveform = SBX_NOISE_WAVE_NONE;
   int saw_waveform_prefix = 0;
   int saw_spin_wave_prefix = 0;
+  int saw_noise_wave_prefix = 0;
   int n = 0;
   double carrier = 0.0, beat = 0.0, amp_pct = 0.0;
   char c = 0;
@@ -5171,6 +5408,13 @@ parse_tone_spec_with_default_waveform(const char *spec,
         sbx_parse_literal_env_prefix(p, &env_waveform, &next)) {
       p = next;
       out_tone->envelope_waveform = env_waveform;
+      advanced = 1;
+    } else if (sbx_parse_noise_wave_prefix(p, &noise_waveform, &next)) {
+      if (saw_noise_wave_prefix)
+        return SBX_EINVAL;
+      p = next;
+      out_tone->noise_waveform = noise_waveform;
+      saw_noise_wave_prefix = 1;
       advanced = 1;
     } else if (sbx_parse_spin_wave_prefix(p, &waveform, &next)) {
       if (saw_waveform_prefix || saw_spin_wave_prefix)
@@ -5200,7 +5444,20 @@ parse_tone_spec_with_default_waveform(const char *spec,
     return SBX_OK;
   }
 
-  // Noise tones: pink/<amp>, white/<amp>, brown/<amp>
+  // Noise tones: noiseNN/<amp>, pink/<amp>, white/<amp>, brown/<amp>
+  {
+    int noise_idx = -1;
+    if (sscanf(p, "noise%2d/%lf %n", &noise_idx, &amp_pct, &n) == 2 &&
+        *skip_ws(p + n) == 0) {
+      if (noise_idx < 0 || noise_idx >= SBX_CUSTOM_WAVE_COUNT ||
+          !isfinite(amp_pct) || amp_pct < 0.0)
+        return SBX_EINVAL;
+      out_tone->mode = SBX_TONE_WHITE_NOISE;
+      out_tone->noise_waveform = SBX_NOISE_WAVE_BASE + noise_idx;
+      out_tone->amplitude = amp_pct / 100.0;
+      return SBX_OK;
+    }
+  }
   if (sscanf(p, "pink/%lf %n", &amp_pct, &n) == 1 &&
       *skip_ws(p + n) == 0) {
     if (!isfinite(amp_pct) || amp_pct < 0.0) return SBX_EINVAL;
@@ -5243,7 +5500,9 @@ parse_tone_spec_with_default_waveform(const char *spec,
       *skip_ws(p + n) == 0) {
     if (!isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
       return SBX_EINVAL;
-    out_tone->mode = SBX_TONE_SPIN_PINK;
+    out_tone->mode = (sbx_noise_wave_index(out_tone->noise_waveform) >= 0)
+                         ? SBX_TONE_SPIN_WHITE
+                         : SBX_TONE_SPIN_PINK;
     out_tone->carrier_hz = carrier;
     out_tone->beat_hz = beat;
     out_tone->amplitude = amp_pct / 100.0;
@@ -5251,6 +5510,8 @@ parse_tone_spec_with_default_waveform(const char *spec,
   }
   if (sscanf(p, "bspin:%lf%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
       *skip_ws(p + n) == 0) {
+    if (sbx_noise_wave_index(out_tone->noise_waveform) >= 0)
+      return SBX_EINVAL;
     if (!isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
       return SBX_EINVAL;
     out_tone->mode = SBX_TONE_SPIN_BROWN;
@@ -5261,6 +5522,8 @@ parse_tone_spec_with_default_waveform(const char *spec,
   }
   if (sscanf(p, "wspin:%lf%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
       *skip_ws(p + n) == 0) {
+    if (sbx_noise_wave_index(out_tone->noise_waveform) >= 0)
+      return SBX_EINVAL;
     if (!isfinite(carrier) || !isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
       return SBX_EINVAL;
     out_tone->mode = SBX_TONE_SPIN_WHITE;
@@ -5269,7 +5532,6 @@ parse_tone_spec_with_default_waveform(const char *spec,
     out_tone->amplitude = amp_pct / 100.0;
     return SBX_OK;
   }
-
   // Isochronic: <carrier>@<pulse>/<amp>
   if (sscanf(p, "%lf@%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
       *skip_ws(p + n) == 0) {
@@ -5762,6 +6024,15 @@ spin_prefix_for_tone(int waveform, char *out, size_t out_sz) {
 }
 
 static int
+noise_prefix_for_tone(int waveform, char *out, size_t out_sz) {
+  int noise_idx = sbx_noise_wave_index(waveform);
+  if (!out || out_sz == 0) return 0;
+  if (noise_idx < 0)
+    return snprintf_checked(out, out_sz, "");
+  return snprintf_checked(out, out_sz, "noise%02d", noise_idx);
+}
+
+static int
 snprintf_checked(char *out, size_t out_sz, const char *fmt, ...) {
   int n;
   va_list ap;
@@ -5862,6 +6133,7 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
   char wprefix[24];
   char eprefix[24];
   char sprefix[24];
+  char nprefix[24];
   char prefix[64];
   if (!tone || !out || out_sz == 0) return SBX_EINVAL;
 
@@ -5874,6 +6146,8 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
     return SBX_EINVAL;
   if (!spin_prefix_for_tone(norm.waveform, sprefix, sizeof(sprefix)))
     return SBX_EINVAL;
+  if (!noise_prefix_for_tone(norm.noise_waveform, nprefix, sizeof(nprefix)))
+    return SBX_EINVAL;
   if (norm.envelope_waveform != SBX_ENV_WAVE_NONE) {
     if (norm.waveform == SBX_WAVE_SINE) {
       if (!snprintf_checked(prefix, sizeof(prefix), "%s:", eprefix))
@@ -5882,9 +6156,19 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
       if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:", eprefix, wprefix))
         return SBX_EINVAL;
     }
+  } else if (sprefix[0] != 0 && nprefix[0] != 0) {
+    if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:", sprefix, nprefix))
+      return SBX_EINVAL;
   } else if (sprefix[0] != 0) {
     if (!snprintf_checked(prefix, sizeof(prefix), "%s:", sprefix))
       return SBX_EINVAL;
+  } else if (nprefix[0] != 0) {
+    if (norm.waveform == SBX_WAVE_SINE) {
+      if (!snprintf_checked(prefix, sizeof(prefix), "%s:", nprefix))
+        return SBX_EINVAL;
+    } else if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:", nprefix, wprefix)) {
+      return SBX_EINVAL;
+    }
   } else if (norm.waveform == SBX_WAVE_SINE) {
     if (!snprintf_checked(prefix, sizeof(prefix), "%s:", wprefix))
       return SBX_EINVAL;
@@ -5922,7 +6206,9 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
       return SBX_OK;
     }
     case SBX_TONE_WHITE_NOISE:
-      if (!snprintf_checked(out, out_sz, "white/%g", amp_pct)) return SBX_EINVAL;
+      if (nprefix[0] != 0) {
+        if (!snprintf_checked(out, out_sz, "%s/%g", nprefix, amp_pct)) return SBX_EINVAL;
+      } else if (!snprintf_checked(out, out_sz, "white/%g", amp_pct)) return SBX_EINVAL;
       return SBX_OK;
     case SBX_TONE_PINK_NOISE:
       if (!snprintf_checked(out, out_sz, "pink/%g", amp_pct)) return SBX_EINVAL;
@@ -5943,7 +6229,10 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
         return SBX_EINVAL;
       return SBX_OK;
     case SBX_TONE_SPIN_WHITE:
-      if (!snprintf_checked(out, out_sz, "%swspin:%g%+g/%g", prefix, norm.carrier_hz, norm.beat_hz, amp_pct))
+      if (nprefix[0] != 0) {
+        if (!snprintf_checked(out, out_sz, "%sspin:%g%+g/%g", prefix, norm.carrier_hz, norm.beat_hz, amp_pct))
+          return SBX_EINVAL;
+      } else if (!snprintf_checked(out, out_sz, "%swspin:%g%+g/%g", prefix, norm.carrier_hz, norm.beat_hz, amp_pct))
         return SBX_EINVAL;
       return SBX_OK;
     default:
@@ -5967,6 +6256,7 @@ sbx_default_tone_spec(SbxToneSpec *tone) {
   tone->amplitude = 0.5;
   tone->waveform = SBX_WAVE_SINE;
   tone->envelope_waveform = SBX_ENV_WAVE_NONE;
+  tone->noise_waveform = SBX_NOISE_WAVE_NONE;
   tone->duty_cycle = 0.403014;
   tone->iso_start = 0.048493;
   tone->iso_attack = 0.5;
@@ -6996,6 +7286,12 @@ sbx_engine_reset(SbxEngine *eng) {
   memset(eng->pink_r, 0, sizeof(eng->pink_r));
   eng->brown_l = 0.0;
   eng->brown_r = 0.0;
+  memset(eng->noise_hist_l, 0, sizeof(eng->noise_hist_l));
+  memset(eng->noise_hist_r, 0, sizeof(eng->noise_hist_r));
+  memset(eng->noise_hist_m, 0, sizeof(eng->noise_hist_m));
+  eng->noise_hist_pos_l = 0;
+  eng->noise_hist_pos_r = 0;
+  eng->noise_hist_pos_m = 0;
   eng->bell_env = 0.0;
   eng->bell_tick = 0;
   eng->bell_tick_period = (int)(eng->cfg.sample_rate / 20.0);
@@ -8389,6 +8685,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
   double *legacy_env_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
   double *custom_env_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
   double *spin_waves[SBX_CUSTOM_WAVE_COUNT] = {0};
+  SbxNoiseProfile *noise_profiles[SBX_CUSTOM_WAVE_COUNT] = {0};
   int legacy_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   int custom_env_edge_modes[SBX_CUSTOM_WAVE_COUNT];
   int spin_edge_modes[SBX_CUSTOM_WAVE_COUNT];
@@ -8736,26 +9033,33 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             isdigit((unsigned char)name[6]) &&
             isdigit((unsigned char)name[7]) &&
             name[8] == 0)) ||
+          ((strncmp(name, "noise", 5) == 0 &&
+            isdigit((unsigned char)name[5]) &&
+            isdigit((unsigned char)name[6]) &&
+            name[7] == 0)) ||
           ((strncmp(name, "spin", 4) == 0 &&
             isdigit((unsigned char)name[4]) &&
             isdigit((unsigned char)name[5]) &&
             name[6] == 0))) {
         int is_custom = (strncmp(name, "custom", 6) == 0);
-        int is_spin = (!is_custom && strncmp(name, "spin", 4) == 0);
+        int is_noise = (!is_custom && strncmp(name, "noise", 5) == 0);
+        int is_spin = (!is_custom && !is_noise && strncmp(name, "spin", 4) == 0);
         int wave_idx = is_custom ? ((name[6] - '0') * 10 + (name[7] - '0'))
-                                 : ((name[4] - '0') * 10 + (name[5] - '0'));
+                                 : (is_noise ? ((name[5] - '0') * 10 + (name[6] - '0'))
+                                             : ((name[4] - '0') * 10 + (name[5] - '0')));
         double *raw = 0;
         size_t raw_count = 0, raw_cap = 0;
         char *wr = r;
         int custom_edge_mode = 1;
         int custom_edge_seen = 0;
         if ((is_custom ? custom_env_waves[wave_idx]
-                       : (is_spin ? spin_waves[wave_idx] : legacy_env_waves[wave_idx]))) {
+                       : (is_noise ? (noise_profiles[wave_idx] ? (double *)1 : 0)
+                                   : (is_spin ? spin_waves[wave_idx] : legacy_env_waves[wave_idx])))) {
           char emsg[224];
           snprintf(emsg, sizeof(emsg),
                    "line %lu: %s %02d already defined",
                    (unsigned long)line_no,
-                   is_custom ? "customNN" : (is_spin ? "spinNN" : "waveNN"),
+                   is_custom ? "customNN" : (is_noise ? "noiseNN" : (is_spin ? "spinNN" : "waveNN")),
                    wave_idx);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
@@ -8799,7 +9103,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
             snprintf(emsg, sizeof(emsg),
                      "line %lu: %s %02d expects floating-point samples",
                      (unsigned long)line_no,
-                     is_custom ? "customNN" : (is_spin ? "spinNN" : "waveNN"),
+                     is_custom ? "customNN" : (is_noise ? "noiseNN" : (is_spin ? "spinNN" : "waveNN")),
                      wave_idx);
             if (raw) free(raw);
             set_ctx_error_token_span(ctx, emsg, line_no, line, wr);
@@ -8825,6 +9129,9 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           rc = sbx_build_literal_custom_env_table_from_samples(raw, raw_count, custom_edge_mode,
                                                                &custom_env_waves[wave_idx]);
           custom_env_edge_modes[wave_idx] = custom_edge_mode;
+        } else if (is_noise) {
+          rc = sbx_build_noise_profile_from_db_bands(raw, raw_count, ctx->eng->cfg.sample_rate,
+                                                     &noise_profiles[wave_idx]);
         } else if (is_spin) {
           rc = sbx_build_literal_spin_wave_table_from_samples(raw, raw_count, custom_edge_mode,
                                                               &spin_waves[wave_idx]);
@@ -8838,7 +9145,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
           snprintf(emsg, sizeof(emsg),
                    "line %lu: invalid %s %02d definition",
                    (unsigned long)line_no,
-                   is_custom ? "customNN" : (is_spin ? "spinNN" : "waveNN"),
+                   is_custom ? "customNN" : (is_noise ? "noiseNN" : (is_spin ? "spinNN" : "waveNN")),
                    wave_idx);
           set_ctx_error(ctx, emsg);
           rc = SBX_EINVAL;
@@ -9268,7 +9575,7 @@ sbx_context_load_sbg_timing_text(SbxContext *ctx, const char *text, int loop) {
     }
   }
 
-  ctx_replace_custom_waves(ctx, legacy_env_waves, custom_env_waves, spin_waves,
+  ctx_replace_custom_waves(ctx, legacy_env_waves, custom_env_waves, spin_waves, noise_profiles,
                            legacy_env_edge_modes, custom_env_edge_modes, spin_edge_modes);
   rc = ctx_activate_keyframes_internal(ctx, primary, count,
                                        mv_frames ? mv_frames : primary,
@@ -9311,6 +9618,7 @@ done:
       if (legacy_env_waves[i]) free(legacy_env_waves[i]);
       if (custom_env_waves[i]) free(custom_env_waves[i]);
       if (spin_waves[i]) free(spin_waves[i]);
+      if (noise_profiles[i]) free(noise_profiles[i]);
     }
   }
   if (buf) free(buf);
@@ -9402,7 +9710,7 @@ sbx_context_set_aux_tones(SbxContext *ctx, const SbxToneSpec *tones, size_t tone
       return SBX_ENOMEM;
     }
     engine_set_custom_waves(engv[i], ctx->legacy_env_waves, ctx->custom_env_waves,
-                            ctx->spin_waves,
+                            ctx->spin_waves, ctx->noise_profiles,
                             ctx->legacy_env_edge_modes, ctx->custom_env_edge_modes,
                             ctx->spin_edge_modes);
     rc = engine_apply_tone(engv[i], &copy[i], 1);

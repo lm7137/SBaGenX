@@ -1,0 +1,18 @@
+## noiseNN example approximating Brownian-style noise.
+##
+## The noise00 profile is a custom spectral noise curve with strong low-end
+## emphasis and a steep high-frequency roll-off, intended to resemble a
+## Brownian-style bed without relying on the built-in brown/<amp> source.
+##
+## Assumes you run from the repo root:
+##   sbagenx -D examples/X/noiseNN-brownian-demo.sbg
+##   sbagenx examples/X/noiseNN-brownian-demo.sbg
+
+noise00: 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0 -1 -2 -3 -4 -6 -8 -10 -12 -15 -18 -21
+
+brown-bed: noise00/20 180+4/15
+brown-orbit: noise00:spin:280+0.08/18 180+3/15
+
+00:00 brown-bed
+00:05:00 brown-orbit ->
+00:10:00 brown-bed

@@ -373,6 +373,7 @@ struct SbxToneSpec {
   amplitude: f64,
   waveform: c_int,
   envelope_waveform: c_int,
+  noise_waveform: c_int,
   duty_cycle: f64,
   iso_start: f64,
   iso_attack: f64,
@@ -519,6 +520,8 @@ type SbxRuntimeContextCreateFromCurveProgram = unsafe extern "C" fn(
   *mut f64,
   *mut *mut SbxContext,
 ) -> c_int;
+
+const EXPECTED_SBX_API_VERSION: i32 = 40;
 
 pub struct ValidationDiagnostic {
   pub severity: &'static str,
@@ -1020,9 +1023,20 @@ impl Api {
     let lib = unsafe { Library::new(&path) }
       .map_err(|err| format!("failed to open sbagenxlib at {}: {}", path.display(), err))?;
     unsafe {
+      let sbx_version: SbxVersion = Self::load_symbol(&lib, b"sbx_version\0")?;
+      let sbx_api_version: SbxApiVersion = Self::load_symbol(&lib, b"sbx_api_version\0")?;
+      let loaded_api_version = sbx_api_version() as i32;
+      if loaded_api_version != EXPECTED_SBX_API_VERSION {
+        return Err(format!(
+          "sbagenxlib at {} reports API version {}, but the GUI expects {}",
+          path.display(),
+          loaded_api_version,
+          EXPECTED_SBX_API_VERSION
+        ));
+      }
       Ok(Self {
-        sbx_version: Self::load_symbol(&lib, b"sbx_version\0")?,
-        sbx_api_version: Self::load_symbol(&lib, b"sbx_api_version\0")?,
+        sbx_version,
+        sbx_api_version,
         sbx_default_engine_config: Self::load_symbol(&lib, b"sbx_default_engine_config\0")?,
         sbx_default_tone_spec: Self::load_symbol(&lib, b"sbx_default_tone_spec\0")?,
         sbx_default_iso_envelope_spec:
@@ -1164,44 +1178,46 @@ fn resolve_library_path() -> Result<PathBuf, String> {
     }
   }
 
-  let mut candidates = Vec::<PathBuf>::new();
+  let current_exe = std::env::current_exe()
+    .ok()
+    .and_then(|path| path.canonicalize().ok().or(Some(path)));
+  let exe_dir = current_exe
+    .as_ref()
+    .and_then(|path| path.parent().map(Path::to_path_buf));
+  let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("../..")
+    .canonicalize()
+    .ok();
+  let in_repo_build_tree = current_exe
+    .as_ref()
+    .zip(repo_root.as_ref())
+    .map(|(exe, repo)| exe.starts_with(repo))
+    .unwrap_or(false);
 
-  if let Ok(exe_path) = std::env::current_exe() {
-    if let Some(exe_dir) = exe_path.parent() {
-      if cfg!(target_os = "linux") {
-        candidates.push(exe_dir.join("libsbagenx.so"));
-        candidates.push(exe_dir.join("libsbagenx.so.3"));
-      } else if cfg!(target_os = "windows") {
-        if cfg!(target_pointer_width = "64") {
-          candidates.push(exe_dir.join("sbagenxlib-win64.dll"));
-        } else {
-          candidates.push(exe_dir.join("sbagenxlib-win32.dll"));
-        }
-      } else if cfg!(target_os = "macos") {
-        candidates.push(exe_dir.join("libsbagenx.dylib"));
+  let mut candidates = Vec::<PathBuf>::new();
+  let mut repo_dist_candidates = Vec::<PathBuf>::new();
+  let mut exe_dir_candidates = Vec::<PathBuf>::new();
+
+  if let Some(exe_dir) = exe_dir.as_ref() {
+    if cfg!(target_os = "linux") {
+      exe_dir_candidates.push(exe_dir.join("libsbagenx.so"));
+      exe_dir_candidates.push(exe_dir.join("libsbagenx.so.3"));
+    } else if cfg!(target_os = "windows") {
+      if cfg!(target_pointer_width = "64") {
+        exe_dir_candidates.push(exe_dir.join("sbagenxlib-win64.dll"));
+      } else {
+        exe_dir_candidates.push(exe_dir.join("sbagenxlib-win32.dll"));
       }
+    } else if cfg!(target_os = "macos") {
+      exe_dir_candidates.push(exe_dir.join("libsbagenx.dylib"));
     }
   }
 
-  if let Ok(repo_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    .join("../..")
-    .canonicalize()
-  {
+  if let Some(repo_root) = repo_root.as_ref() {
     let dist = repo_root.join("dist");
     if cfg!(target_os = "linux") {
-      candidates.push(dist.join("libsbagenx.so"));
-      candidates.push(dist.join("libsbagenx.so.3"));
-    } else if cfg!(target_os = "windows") {
-      if cfg!(target_pointer_width = "64") {
-        candidates.push(dist.join("sbagenxlib-win64.dll"));
-      } else {
-        candidates.push(dist.join("sbagenxlib-win32.dll"));
-      }
-    } else if cfg!(target_os = "macos") {
-      candidates.push(dist.join("libsbagenx.dylib"));
-    }
-
-    if cfg!(target_os = "linux") {
+      repo_dist_candidates.push(dist.join("libsbagenx.so"));
+      repo_dist_candidates.push(dist.join("libsbagenx.so.3"));
       if let Ok(entries) = fs::read_dir(&dist) {
         let mut versioned: Vec<PathBuf> = entries
           .filter_map(Result::ok)
@@ -1216,9 +1232,25 @@ fn resolve_library_path() -> Result<PathBuf, String> {
           .collect();
         versioned.sort();
         versioned.reverse();
-        candidates.extend(versioned);
+        repo_dist_candidates.extend(versioned);
       }
+    } else if cfg!(target_os = "windows") {
+      if cfg!(target_pointer_width = "64") {
+        repo_dist_candidates.push(dist.join("sbagenxlib-win64.dll"));
+      } else {
+        repo_dist_candidates.push(dist.join("sbagenxlib-win32.dll"));
+      }
+    } else if cfg!(target_os = "macos") {
+      repo_dist_candidates.push(dist.join("libsbagenx.dylib"));
     }
+  }
+
+  if cfg!(target_os = "linux") && in_repo_build_tree {
+    candidates.extend(repo_dist_candidates.clone());
+    candidates.extend(exe_dir_candidates.clone());
+  } else {
+    candidates.extend(exe_dir_candidates);
+    candidates.extend(repo_dist_candidates);
   }
 
   if cfg!(target_os = "linux") {
@@ -3322,6 +3354,7 @@ fn sample_context_beat_preview(
         amplitude: 0.0,
         waveform: 0,
         envelope_waveform: 0,
+        noise_waveform: 0,
         duty_cycle: 0.0,
         iso_start: 0.0,
         iso_attack: 0.0,
@@ -3454,6 +3487,7 @@ fn sample_context_iso_cycle(
     amplitude: 0.0,
     waveform: 0,
     envelope_waveform: 0,
+    noise_waveform: 0,
     duty_cycle: 0.0,
     iso_start: 0.0,
     iso_attack: 0.0,
@@ -4147,5 +4181,62 @@ mod tests {
 
     let span = preview_span_for_program_request(&request).expect("preview span");
     assert!((span - 3780.0).abs() < 1e-9, "expected drop+hold+wake only, got {}", span);
+  }
+
+  #[test]
+  fn sequence_beat_preview_keeps_contiguous_samples() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("../..")
+      .join("examples/plus/deep-sleep-aid.sbg");
+    let text = fs::read_to_string(&path).expect("read deep-sleep example");
+
+    let outcome = sample_beat_preview(&text, &path.to_string_lossy()).expect("sample beat preview");
+    assert!(!outcome.series.is_empty(), "expected at least one preview series");
+
+    let first = &outcome.series[0];
+    assert!(
+      first.active_sample_count > first.points.len() / 2,
+      "expected mostly active beat samples, got {} of {}",
+      first.active_sample_count,
+      first.points.len()
+    );
+
+    let isolated_nulls = first
+      .points
+      .windows(3)
+      .filter(|window| {
+        window[0].beat_hz.is_some() && window[1].beat_hz.is_none() && window[2].beat_hz.is_some()
+      })
+      .count();
+    assert_eq!(
+      isolated_nulls, 0,
+      "preview should not insert isolated null gaps between active samples"
+    );
+  }
+
+  #[test]
+  fn built_in_beat_preview_keeps_contiguous_samples() {
+    let request = ProgramRuntimeRequest {
+      kind: ProgramKind::Drop,
+      main_arg: "00ls+^".to_string(),
+      drop_time_sec: 30 * 60,
+      hold_time_sec: 30 * 60,
+      wake_time_sec: 3 * 60,
+      iso_params_spec: None,
+      curve_text: None,
+      source_name: "program:drop".to_string(),
+      mix_path: None,
+      mix_looper_spec: None,
+    };
+
+    let outcome = sample_program_beat_preview(&request).expect("sample program beat preview");
+    assert!(!outcome.series.is_empty(), "expected at least one preview series");
+
+    let first = &outcome.series[0];
+    assert_eq!(
+      first.active_sample_count,
+      first.points.len(),
+      "built-in preview should keep all beat samples active"
+    );
   }
 }

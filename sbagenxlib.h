@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 39  /* public API contract revision */
+#define SBX_API_VERSION 40  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
@@ -61,6 +61,11 @@ typedef enum {
   SBX_ENV_WAVE_LEGACY_BASE = 2000, /* legacy waveNN envelope id: + [0..99] */
   SBX_ENV_WAVE_CUSTOM_BASE = 2100  /* literal customNN envelope id: + [0..99] */
 } SbxEnvelopeWaveform;
+
+typedef enum {
+  SBX_NOISE_WAVE_NONE = 0,
+  SBX_NOISE_WAVE_BASE = 2300 /* literal noiseNN spectrum id: + [0..99], valid only for noise and spin-noise tones */
+} SbxNoiseWaveform;
 
 typedef enum {
   SBX_INTERP_LINEAR = 0,
@@ -156,6 +161,7 @@ typedef struct {
   double amplitude;  /* 0.0 .. 1.0 */
   int waveform;      /* SBX_WAVE_* carrier waveform, or SBX_WAVE_SPIN_BASE+[0..99] for spin tones */
   int envelope_waveform; /* SBX_ENV_WAVE_NONE or SBX_ENV_WAVE_* + [0..99] */
+  int noise_waveform; /* SBX_NOISE_WAVE_NONE or SBX_NOISE_WAVE_BASE + [0..99], valid only for noise and spin-noise tones */
   double duty_cycle; /* for isochronic mode: 0.0 .. 1.0 (default 0.403014) */
   double iso_start;   /* cycle-relative start phase for isochronic mode (default 0.048493) */
   double iso_attack;  /* attack share of isochronic on-window (default 0.5) */

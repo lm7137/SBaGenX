@@ -2180,6 +2180,7 @@ Here are the different types:
   pink/<amp>                          # Pink noise
   white/<amp>                         # White noise
   brown/<amp>                         # Brown noise
+  noiseNN/<amp>                       # Custom spectral noise (32 fixed log bands, dB values)
   mix/<amp>                           # Soundtrack input mix
   <carrier><sign><freq>/<amp>         # Binaural tones
   <carrier>/<amp>                      # Sine-wave (a binaural tone with
@@ -2188,6 +2189,9 @@ Here are the different types:
   spin:<width>+<freq>/<amp>           # Spinning variable-delay pink noise
   bspin:<width>+<freq>/<amp>          # Spinning variable-delay brown noise
   wspin:<width>+<freq>/<amp>          # Spinning variable-delay white noise
+  noiseNN:spin:<width>+<freq>/<amp>   # Spin with custom spectral noise base
+  spinNN:noiseNN:spin:<width>+<freq>/<amp>
+                                      # Custom motion shape + custom spectral noise base
   spinNN:spin:<width>+<freq>/<amp>    # Spin with custom bipolar motion shape
   spinNN:bspin:<width>+<freq>/<amp>   # Brown spin with custom bipolar motion
   spinNN:wspin:<width>+<freq>/<amp>   # White spin with custom bipolar motion
@@ -2834,6 +2838,30 @@ shared amplitude envelope of binaural tones generated from it.
 
     spin00: e=0 0 0 0 100 100 -100 -100
     spin00:spin:300+1/35
+
+  There is now also a separate `noiseNN` definition family for custom
+  spectral noise sources:
+
+    noise<2-digits>: <32 dB values>
+
+  These are not time-domain envelopes.  They define a fixed 32-band
+  log-spaced spectral curve from 20Hz to 20kHz.  Each value is a gain in dB,
+  linearly interpolated in log-frequency, clamped to the range [-24,+24] dB.
+  The resulting custom noise is RMS-normalized so its nominal amplitude stays
+  comparable to the built-in `white`, `pink`, and `brown` noise sources.
+
+  `noiseNN` may be used directly:
+
+    noise00: 12 12 11 11 10 10 9 8 7 6 5 4 3 2 1 0 -1 -2 -3 -4 -5 -6 -7 -8 -9 -10 -11 -12 -12 -12 -12 -12
+    noise00/20
+
+  Or as the base noise source for the spin-noise family:
+
+    noise00:spin:300+1/35
+    spin00:noise00:spin:300+1/35
+
+  In the second form, `noiseNN` chooses the custom spectral noise source and
+  `spinNN` still controls the bipolar motion waveform independently.
   
   > Let's say we have a brain-wave waveform of f(T) (T is theta),
   > expressed as a fourier series (using complex maths because it's
