@@ -5,11 +5,11 @@
 ## The triangle waveform still determines the spin motion itself; custom01
 ## only shapes the effect strength.
 ##
-## Assumes you run from the repo root:
+## Assumes the installed `river1.ogg` asset is available alongside the program files:
 ##   sbagenx -D examples/X/custom-mixspin-orbit.sbg
 ##   sbagenx examples/X/custom-mixspin-orbit.sbg
 
--m assets/river1.ogg
+-m river1.ogg
 
 custom01: e=1 0 0.1 0.15 0.2 0.9 1 0.4 0.15 0.1 0
 

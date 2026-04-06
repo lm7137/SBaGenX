@@ -3,11 +3,11 @@
 ## The custom00 envelope shapes the mix pulse intensity as a slow
 ## inhale/exhale style cycle instead of a plain sine/square pulse.
 ##
-## Assumes you run from the repo root so this mix path resolves:
+## Assumes the installed `river1.ogg` asset is available alongside the program files:
 ##   sbagenx -D examples/X/custom-mixpulse-breathe.sbg
 ##   sbagenx examples/X/custom-mixpulse-breathe.sbg
 
--m assets/river1.ogg
+-m river1.ogg
 
 custom00: e=2 0 0.05 0.2 0.7 1 0.7 0.2 0.05 0
 

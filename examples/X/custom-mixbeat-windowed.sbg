@@ -3,11 +3,11 @@
 ## The custom02 envelope creates short windows where the embedded-beat
 ## effect becomes strong, instead of applying mixbeat continuously.
 ##
-## Assumes you run from the repo root:
+## Assumes the installed `river1.ogg` asset is available alongside the program files:
 ##   sbagenx -D examples/X/custom-mixbeat-windowed.sbg
 ##   sbagenx examples/X/custom-mixbeat-windowed.sbg
 
--m assets/river1.ogg
+-m river1.ogg
 
 custom02: e=0 0 0 0 1 1 0 0 0
 

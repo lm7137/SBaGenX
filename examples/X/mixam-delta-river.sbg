@@ -4,11 +4,11 @@
 ## stream. This example uses a slow delta-rate AM with a raised-cosine model
 ## and a non-zero floor, so the river bed never fully disappears.
 ##
-## Assumes you run from the repo root:
+## Assumes the installed `river1.ogg` asset is available alongside the program files:
 ##   sbagenx -D examples/X/mixam-delta-river.sbg
 ##   sbagenx examples/X/mixam-delta-river.sbg
 
--m assets/river1.ogg
+-m river1.ogg
 
 river-delta: mix/85 mixam:2.2:m=cos:s=0:f=0.30
 river-deeper: mix/85 mixam:1.2:m=cos:s=0:f=0.20
