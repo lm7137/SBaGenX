@@ -115,6 +115,15 @@ int main(void) {
         fabs(t.beat_hz - 4.0) > 1e-9 ||
         fabs(t.amplitude - 0.20) > 1e-9)
       fail("custom noisepulse tone parse mismatch");
+    if (sbx_parse_tone_spec("custom00:triangle:noise00:noisebeat:4/20", &t) != SBX_OK)
+      fail("parse custom noisebeat tone failed");
+    if (t.mode != SBX_TONE_NOISE_BEAT ||
+        t.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE ||
+        t.noise_waveform != SBX_NOISE_WAVE_BASE ||
+        t.waveform != SBX_WAVE_TRIANGLE ||
+        fabs(t.beat_hz - 4.0) > 1e-9 ||
+        fabs(t.amplitude - 0.20) > 1e-9)
+      fail("custom noisebeat tone parse mismatch");
   }
   {
     double sec = 0.0;
@@ -194,6 +203,12 @@ int main(void) {
       fail("format custom noisepulse tone failed");
     if (strcmp(spec, "custom00:noise00:noisepulse:4/20") != 0)
       fail("format custom noisepulse tone should preserve prefixes");
+    if (sbx_parse_tone_spec("custom00:triangle:noise00:noisebeat:4/20", &in) != SBX_OK)
+      fail("parse custom noisebeat tone failed");
+    if (sbx_format_tone_spec(&in, spec, sizeof(spec)) != SBX_OK)
+      fail("format custom noisebeat tone failed");
+    if (strcmp(spec, "custom00:noise00:triangle:noisebeat:4/20") != 0)
+      fail("format custom noisebeat tone should preserve prefixes");
   }
   {
     SbxToneSpec t;

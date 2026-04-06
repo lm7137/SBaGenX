@@ -172,6 +172,8 @@ struct SbxEngine {
   int noise_hist_pos_l;
   int noise_hist_pos_r;
   int noise_hist_pos_m;
+  double noisebeat_hist[SBX_MIXBEAT_HILBERT_TAPS];
+  int noisebeat_hist_pos;
   char last_error[256];
 };
 
@@ -1400,23 +1402,35 @@ sbx_mix_fx_reset_state(SbxMixFxState *fx) {
 }
 
 static double
-sbx_mixbeat_hilbert_step(SbxMixFxState *fx, double x) {
+sbx_hilbert_step(double *hist, int *hist_pos, double x) {
   int k, idx;
   double q = 0.0;
   int pos;
-  if (!fx) return 0.0;
+  if (!hist || !hist_pos) return 0.0;
   sbx_mixbeat_hilbert_init_once();
-  pos = fx->mixbeat_hist_pos;
-  fx->mixbeat_hist[pos] = x;
+  pos = *hist_pos;
+  hist[pos] = x;
   idx = pos;
   for (k = 0; k < SBX_MIXBEAT_HILBERT_TAPS; k++) {
-    q += sbx_mixbeat_hilbert_coeff[k] * fx->mixbeat_hist[idx];
+    q += sbx_mixbeat_hilbert_coeff[k] * hist[idx];
     if (--idx < 0) idx = SBX_MIXBEAT_HILBERT_TAPS - 1;
   }
   pos++;
   if (pos >= SBX_MIXBEAT_HILBERT_TAPS) pos = 0;
-  fx->mixbeat_hist_pos = pos;
+  *hist_pos = pos;
   return q;
+}
+
+static double
+sbx_mixbeat_hilbert_step(SbxMixFxState *fx, double x) {
+  if (!fx) return 0.0;
+  return sbx_hilbert_step(fx->mixbeat_hist, &fx->mixbeat_hist_pos, x);
+}
+
+static double
+sbx_noisebeat_hilbert_step(SbxEngine *eng, double x) {
+  if (!eng) return 0.0;
+  return sbx_hilbert_step(eng->noisebeat_hist, &eng->noisebeat_hist_pos, x);
 }
 
 static double
@@ -3536,7 +3550,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   if (!tone) return SBX_EINVAL;
   if (err && err_sz) err[0] = 0;
 
-  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_NOISE_PULSE) {
+  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_NOISE_BEAT) {
     if (err && err_sz) snprintf(err, err_sz, "%s", "unsupported tone mode");
     return SBX_EINVAL;
   }
@@ -3603,8 +3617,9 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     if (custom_env_idx >= 0 &&
         tone->mode != SBX_TONE_BINAURAL &&
         tone->mode != SBX_TONE_ISOCHRONIC &&
-        tone->mode != SBX_TONE_NOISE_PULSE) {
-      if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural, isochronic, or noisepulse tones");
+        tone->mode != SBX_TONE_NOISE_PULSE &&
+        tone->mode != SBX_TONE_NOISE_BEAT) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural, isochronic, noisepulse, or noisebeat tones");
       return SBX_EINVAL;
     }
     if (spin_wave_idx >= 0 && !tone_is_spin) {
@@ -3612,14 +3627,23 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
       return SBX_EINVAL;
     }
     if (noise_idx >= 0 && !tone_is_spin) {
-      if (tone->mode != SBX_TONE_NOISE_PULSE) {
-        if (err && err_sz) snprintf(err, err_sz, "%s", "noiseNN spectra are only valid for noise, noisepulse, or spin-noise tones");
+      if (tone->mode != SBX_TONE_NOISE_PULSE &&
+          tone->mode != SBX_TONE_NOISE_BEAT) {
+        if (err && err_sz) snprintf(err, err_sz, "%s", "noiseNN spectra are only valid for noise, noisepulse, noisebeat, or spin-noise tones");
         return SBX_EINVAL;
       }
     }
   } else {
-    tone->waveform = SBX_WAVE_SINE;
-    if (tone->mode != SBX_TONE_NOISE_PULSE)
+    if (tone->mode == SBX_TONE_NOISE_BEAT) {
+      if (tone->waveform < SBX_WAVE_SINE || tone->waveform > SBX_WAVE_SAWTOOTH) {
+        if (err && err_sz) snprintf(err, err_sz, "%s", "waveform must be a valid SBX_WAVE_* value");
+        return SBX_EINVAL;
+      }
+    } else {
+      tone->waveform = SBX_WAVE_SINE;
+    }
+    if (tone->mode != SBX_TONE_NOISE_PULSE &&
+        tone->mode != SBX_TONE_NOISE_BEAT)
       tone->envelope_waveform = SBX_ENV_WAVE_NONE;
   }
 
@@ -3635,12 +3659,15 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   if (custom_env_idx >= 0 &&
       tone->mode != SBX_TONE_BINAURAL &&
       tone->mode != SBX_TONE_ISOCHRONIC &&
-      tone->mode != SBX_TONE_NOISE_PULSE) {
-    if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural, isochronic, or noisepulse tones");
+      tone->mode != SBX_TONE_NOISE_PULSE &&
+      tone->mode != SBX_TONE_NOISE_BEAT) {
+    if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural, isochronic, noisepulse, or noisebeat tones");
     return SBX_EINVAL;
   }
 
-  if (!uses_carrier && tone->waveform != SBX_WAVE_SINE)
+  if (!uses_carrier &&
+      tone->mode != SBX_TONE_NOISE_BEAT &&
+      tone->waveform != SBX_WAVE_SINE)
     tone->waveform = SBX_WAVE_SINE;
 
   if (tone->noise_waveform != SBX_NOISE_WAVE_NONE && noise_idx < 0) {
@@ -3650,8 +3677,9 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   if (noise_idx >= 0 &&
       tone->mode != SBX_TONE_WHITE_NOISE &&
       tone->mode != SBX_TONE_SPIN_WHITE &&
-      tone->mode != SBX_TONE_NOISE_PULSE) {
-    if (err && err_sz) snprintf(err, err_sz, "%s", "noiseNN spectra are only valid for noise, noisepulse, or spin-noise tones");
+      tone->mode != SBX_TONE_NOISE_PULSE &&
+      tone->mode != SBX_TONE_NOISE_BEAT) {
+    if (err && err_sz) snprintf(err, err_sz, "%s", "noiseNN spectra are only valid for noise, noisepulse, noisebeat, or spin-noise tones");
     return SBX_EINVAL;
   }
 
@@ -3682,7 +3710,8 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
 
   if (tone->mode == SBX_TONE_MONAURAL ||
       tone->mode == SBX_TONE_ISOCHRONIC ||
-      tone->mode == SBX_TONE_NOISE_PULSE)
+      tone->mode == SBX_TONE_NOISE_PULSE ||
+      tone->mode == SBX_TONE_NOISE_BEAT)
     tone->beat_hz = fabs(tone->beat_hz);
   if (tone->mode == SBX_TONE_BELL) {
     tone->carrier_hz = fabs(tone->carrier_hz);
@@ -3724,6 +3753,13 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     }
     if (tone->iso_edge_mode < 0 || tone->iso_edge_mode > 3) {
       if (err && err_sz) snprintf(err, err_sz, "%s", "iso_edge_mode must be 0..3");
+      return SBX_EINVAL;
+    }
+  }
+
+  if (tone->mode == SBX_TONE_NOISE_BEAT) {
+    if (!isfinite(tone->beat_hz) || tone->beat_hz <= 0.0) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "noisebeat beat_hz must be > 0");
       return SBX_EINVAL;
     }
   }
@@ -3984,6 +4020,7 @@ engine_next_noise_mono_for_mode(SbxEngine *eng, SbxToneMode mode) {
     case SBX_TONE_BROWN_NOISE:
       return engine_next_brown_from_state(eng, &eng->brown_l);
     case SBX_TONE_NOISE_PULSE:
+    case SBX_TONE_NOISE_BEAT:
     case SBX_TONE_SPIN_PINK:
     case SBX_TONE_PINK_NOISE:
     default:
@@ -4078,6 +4115,27 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     }
 
     left = right = amp * env * carrier_or_noise;
+  } else if (eng->tone.mode == SBX_TONE_NOISE_BEAT) {
+    double mono, q, s, c, up, down, env, phase_unit;
+
+    mono = engine_next_noise_sample_for_tone(eng, &eng->tone, 2);
+    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * (eng->tone.beat_hz * 0.5) / sr, SBX_TAU);
+    phase_unit = eng->phase_l / SBX_TAU;
+    s = sbx_wave_sample_unit_phase(eng->tone.waveform, phase_unit);
+    c = sbx_wave_sample_unit_phase(eng->tone.waveform, phase_unit + 0.25);
+    q = sbx_noisebeat_hilbert_step(eng, mono);
+    up = mono * c - q * s;
+    down = mono * c + q * s;
+    env = 1.0;
+    if (eng->tone.envelope_waveform != SBX_ENV_WAVE_NONE &&
+        engine_custom_env_sample(eng, eng->tone.envelope_waveform, phase_unit, &env) == 1) {
+      env = sbx_dsp_clamp(env, 0.0, 1.0);
+      left = amp * (mono * (1.0 - env) + down * env);
+      right = amp * (mono * (1.0 - env) + up * env);
+    } else {
+      left = amp * down;
+      right = amp * up;
+    }
   } else if (eng->tone.mode == SBX_TONE_BELL) {
     double bell_wave = 0.0;
     if (eng->bell_env > 0.0) {
@@ -5585,6 +5643,20 @@ parse_tone_spec_with_default_waveform(const char *spec,
     return SBX_OK;
   }
 
+  // Noise beat: noisebeat:<beat>/<amp>
+  if (sscanf(p, "noisebeat:%lf/%lf %n", &beat, &amp_pct, &n) == 2 &&
+      *skip_ws(p + n) == 0) {
+    if (saw_spin_wave_prefix)
+      return SBX_EINVAL;
+    if (!isfinite(beat) || !isfinite(amp_pct) || amp_pct < 0.0)
+      return SBX_EINVAL;
+    out_tone->mode = SBX_TONE_NOISE_BEAT;
+    out_tone->carrier_hz = 0.0;
+    out_tone->beat_hz = fabs(beat);
+    out_tone->amplitude = amp_pct / 100.0;
+    return SBX_OK;
+  }
+
   // Isochronic: <carrier>@<pulse>/<amp>
   if (sscanf(p, "%lf@%lf/%lf %n", &carrier, &beat, &amp_pct, &n) == 3 &&
       *skip_ws(p + n) == 0) {
@@ -6263,9 +6335,62 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
     }
     case SBX_TONE_NOISE_PULSE: {
       double pulse = fabs(norm.beat_hz);
-      if (!snprintf_checked(out, out_sz, "%snoisepulse:%g/%g",
-                            prefix, pulse, amp_pct))
+      if (norm.envelope_waveform != SBX_ENV_WAVE_NONE) {
+        if (nprefix[0] != 0) {
+          if (!snprintf_checked(out, out_sz, "%s:%s:noisepulse:%g/%g",
+                                eprefix, nprefix, pulse, amp_pct))
+            return SBX_EINVAL;
+        } else if (!snprintf_checked(out, out_sz, "%s:noisepulse:%g/%g",
+                                     eprefix, pulse, amp_pct)) {
+          return SBX_EINVAL;
+        }
+      } else if (nprefix[0] != 0) {
+        if (!snprintf_checked(out, out_sz, "%s:noisepulse:%g/%g",
+                              nprefix, pulse, amp_pct))
+          return SBX_EINVAL;
+      } else if (!snprintf_checked(out, out_sz, "noisepulse:%g/%g",
+                                   pulse, amp_pct)) {
         return SBX_EINVAL;
+      }
+      return SBX_OK;
+    }
+    case SBX_TONE_NOISE_BEAT: {
+      double beat = fabs(norm.beat_hz);
+      if (norm.envelope_waveform != SBX_ENV_WAVE_NONE) {
+        if (nprefix[0] != 0) {
+          if (norm.waveform != SBX_WAVE_SINE) {
+            if (!snprintf_checked(out, out_sz, "%s:%s:%s:noisebeat:%g/%g",
+                                  eprefix, nprefix, wprefix, beat, amp_pct))
+              return SBX_EINVAL;
+          } else if (!snprintf_checked(out, out_sz, "%s:%s:noisebeat:%g/%g",
+                                       eprefix, nprefix, beat, amp_pct)) {
+            return SBX_EINVAL;
+          }
+        } else if (norm.waveform != SBX_WAVE_SINE) {
+          if (!snprintf_checked(out, out_sz, "%s:%s:noisebeat:%g/%g",
+                                eprefix, wprefix, beat, amp_pct))
+            return SBX_EINVAL;
+        } else if (!snprintf_checked(out, out_sz, "%s:noisebeat:%g/%g",
+                                     eprefix, beat, amp_pct)) {
+          return SBX_EINVAL;
+        }
+      } else if (nprefix[0] != 0) {
+        if (norm.waveform != SBX_WAVE_SINE) {
+          if (!snprintf_checked(out, out_sz, "%s:%s:noisebeat:%g/%g",
+                                nprefix, wprefix, beat, amp_pct))
+            return SBX_EINVAL;
+        } else if (!snprintf_checked(out, out_sz, "%s:noisebeat:%g/%g",
+                                     nprefix, beat, amp_pct)) {
+          return SBX_EINVAL;
+        }
+      } else if (norm.waveform != SBX_WAVE_SINE) {
+        if (!snprintf_checked(out, out_sz, "%s:noisebeat:%g/%g",
+                              wprefix, beat, amp_pct))
+          return SBX_EINVAL;
+      } else if (!snprintf_checked(out, out_sz, "noisebeat:%g/%g",
+                                   beat, amp_pct)) {
+        return SBX_EINVAL;
+      }
       return SBX_OK;
     }
     case SBX_TONE_WHITE_NOISE:
@@ -7355,6 +7480,8 @@ sbx_engine_reset(SbxEngine *eng) {
   eng->noise_hist_pos_l = 0;
   eng->noise_hist_pos_r = 0;
   eng->noise_hist_pos_m = 0;
+  memset(eng->noisebeat_hist, 0, sizeof(eng->noisebeat_hist));
+  eng->noisebeat_hist_pos = 0;
   eng->bell_env = 0.0;
   eng->bell_tick = 0;
   eng->bell_tick_period = (int)(eng->cfg.sample_rate / 20.0);

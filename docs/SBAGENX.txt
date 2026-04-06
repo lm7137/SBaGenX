@@ -342,13 +342,15 @@ global min/max recentering.  Example:
   00:00 base
 
 `customNN` currently supports binaural tones, isochronic tones,
-`noisepulse`, and the compatible mix-effect envelopes `mixpulse`,
-`mixspin`, and `mixbeat` on the `sbagenxlib` path.  For isochronic tones
-and `noisepulse`, the custom envelope replaces the default `-I` pulse
-shape for that tone.  For mix effects, the custom envelope modulates
-effect strength while preserving the underlying sine/explicit waveform
-oscillator used by the effect.  The installer ships a rendered reference
-plot for the example above as:
+`noisepulse`, `noisebeat`, and the compatible mix-effect envelopes
+`mixpulse`, `mixspin`, and `mixbeat` on the `sbagenxlib` path.  For
+isochronic tones and `noisepulse`, the custom envelope replaces the
+default `-I` pulse shape for that tone.  For `noisebeat`, the custom
+envelope crossfades between centered mono noise and the fully
+beat-shifted stereo result.  For mix effects, the custom envelope
+modulates effect strength while preserving the underlying
+sine/explicit-waveform oscillator used by the effect.  The installer
+ships a rendered reference plot for the example above as:
 
 For the spin-noise family there is now a separate `spinNN` definition family:
 
@@ -2183,6 +2185,7 @@ Here are the different types:
   brown/<amp>                         # Brown noise
   noiseNN/<amp>                       # Custom spectral noise (32 fixed log bands, dB values)
   noisepulse:<pulse>/<amp>            # Pulsed pink-noise bed
+  noisebeat:<beat>/<amp>              # Hilbert-shifted binauralized noise bed
   mix/<amp>                           # Soundtrack input mix
   <carrier><sign><freq>/<amp>         # Binaural tones
   <carrier>/<amp>                      # Sine-wave (a binaural tone with
@@ -2861,6 +2864,10 @@ shared amplitude envelope of binaural tones generated from it.
 
     custom00: e=0 0 0 1 1 0 0
     custom00:noise00:noisepulse:2/20
+
+  Or as the source for a generated-noise beat bed:
+
+    custom00:triangle:noise00:noisebeat:2/20
 
   Or as the base noise source for the spin-noise family:
 

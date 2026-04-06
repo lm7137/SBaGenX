@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 41  /* public API contract revision */
+#define SBX_API_VERSION 42  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
@@ -45,7 +45,8 @@ typedef enum {
   SBX_TONE_SPIN_BROWN = 8,
   SBX_TONE_SPIN_WHITE = 9,
   SBX_TONE_BELL = 10,
-  SBX_TONE_NOISE_PULSE = 11
+  SBX_TONE_NOISE_PULSE = 11,
+  SBX_TONE_NOISE_BEAT = 12
 } SbxToneMode;
 
 typedef enum {

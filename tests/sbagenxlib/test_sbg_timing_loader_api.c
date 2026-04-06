@@ -141,6 +141,11 @@ main(void) {
       "noise00: 12 12 11 11 10 10 9 8 7 6 5 4 3 2 1 0 -1 -2 -3 -4 -5 -6 -7 -8 -9 -10 -11 -12 -12 -12 -12 -12\n"
       "base: custom00:noise00:noisepulse:2/20\n"
       "NOW base\n";
+  const char *sbg_noise_beat_text =
+      "custom00: e=0 0 0 1 1 0 0\n"
+      "noise00: 12 12 11 11 10 10 9 8 7 6 5 4 3 2 1 0 -1 -2 -3 -4 -5 -6 -7 -8 -9 -10 -11 -12 -12 -12 -12 -12\n"
+      "base: custom00:triangle:noise00:noisebeat:2/20\n"
+      "NOW base\n";
   const char *sbg_mix_tokens_text =
       "00:00 mix/70 mixpulse:2/40 180+0/20 ==\n"
       "00:00:02 -\n";
@@ -506,6 +511,32 @@ main(void) {
   if (!(abs_sum_window(buf, (size_t)(0.16 * cfg.sample_rate), (size_t)(0.24 * cfg.sample_rate)) >
         abs_sum_window(buf, 0, (size_t)(0.04 * cfg.sample_rate)) * 2.5))
     fail("noisepulse render should show stronger mid-cycle gated noise energy");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_noise_beat_text, 0);
+  if (rc != SBX_OK) fail("noisebeat timing load failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("noisebeat keyframe retrieval failed");
+  if (kf.tone.mode != SBX_TONE_NOISE_BEAT ||
+      kf.tone.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE ||
+      kf.tone.noise_waveform != SBX_NOISE_WAVE_BASE ||
+      kf.tone.waveform != SBX_WAVE_TRIANGLE)
+    fail("noisebeat keyframe should preserve customNN, noiseNN, and waveform prefixes");
+  {
+    char spec_buf[128];
+    if (sbx_format_tone_spec(&kf.tone, spec_buf, sizeof(spec_buf)) != SBX_OK)
+      fail("noisebeat tone format failed");
+    if (strcmp(spec_buf, "custom00:noise00:triangle:noisebeat:2/20") != 0)
+      fail("noisebeat formatted tone should round-trip all prefixes");
+  }
+  free(buf);
+  frames = (size_t)(0.6 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (noisebeat)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("noisebeat render failed");
+  if (!(stereo_diff_window(buf, 0, (size_t)(0.08 * cfg.sample_rate)) < 1e-6 &&
+        stereo_diff_window(buf, (size_t)(0.32 * cfg.sample_rate), (size_t)(0.40 * cfg.sample_rate)) > 10.0))
+    fail("noisebeat render should stay mono early and diverge later when customNN opens");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_mix_tokens_text, 0);
   if (rc != SBX_OK) fail("sbg timing load with direct mix tokens failed");

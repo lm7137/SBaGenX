@@ -1,0 +1,22 @@
+## examples/X/noisebeat-night-bed.sbg
+##
+## Demonstrates `noisebeat`, which applies a beat-driven stereo shift to a
+## generated noise bed instead of to an external mix track.
+##
+## - `noise00` defines a low-heavy custom spectrum.
+## - `custom00` keeps the noise largely centered early in each cycle and opens
+##   the stereo beat effect later in the cycle.
+## - The second section slows the beat rate for a more delta-oriented texture.
+##
+## Usage:
+##   sbagenx -D examples/X/noisebeat-night-bed.sbg
+##   sbagenx examples/X/noisebeat-night-bed.sbg
+
+custom00: e=0 0 0 0 0.2 0.7 1 1 0.7 0.2 0 0
+noise00: 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0 -1 -2 -3 -4 -5 -6 -7 -8 -9 -10 -11 -12 -13
+
+theta-bed: custom00:triangle:noise00:noisebeat:4/18
+delta-bed: custom00:sine:noise00:noisebeat:2/20
+
+NOW theta-bed
++00:03:00 delta-bed ->

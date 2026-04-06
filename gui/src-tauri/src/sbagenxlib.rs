@@ -31,6 +31,7 @@ const SBX_TONE_BINAURAL: c_int = 1;
 const SBX_TONE_MONAURAL: c_int = 2;
 const SBX_TONE_ISOCHRONIC: c_int = 3;
 const SBX_TONE_NOISE_PULSE: c_int = 11;
+const SBX_TONE_NOISE_BEAT: c_int = 12;
 const SBX_TONE_SPIN_PINK: c_int = 7;
 const SBX_TONE_SPIN_BROWN: c_int = 8;
 const SBX_TONE_SPIN_WHITE: c_int = 9;
@@ -522,7 +523,7 @@ type SbxRuntimeContextCreateFromCurveProgram = unsafe extern "C" fn(
   *mut *mut SbxContext,
 ) -> c_int;
 
-const EXPECTED_SBX_API_VERSION: i32 = 41;
+const EXPECTED_SBX_API_VERSION: i32 = 42;
 
 pub struct ValidationDiagnostic {
   pub severity: &'static str,
@@ -3466,6 +3467,7 @@ fn tone_mode_has_beat_preview(mode: c_int) -> bool {
       | SBX_TONE_MONAURAL
       | SBX_TONE_ISOCHRONIC
       | SBX_TONE_NOISE_PULSE
+      | SBX_TONE_NOISE_BEAT
       | SBX_TONE_SPIN_PINK
       | SBX_TONE_SPIN_BROWN
       | SBX_TONE_SPIN_WHITE
