@@ -107,6 +107,14 @@ int main(void) {
         t.waveform != SBX_WAVE_SPIN_BASE ||
         t.noise_waveform != SBX_NOISE_WAVE_BASE)
       fail("spinNN+noiseNN tone parse mismatch");
+    if (sbx_parse_tone_spec("custom00:noise00:noisepulse:4/20", &t) != SBX_OK)
+      fail("parse custom noisepulse tone failed");
+    if (t.mode != SBX_TONE_NOISE_PULSE ||
+        t.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE ||
+        t.noise_waveform != SBX_NOISE_WAVE_BASE ||
+        fabs(t.beat_hz - 4.0) > 1e-9 ||
+        fabs(t.amplitude - 0.20) > 1e-9)
+      fail("custom noisepulse tone parse mismatch");
   }
   {
     double sec = 0.0;
@@ -180,6 +188,12 @@ int main(void) {
       fail("format spinNN+noiseNN tone failed");
     if (strcmp(spec, "spin00:noise00:spin:120+1.25/35") != 0)
       fail("format spinNN+noiseNN tone should preserve prefixes");
+    if (sbx_parse_tone_spec("custom00:noise00:noisepulse:4/20", &in) != SBX_OK)
+      fail("parse custom noisepulse tone failed");
+    if (sbx_format_tone_spec(&in, spec, sizeof(spec)) != SBX_OK)
+      fail("format custom noisepulse tone failed");
+    if (strcmp(spec, "custom00:noise00:noisepulse:4/20") != 0)
+      fail("format custom noisepulse tone should preserve prefixes");
   }
   {
     SbxToneSpec t;

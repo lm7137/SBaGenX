@@ -1,0 +1,20 @@
+## examples/X/noisepulse-theta-wash.sbg
+##
+## Demonstrates `noisepulse` with both a custom spectral noise source (`noiseNN`)
+## and a hand-shaped pulse envelope (`customNN`).
+##
+## The first section is a slightly quicker theta-rate wash. The second relaxes
+## into a slower delta-rate pulse while keeping the same low-heavy noise colour.
+##
+## Usage:
+##   sbagenx -D examples/X/noisepulse-theta-wash.sbg
+##   sbagenx examples/X/noisepulse-theta-wash.sbg
+
+custom00: e=2 0 0.05 0.35 0.9 1 0.9 0.35 0.05 0
+noise00: 12 12 11 11 10 10 9 8 7 6 5 4 3 2 1 0 -1 -2 -3 -4 -5 -6 -7 -8 -9 -10 -11 -12 -12 -12 -12 -12
+
+theta-wash: custom00:noise00:noisepulse:4/18
+delta-wash: custom00:noise00:noisepulse:2/20
+
+NOW theta-wash
++00:02:00 delta-wash ->
