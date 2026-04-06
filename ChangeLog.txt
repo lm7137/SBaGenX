@@ -1,3 +1,5 @@
+3.9.0-alpha.10: Added `noisebeat` generated-noise beat beds with optional waveform prefixes, `noiseNN` spectra, and `customNN` stereo-opening envelopes.
+3.9.0-alpha.10: Added shipped `examples/X/noisebeat-night-bed.sbg` to demonstrate `noisebeat` with custom spectral shaping and envelope-controlled stereo opening.
 3.9.0-alpha.9: Added `noiseNN` custom spectral noise with 32 log-spaced dB bands for direct noise beds and `noiseNN:spin` custom spin-noise bases.
 3.9.0-alpha.9: Fixed Linux GUI dev runtime loading to prefer the rebuilt source-tree `dist/libsbagenx.so.3` and reject stale `sbagenxlib` API mismatches cleanly.
 3.9.0-alpha.9: Added curated `examples/X` demos for `noiseNN`, `spinNN` with Brownian noise, and `mixam` broadband AM.
