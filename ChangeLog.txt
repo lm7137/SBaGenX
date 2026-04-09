@@ -1,3 +1,5 @@
+3.9.0-alpha.11: Added a persistent GUI light/dark mode with a website-style toggle, light-mode default, and theme-aware Monaco editor support.
+3.9.0-alpha.11: Extended the glass-panel visual system to dark mode while preserving the GUI background treatment and panel translucency.
 3.9.0-alpha.10: Added `noisebeat` generated-noise beat beds with optional waveform prefixes, `noiseNN` spectra, and `customNN` stereo-opening envelopes.
 3.9.0-alpha.10: Added shipped `examples/X/noisebeat-night-bed.sbg` to demonstrate `noisebeat` with custom spectral shaping and envelope-controlled stereo opening.
 3.9.0-alpha.9: Added `noiseNN` custom spectral noise with 32 log-spaced dB bands for direct noise beds and `noiseNN:spin` custom spin-noise bases.
