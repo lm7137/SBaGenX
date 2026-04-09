@@ -135,6 +135,6 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--text-muted);
+    color: var(--muted);
   }
 </style>

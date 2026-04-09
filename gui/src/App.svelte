@@ -50,6 +50,7 @@
     curve: '00ls:l=0.15',
   }
   const DEFAULT_ISO_PARAMS_SPEC = 's=0.0485:d=0.4030:a=0.5:r=0.5:e=2'
+  const THEME_STORAGE_KEY = 'sbagenx-gui-theme'
 
   const bootstrappedExampleSuffixes = new Set([
     '/examples/plus/deep-sleep-aid.sbg',
@@ -67,7 +68,10 @@
     | { mode: 'sequence'; id: string }
     | { mode: 'program' }
 
+  type ThemeMode = 'light' | 'dark'
+
   let runtimeMode: RuntimeMode = 'program'
+  let themeMode: ThemeMode = 'light'
   let documents: DocumentRecord[] = [makeUntitledDocument('sbg')]
   let activeId = documents[0].id
   let programKind: ProgramKind = 'drop'
@@ -270,6 +274,20 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       queueProgramValidation()
     }
     tick().then(() => editorView?.focusEditor())
+  }
+
+  function applyTheme(nextTheme: ThemeMode) {
+    themeMode = nextTheme
+    document.documentElement.dataset.theme = nextTheme
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme)
+    } catch {
+      // Ignore storage failures in restricted environments.
+    }
+  }
+
+  function toggleTheme() {
+    applyTheme(themeMode === 'dark' ? 'light' : 'dark')
   }
 
   function selectProgramKind(nextKind: ProgramKind) {
@@ -1117,6 +1135,16 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     (!!activeDocument?.mixPathOverride || sequenceDocumentHasPreambleMix(activeDocument))
 
   onMount(() => {
+    try {
+      const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
+      if (storedTheme === 'dark' || storedTheme === 'light') {
+        themeMode = storedTheme
+      }
+    } catch {
+      // Ignore storage failures in restricted environments.
+    }
+    document.documentElement.dataset.theme = themeMode
+
     const onKeydown = (event: KeyboardEvent) => handleGlobalKeydown(event)
     window.addEventListener('keydown', onKeydown)
 
@@ -1199,6 +1227,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     })()
 
     return () => {
+      delete document.documentElement.dataset.theme
       window.removeEventListener('keydown', onKeydown)
       unlistenPlaybackEvents?.()
       if (validationTimer) clearTimeout(validationTimer)
@@ -1228,27 +1257,51 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     </div>
 
     <div class='toolbar-stack'>
-      <div class='mode-selector' role='radiogroup' aria-label='Runtime mode'>
-        <label class:active={runtimeMode === 'program'} class='mode-option'>
-          <input
-            type='radio'
-            name='runtime-mode'
-            value='program'
-            checked={runtimeMode === 'program'}
-            on:change={() => selectRuntimeMode('program')}
-          />
-          <span>Built-in Program</span>
-        </label>
-        <label class:active={runtimeMode === 'sequence'} class='mode-option'>
-          <input
-            type='radio'
-            name='runtime-mode'
-            value='sequence'
-            checked={runtimeMode === 'sequence'}
-            on:change={() => selectRuntimeMode('sequence')}
-          />
-          <span>Sequence File</span>
-        </label>
+      <div class='toolbar-mode-row'>
+        <button
+          class:active={themeMode === 'light'}
+          class='theme-toggle'
+          type='button'
+          aria-label={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          on:click={toggleTheme}
+        >
+          <span class='theme-toggle-track' aria-hidden='true'></span>
+          <span class='theme-toggle-thumb' aria-hidden='true'>
+            <span class='theme-toggle-icon theme-toggle-icon-moon'>
+              <svg viewBox='0 0 24 24' aria-hidden='true'>
+                <path d='M20.2 14.3A8.5 8.5 0 0 1 9.7 3.8a.75.75 0 0 0-1-.88 9.5 9.5 0 1 0 12.38 12.37.75.75 0 0 0-.95-.97Z'></path>
+              </svg>
+            </span>
+            <span class='theme-toggle-icon theme-toggle-icon-sun'>
+              <svg viewBox='0 0 24 24' aria-hidden='true'>
+                <path d='M12 4.75a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V5.5a.75.75 0 0 1 .75-.75Zm0 10.5a3.25 3.25 0 1 0 0-6.5 3.25 3.25 0 0 0 0 6.5ZM6.5 11.25a.75.75 0 0 1 0 1.5H5a.75.75 0 0 1 0-1.5h1.5Zm13 0a.75.75 0 0 1 0 1.5H18a.75.75 0 0 1 0-1.5h1.5ZM7.46 6.4a.75.75 0 0 1 1.06 0l1.06 1.06a.75.75 0 0 1-1.06 1.06L7.46 7.46a.75.75 0 0 1 0-1.06Zm8.96 8.96a.75.75 0 0 1 1.06 0l1.06 1.06a.75.75 0 1 1-1.06 1.06l-1.06-1.06a.75.75 0 0 1 0-1.06Zm2.12-8.96a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0Zm-8.96 8.96a.75.75 0 0 1 0 1.06l-1.06 1.06a.75.75 0 1 1-1.06-1.06l1.06-1.06a.75.75 0 0 1 1.06 0ZM12 17.25a.75.75 0 0 1 .75.75v1.5a.75.75 0 0 1-1.5 0V18a.75.75 0 0 1 .75-.75Z'></path>
+              </svg>
+            </span>
+          </span>
+        </button>
+
+        <div class='mode-selector' role='radiogroup' aria-label='Runtime mode'>
+          <label class:active={runtimeMode === 'program'} class='mode-option'>
+            <input
+              type='radio'
+              name='runtime-mode'
+              value='program'
+              checked={runtimeMode === 'program'}
+              on:change={() => selectRuntimeMode('program')}
+            />
+            <span>Built-in Program</span>
+          </label>
+          <label class:active={runtimeMode === 'sequence'} class='mode-option'>
+            <input
+              type='radio'
+              name='runtime-mode'
+              value='sequence'
+              checked={runtimeMode === 'sequence'}
+              on:change={() => selectRuntimeMode('sequence')}
+            />
+            <span>Sequence File</span>
+          </label>
+        </div>
       </div>
 
       <div class='toolbar'>
@@ -1382,6 +1435,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
                 bind:this={editorView}
                 docId={activeDocument.id}
                 language='sbg'
+                themeMode={themeMode}
                 value={activeDocument.content}
                 diagnostics={activeDiagnostics}
                 onChange={handleEditorChange}
@@ -1556,6 +1610,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
                 bind:this={editorView}
                 docId={programCurveDocument.id}
                 language='sbgf'
+                themeMode={themeMode}
                 value={programCurveDocument.content}
                 diagnostics={programCurveDocument.diagnostics}
                 onChange={handleEditorChange}

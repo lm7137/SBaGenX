@@ -80,6 +80,35 @@ function registerTheme(monaco: typeof Monaco) {
       'editorMarkerNavigationWarning.background': '#d59a1f',
     },
   })
+
+  monaco.editor.defineTheme('sbagenx-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '8f9aa7' },
+      { token: 'keyword', foreground: '82b6ff', fontStyle: 'bold' },
+      { token: 'type', foreground: 'ffc67b' },
+      { token: 'type.identifier', foreground: 'b8d7ff', fontStyle: 'bold' },
+      { token: 'number', foreground: '8de0b6' },
+      { token: 'operator', foreground: 'ff9a70' },
+      { token: 'string', foreground: 'f3a3d3' },
+    ],
+    colors: {
+      'editor.background': '#12161f',
+      'editorLineNumber.foreground': '#6d7784',
+      'editor.lineHighlightBackground': '#1a2230',
+      'editor.selectionBackground': '#233d63',
+      'editor.inactiveSelectionBackground': '#1c2a40',
+      'editorError.foreground': '#ff7da3',
+      'editorWarning.foreground': '#f4c04d',
+      'editorError.border': '#ff7da3',
+      'editorWarning.border': '#f4c04d',
+      'editorError.background': '#4b1f2d',
+      'editorWarning.background': '#433417',
+      'editorMarkerNavigationError.background': '#b82b59',
+      'editorMarkerNavigationWarning.background': '#a87b16',
+    },
+  })
 }
 
 export function ensureMonacoSetup(monaco: typeof Monaco) {

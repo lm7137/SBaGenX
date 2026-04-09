@@ -5,6 +5,7 @@
 
   export let docId: string
   export let language: 'sbg' | 'sbgf'
+  export let themeMode: 'light' | 'dark' = 'light'
   export let value = ''
   export let diagnostics: ValidationDiagnostic[] = []
   export let readOnly = false
@@ -126,7 +127,7 @@
     editor = monaco.editor.create(host, {
       value,
       language,
-      theme: 'sbagenx-light',
+      theme: themeMode === 'dark' ? 'sbagenx-dark' : 'sbagenx-light',
       renderValidationDecorations: 'on',
       automaticLayout: true,
       minimap: { enabled: false },
@@ -168,6 +169,10 @@
   $: if (editor && monacoRef && decorationsCollection) {
     diagnostics
     applyMarkers()
+  }
+
+  $: if (editor && monacoRef) {
+    monacoRef.editor.setTheme(themeMode === 'dark' ? 'sbagenx-dark' : 'sbagenx-light')
   }
 
   onDestroy(() => {
