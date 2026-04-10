@@ -1526,6 +1526,40 @@ fn resolve_library_path() -> Result<PathBuf, String> {
     .ok_or_else(|| "unable to locate a usable sbagenxlib runtime library".to_string())
 }
 
+fn runtime_bundle_library_path() -> PathBuf {
+  let bundle_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime-bundle");
+  if cfg!(target_os = "linux") {
+    bundle_dir.join("libsbagenx.so.3")
+  } else if cfg!(target_os = "windows") {
+    if cfg!(target_pointer_width = "64") {
+      bundle_dir.join("sbagenxlib-win64.dll")
+    } else {
+      bundle_dir.join("sbagenxlib-win32.dll")
+    }
+  } else if cfg!(target_os = "macos") {
+    bundle_dir.join("libsbagenx.dylib")
+  } else {
+    panic!("unsupported platform");
+  }
+}
+
+pub fn smoke_runtime_bundle_abi_validation() -> Result<String, String> {
+  let path = runtime_bundle_library_path();
+  if !path.exists() {
+    return Err(format!("runtime bundle library missing: {}", path.display()));
+  }
+  let api = Api::load_from_path(&path)?;
+  if api.api_version() != EXPECTED_SBX_API_VERSION {
+    return Err(format!(
+      "runtime bundle API version mismatch at {}: expected {}, got {}",
+      path.display(),
+      EXPECTED_SBX_API_VERSION,
+      api.api_version()
+    ));
+  }
+  Ok(api.version_string())
+}
+
 fn cstr_to_string(ptr: *const c_char) -> String {
   if ptr.is_null() {
     return String::new();
@@ -4243,23 +4277,6 @@ mod tests {
     dir
   }
 
-  fn runtime_bundle_library_path() -> PathBuf {
-    let bundle_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime-bundle");
-    if cfg!(target_os = "linux") {
-      bundle_dir.join("libsbagenx.so.3")
-    } else if cfg!(target_os = "windows") {
-      if cfg!(target_pointer_width = "64") {
-        bundle_dir.join("sbagenxlib-win64.dll")
-      } else {
-        bundle_dir.join("sbagenxlib-win32.dll")
-      }
-    } else if cfg!(target_os = "macos") {
-      bundle_dir.join("libsbagenx.dylib")
-    } else {
-      panic!("unsupported test platform");
-    }
-  }
-
   #[test]
   fn api_loader_validates_ffi_layouts() {
     let api = Api::load().expect("load sbagenxlib api");
@@ -4271,10 +4288,7 @@ mod tests {
     if std::env::var_os("SBAGENX_GUI_RUNTIME_BUNDLE_SMOKE").is_none() {
       return;
     }
-    let path = runtime_bundle_library_path();
-    assert!(path.exists(), "runtime bundle library missing: {}", path.display());
-    let api = Api::load_from_path(&path).expect("load staged runtime bundle");
-    assert_eq!(api.api_version(), EXPECTED_SBX_API_VERSION);
+    smoke_runtime_bundle_abi_validation().expect("validate staged runtime bundle");
   }
 
   #[test]

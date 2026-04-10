@@ -20,9 +20,8 @@ bash "$ROOT_DIR/linux-build-sbagenx.sh" >/dev/null
   npm run prepare:runtime >/dev/null
 )
 
-SBAGENX_GUI_RUNTIME_BUNDLE_SMOKE=1 \
-  cargo test --manifest-path "$GUI_DIR/src-tauri/Cargo.toml" \
-  runtime_bundle_library_passes_abi_validation -- --nocapture >/tmp/sbagenx_gui_runtime_bundle_smoke_$$.out \
+cargo run --manifest-path "$GUI_DIR/src-tauri/Cargo.toml" \
+  --bin runtime_bundle_smoke >/tmp/sbagenx_gui_runtime_bundle_smoke_$$.out \
   || {
     cat /tmp/sbagenx_gui_runtime_bundle_smoke_$$.out >&2 || true
     fail "runtime bundle cargo smoke test failed"

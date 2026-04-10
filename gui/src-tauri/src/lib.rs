@@ -1,5 +1,7 @@
 mod sbagenxlib;
 
+pub use crate::sbagenxlib::smoke_runtime_bundle_abi_validation;
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
 use std::fs;
