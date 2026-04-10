@@ -1,3 +1,7 @@
+3.9.0-alpha.12: Added an SBGLIB comparison benchmark to measure 16-bit residuals and high-precision path quality against sbagenxlib.
+3.9.0-alpha.12: Band-limited runtime square, triangle, and sawtooth tone carriers to reduce aliasing on the main render path.
+3.9.0-alpha.12: Added exported sbagenxlib ABI layout metadata plus GUI-side Rust/C struct validation to catch shared-library mismatches before use.
+3.9.0-alpha.12: Added standalone GUI runtime-bundle smoke validation for Windows/Linux without relying on the MinGW cargo-test DLL path.
 3.9.0-alpha.11: Added a persistent GUI light/dark mode with a website-style toggle, light-mode default, and theme-aware Monaco editor support.
 3.9.0-alpha.11: Extended the glass-panel visual system to dark mode while preserving the GUI background treatment and panel translucency.
 3.9.0-alpha.10: Added `noisebeat` generated-noise beat beds with optional waveform prefixes, `noiseNN` spectra, and `customNN` stereo-opening envelopes.
