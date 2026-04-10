@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 42  /* public API contract revision */
+#define SBX_API_VERSION 43  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
@@ -499,6 +499,88 @@ typedef struct {
   const SbxAmpAdjustSpec *amp_adjust;   /* optional -c amplitude-adjust curve */
 } SbxRuntimeContextConfig;
 
+typedef struct {
+  size_t amp_adjust_point_size;
+  size_t amp_adjust_point_adj_offset;
+  size_t amp_adjust_spec_size;
+  size_t amp_adjust_spec_points_offset;
+  size_t mix_mod_spec_size;
+  size_t mix_mod_spec_end_level_offset;
+  size_t mix_mod_spec_wake_enabled_offset;
+  size_t iso_envelope_spec_size;
+  size_t iso_envelope_spec_release_offset;
+  size_t iso_envelope_spec_edge_mode_offset;
+  size_t mix_fx_spec_size;
+  size_t mix_fx_spec_envelope_waveform_offset;
+  size_t mix_fx_spec_amp_offset;
+  size_t mix_fx_spec_mixam_mode_offset;
+  size_t mix_fx_spec_mixam_floor_offset;
+  size_t mix_fx_spec_mixam_bind_program_beat_offset;
+  size_t mix_amp_keyframe_size;
+  size_t mix_amp_keyframe_interp_offset;
+  size_t engine_config_size;
+  size_t engine_config_channels_offset;
+  size_t pcm_convert_state_size;
+  size_t pcm_convert_state_dither_mode_offset;
+  size_t audio_writer_config_size;
+  size_t audio_writer_config_format_offset;
+  size_t audio_writer_config_mp3_vbr_quality_offset;
+  size_t audio_writer_config_prefer_float_input_offset;
+  size_t tone_spec_size;
+  size_t tone_spec_amplitude_offset;
+  size_t tone_spec_waveform_offset;
+  size_t tone_spec_noise_waveform_offset;
+  size_t tone_spec_iso_release_offset;
+  size_t tone_spec_iso_edge_mode_offset;
+  size_t program_keyframe_size;
+  size_t program_keyframe_tone_offset;
+  size_t program_keyframe_interp_offset;
+  size_t mix_input_config_size;
+  size_t mix_input_config_looper_spec_override_offset;
+  size_t mix_input_config_warn_user_offset;
+  size_t safe_seqfile_preamble_size;
+  size_t safe_seqfile_preamble_amp_adjust_offset;
+  size_t safe_seqfile_preamble_mix_mod_offset;
+  size_t safe_seqfile_preamble_iso_env_offset;
+  size_t safe_seqfile_preamble_mixam_env_offset;
+  size_t safe_seqfile_preamble_have_K_offset;
+  size_t safe_seqfile_preamble_mix_path_offset;
+  size_t safe_seqfile_preamble_out_path_offset;
+  size_t diagnostic_size;
+  size_t diagnostic_message_offset;
+  size_t curve_info_size;
+  size_t curve_info_mixamp_piece_count_offset;
+  size_t curve_eval_config_size;
+  size_t curve_eval_config_wake_min_offset;
+  size_t curve_eval_config_mix_amp0_pct_offset;
+  size_t curve_source_config_size;
+  size_t curve_source_config_iso_release_offset;
+  size_t curve_source_config_duration_sec_offset;
+  size_t curve_source_config_loop_offset;
+  size_t builtin_drop_config_size;
+  size_t builtin_drop_config_beat_target_hz_offset;
+  size_t builtin_drop_config_wake_sec_offset;
+  size_t builtin_drop_config_fade_sec_offset;
+  size_t builtin_sigmoid_config_size;
+  size_t builtin_sigmoid_config_beat_target_hz_offset;
+  size_t builtin_sigmoid_config_wake_sec_offset;
+  size_t builtin_sigmoid_config_sig_h_offset;
+  size_t builtin_slide_config_size;
+  size_t builtin_slide_config_carrier_end_hz_offset;
+  size_t builtin_slide_config_fade_sec_offset;
+  size_t curve_timeline_config_size;
+  size_t curve_timeline_config_wake_sec_offset;
+  size_t curve_timeline_config_mute_program_tone_offset;
+  size_t curve_timeline_config_fade_sec_offset;
+  size_t curve_timeline_size;
+  size_t curve_timeline_mix_frames_offset;
+  size_t curve_timeline_mix_frame_count_offset;
+  size_t runtime_context_config_size;
+  size_t runtime_context_config_default_mix_amp_pct_offset;
+  size_t runtime_context_config_aux_tones_offset;
+  size_t runtime_context_config_amp_adjust_offset;
+} SbxAbiLayoutInfo;
+
 /* ----- Version and status ----- */
 
 /* Runtime library version string (human-readable). */
@@ -506,6 +588,9 @@ const char *sbx_version(void);
 
 /* Public API version integer (for feature gating). */
 int sbx_api_version(void);
+
+/* Fill out with canonical C-side ABI sizes/offsets for binding validation. */
+void sbx_fill_abi_layout_info(SbxAbiLayoutInfo *info);
 
 /* Convert status code (SBX_*) to short text. */
 const char *sbx_status_string(int status);

@@ -367,6 +367,90 @@ struct SbxRuntimeContextConfig {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+struct SbxAbiLayoutInfo {
+  amp_adjust_point_size: usize,
+  amp_adjust_point_adj_offset: usize,
+  amp_adjust_spec_size: usize,
+  amp_adjust_spec_points_offset: usize,
+  mix_mod_spec_size: usize,
+  mix_mod_spec_end_level_offset: usize,
+  mix_mod_spec_wake_enabled_offset: usize,
+  iso_envelope_spec_size: usize,
+  iso_envelope_spec_release_offset: usize,
+  iso_envelope_spec_edge_mode_offset: usize,
+  mix_fx_spec_size: usize,
+  mix_fx_spec_envelope_waveform_offset: usize,
+  mix_fx_spec_amp_offset: usize,
+  mix_fx_spec_mixam_mode_offset: usize,
+  mix_fx_spec_mixam_floor_offset: usize,
+  mix_fx_spec_mixam_bind_program_beat_offset: usize,
+  mix_amp_keyframe_size: usize,
+  mix_amp_keyframe_interp_offset: usize,
+  engine_config_size: usize,
+  engine_config_channels_offset: usize,
+  pcm_convert_state_size: usize,
+  pcm_convert_state_dither_mode_offset: usize,
+  audio_writer_config_size: usize,
+  audio_writer_config_format_offset: usize,
+  audio_writer_config_mp3_vbr_quality_offset: usize,
+  audio_writer_config_prefer_float_input_offset: usize,
+  tone_spec_size: usize,
+  tone_spec_amplitude_offset: usize,
+  tone_spec_waveform_offset: usize,
+  tone_spec_noise_waveform_offset: usize,
+  tone_spec_iso_release_offset: usize,
+  tone_spec_iso_edge_mode_offset: usize,
+  program_keyframe_size: usize,
+  program_keyframe_tone_offset: usize,
+  program_keyframe_interp_offset: usize,
+  mix_input_config_size: usize,
+  mix_input_config_looper_spec_override_offset: usize,
+  mix_input_config_warn_user_offset: usize,
+  safe_seqfile_preamble_size: usize,
+  safe_seqfile_preamble_amp_adjust_offset: usize,
+  safe_seqfile_preamble_mix_mod_offset: usize,
+  safe_seqfile_preamble_iso_env_offset: usize,
+  safe_seqfile_preamble_mixam_env_offset: usize,
+  safe_seqfile_preamble_have_k_offset: usize,
+  safe_seqfile_preamble_mix_path_offset: usize,
+  safe_seqfile_preamble_out_path_offset: usize,
+  diagnostic_size: usize,
+  diagnostic_message_offset: usize,
+  curve_info_size: usize,
+  curve_info_mixamp_piece_count_offset: usize,
+  curve_eval_config_size: usize,
+  curve_eval_config_wake_min_offset: usize,
+  curve_eval_config_mix_amp0_pct_offset: usize,
+  curve_source_config_size: usize,
+  curve_source_config_iso_release_offset: usize,
+  curve_source_config_duration_sec_offset: usize,
+  curve_source_config_loop_offset: usize,
+  builtin_drop_config_size: usize,
+  builtin_drop_config_beat_target_hz_offset: usize,
+  builtin_drop_config_wake_sec_offset: usize,
+  builtin_drop_config_fade_sec_offset: usize,
+  builtin_sigmoid_config_size: usize,
+  builtin_sigmoid_config_beat_target_hz_offset: usize,
+  builtin_sigmoid_config_wake_sec_offset: usize,
+  builtin_sigmoid_config_sig_h_offset: usize,
+  builtin_slide_config_size: usize,
+  builtin_slide_config_carrier_end_hz_offset: usize,
+  builtin_slide_config_fade_sec_offset: usize,
+  curve_timeline_config_size: usize,
+  curve_timeline_config_wake_sec_offset: usize,
+  curve_timeline_config_mute_program_tone_offset: usize,
+  curve_timeline_config_fade_sec_offset: usize,
+  curve_timeline_size: usize,
+  curve_timeline_mix_frames_offset: usize,
+  curve_timeline_mix_frame_count_offset: usize,
+  runtime_context_config_size: usize,
+  runtime_context_config_default_mix_amp_pct_offset: usize,
+  runtime_context_config_aux_tones_offset: usize,
+  runtime_context_config_amp_adjust_offset: usize,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 struct SbxToneSpec {
   mode: c_int,
@@ -473,6 +557,7 @@ type SbxContextSampleIsochronicCycle = unsafe extern "C" fn(
 ) -> c_int;
 type SbxVersion = unsafe extern "C" fn() -> *const c_char;
 type SbxApiVersion = unsafe extern "C" fn() -> c_int;
+type SbxFillAbiLayoutInfo = unsafe extern "C" fn(*mut SbxAbiLayoutInfo);
 type SbxAudioWriterCreatePath =
   unsafe extern "C" fn(*const c_char, *const SbxAudioWriterConfig) -> *mut SbxAudioWriter;
 type SbxAudioWriterClose = unsafe extern "C" fn(*mut SbxAudioWriter) -> c_int;
@@ -523,7 +608,149 @@ type SbxRuntimeContextCreateFromCurveProgram = unsafe extern "C" fn(
   *mut *mut SbxContext,
 ) -> c_int;
 
-const EXPECTED_SBX_API_VERSION: i32 = 42;
+const EXPECTED_SBX_API_VERSION: i32 = 43;
+
+fn rust_abi_layout_info() -> SbxAbiLayoutInfo {
+  SbxAbiLayoutInfo {
+    amp_adjust_point_size: std::mem::size_of::<SbxAmpAdjustPoint>(),
+    amp_adjust_point_adj_offset: std::mem::offset_of!(SbxAmpAdjustPoint, adj),
+    amp_adjust_spec_size: std::mem::size_of::<SbxAmpAdjustSpec>(),
+    amp_adjust_spec_points_offset: std::mem::offset_of!(SbxAmpAdjustSpec, points),
+    mix_mod_spec_size: std::mem::size_of::<SbxMixModSpec>(),
+    mix_mod_spec_end_level_offset: std::mem::offset_of!(SbxMixModSpec, end_level),
+    mix_mod_spec_wake_enabled_offset: std::mem::offset_of!(SbxMixModSpec, wake_enabled),
+    iso_envelope_spec_size: std::mem::size_of::<SbxIsoEnvelopeSpec>(),
+    iso_envelope_spec_release_offset: std::mem::offset_of!(SbxIsoEnvelopeSpec, release),
+    iso_envelope_spec_edge_mode_offset: std::mem::offset_of!(SbxIsoEnvelopeSpec, edge_mode),
+    mix_fx_spec_size: std::mem::size_of::<SbxMixFxSpec>(),
+    mix_fx_spec_envelope_waveform_offset: std::mem::offset_of!(SbxMixFxSpec, envelope_waveform),
+    mix_fx_spec_amp_offset: std::mem::offset_of!(SbxMixFxSpec, amp),
+    mix_fx_spec_mixam_mode_offset: std::mem::offset_of!(SbxMixFxSpec, mixam_mode),
+    mix_fx_spec_mixam_floor_offset: std::mem::offset_of!(SbxMixFxSpec, mixam_floor),
+    mix_fx_spec_mixam_bind_program_beat_offset: std::mem::offset_of!(
+      SbxMixFxSpec,
+      mixam_bind_program_beat
+    ),
+    mix_amp_keyframe_size: std::mem::size_of::<SbxMixAmpKeyframe>(),
+    mix_amp_keyframe_interp_offset: std::mem::offset_of!(SbxMixAmpKeyframe, interp),
+    engine_config_size: std::mem::size_of::<SbxEngineConfig>(),
+    engine_config_channels_offset: std::mem::offset_of!(SbxEngineConfig, channels),
+    pcm_convert_state_size: std::mem::size_of::<SbxPcmConvertState>(),
+    pcm_convert_state_dither_mode_offset: std::mem::offset_of!(SbxPcmConvertState, dither_mode),
+    audio_writer_config_size: std::mem::size_of::<SbxAudioWriterConfig>(),
+    audio_writer_config_format_offset: std::mem::offset_of!(SbxAudioWriterConfig, format),
+    audio_writer_config_mp3_vbr_quality_offset: std::mem::offset_of!(
+      SbxAudioWriterConfig,
+      mp3_vbr_quality
+    ),
+    audio_writer_config_prefer_float_input_offset: std::mem::offset_of!(
+      SbxAudioWriterConfig,
+      prefer_float_input
+    ),
+    tone_spec_size: std::mem::size_of::<SbxToneSpec>(),
+    tone_spec_amplitude_offset: std::mem::offset_of!(SbxToneSpec, amplitude),
+    tone_spec_waveform_offset: std::mem::offset_of!(SbxToneSpec, waveform),
+    tone_spec_noise_waveform_offset: std::mem::offset_of!(SbxToneSpec, noise_waveform),
+    tone_spec_iso_release_offset: std::mem::offset_of!(SbxToneSpec, iso_release),
+    tone_spec_iso_edge_mode_offset: std::mem::offset_of!(SbxToneSpec, iso_edge_mode),
+    program_keyframe_size: std::mem::size_of::<SbxProgramKeyframe>(),
+    program_keyframe_tone_offset: std::mem::offset_of!(SbxProgramKeyframe, tone),
+    program_keyframe_interp_offset: std::mem::offset_of!(SbxProgramKeyframe, interp),
+    mix_input_config_size: std::mem::size_of::<SbxMixInputConfig>(),
+    mix_input_config_looper_spec_override_offset: std::mem::offset_of!(
+      SbxMixInputConfig,
+      looper_spec_override
+    ),
+    mix_input_config_warn_user_offset: std::mem::offset_of!(SbxMixInputConfig, warn_user),
+    safe_seqfile_preamble_size: std::mem::size_of::<SbxSafeSeqfilePreamble>(),
+    safe_seqfile_preamble_amp_adjust_offset: std::mem::offset_of!(
+      SbxSafeSeqfilePreamble,
+      amp_adjust
+    ),
+    safe_seqfile_preamble_mix_mod_offset: std::mem::offset_of!(SbxSafeSeqfilePreamble, mix_mod),
+    safe_seqfile_preamble_iso_env_offset: std::mem::offset_of!(SbxSafeSeqfilePreamble, iso_env),
+    safe_seqfile_preamble_mixam_env_offset: std::mem::offset_of!(
+      SbxSafeSeqfilePreamble,
+      mixam_env
+    ),
+    safe_seqfile_preamble_have_k_offset: std::mem::offset_of!(SbxSafeSeqfilePreamble, have_K),
+    safe_seqfile_preamble_mix_path_offset: std::mem::offset_of!(SbxSafeSeqfilePreamble, mix_path),
+    safe_seqfile_preamble_out_path_offset: std::mem::offset_of!(SbxSafeSeqfilePreamble, out_path),
+    diagnostic_size: std::mem::size_of::<SbxDiagnosticRaw>(),
+    diagnostic_message_offset: std::mem::offset_of!(SbxDiagnosticRaw, message),
+    curve_info_size: std::mem::size_of::<SbxCurveInfoRaw>(),
+    curve_info_mixamp_piece_count_offset: std::mem::offset_of!(
+      SbxCurveInfoRaw,
+      mixamp_piece_count
+    ),
+    curve_eval_config_size: std::mem::size_of::<SbxCurveEvalConfig>(),
+    curve_eval_config_wake_min_offset: std::mem::offset_of!(SbxCurveEvalConfig, wake_min),
+    curve_eval_config_mix_amp0_pct_offset: std::mem::offset_of!(SbxCurveEvalConfig, mix_amp0_pct),
+    curve_source_config_size: std::mem::size_of::<SbxCurveSourceConfig>(),
+    curve_source_config_iso_release_offset: std::mem::offset_of!(SbxCurveSourceConfig, iso_release),
+    curve_source_config_duration_sec_offset: std::mem::offset_of!(
+      SbxCurveSourceConfig,
+      duration_sec
+    ),
+    curve_source_config_loop_offset: std::mem::offset_of!(SbxCurveSourceConfig, loop_),
+    builtin_drop_config_size: std::mem::size_of::<SbxBuiltinDropConfig>(),
+    builtin_drop_config_beat_target_hz_offset: std::mem::offset_of!(
+      SbxBuiltinDropConfig,
+      beat_target_hz
+    ),
+    builtin_drop_config_wake_sec_offset: std::mem::offset_of!(SbxBuiltinDropConfig, wake_sec),
+    builtin_drop_config_fade_sec_offset: std::mem::offset_of!(SbxBuiltinDropConfig, fade_sec),
+    builtin_sigmoid_config_size: std::mem::size_of::<SbxBuiltinSigmoidConfig>(),
+    builtin_sigmoid_config_beat_target_hz_offset: std::mem::offset_of!(
+      SbxBuiltinSigmoidConfig,
+      beat_target_hz
+    ),
+    builtin_sigmoid_config_wake_sec_offset: std::mem::offset_of!(
+      SbxBuiltinSigmoidConfig,
+      wake_sec
+    ),
+    builtin_sigmoid_config_sig_h_offset: std::mem::offset_of!(SbxBuiltinSigmoidConfig, sig_h),
+    builtin_slide_config_size: std::mem::size_of::<SbxBuiltinSlideConfig>(),
+    builtin_slide_config_carrier_end_hz_offset: std::mem::offset_of!(
+      SbxBuiltinSlideConfig,
+      carrier_end_hz
+    ),
+    builtin_slide_config_fade_sec_offset: std::mem::offset_of!(SbxBuiltinSlideConfig, fade_sec),
+    curve_timeline_config_size: std::mem::size_of::<SbxCurveTimelineConfig>(),
+    curve_timeline_config_wake_sec_offset: std::mem::offset_of!(SbxCurveTimelineConfig, wake_sec),
+    curve_timeline_config_mute_program_tone_offset: std::mem::offset_of!(
+      SbxCurveTimelineConfig,
+      mute_program_tone
+    ),
+    curve_timeline_config_fade_sec_offset: std::mem::offset_of!(SbxCurveTimelineConfig, fade_sec),
+    curve_timeline_size: std::mem::size_of::<SbxCurveTimeline>(),
+    curve_timeline_mix_frames_offset: std::mem::offset_of!(SbxCurveTimeline, mix_frames),
+    curve_timeline_mix_frame_count_offset: std::mem::offset_of!(
+      SbxCurveTimeline,
+      mix_frame_count
+    ),
+    runtime_context_config_size: std::mem::size_of::<SbxRuntimeContextConfig>(),
+    runtime_context_config_default_mix_amp_pct_offset: std::mem::offset_of!(
+      SbxRuntimeContextConfig,
+      default_mix_amp_pct
+    ),
+    runtime_context_config_aux_tones_offset: std::mem::offset_of!(SbxRuntimeContextConfig, aux_tones),
+    runtime_context_config_amp_adjust_offset: std::mem::offset_of!(SbxRuntimeContextConfig, amp_adjust),
+  }
+}
+
+fn verify_abi_layout_info(path: &Path, actual: SbxAbiLayoutInfo) -> Result<(), String> {
+  let expected = rust_abi_layout_info();
+  if actual != expected {
+    return Err(format!(
+      "sbagenxlib at {} reports incompatible FFI layout info\nexpected: {:?}\nactual: {:?}",
+      path.display(),
+      expected,
+      actual
+    ));
+  }
+  Ok(())
+}
 
 pub struct ValidationDiagnostic {
   pub severity: &'static str,
@@ -1020,13 +1247,14 @@ impl Api {
       .map_err(|err| format!("failed to load symbol {}: {}", String::from_utf8_lossy(name), err))
   }
 
-  fn load() -> Result<Self, String> {
-    let path = resolve_library_path()?;
+  fn load_from_path(path: &Path) -> Result<Self, String> {
     let lib = unsafe { Library::new(&path) }
       .map_err(|err| format!("failed to open sbagenxlib at {}: {}", path.display(), err))?;
     unsafe {
       let sbx_version: SbxVersion = Self::load_symbol(&lib, b"sbx_version\0")?;
       let sbx_api_version: SbxApiVersion = Self::load_symbol(&lib, b"sbx_api_version\0")?;
+      let sbx_fill_abi_layout_info: SbxFillAbiLayoutInfo =
+        Self::load_symbol(&lib, b"sbx_fill_abi_layout_info\0")?;
       let loaded_api_version = sbx_api_version() as i32;
       if loaded_api_version != EXPECTED_SBX_API_VERSION {
         return Err(format!(
@@ -1035,6 +1263,11 @@ impl Api {
           loaded_api_version,
           EXPECTED_SBX_API_VERSION
         ));
+      }
+      {
+        let mut layout_info = SbxAbiLayoutInfo::default();
+        sbx_fill_abi_layout_info(&mut layout_info);
+        verify_abi_layout_info(path, layout_info)?;
       }
       Ok(Self {
         sbx_version,
@@ -1161,6 +1394,11 @@ impl Api {
         _lib: lib,
       })
     }
+  }
+
+  fn load() -> Result<Self, String> {
+    let path = resolve_library_path()?;
+    Self::load_from_path(&path)
   }
 
   fn version_string(&self) -> String {
@@ -4003,6 +4241,40 @@ mod tests {
     let dir = std::env::temp_dir().join(format!("sbagenx-gui-{}-{}", name, stamp));
     fs::create_dir_all(&dir).expect("create temp dir");
     dir
+  }
+
+  fn runtime_bundle_library_path() -> PathBuf {
+    let bundle_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime-bundle");
+    if cfg!(target_os = "linux") {
+      bundle_dir.join("libsbagenx.so.3")
+    } else if cfg!(target_os = "windows") {
+      if cfg!(target_pointer_width = "64") {
+        bundle_dir.join("sbagenxlib-win64.dll")
+      } else {
+        bundle_dir.join("sbagenxlib-win32.dll")
+      }
+    } else if cfg!(target_os = "macos") {
+      bundle_dir.join("libsbagenx.dylib")
+    } else {
+      panic!("unsupported test platform");
+    }
+  }
+
+  #[test]
+  fn api_loader_validates_ffi_layouts() {
+    let api = Api::load().expect("load sbagenxlib api");
+    assert_eq!(api.api_version(), EXPECTED_SBX_API_VERSION);
+  }
+
+  #[test]
+  fn runtime_bundle_library_passes_abi_validation() {
+    if std::env::var_os("SBAGENX_GUI_RUNTIME_BUNDLE_SMOKE").is_none() {
+      return;
+    }
+    let path = runtime_bundle_library_path();
+    assert!(path.exists(), "runtime bundle library missing: {}", path.display());
+    let api = Api::load_from_path(&path).expect("load staged runtime bundle");
+    assert_eq!(api.api_version(), EXPECTED_SBX_API_VERSION);
   }
 
   #[test]

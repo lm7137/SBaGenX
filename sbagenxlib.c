@@ -4976,6 +4976,92 @@ sbx_api_version(void) {
   return SBX_API_VERSION;
 }
 
+void
+sbx_fill_abi_layout_info(SbxAbiLayoutInfo *info) {
+  if (!info) return;
+  memset(info, 0, sizeof(*info));
+
+  info->amp_adjust_point_size = sizeof(SbxAmpAdjustPoint);
+  info->amp_adjust_point_adj_offset = offsetof(SbxAmpAdjustPoint, adj);
+  info->amp_adjust_spec_size = sizeof(SbxAmpAdjustSpec);
+  info->amp_adjust_spec_points_offset = offsetof(SbxAmpAdjustSpec, points);
+  info->mix_mod_spec_size = sizeof(SbxMixModSpec);
+  info->mix_mod_spec_end_level_offset = offsetof(SbxMixModSpec, end_level);
+  info->mix_mod_spec_wake_enabled_offset = offsetof(SbxMixModSpec, wake_enabled);
+  info->iso_envelope_spec_size = sizeof(SbxIsoEnvelopeSpec);
+  info->iso_envelope_spec_release_offset = offsetof(SbxIsoEnvelopeSpec, release);
+  info->iso_envelope_spec_edge_mode_offset = offsetof(SbxIsoEnvelopeSpec, edge_mode);
+  info->mix_fx_spec_size = sizeof(SbxMixFxSpec);
+  info->mix_fx_spec_envelope_waveform_offset = offsetof(SbxMixFxSpec, envelope_waveform);
+  info->mix_fx_spec_amp_offset = offsetof(SbxMixFxSpec, amp);
+  info->mix_fx_spec_mixam_mode_offset = offsetof(SbxMixFxSpec, mixam_mode);
+  info->mix_fx_spec_mixam_floor_offset = offsetof(SbxMixFxSpec, mixam_floor);
+  info->mix_fx_spec_mixam_bind_program_beat_offset = offsetof(SbxMixFxSpec, mixam_bind_program_beat);
+  info->mix_amp_keyframe_size = sizeof(SbxMixAmpKeyframe);
+  info->mix_amp_keyframe_interp_offset = offsetof(SbxMixAmpKeyframe, interp);
+  info->engine_config_size = sizeof(SbxEngineConfig);
+  info->engine_config_channels_offset = offsetof(SbxEngineConfig, channels);
+  info->pcm_convert_state_size = sizeof(SbxPcmConvertState);
+  info->pcm_convert_state_dither_mode_offset = offsetof(SbxPcmConvertState, dither_mode);
+  info->audio_writer_config_size = sizeof(SbxAudioWriterConfig);
+  info->audio_writer_config_format_offset = offsetof(SbxAudioWriterConfig, format);
+  info->audio_writer_config_mp3_vbr_quality_offset = offsetof(SbxAudioWriterConfig, mp3_vbr_quality);
+  info->audio_writer_config_prefer_float_input_offset = offsetof(SbxAudioWriterConfig, prefer_float_input);
+  info->tone_spec_size = sizeof(SbxToneSpec);
+  info->tone_spec_amplitude_offset = offsetof(SbxToneSpec, amplitude);
+  info->tone_spec_waveform_offset = offsetof(SbxToneSpec, waveform);
+  info->tone_spec_noise_waveform_offset = offsetof(SbxToneSpec, noise_waveform);
+  info->tone_spec_iso_release_offset = offsetof(SbxToneSpec, iso_release);
+  info->tone_spec_iso_edge_mode_offset = offsetof(SbxToneSpec, iso_edge_mode);
+  info->program_keyframe_size = sizeof(SbxProgramKeyframe);
+  info->program_keyframe_tone_offset = offsetof(SbxProgramKeyframe, tone);
+  info->program_keyframe_interp_offset = offsetof(SbxProgramKeyframe, interp);
+  info->mix_input_config_size = sizeof(SbxMixInputConfig);
+  info->mix_input_config_looper_spec_override_offset = offsetof(SbxMixInputConfig, looper_spec_override);
+  info->mix_input_config_warn_user_offset = offsetof(SbxMixInputConfig, warn_user);
+  info->safe_seqfile_preamble_size = sizeof(SbxSafeSeqfilePreamble);
+  info->safe_seqfile_preamble_amp_adjust_offset = offsetof(SbxSafeSeqfilePreamble, amp_adjust);
+  info->safe_seqfile_preamble_mix_mod_offset = offsetof(SbxSafeSeqfilePreamble, mix_mod);
+  info->safe_seqfile_preamble_iso_env_offset = offsetof(SbxSafeSeqfilePreamble, iso_env);
+  info->safe_seqfile_preamble_mixam_env_offset = offsetof(SbxSafeSeqfilePreamble, mixam_env);
+  info->safe_seqfile_preamble_have_K_offset = offsetof(SbxSafeSeqfilePreamble, have_K);
+  info->safe_seqfile_preamble_mix_path_offset = offsetof(SbxSafeSeqfilePreamble, mix_path);
+  info->safe_seqfile_preamble_out_path_offset = offsetof(SbxSafeSeqfilePreamble, out_path);
+  info->diagnostic_size = sizeof(SbxDiagnostic);
+  info->diagnostic_message_offset = offsetof(SbxDiagnostic, message);
+  info->curve_info_size = sizeof(SbxCurveInfo);
+  info->curve_info_mixamp_piece_count_offset = offsetof(SbxCurveInfo, mixamp_piece_count);
+  info->curve_eval_config_size = sizeof(SbxCurveEvalConfig);
+  info->curve_eval_config_wake_min_offset = offsetof(SbxCurveEvalConfig, wake_min);
+  info->curve_eval_config_mix_amp0_pct_offset = offsetof(SbxCurveEvalConfig, mix_amp0_pct);
+  info->curve_source_config_size = sizeof(SbxCurveSourceConfig);
+  info->curve_source_config_iso_release_offset = offsetof(SbxCurveSourceConfig, iso_release);
+  info->curve_source_config_duration_sec_offset = offsetof(SbxCurveSourceConfig, duration_sec);
+  info->curve_source_config_loop_offset = offsetof(SbxCurveSourceConfig, loop);
+  info->builtin_drop_config_size = sizeof(SbxBuiltinDropConfig);
+  info->builtin_drop_config_beat_target_hz_offset = offsetof(SbxBuiltinDropConfig, beat_target_hz);
+  info->builtin_drop_config_wake_sec_offset = offsetof(SbxBuiltinDropConfig, wake_sec);
+  info->builtin_drop_config_fade_sec_offset = offsetof(SbxBuiltinDropConfig, fade_sec);
+  info->builtin_sigmoid_config_size = sizeof(SbxBuiltinSigmoidConfig);
+  info->builtin_sigmoid_config_beat_target_hz_offset = offsetof(SbxBuiltinSigmoidConfig, beat_target_hz);
+  info->builtin_sigmoid_config_wake_sec_offset = offsetof(SbxBuiltinSigmoidConfig, wake_sec);
+  info->builtin_sigmoid_config_sig_h_offset = offsetof(SbxBuiltinSigmoidConfig, sig_h);
+  info->builtin_slide_config_size = sizeof(SbxBuiltinSlideConfig);
+  info->builtin_slide_config_carrier_end_hz_offset = offsetof(SbxBuiltinSlideConfig, carrier_end_hz);
+  info->builtin_slide_config_fade_sec_offset = offsetof(SbxBuiltinSlideConfig, fade_sec);
+  info->curve_timeline_config_size = sizeof(SbxCurveTimelineConfig);
+  info->curve_timeline_config_wake_sec_offset = offsetof(SbxCurveTimelineConfig, wake_sec);
+  info->curve_timeline_config_mute_program_tone_offset = offsetof(SbxCurveTimelineConfig, mute_program_tone);
+  info->curve_timeline_config_fade_sec_offset = offsetof(SbxCurveTimelineConfig, fade_sec);
+  info->curve_timeline_size = sizeof(SbxCurveTimeline);
+  info->curve_timeline_mix_frames_offset = offsetof(SbxCurveTimeline, mix_frames);
+  info->curve_timeline_mix_frame_count_offset = offsetof(SbxCurveTimeline, mix_frame_count);
+  info->runtime_context_config_size = sizeof(SbxRuntimeContextConfig);
+  info->runtime_context_config_default_mix_amp_pct_offset = offsetof(SbxRuntimeContextConfig, default_mix_amp_pct);
+  info->runtime_context_config_aux_tones_offset = offsetof(SbxRuntimeContextConfig, aux_tones);
+  info->runtime_context_config_amp_adjust_offset = offsetof(SbxRuntimeContextConfig, amp_adjust);
+}
+
 const char *
 sbx_status_string(int status) {
   switch (status) {
