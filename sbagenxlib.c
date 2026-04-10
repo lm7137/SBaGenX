@@ -1441,6 +1441,72 @@ sbx_wave_sample_unit_phase(int waveform, double phase_unit) {
   return wav;
 }
 
+static double
+sbx_poly_blep(double t, double dt) {
+  if (!(dt > 0.0) || dt >= 1.0)
+    return 0.0;
+  t = sbx_dsp_wrap_unit(t);
+  if (t < dt) {
+    t /= dt;
+    return t + t - t * t - 1.0;
+  }
+  if (t > 1.0 - dt) {
+    t = (t - 1.0) / dt;
+    return t * t + t + t + 1.0;
+  }
+  return 0.0;
+}
+
+static double
+sbx_bandlimited_square_sample(double phase_unit, double dt) {
+  double out = (phase_unit < 0.5) ? 1.0 : -1.0;
+  out += sbx_poly_blep(phase_unit, dt);
+  out -= sbx_poly_blep(sbx_dsp_wrap_unit(phase_unit + 0.5), dt);
+  return out;
+}
+
+static double
+sbx_bandlimited_saw_sample(double phase_unit, double dt) {
+  double out = -1.0 + 2.0 * phase_unit;
+  out -= sbx_poly_blep(phase_unit, dt);
+  return out;
+}
+
+static double
+sbx_oversampled_triangle_sample(double phase_unit, double dt) {
+  int i;
+  double acc = 0.0;
+  const int oversample = 4;
+  for (i = 0; i < oversample; ++i) {
+    double sub_phase = sbx_dsp_wrap_unit(phase_unit + dt * ((double)i + 0.5) / (double)oversample);
+    acc += sbx_wave_sample_unit_phase(SBX_WAVE_TRIANGLE, sub_phase);
+  }
+  return acc / (double)oversample;
+}
+
+static double
+engine_wave_runtime_sample(SbxEngine *eng,
+                           int waveform,
+                           double phase,
+                           double phase_inc) {
+  double phase_unit = sbx_dsp_wrap_cycle(phase, SBX_TAU) / SBX_TAU;
+  double dt = fabs(phase_inc) / SBX_TAU;
+  if (dt > 0.5)
+    dt = 0.5;
+  (void)eng;
+  switch (waveform) {
+    case SBX_WAVE_SQUARE:
+      return sbx_bandlimited_square_sample(phase_unit, dt);
+    case SBX_WAVE_TRIANGLE:
+      return sbx_oversampled_triangle_sample(phase_unit, dt);
+    case SBX_WAVE_SAWTOOTH:
+      return sbx_bandlimited_saw_sample(phase_unit, dt);
+    case SBX_WAVE_SINE:
+    default:
+      return sin(phase);
+  }
+}
+
 static const char *
 skip_ws(const char *p) {
   while (*p && isspace((unsigned char)*p)) p++;
@@ -4057,35 +4123,39 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
   if (eng->tone.mode == SBX_TONE_BINAURAL) {
     double f_l = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
     double f_r = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
+    double inc_l = SBX_TAU * f_l / sr;
+    double inc_r = SBX_TAU * f_r / sr;
     double env = 1.0;
     int custom_rc = engine_custom_env_sample(eng, eng->tone.envelope_waveform, eng->pulse_phase, &env);
     if (custom_rc == 1) {
-      engine_wave_sample(eng->tone.waveform, eng->phase_l, &left);
-      engine_wave_sample(eng->tone.waveform, eng->phase_r, &right);
+      left = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_l, inc_l);
+      right = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_r, inc_r);
       left *= amp * env;
       right *= amp * env;
       eng->pulse_phase += fabs(eng->tone.beat_hz) / sr;
       while (eng->pulse_phase >= 1.0) eng->pulse_phase -= 1.0;
     } else {
-      engine_wave_sample(eng->tone.waveform, eng->phase_l, &left);
-      engine_wave_sample(eng->tone.waveform, eng->phase_r, &right);
+      left = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_l, inc_l);
+      right = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_r, inc_r);
       left *= amp;
       right *= amp;
     }
-    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f_l / sr, SBX_TAU);
-    eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f_r / sr, SBX_TAU);
+    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + inc_l, SBX_TAU);
+    eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + inc_r, SBX_TAU);
   } else if (eng->tone.mode == SBX_TONE_MONAURAL) {
     double f1 = eng->tone.carrier_hz - eng->tone.beat_hz * 0.5;
     double f2 = eng->tone.carrier_hz + eng->tone.beat_hz * 0.5;
+    double inc1 = SBX_TAU * f1 / sr;
+    double inc2 = SBX_TAU * f2 / sr;
     double s1 = 0.0, s2 = 0.0;
     double mono;
-    engine_wave_sample(eng->tone.waveform, eng->phase_l, &s1);
-    engine_wave_sample(eng->tone.waveform, eng->phase_r, &s2);
+    s1 = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_l, inc1);
+    s2 = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_r, inc2);
     mono = 0.5 * amp * (s1 + s2);
     left = mono;
     right = mono;
-    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * f1 / sr, SBX_TAU);
-    eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * f2 / sr, SBX_TAU);
+    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + inc1, SBX_TAU);
+    eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + inc2, SBX_TAU);
   } else if (eng->tone.mode == SBX_TONE_ISOCHRONIC ||
              eng->tone.mode == SBX_TONE_NOISE_PULSE) {
     double env = 0.0;
@@ -4094,8 +4164,9 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     int custom_rc;
 
     if (eng->tone.mode == SBX_TONE_ISOCHRONIC) {
-      engine_wave_sample(eng->tone.waveform, eng->phase_l, &carrier_or_noise);
-      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr, SBX_TAU);
+      double inc = SBX_TAU * eng->tone.carrier_hz / sr;
+      carrier_or_noise = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_l, inc);
+      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + inc, SBX_TAU);
     } else {
       carrier_or_noise = engine_next_noise_sample_for_tone(eng, &eng->tone, 2);
     }
@@ -4139,9 +4210,10 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
   } else if (eng->tone.mode == SBX_TONE_BELL) {
     double bell_wave = 0.0;
     if (eng->bell_env > 0.0) {
-      engine_wave_sample(eng->tone.waveform, eng->phase_l, &bell_wave);
+      double inc = SBX_TAU * eng->tone.carrier_hz / sr;
+      bell_wave = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_l, inc);
       left = right = bell_wave * eng->bell_env;
-      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + SBX_TAU * eng->tone.carrier_hz / sr, SBX_TAU);
+      eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + inc, SBX_TAU);
 
       eng->bell_tick++;
       if (eng->bell_tick >= eng->bell_tick_period) {
