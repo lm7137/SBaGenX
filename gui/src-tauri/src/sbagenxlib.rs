@@ -1527,6 +1527,12 @@ fn resolve_library_path() -> Result<PathBuf, String> {
 }
 
 fn runtime_bundle_library_path() -> PathBuf {
+  if let Ok(path) = std::env::var("SBAGENX_GUI_RUNTIME_BUNDLE_LIBRARY") {
+    let path = PathBuf::from(path);
+    if path.exists() {
+      return path;
+    }
+  }
   let bundle_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime-bundle");
   if cfg!(target_os = "linux") {
     bundle_dir.join("libsbagenx.so.3")
