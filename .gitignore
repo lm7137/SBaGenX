@@ -1,6 +1,8 @@
 .DS_Store
 build
 dist
+target/
+tests/gui/runtime_bundle_smoke/Cargo.lock
 libs/*.a
 sbagenx-*
 *.exe
