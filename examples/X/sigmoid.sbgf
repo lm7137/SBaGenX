@@ -1,0 +1,31 @@
+# SBaGenX custom curve example (.sbgf)
+# Exact built-in `-p sigmoid` replica expressed as a reusable curve file.
+# The main sigmoid constants are solved from the same boundary conditions
+# used by the built-in program:
+#   beat(0) = b0
+#   beat(D) = b1
+#
+# Usage examples:
+#   sbagenx -p curve examples/X/sigmoid.sbgf 00ls:l=0.125:h=0
+#   sbagenx -p curve examples/X/sigmoid.sbgf t30,30,3 00ls+^:l=0.125:h=0
+#
+# Runtime variables:
+#   m  = minutes from start of main session
+#   t  = seconds from start of main session
+#   D  = drop-time in minutes
+#   T  = total main time in minutes (drop + hold)
+#   U  = wake-time in minutes
+#   b0 = start beat/pulse frequency in Hz
+#   b1 = target beat/pulse frequency in Hz
+#   c0 = start carrier frequency in Hz
+#   c1 = end carrier frequency in Hz (after drop/hold)
+#   a0 = base tone amplitude in % (from /amp in curve spec)
+
+param l = 0.125
+param h = 0
+
+solve A,B : A*tanh(l*(0-D/2-h))+B=b0 ; A*tanh(l*(D-D/2-h))+B=b1
+
+beat = ifelse(lt(m,D), A*tanh(l*(m-D/2-h))+B, ifelse(gt(U,0), ifelse(lt(m,T), b1, seg(m,T,T+U,b1,b0)), b1))
+carrier = ifelse(lt(m,T), c0 + (c1-c0)*ramp(m,0,T), ifelse(gt(U,0), seg(m,T,T+U,c1,c0), c1))
+amp = ifelse(lt(t,(T+U)*60), a0, ifelse(lt(t,(T+U)*60+10), a0*(1-ramp(t,(T+U)*60,(T+U)*60+10)), 0))
