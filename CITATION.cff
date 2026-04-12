@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+title: "SBaGenX"
+message: "If you use SBaGenX in research, software, or documentation, please cite the project using this metadata."
+type: software
+version: "3.9.0-alpha.12"
+repository-code: "https://github.com/lm7137/SBaGenX"
+url: "https://www.sbagenx.com"
+authors:
+  - family-names: Peters
+    given-names: Jim
+  - family-names: Klein
+    given-names: Ruan
+  - family-names: Contributors
+    given-names: SBaGenX
