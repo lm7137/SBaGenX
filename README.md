@@ -4,6 +4,8 @@ SBaGenX is a scriptable audio-generation toolkit for brainwave-style sessions: a
 
 ![SBaGenX example plot](assets/example-plot-drop-binaural-default.png)
 
+![SBaGenX desktop GUI](docs/images/gui-screenshot.png)
+
 ## Why it is interesting
 
 - Build sessions from `.sbg` sequence files or built-in programs such as `drop`, `sigmoid`, `slide`, and `curve`.
