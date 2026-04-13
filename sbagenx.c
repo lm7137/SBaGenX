@@ -356,13 +356,15 @@ help() {
 	  NL "Options:  -h        Display this help-text"
 	  NL "          -Q        Quiet - don't display running status"
 	  NL "          -D        Display the full interpreted sequence instead of playing it"
-	  NL "          -P        Plot one-cycle envelope/waveform PNG and exit"
+	  NL "          -P, --cycle-plot"
+	  NL "                     Plot one-cycle envelope/waveform PNG and exit"
 	  NL "                     With -H: plots mixam envelope/gain cycle"
 	  NL "                     With -p ... and mixam:<...> extras: plots mixam cycle"
 	  NL "                     Otherwise: plots one-cycle isochronic waveform"
 	  NL "                     Compatibility: with -p drop/-p sigmoid/-p curve and no"
 	  NL "                     cycle target, falls back to program beat/pulse graph"
-	  NL "          -G        Plot program beat/pulse-vs-time PNG and exit"
+	  NL "          -G, --graph"
+	  NL "                     Plot program beat/pulse-vs-time PNG and exit"
 	  NL "                     Supported with -p drop/-p sigmoid/-p curve"
 	  NL "          --graph-video file"
 	  NL "                     With -G, also write an MP4 animation with"
@@ -428,7 +430,8 @@ help() {
 		  "wav/raw format"
 	  NL "          -M        Read raw audio data from the standard input and mix it"
 	  NL "                      with the generated brainwave tones (raw only)"
-	  NL "          -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid"
+	  NL "          -A [spec], --amp-mod [spec]"
+	  NL "                    Enable mix amplitude modulation for -p drop/-p sigmoid"
 	  NL "                      with mix input; spec is d=<v>:e=<v>:k=<v>:E=<v>"
 	  NL "                      defaults: d=0.3:e=0.3:k=10:E=0.7"
 	  NL "          -I [spec], --iso-params [spec]"
@@ -3845,6 +3848,12 @@ scanOptions(int *acp, char ***avp) {
 	 argc--;
 	 continue;
       }
+      if (0 == strcmp(argv[0], "--graph")) {
+	 opt_G= 1;
+	 argv++;
+	 argc--;
+	 continue;
+      }
       if (0 == strcmp(argv[0], "--graph-video-fps")) {
 	 if (argc-- < 2 || 1 != sscanf(argv[1], "%d %c", &val, &dmy) || val < 1)
 	    error("--graph-video-fps expects a positive integer");
@@ -3861,6 +3870,29 @@ scanOptions(int *acp, char ***avp) {
 	 if (!opt_looper) opt_looper= *argv;
 	 argc--;
 	 argv++;
+	 continue;
+      }
+      if (0 == strcmp(argv[0], "--cycle-plot")) {
+	 opt_P= 1;
+	 argv++;
+	 argc--;
+	 continue;
+      }
+      if (0 == strcmp(argv[0], "--amp-mod")) {
+	 opt_A= 1;
+	 argv++;
+	 argc--;
+	 if (argc > 0 && is_mix_mod_option_spec(argv[0])) {
+	    parse_mix_mod_option_spec(*argv++);
+	    argc--;
+	 }
+	 continue;
+      }
+      if (0 == strncmp(argv[0], "--amp-mod=", 10)) {
+	 opt_A= 1;
+	 parse_mix_mod_option_spec(argv[0] + 10);
+	 argv++;
+	 argc--;
 	 continue;
       }
       if (0 == strcmp(argv[0], "--iso-params")) {

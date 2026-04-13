@@ -2062,10 +2062,12 @@ follows:
   -L time   Select the length of time (hh:mm or hh:mm:ss) to output for
   -m file   Read audio data from the given file and mix it with the
               generated binaural beats; may be flac/ogg/mp3/wav/raw format
-  -A [spec] Enable mix amplitude modulation for -p drop/-p sigmoid.
+  -A [spec], --amp-mod [spec]
+            Enable mix amplitude modulation for -p drop/-p sigmoid.
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
-  -P        Plot one-cycle envelope/waveform graph as PNG and exit.
+  -P, --cycle-plot
+            Plot one-cycle envelope/waveform graph as PNG and exit.
               With -H: renders one-cycle mixam envelope/gain.
               With -p ... and mixam:<...> extras: renders one-cycle
               mixam envelope/gain using current/default -H parameters.
@@ -2075,7 +2077,8 @@ follows:
               cycle target, falls back to the program beat/pulse graph.
               Python+Cairo backend is preferred; otherwise built-in
               plotting is used.
-  -G        Plot program beat/pulse-vs-time graph as PNG and exit.
+  -G, --graph
+            Plot program beat/pulse-vs-time graph as PNG and exit.
               Supported with -p drop/-p sigmoid/-p curve.
             --graph-video file
               With -G, also write an MP4 graph animation with audio.
