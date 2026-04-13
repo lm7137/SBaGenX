@@ -2066,6 +2066,18 @@ follows:
             Enable mix amplitude modulation for -p drop/-p sigmoid.
               Optional spec: d=<v>:e=<v>:k=<v>:E=<v>
               Requires a mix input stream via -m or -M.
+              For main session time (`drop + hold`, excluding wake):
+                G(t) = 1 - d * exp( -e * ((t mod 2k) - k)^2 )
+                V(t) = 1 - ((1 - E) / T) * t
+                F(t) = G(t) * V(t)
+              For wake-up time (if `^` is present):
+                W(t) = E + ((1 - E) / U) * t
+              Here `t` is in minutes, `T` is total main time
+              (`drop + hold`), `U` is wake time, and `d/e/k/E`
+              are the user parameters from the option spec.
+              If there is no wake-up phase, the modulation holds
+              at `E` after the main session instead of jumping
+              back to full level.
   -P, --cycle-plot
             Plot one-cycle envelope/waveform graph as PNG and exit.
               With -H: renders one-cycle mixam envelope/gain.
