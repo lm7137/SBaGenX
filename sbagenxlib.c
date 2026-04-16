@@ -4817,6 +4817,15 @@ ctx_eval_keyframed_tone_at(const SbxProgramKeyframe *kfs,
   if (u > 1.0) u = 1.0;
   if (k0->interp == SBX_INTERP_STEP)
     u = 0.0;
+  /*
+   * Bells are edge-triggered events in sequence files. They should not fade
+   * into existence during the lead-in segment before their scheduled time.
+   */
+  if (k0->tone.mode == SBX_TONE_BELL || k1->tone.mode == SBX_TONE_BELL) {
+    *out = k0->tone;
+    if (inout_seg) *inout_seg = seg;
+    return;
+  }
   if (styles && styles[i0] != SBX_SEG_STYLE_DIRECT)
     sbx_eval_sbg_transition_tone(&k0->tone, &k1->tone, styles[i0], u, out);
   else if (k0->tone.mode != k1->tone.mode ||

@@ -103,6 +103,12 @@ main(void) {
   const char *sbg_negative_bell_text =
       "hit: bell-4000/30\n"
       "NOW hit\n";
+  const char *sbg_timed_bell_text =
+      "off: -\n"
+      "hit: bell300/100\n"
+      "00:00:00 off\n"
+      "00:00:03 hit\n"
+      "00:00:04 off\n";
   const char *sbg_multivoice_named_text =
       "solo: 180+0/20\n"
       "duo: 180+0/20 260+0/20\n"
@@ -339,6 +345,21 @@ main(void) {
     fail("negative-bell sbg timing render failed");
   if (!(abs_sum_window(buf, (size_t)(0.02 * cfg.sample_rate), (size_t)(0.25 * cfg.sample_rate)) > 1e-3))
     fail("negative-bell sbg timing should produce audible transient energy");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_timed_bell_text, 0);
+  if (rc != SBX_OK) fail("timed-bell sbg timing load failed");
+  if (sbx_context_sample_tones(ctx, 2.9, 2.9, 1, NULL, &kf.tone) != SBX_OK)
+    fail("timed-bell pre-trigger sample failed");
+  if (kf.tone.mode != SBX_TONE_NONE)
+    fail("timed bell should stay off before scheduled trigger");
+  if (sbx_context_sample_tones(ctx, 3.0, 3.0, 1, NULL, &kf.tone) != SBX_OK)
+    fail("timed-bell trigger sample failed");
+  if (kf.tone.mode != SBX_TONE_BELL)
+    fail("timed bell should activate at scheduled trigger");
+  if (sbx_context_sample_tones(ctx, 4.0, 4.0, 1, NULL, &kf.tone) != SBX_OK)
+    fail("timed-bell stop sample failed");
+  if (kf.tone.mode != SBX_TONE_NONE)
+    fail("timed bell should stop at scheduled off keyframe");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_multivoice_named_text, 0);
   if (rc != SBX_OK) fail("multivoice named sbg timing load failed");
