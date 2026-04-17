@@ -36,6 +36,10 @@ const SBX_TONE_SPIN_PINK: c_int = 7;
 const SBX_TONE_SPIN_BROWN: c_int = 8;
 const SBX_TONE_SPIN_WHITE: c_int = 9;
 const SBX_WAVE_SINE: c_int = 0;
+const SBX_LIVE_CONTROL_CARRIER_HZ: c_int = 1;
+const SBX_LIVE_CONTROL_BEAT_HZ: c_int = 2;
+const SBX_LIVE_CONTROL_AMPLITUDE: c_int = 3;
+const SBX_LIVE_CONTROL_MIX_AMP_PCT: c_int = 4;
 
 #[cfg(target_os = "windows")]
 unsafe extern "C" {
@@ -524,6 +528,7 @@ type SbxContextDurationSec = unsafe extern "C" fn(*const SbxContext) -> f64;
 type SbxContextIsLooping = unsafe extern "C" fn(*const SbxContext) -> c_int;
 type SbxContextHasMixEffects = unsafe extern "C" fn(*const SbxContext) -> c_int;
 type SbxContextTimeSec = unsafe extern "C" fn(*const SbxContext) -> f64;
+type SbxContextMixAmpEffectiveAt = unsafe extern "C" fn(*mut SbxContext, f64) -> f64;
 type SbxContextRenderF32 = unsafe extern "C" fn(*mut SbxContext, *mut f32, usize) -> c_int;
 type SbxContextMixStreamSample = unsafe extern "C" fn(
   *mut SbxContext,
@@ -555,6 +560,9 @@ type SbxContextSampleIsochronicCycle = unsafe extern "C" fn(
   *mut f64,
   *mut f64,
 ) -> c_int;
+type SbxContextSetLiveControl = unsafe extern "C" fn(*mut SbxContext, c_int, f64) -> c_int;
+type SbxContextRampLiveControl = unsafe extern "C" fn(*mut SbxContext, c_int, f64, f64) -> c_int;
+type SbxContextClearLiveControls = unsafe extern "C" fn(*mut SbxContext);
 type SbxVersion = unsafe extern "C" fn() -> *const c_char;
 type SbxApiVersion = unsafe extern "C" fn() -> c_int;
 type SbxFillAbiLayoutInfo = unsafe extern "C" fn(*mut SbxAbiLayoutInfo);
@@ -608,7 +616,7 @@ type SbxRuntimeContextCreateFromCurveProgram = unsafe extern "C" fn(
   *mut *mut SbxContext,
 ) -> c_int;
 
-const EXPECTED_SBX_API_VERSION: i32 = 43;
+const EXPECTED_SBX_API_VERSION: i32 = 44;
 
 fn rust_abi_layout_info() -> SbxAbiLayoutInfo {
   SbxAbiLayoutInfo {
@@ -781,6 +789,15 @@ pub struct ExportOutcome {
   pub engine_version: String,
 }
 
+pub struct LiveControlSnapshotOutcome {
+  pub time_sec: f64,
+  pub carrier_hz: f64,
+  pub beat_hz: f64,
+  pub amplitude_pct: f64,
+  pub mix_amp_pct: f64,
+  pub engine_version: String,
+}
+
 pub struct BeatPreviewPoint {
   pub t_sec: f64,
   pub beat_hz: Option<f64>,
@@ -938,12 +955,16 @@ struct Api {
   sbx_context_is_looping: SbxContextIsLooping,
   sbx_context_has_mix_effects: SbxContextHasMixEffects,
   sbx_context_time_sec: SbxContextTimeSec,
+  sbx_context_mix_amp_effective_at: SbxContextMixAmpEffectiveAt,
   sbx_context_render_f32: SbxContextRenderF32,
   sbx_context_mix_stream_sample: SbxContextMixStreamSample,
   sbx_context_voice_count: SbxContextVoiceCount,
   sbx_context_sample_program_beat_voice: SbxContextSampleProgramBeatVoice,
   sbx_context_sample_tones_voice: SbxContextSampleTonesVoice,
   sbx_context_sample_isochronic_cycle: SbxContextSampleIsochronicCycle,
+  sbx_context_set_live_control: SbxContextSetLiveControl,
+  sbx_context_ramp_live_control: SbxContextRampLiveControl,
+  sbx_context_clear_live_controls: SbxContextClearLiveControls,
   sbx_audio_writer_create_path: SbxAudioWriterCreatePath,
   sbx_audio_writer_close: SbxAudioWriterClose,
   sbx_audio_writer_destroy: SbxAudioWriterDestroy,
@@ -1041,6 +1062,13 @@ impl LiveLoadedContext {
       Self::Program(loaded) => &loaded.engine_cfg,
     }
   }
+
+  fn ctx(&self) -> *mut SbxContext {
+    match self {
+      Self::Sequence(loaded) => loaded.ctx,
+      Self::Program(loaded) => loaded.ctx,
+    }
+  }
 }
 
 pub(crate) struct LivePlaybackContext {
@@ -1074,6 +1102,104 @@ impl LivePlaybackContext {
 
   pub(crate) fn is_finished(&self) -> bool {
     self.finished
+  }
+
+  pub(crate) fn snapshot_live_controls(&mut self) -> Result<LiveControlSnapshotOutcome, String> {
+    let api = self.loaded.api();
+    let ctx = self.loaded.ctx();
+    let t_sec = unsafe { (api.sbx_context_time_sec)(ctx) };
+    let mut tone = SbxToneSpec {
+      mode: SBX_TONE_BINAURAL,
+      carrier_hz: 0.0,
+      beat_hz: 0.0,
+      amplitude: 0.0,
+      waveform: SBX_WAVE_SINE,
+      envelope_waveform: SBX_WAVE_SINE,
+      noise_waveform: SBX_WAVE_SINE,
+      duty_cycle: 0.0,
+      iso_start: 0.0,
+      iso_attack: 0.0,
+      iso_release: 0.0,
+      iso_edge_mode: 0,
+    };
+    unsafe { (api.sbx_default_tone_spec)(&mut tone) };
+    let rc = unsafe {
+      (api.sbx_context_sample_tones_voice)(ctx, 0, t_sec, t_sec, 1, std::ptr::null_mut(), &mut tone)
+    };
+    if rc != SBX_OK {
+      let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
+      return Err(if msg.is_empty() {
+        "failed to sample live preview tone".to_string()
+      } else {
+        msg
+      });
+    }
+
+    Ok(LiveControlSnapshotOutcome {
+      time_sec: t_sec,
+      carrier_hz: tone.carrier_hz,
+      beat_hz: tone.beat_hz,
+      amplitude_pct: tone.amplitude,
+      mix_amp_pct: unsafe { (api.sbx_context_mix_amp_effective_at)(ctx, t_sec) },
+      engine_version: api.version_string(),
+    })
+  }
+
+  pub(crate) fn apply_live_controls(
+    &mut self,
+    carrier_hz: Option<f64>,
+    beat_hz: Option<f64>,
+    amplitude_pct: Option<f64>,
+    mix_amp_pct: Option<f64>,
+    ramp_sec: Option<f64>,
+  ) -> Result<LiveControlSnapshotOutcome, String> {
+    let api = self.loaded.api();
+    let ctx = self.loaded.ctx();
+    let ramp_sec = ramp_sec.unwrap_or(0.0);
+    if !ramp_sec.is_finite() || ramp_sec < 0.0 {
+      return Err("live control ramp duration must be finite and >= 0".to_string());
+    }
+
+    let apply = |kind: c_int, value: f64| -> Result<(), String> {
+      let rc = unsafe {
+        if ramp_sec > 0.0 {
+          (api.sbx_context_ramp_live_control)(ctx, kind, value, ramp_sec)
+        } else {
+          (api.sbx_context_set_live_control)(ctx, kind, value)
+        }
+      };
+      if rc != SBX_OK {
+        let msg = unsafe { cstr_to_string((api.sbx_context_last_error)(ctx)) };
+        return Err(if msg.is_empty() {
+          "failed to apply live control".to_string()
+        } else {
+          msg
+        });
+      }
+      Ok(())
+    };
+
+    if let Some(value) = carrier_hz {
+      apply(SBX_LIVE_CONTROL_CARRIER_HZ, value)?;
+    }
+    if let Some(value) = beat_hz {
+      apply(SBX_LIVE_CONTROL_BEAT_HZ, value)?;
+    }
+    if let Some(value) = amplitude_pct {
+      apply(SBX_LIVE_CONTROL_AMPLITUDE, value)?;
+    }
+    if let Some(value) = mix_amp_pct {
+      apply(SBX_LIVE_CONTROL_MIX_AMP_PCT, value)?;
+    }
+
+    self.snapshot_live_controls()
+  }
+
+  pub(crate) fn clear_live_controls(&mut self) -> Result<LiveControlSnapshotOutcome, String> {
+    let api = self.loaded.api();
+    let ctx = self.loaded.ctx();
+    unsafe { (api.sbx_context_clear_live_controls)(ctx) };
+    self.snapshot_live_controls()
   }
 
   pub(crate) fn render_interleaved_f32(&mut self, out: &mut [f32]) -> Result<usize, String> {
@@ -1334,6 +1460,8 @@ impl Api {
         sbx_context_has_mix_effects:
           Self::load_symbol(&lib, b"sbx_context_has_mix_effects\0")?,
         sbx_context_time_sec: Self::load_symbol(&lib, b"sbx_context_time_sec\0")?,
+        sbx_context_mix_amp_effective_at:
+          Self::load_symbol(&lib, b"sbx_context_mix_amp_effective_at\0")?,
         sbx_context_render_f32: Self::load_symbol(&lib, b"sbx_context_render_f32\0")?,
         sbx_context_mix_stream_sample:
           Self::load_symbol(&lib, b"sbx_context_mix_stream_sample\0")?,
@@ -1344,6 +1472,12 @@ impl Api {
           Self::load_symbol(&lib, b"sbx_context_sample_tones_voice\0")?,
         sbx_context_sample_isochronic_cycle:
           Self::load_symbol(&lib, b"sbx_context_sample_isochronic_cycle\0")?,
+        sbx_context_set_live_control:
+          Self::load_symbol(&lib, b"sbx_context_set_live_control\0")?,
+        sbx_context_ramp_live_control:
+          Self::load_symbol(&lib, b"sbx_context_ramp_live_control\0")?,
+        sbx_context_clear_live_controls:
+          Self::load_symbol(&lib, b"sbx_context_clear_live_controls\0")?,
         sbx_audio_writer_create_path:
           Self::load_symbol(&lib, b"sbx_audio_writer_create_path\0")?,
         sbx_audio_writer_close: Self::load_symbol(&lib, b"sbx_audio_writer_close\0")?,

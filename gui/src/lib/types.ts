@@ -79,6 +79,16 @@ export interface LivePreviewResult {
   engineVersion: string
 }
 
+export interface LiveControlSnapshot {
+  timeSec: number
+  carrierHz: number
+  beatHz: number
+  amplitudePct: number
+  mixAmpPct: number
+  bridge: string
+  engineVersion: string
+}
+
 export interface PlaybackEvent {
   state: 'started' | 'stopped' | 'finished' | 'error'
   message?: string | null

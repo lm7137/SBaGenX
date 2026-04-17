@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 43  /* public API contract revision */
+#define SBX_API_VERSION 44  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
@@ -483,6 +483,22 @@ typedef struct {
   size_t aux_tone_count;      /* configured auxiliary overlay tones */
   size_t mix_effect_count;    /* configured static + timed mix-effect slots */
 } SbxRuntimeTelemetry;
+
+typedef enum {
+  SBX_LIVE_CONTROL_CARRIER_HZ = 1,
+  SBX_LIVE_CONTROL_BEAT_HZ = 2,
+  SBX_LIVE_CONTROL_AMPLITUDE = 3,
+  SBX_LIVE_CONTROL_MIX_AMP_PCT = 4
+} SbxLiveControlKind;
+
+typedef struct {
+  int active;              /* 1 => override enabled */
+  int ramp_active;         /* 1 => currently interpolating toward target_value */
+  double current_value;    /* evaluated control value at the queried time */
+  double target_value;     /* final target for the control */
+  double start_time_sec;   /* ramp start time on the context timeline */
+  double end_time_sec;     /* ramp end time on the context timeline */
+} SbxLiveControlState;
 
 typedef void (*SbxTelemetryCallback)(const SbxRuntimeTelemetry *telem, void *user);
 
@@ -1284,6 +1300,48 @@ int sbx_context_set_telemetry_callback(SbxContext *ctx,
 
 /* Retrieve a runtime telemetry snapshot at the current context time. */
 int sbx_context_get_runtime_telemetry(SbxContext *ctx, SbxRuntimeTelemetry *out);
+
+/* ----- Live control overlay ----- */
+
+/* Fill with an inactive/default live-control state. */
+void sbx_default_live_control_state(SbxLiveControlState *state);
+
+/*
+ * Apply an immediate override on top of the currently loaded primary tone or
+ * effective mix level.
+ *
+ * Supported kinds:
+ * - SBX_LIVE_CONTROL_CARRIER_HZ
+ * - SBX_LIVE_CONTROL_BEAT_HZ
+ * - SBX_LIVE_CONTROL_AMPLITUDE
+ * - SBX_LIVE_CONTROL_MIX_AMP_PCT
+ *
+ * Tone controls affect only voice lane 0. Auxiliary tones and secondary
+ * keyframed voice lanes are unchanged.
+ */
+int sbx_context_set_live_control(SbxContext *ctx, int kind, double value);
+
+/*
+ * Ramp one live control from its current evaluated value to target_value over
+ * duration_sec on the context timeline.
+ *
+ * duration_sec == 0 behaves like sbx_context_set_live_control().
+ */
+int sbx_context_ramp_live_control(SbxContext *ctx,
+                                  int kind,
+                                  double target_value,
+                                  double duration_sec);
+
+/* Query the current status of one live control at the context's current time. */
+int sbx_context_get_live_control(const SbxContext *ctx,
+                                 int kind,
+                                 SbxLiveControlState *out);
+
+/* Disable one live control override. */
+int sbx_context_clear_live_control(SbxContext *ctx, int kind);
+
+/* Disable all live control overrides. */
+void sbx_context_clear_live_controls(SbxContext *ctx);
 
 /* ----- Introspection/render ----- */
 

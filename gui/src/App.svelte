@@ -9,9 +9,12 @@
   import IsoCyclePreviewChart from './lib/inspector/IsoCyclePreviewChart.svelte'
   import logoUrl from './lib/assets/sbagenx-logo.svg'
   import {
+    applyLivePreviewControls,
+    clearLivePreviewControls,
     exitApplication,
     exportDocument,
     exportProgram,
+    getLivePreviewControls,
     inspectProgramCurveInfo,
     inspectMixEmbeddedLooper,
     loadDevelopmentExamples,
@@ -35,6 +38,7 @@
     DocumentKind,
     DocumentRecord,
     IsoCyclePreviewResult,
+    LiveControlSnapshot,
     PlaybackEvent,
     ProgramKind,
     ProgramRuntimeRequest,
@@ -93,8 +97,14 @@
   let validatingTarget: string | null = null
   let transportBusy = false
   let transportMessage = 'ready'
+  let liveControlsBusy = false
   let selectedDiagnosticId: string | null = null
   let isPlaying = false
+  let liveCarrierHz = 200
+  let liveBeatHz = 10
+  let liveAmplitudePct = 100
+  let liveMixAmpPct = 100
+  let liveRampSeconds = 8
   let recentFiles: RecentFileEntry[] = []
   let previewLoadingId: string | null = null
   let curveInfoLoadingId: string | null = null
@@ -307,6 +317,61 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       return `${mins}m ${secs}s`
     }
     return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
+  }
+
+  function syncLiveProgramControls(snapshot: LiveControlSnapshot) {
+    liveCarrierHz = Number(snapshot.carrierHz.toFixed(3))
+    liveBeatHz = Number(snapshot.beatHz.toFixed(3))
+    liveAmplitudePct = Number(snapshot.amplitudePct.toFixed(3))
+    liveMixAmpPct = Number(snapshot.mixAmpPct.toFixed(3))
+  }
+
+  async function refreshLiveProgramControls() {
+    liveControlsBusy = true
+    try {
+      const snapshot = await getLivePreviewControls()
+      syncLiveProgramControls(snapshot)
+    } catch (error) {
+      transportMessage = error instanceof Error ? error.message : String(error)
+    } finally {
+      liveControlsBusy = false
+    }
+  }
+
+  async function applyProgramLiveControls(useRamp: boolean) {
+    if (!isPlaying || runtimeMode !== 'program') return
+    liveControlsBusy = true
+    try {
+      const snapshot = await applyLivePreviewControls({
+        carrierHz: liveCarrierHz,
+        beatHz: liveBeatHz,
+        amplitudePct: liveAmplitudePct,
+        mixAmpPct: liveMixAmpPct,
+        rampSec: useRamp ? liveRampSeconds : 0,
+      })
+      syncLiveProgramControls(snapshot)
+      transportMessage = useRamp
+        ? `live ramp applied · ${liveRampSeconds.toFixed(1)}s`
+        : 'live controls applied'
+    } catch (error) {
+      transportMessage = error instanceof Error ? error.message : String(error)
+    } finally {
+      liveControlsBusy = false
+    }
+  }
+
+  async function clearProgramLiveControls() {
+    if (!isPlaying || runtimeMode !== 'program') return
+    liveControlsBusy = true
+    try {
+      const snapshot = await clearLivePreviewControls()
+      syncLiveProgramControls(snapshot)
+      transportMessage = 'live controls cleared'
+    } catch (error) {
+      transportMessage = error instanceof Error ? error.message : String(error)
+    } finally {
+      liveControlsBusy = false
+    }
   }
 
   async function openDocuments() {
@@ -883,6 +948,9 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
           : await startProgramLivePreview(buildProgramRequest())
       isPlaying = true
       transportMessage = result.durationSec > 0 ? `live preview · ${formatDuration(result.durationSec)}` : 'live preview running'
+      if (runtimeMode === 'program') {
+        await refreshLiveProgramControls()
+      }
     } catch (error) {
       transportMessage = error instanceof Error ? error.message : String(error)
     } finally {
@@ -1573,6 +1641,54 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               <p class='panel-note mix-looper-note'>
                 Leave empty to use the embedded `SBAGEN_LOOPER` tag, if present.
               </p>
+            {/if}
+
+            {#if isPlaying}
+              <div class='program-mix-row live-control-row'>
+                <div class='live-control-copy'>
+                  <p class='panel-title'>Live Controls</p>
+                  <p class='panel-note'>
+                    Applies to the running program preview only. Export and validation stay on the authored settings.
+                  </p>
+                </div>
+                <div class='program-inline-actions'>
+                  <button class='button ghost' disabled={liveControlsBusy} on:click={() => void refreshLiveProgramControls()}>
+                    Refresh
+                  </button>
+                  <button class='button ghost' disabled={liveControlsBusy} on:click={() => void applyProgramLiveControls(false)}>
+                    Apply Now
+                  </button>
+                  <button class='button ghost' disabled={liveControlsBusy} on:click={() => void applyProgramLiveControls(true)}>
+                    Ramp
+                  </button>
+                  <button class='button ghost' disabled={liveControlsBusy} on:click={() => void clearProgramLiveControls()}>
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
+              <div class='program-grid live-control-grid'>
+                <label class='field'>
+                  <span>Carrier (Hz)</span>
+                  <input type='number' min='0.1' step='0.1' bind:value={liveCarrierHz} />
+                </label>
+                <label class='field'>
+                  <span>Beat (Hz)</span>
+                  <input type='number' step='0.1' bind:value={liveBeatHz} />
+                </label>
+                <label class='field'>
+                  <span>Program Amp (%)</span>
+                  <input type='number' min='0' step='0.1' bind:value={liveAmplitudePct} />
+                </label>
+                <label class='field'>
+                  <span>Mix Amp (%)</span>
+                  <input type='number' min='0' step='0.1' bind:value={liveMixAmpPct} />
+                </label>
+                <label class='field'>
+                  <span>Ramp (sec)</span>
+                  <input type='number' min='0' step='0.1' bind:value={liveRampSeconds} />
+                </label>
+              </div>
             {/if}
           </div>
         </section>

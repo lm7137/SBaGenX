@@ -6,6 +6,7 @@ import type {
   ExportResult,
   FileDocument,
   IsoCyclePreviewResult,
+  LiveControlSnapshot,
   LivePreviewResult,
   ProgramRuntimeRequest,
   PreviewResult,
@@ -118,6 +119,26 @@ export async function startLivePreview(
 
 export async function stopLivePreview(): Promise<void> {
   await invoke('stop_live_preview')
+}
+
+export async function getLivePreviewControls(): Promise<LiveControlSnapshot> {
+  return invoke<LiveControlSnapshot>('get_live_preview_controls')
+}
+
+export async function applyLivePreviewControls(args: {
+  carrierHz?: number | null
+  beatHz?: number | null
+  amplitudePct?: number | null
+  mixAmpPct?: number | null
+  rampSec?: number | null
+}): Promise<LiveControlSnapshot> {
+  return invoke<LiveControlSnapshot>('apply_live_preview_controls', {
+    args,
+  })
+}
+
+export async function clearLivePreviewControls(): Promise<LiveControlSnapshot> {
+  return invoke<LiveControlSnapshot>('clear_live_preview_controls')
 }
 
 export async function exportDocument(

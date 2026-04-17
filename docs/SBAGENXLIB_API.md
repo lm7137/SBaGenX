@@ -496,6 +496,12 @@ should treat the program timeline as wrapping.
 - `sbx_context_eval_active_tones(...)`
 - `sbx_context_set_telemetry_callback(...)`
 - `sbx_context_get_runtime_telemetry(...)`
+- `sbx_default_live_control_state(...)`
+- `sbx_context_set_live_control(...)`
+- `sbx_context_ramp_live_control(...)`
+- `sbx_context_get_live_control(...)`
+- `sbx_context_clear_live_control(...)`
+- `sbx_context_clear_live_controls(...)`
 - `sbx_context_mix_stream_sample(...)`
 - `sbx_context_configure_runtime(...)`
 
@@ -539,6 +545,30 @@ For curve-backed contexts, any matching `.sbgf` mix-effect targets are already
 applied to those returned specs at the requested time.
 
 Entries with `type == SBX_MIXFX_NONE` represent empty timed slots.
+
+`sbx_context_set_live_control` and `sbx_context_ramp_live_control` add a
+runtime overlay on top of the loaded source without rewriting keyframes,
+sequence text, or `.sbgf` programs. The first pass supports:
+
+- primary-voice carrier Hz
+- primary-voice beat Hz
+- primary-voice amplitude
+- effective mix amp percent
+
+Important semantics:
+
+- tone controls affect only voice lane `0`
+- auxiliary tones and secondary multivoice lanes are unchanged
+- ramps are anchored to the context timeline (`sbx_context_time_sec`)
+- `sbx_context_sample_tones[_voice]`, `sbx_context_sample_program_beat[_voice]`,
+  `sbx_context_render_f32`, and runtime telemetry all see the same overlaid
+  values
+- `sbx_context_mix_amp_at(...)` still reports the authored/base `mix/<amp>`
+  profile, while `sbx_context_mix_amp_effective_at(...)` reflects the live
+  override when one is active
+
+Use `sbx_context_get_live_control(...)` to inspect whether a control is active
+and whether it is still ramping toward its target.
 
 10) Plot/data sampling support
 

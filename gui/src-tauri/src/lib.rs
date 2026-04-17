@@ -102,6 +102,18 @@ struct LivePreviewResult {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+struct LiveControlSnapshot {
+  time_sec: f64,
+  carrier_hz: f64,
+  beat_hz: f64,
+  amplitude_pct: f64,
+  mix_amp_pct: f64,
+  bridge: &'static str,
+  engine_version: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct PlaybackEvent {
   state: &'static str,
   message: Option<String>,
@@ -123,6 +135,7 @@ struct PlaybackRenderState {
 
 struct LivePlaybackSession {
   stop_flag: Arc<AtomicBool>,
+  shared: Arc<Mutex<PlaybackRenderState>>,
   thread: Option<JoinHandle<()>>,
 }
 
@@ -138,6 +151,21 @@ impl LivePlaybackSession {
 #[derive(Default)]
 struct PlaybackController {
   session: Mutex<Option<LivePlaybackSession>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveControlArgs {
+  carrier_hz: Option<f64>,
+  beat_hz: Option<f64>,
+  amplitude_pct: Option<f64>,
+  mix_amp_pct: Option<f64>,
+  ramp_sec: Option<f64>,
+}
+
+struct PlaybackStartup {
+  result: LivePreviewResult,
+  shared: Arc<Mutex<PlaybackRenderState>>,
 }
 
 #[derive(Serialize)]
@@ -453,6 +481,30 @@ fn stop_active_session(controller: &PlaybackController) {
   }
 }
 
+fn with_live_playback_state<T, F>(controller: &PlaybackController, f: F) -> Result<T, String>
+where
+  F: FnOnce(&mut PlaybackRenderState) -> Result<T, String>,
+{
+  let shared = {
+    let guard = controller
+      .session
+      .lock()
+      .map_err(|_| "failed to access live playback session".to_string())?;
+    let session = guard
+      .as_ref()
+      .ok_or_else(|| "no live preview is currently running".to_string())?;
+    session.shared.clone()
+  };
+
+  let mut state = shared
+    .lock()
+    .map_err(|_| "failed to access live playback state".to_string())?;
+  if state.finished || state.live.is_finished() {
+    return Err("live preview is not running".to_string());
+  }
+  f(&mut state)
+}
+
 fn render_into_output<T>(data: &mut [T], shared: &Arc<Mutex<PlaybackRenderState>>, stop: &Arc<AtomicBool>)
 where
   T: cpal::Sample + cpal::FromSample<f32>,
@@ -573,7 +625,7 @@ fn program_request_from_args(args: ProgramRequestArgs) -> Result<sbagenxlib::Pro
 fn spawn_playback_thread_with_factory<F>(
   app: tauri::AppHandle,
   stop_flag: Arc<AtomicBool>,
-  startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
+  startup_tx: std::sync::mpsc::Sender<Result<PlaybackStartup, String>>,
   build_live: F,
 ) -> JoinHandle<()>
 where
@@ -751,7 +803,10 @@ where
       bridge: "tauri-rust",
       engine_version: engine_version.clone(),
     };
-    let _ = startup_tx.send(Ok(start_result.clone()));
+    let _ = startup_tx.send(Ok(PlaybackStartup {
+      result: start_result.clone(),
+      shared: shared.clone(),
+    }));
     emit_playback_event(
       &app,
       PlaybackEvent {
@@ -836,7 +891,7 @@ fn spawn_sequence_playback_thread(
   mix_path_override: Option<String>,
   mix_looper_override: Option<String>,
   stop_flag: Arc<AtomicBool>,
-  startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
+  startup_tx: std::sync::mpsc::Sender<Result<PlaybackStartup, String>>,
 ) -> JoinHandle<()> {
   spawn_playback_thread_with_factory(app, stop_flag, startup_tx, move |sample_rate_hz| {
     sbagenxlib::create_live_preview(
@@ -853,7 +908,7 @@ fn spawn_program_playback_thread(
   app: tauri::AppHandle,
   request: sbagenxlib::ProgramRuntimeRequest,
   stop_flag: Arc<AtomicBool>,
-  startup_tx: std::sync::mpsc::Sender<Result<LivePreviewResult, String>>,
+  startup_tx: std::sync::mpsc::Sender<Result<PlaybackStartup, String>>,
 ) -> JoinHandle<()> {
   spawn_playback_thread_with_factory(app, stop_flag, startup_tx, move |sample_rate_hz| {
     sbagenxlib::create_live_program_preview(&request, sample_rate_hz)
@@ -1190,9 +1245,10 @@ fn start_live_preview(
   );
 
   match startup_rx.recv_timeout(Duration::from_secs(5)) {
-    Ok(Ok(result)) => {
+    Ok(Ok(startup)) => {
       let session = LivePlaybackSession {
         stop_flag,
+        shared: startup.shared,
         thread: Some(playback_thread),
       };
       let mut guard = controller
@@ -1201,7 +1257,7 @@ fn start_live_preview(
         .lock()
         .map_err(|_| "failed to store live playback session".to_string())?;
       *guard = Some(session);
-      Ok(result)
+      Ok(startup.result)
     }
     Ok(Err(err)) => {
       let _ = playback_thread.join();
@@ -1230,9 +1286,10 @@ fn start_program_live_preview(
     spawn_program_playback_thread(app.clone(), request, stop_flag.clone(), startup_tx);
 
   match startup_rx.recv_timeout(Duration::from_secs(5)) {
-    Ok(Ok(result)) => {
+    Ok(Ok(startup)) => {
       let session = LivePlaybackSession {
         stop_flag,
+        shared: startup.shared,
         thread: Some(playback_thread),
       };
       let mut guard = controller
@@ -1241,7 +1298,7 @@ fn start_program_live_preview(
         .lock()
         .map_err(|_| "failed to store live playback session".to_string())?;
       *guard = Some(session);
-      Ok(result)
+      Ok(startup.result)
     }
     Ok(Err(err)) => {
       let _ = playback_thread.join();
@@ -1275,6 +1332,67 @@ fn stop_live_preview(
     },
   );
   Ok(())
+}
+
+#[tauri::command]
+fn get_live_preview_controls(
+  controller: State<'_, PlaybackController>,
+) -> Result<LiveControlSnapshot, String> {
+  with_live_playback_state(controller.inner(), |state| {
+    let snapshot = state.live.snapshot_live_controls()?;
+    Ok(LiveControlSnapshot {
+      time_sec: snapshot.time_sec,
+      carrier_hz: snapshot.carrier_hz,
+      beat_hz: snapshot.beat_hz,
+      amplitude_pct: snapshot.amplitude_pct,
+      mix_amp_pct: snapshot.mix_amp_pct,
+      bridge: "tauri-rust",
+      engine_version: snapshot.engine_version,
+    })
+  })
+}
+
+#[tauri::command]
+fn apply_live_preview_controls(
+  controller: State<'_, PlaybackController>,
+  args: LiveControlArgs,
+) -> Result<LiveControlSnapshot, String> {
+  with_live_playback_state(controller.inner(), |state| {
+    let snapshot = state.live.apply_live_controls(
+      args.carrier_hz,
+      args.beat_hz,
+      args.amplitude_pct,
+      args.mix_amp_pct,
+      args.ramp_sec,
+    )?;
+    Ok(LiveControlSnapshot {
+      time_sec: snapshot.time_sec,
+      carrier_hz: snapshot.carrier_hz,
+      beat_hz: snapshot.beat_hz,
+      amplitude_pct: snapshot.amplitude_pct,
+      mix_amp_pct: snapshot.mix_amp_pct,
+      bridge: "tauri-rust",
+      engine_version: snapshot.engine_version,
+    })
+  })
+}
+
+#[tauri::command]
+fn clear_live_preview_controls(
+  controller: State<'_, PlaybackController>,
+) -> Result<LiveControlSnapshot, String> {
+  with_live_playback_state(controller.inner(), |state| {
+    let snapshot = state.live.clear_live_controls()?;
+    Ok(LiveControlSnapshot {
+      time_sec: snapshot.time_sec,
+      carrier_hz: snapshot.carrier_hz,
+      beat_hz: snapshot.beat_hz,
+      amplitude_pct: snapshot.amplitude_pct,
+      mix_amp_pct: snapshot.mix_amp_pct,
+      bridge: "tauri-rust",
+      engine_version: snapshot.engine_version,
+    })
+  })
 }
 
 #[tauri::command]
@@ -1520,6 +1638,9 @@ pub fn run() {
       start_live_preview,
       start_program_live_preview,
       stop_live_preview,
+      get_live_preview_controls,
+      apply_live_preview_controls,
+      clear_live_preview_controls,
       exit_application,
       export_document,
       export_program,

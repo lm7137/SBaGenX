@@ -138,9 +138,20 @@ typedef struct {
 typedef struct SbxVoiceSetKeyframe SbxVoiceSetKeyframe;
 typedef struct SbxMixFxKeyframe SbxMixFxKeyframe;
 typedef struct SbxNoiseProfile SbxNoiseProfile;
+typedef struct SbxLiveControlSlot SbxLiveControlSlot;
 
 struct SbxNoiseProfile {
   double fir[SBX_NOISE_FIR_TAPS];
+};
+
+struct SbxLiveControlSlot {
+  int active;
+  int ramp_active;
+  double immediate_value;
+  double start_value;
+  double target_value;
+  double start_time_sec;
+  double end_time_sec;
 };
 
 struct SbxEngine {
@@ -191,6 +202,7 @@ struct SbxContext {
   int have_seq_mixam_override;
   SbxMixFxSpec seq_mixam_env;
   int source_mode;
+  SbxToneSpec static_tone;
   SbxProgramKeyframe *kfs;
   unsigned char *kf_styles;
   size_t kf_count;
@@ -235,6 +247,7 @@ struct SbxContext {
   void *telemetry_user;
   SbxRuntimeTelemetry telemetry_last;
   int telemetry_valid;
+  SbxLiveControlSlot live_ctrl[4];
 };
 
 struct SbxCurveProgram {
@@ -451,6 +464,10 @@ static void sbx_apply_immediate_mixam_override(SbxMixFxSpec *fx,
                                                const SbxImmediateParseConfig *cfg);
 static int sbx_audio_writer_init_mp3(SbxAudioWriter *writer, const char *path);
 static int sbx_audio_writer_ensure_mp3_buf(SbxAudioWriter *writer, int frames);
+static double ctx_mix_amp_effective_base_at(SbxContext *ctx, double t_sec);
+static int ctx_eval_voice_tone_base_at(SbxContext *ctx, size_t voice_index, double t_sec, SbxToneSpec *out);
+static int ctx_apply_live_controls_to_tone(SbxContext *ctx, double t_sec, SbxToneSpec *tone);
+static int ctx_eval_primary_tone_effective_at(SbxContext *ctx, double t_sec, SbxToneSpec *out);
 
 static void
 set_last_error(SbxEngine *eng, const char *msg) {
@@ -524,6 +541,55 @@ set_ctx_error_range_span(SbxContext *ctx,
     end_column = column + (uint32_t)range_len;
   }
   set_ctx_error_span(ctx, msg, (uint32_t)line_no, column, (uint32_t)line_no, end_column);
+}
+
+static int
+sbx_live_control_kind_index(int kind) {
+  switch (kind) {
+    case SBX_LIVE_CONTROL_CARRIER_HZ: return 0;
+    case SBX_LIVE_CONTROL_BEAT_HZ: return 1;
+    case SBX_LIVE_CONTROL_AMPLITUDE: return 2;
+    case SBX_LIVE_CONTROL_MIX_AMP_PCT: return 3;
+    default: return -1;
+  }
+}
+
+static double
+sbx_live_control_slot_value_at(const SbxLiveControlSlot *slot, double t_sec, int *out_ramping) {
+  double u;
+  if (out_ramping) *out_ramping = 0;
+  if (!slot || !slot->active) return 0.0;
+  if (!slot->ramp_active || !isfinite(slot->start_time_sec) || !isfinite(slot->end_time_sec) ||
+      slot->end_time_sec <= slot->start_time_sec) {
+    return slot->target_value;
+  }
+  if (t_sec <= slot->start_time_sec) {
+    if (out_ramping) *out_ramping = 1;
+    return slot->start_value;
+  }
+  if (t_sec >= slot->end_time_sec)
+    return slot->target_value;
+  u = (t_sec - slot->start_time_sec) / (slot->end_time_sec - slot->start_time_sec);
+  if (u < 0.0) u = 0.0;
+  if (u > 1.0) u = 1.0;
+  if (out_ramping) *out_ramping = 1;
+  return sbx_lerp(slot->start_value, slot->target_value, u);
+}
+
+static void
+ctx_clear_live_controls_internal(SbxContext *ctx) {
+  size_t i;
+  if (!ctx) return;
+  for (i = 0; i < sizeof(ctx->live_ctrl) / sizeof(ctx->live_ctrl[0]); i++)
+    memset(&ctx->live_ctrl[i], 0, sizeof(ctx->live_ctrl[i]));
+}
+
+static int
+ctx_has_live_tone_controls(const SbxContext *ctx) {
+  if (!ctx) return 0;
+  return ctx->live_ctrl[sbx_live_control_kind_index(SBX_LIVE_CONTROL_CARRIER_HZ)].active ||
+         ctx->live_ctrl[sbx_live_control_kind_index(SBX_LIVE_CONTROL_BEAT_HZ)].active ||
+         ctx->live_ctrl[sbx_live_control_kind_index(SBX_LIVE_CONTROL_AMPLITUDE)].active;
 }
 
 static void
@@ -4541,6 +4607,7 @@ ctx_activate_keyframes_internal(SbxContext *ctx,
   ctx->source_mode = SBX_CTX_SRC_KEYFRAMES;
   ctx->loaded = 1;
   ctx->t_sec = 0.0;
+  ctx_clear_live_controls_internal(ctx);
 
   rc = engine_apply_tone(ctx->eng, &ctx->kfs[0].tone, 1);
   if (rc != SBX_OK) {
@@ -4846,25 +4913,8 @@ static double
 ctx_eval_program_beat_hz(SbxContext *ctx, double t_sec) {
   SbxToneSpec tone;
   if (!ctx || !ctx->eng) return 0.0;
-
-  switch (ctx->source_mode) {
-    case SBX_CTX_SRC_KEYFRAMES: {
-      size_t seg = ctx->kf_seg;
-      double eval_t = t_sec;
-      if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
-        eval_t = fmod(eval_t, ctx->kf_duration_sec);
-        if (eval_t < 0.0) eval_t += ctx->kf_duration_sec;
-      }
-      ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_styles, ctx->kf_count,
-                                 eval_t, &seg, &tone);
-      break;
-    }
-    case SBX_CTX_SRC_STATIC:
-      tone = ctx->eng->tone;
-      break;
-    default:
-      return 0.0;
-  }
+  if (ctx_eval_primary_tone_effective_at(ctx, t_sec, &tone) != SBX_OK)
+    return 0.0;
 
   if (!isfinite(tone.beat_hz)) return 0.0;
   if (tone.beat_hz <= 0.0) return fabs(tone.beat_hz);
@@ -4874,41 +4924,185 @@ ctx_eval_program_beat_hz(SbxContext *ctx, double t_sec) {
 static double
 ctx_eval_program_beat_hz_voice(SbxContext *ctx, size_t voice_index, double t_sec) {
   SbxToneSpec tone;
-  size_t seg = 0;
-  const SbxProgramKeyframe *kfs = 0;
 
   if (!ctx || !ctx->eng) return 0.0;
-
-  switch (ctx->source_mode) {
-    case SBX_CTX_SRC_KEYFRAMES: {
-      double eval_t = t_sec;
-      if (voice_index >= sbx_context_voice_count(ctx))
-        return 0.0;
-      if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
-        eval_t = fmod(eval_t, ctx->kf_duration_sec);
-        if (eval_t < 0.0) eval_t += ctx->kf_duration_sec;
-      }
-      kfs = (voice_index == 0 || !ctx->mv_kfs) ? ctx->kfs : SBX_MV_KF(ctx, voice_index);
-      seg = (voice_index == 0) ? ctx->kf_seg : 0;
-      ctx_eval_keyframed_tone_at(kfs, ctx->kf_styles, ctx->kf_count,
-                                 eval_t, &seg, &tone);
-      break;
-    }
-    case SBX_CTX_SRC_CURVE:
-      if (voice_index != 0 || ctx_eval_curve_tone(ctx, t_sec, &tone) != SBX_OK)
-        return 0.0;
-      break;
-    case SBX_CTX_SRC_STATIC:
-      if (voice_index != 0) return 0.0;
-      tone = ctx->eng->tone;
-      break;
-    default:
-      return 0.0;
-  }
+  if (ctx_eval_voice_tone_base_at(ctx, voice_index, t_sec, &tone) != SBX_OK)
+    return 0.0;
+  if (voice_index == 0 &&
+      ctx_apply_live_controls_to_tone(ctx, t_sec, &tone) != SBX_OK)
+    return 0.0;
 
   if (!isfinite(tone.beat_hz)) return 0.0;
   if (tone.beat_hz <= 0.0) return fabs(tone.beat_hz);
   return tone.beat_hz;
+}
+
+static int
+ctx_eval_primary_tone_base_at(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
+  size_t seg;
+  if (!ctx || !out) return SBX_EINVAL;
+  if (!ctx->loaded) return SBX_ENOTREADY;
+
+  switch (ctx->source_mode) {
+    case SBX_CTX_SRC_STATIC:
+      *out = ctx->static_tone;
+      return SBX_OK;
+    case SBX_CTX_SRC_CURVE:
+      return ctx_eval_curve_tone(ctx, t_sec, out);
+    case SBX_CTX_SRC_KEYFRAMES:
+      seg = ctx->kf_seg;
+      if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+        t_sec = fmod(t_sec, ctx->kf_duration_sec);
+        if (t_sec < 0.0) t_sec += ctx->kf_duration_sec;
+      }
+      ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_styles, ctx->kf_count,
+                                 t_sec, &seg, out);
+      return SBX_OK;
+    default:
+      return SBX_ENOTREADY;
+  }
+}
+
+static int
+ctx_eval_voice_tone_base_at(SbxContext *ctx, size_t voice_index, double t_sec, SbxToneSpec *out) {
+  size_t seg = 0;
+  const SbxProgramKeyframe *kfs = 0;
+  if (!ctx || !out) return SBX_EINVAL;
+  if (!ctx->loaded) return SBX_ENOTREADY;
+  if (voice_index == 0)
+    return ctx_eval_primary_tone_base_at(ctx, t_sec, out);
+  if (ctx->source_mode != SBX_CTX_SRC_KEYFRAMES)
+    return SBX_EINVAL;
+  if (voice_index >= sbx_context_voice_count(ctx))
+    return SBX_EINVAL;
+  if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
+    t_sec = fmod(t_sec, ctx->kf_duration_sec);
+    if (t_sec < 0.0) t_sec += ctx->kf_duration_sec;
+  }
+  kfs = (voice_index == 0 || !ctx->mv_kfs) ? ctx->kfs : SBX_MV_KF(ctx, voice_index);
+  ctx_eval_keyframed_tone_at(kfs, ctx->kf_styles, ctx->kf_count,
+                             t_sec, &seg, out);
+  return SBX_OK;
+}
+
+static int
+ctx_validate_live_control_value(SbxContext *ctx, int kind, double value) {
+  SbxToneSpec tone;
+  char err[160];
+  if (!ctx || !ctx->loaded) return SBX_ENOTREADY;
+  if (!isfinite(value)) {
+    set_ctx_error(ctx, "live control value must be finite");
+    return SBX_EINVAL;
+  }
+  if (kind == SBX_LIVE_CONTROL_CARRIER_HZ && value <= 0.0) {
+    set_ctx_error(ctx, "live carrier control must be > 0");
+    return SBX_EINVAL;
+  }
+  if (kind == SBX_LIVE_CONTROL_AMPLITUDE && value < 0.0) {
+    set_ctx_error(ctx, "live amplitude control must be >= 0");
+    return SBX_EINVAL;
+  }
+  if (kind == SBX_LIVE_CONTROL_MIX_AMP_PCT) {
+    if (value < 0.0) {
+      set_ctx_error(ctx, "live mix amp percent must be >= 0");
+      return SBX_EINVAL;
+    }
+    return SBX_OK;
+  }
+  if (ctx_eval_primary_tone_base_at(ctx, ctx->t_sec, &tone) != SBX_OK) {
+    set_ctx_error(ctx, "no tone/program loaded");
+    return SBX_ENOTREADY;
+  }
+  switch (kind) {
+    case SBX_LIVE_CONTROL_CARRIER_HZ:
+      tone.carrier_hz = value;
+      break;
+    case SBX_LIVE_CONTROL_BEAT_HZ:
+      tone.beat_hz = value;
+      break;
+    case SBX_LIVE_CONTROL_AMPLITUDE:
+      tone.amplitude = value;
+      break;
+    default:
+      set_ctx_error(ctx, "unsupported live control kind");
+      return SBX_EINVAL;
+  }
+  if (normalize_tone(&tone, err, sizeof(err)) != SBX_OK) {
+    set_ctx_error(ctx, err);
+    return SBX_EINVAL;
+  }
+  return SBX_OK;
+}
+
+static int
+ctx_eval_live_control_value(SbxContext *ctx, int kind, double t_sec, double *out_value) {
+  int idx;
+  const SbxLiveControlSlot *slot;
+  if (!ctx || !out_value) return SBX_EINVAL;
+  idx = sbx_live_control_kind_index(kind);
+  if (idx < 0) return SBX_EINVAL;
+  slot = &ctx->live_ctrl[idx];
+  if (slot->active) {
+    *out_value = sbx_live_control_slot_value_at(slot, t_sec, 0);
+    return SBX_OK;
+  }
+
+  switch (kind) {
+    case SBX_LIVE_CONTROL_CARRIER_HZ:
+    case SBX_LIVE_CONTROL_BEAT_HZ:
+    case SBX_LIVE_CONTROL_AMPLITUDE: {
+      SbxToneSpec tone;
+      int rc = ctx_eval_primary_tone_base_at(ctx, t_sec, &tone);
+      if (rc != SBX_OK) return rc;
+      if (kind == SBX_LIVE_CONTROL_CARRIER_HZ)
+        *out_value = tone.carrier_hz;
+      else if (kind == SBX_LIVE_CONTROL_BEAT_HZ)
+        *out_value = tone.beat_hz;
+      else
+        *out_value = tone.amplitude;
+      return SBX_OK;
+    }
+    case SBX_LIVE_CONTROL_MIX_AMP_PCT:
+      *out_value = ctx_mix_amp_effective_base_at(ctx, t_sec);
+      return SBX_OK;
+    default:
+      return SBX_EINVAL;
+  }
+}
+
+static int
+ctx_apply_live_controls_to_tone(SbxContext *ctx, double t_sec, SbxToneSpec *tone) {
+  char err[160];
+  int idx;
+  if (!ctx || !tone) return SBX_EINVAL;
+  idx = sbx_live_control_kind_index(SBX_LIVE_CONTROL_CARRIER_HZ);
+  if (ctx->live_ctrl[idx].active)
+    tone->carrier_hz = sbx_live_control_slot_value_at(&ctx->live_ctrl[idx], t_sec, 0);
+  idx = sbx_live_control_kind_index(SBX_LIVE_CONTROL_BEAT_HZ);
+  if (ctx->live_ctrl[idx].active)
+    tone->beat_hz = sbx_live_control_slot_value_at(&ctx->live_ctrl[idx], t_sec, 0);
+  idx = sbx_live_control_kind_index(SBX_LIVE_CONTROL_AMPLITUDE);
+  if (ctx->live_ctrl[idx].active)
+    tone->amplitude = sbx_live_control_slot_value_at(&ctx->live_ctrl[idx], t_sec, 0);
+  if (normalize_tone(tone, err, sizeof(err)) != SBX_OK) {
+    set_ctx_error(ctx, err);
+    return SBX_EINVAL;
+  }
+  return SBX_OK;
+}
+
+static int
+ctx_eval_primary_tone_effective_at(SbxContext *ctx, double t_sec, SbxToneSpec *out) {
+  int rc;
+  if (!ctx || !out) return SBX_EINVAL;
+  rc = ctx_eval_primary_tone_base_at(ctx, t_sec, out);
+  if (rc != SBX_OK) return rc;
+  return ctx_apply_live_controls_to_tone(ctx, t_sec, out);
+}
+
+static double
+ctx_mix_amp_effective_base_at(SbxContext *ctx, double t_sec) {
+  return sbx_context_mix_amp_at(ctx, t_sec) * sbx_context_mix_mod_mul_at(ctx, t_sec);
 }
 
 static int
@@ -4917,36 +5111,15 @@ ctx_collect_runtime_telemetry(SbxContext *ctx,
                               const SbxToneSpec *tone_hint,
                               SbxRuntimeTelemetry *out) {
   SbxToneSpec tone;
-  size_t seg;
   if (!ctx || !ctx->eng || !out) return SBX_EINVAL;
   if (!ctx->loaded) return SBX_ENOTREADY;
 
   if (tone_hint) {
     tone = *tone_hint;
   } else {
-    switch (ctx->source_mode) {
-      case SBX_CTX_SRC_STATIC:
-        tone = ctx->eng->tone;
-        break;
-      case SBX_CTX_SRC_CURVE:
-        if (ctx_eval_curve_tone(ctx, t_sec, &tone) != SBX_OK) {
-          sbx_default_tone_spec(&tone);
-          tone.mode = SBX_TONE_NONE;
-        }
-        break;
-      case SBX_CTX_SRC_KEYFRAMES:
-        seg = ctx->kf_seg;
-        if (ctx->kf_loop && ctx->kf_duration_sec > 0.0) {
-          t_sec = fmod(t_sec, ctx->kf_duration_sec);
-          if (t_sec < 0.0) t_sec += ctx->kf_duration_sec;
-        }
-        ctx_eval_keyframed_tone_at(ctx->kfs, ctx->kf_styles, ctx->kf_count,
-                                   t_sec, &seg, &tone);
-        break;
-      default:
-        sbx_default_tone_spec(&tone);
-        tone.mode = SBX_TONE_NONE;
-        break;
+    if (ctx_eval_primary_tone_effective_at(ctx, t_sec, &tone) != SBX_OK) {
+      sbx_default_tone_spec(&tone);
+      tone.mode = SBX_TONE_NONE;
     }
   }
 
@@ -5069,6 +5242,12 @@ sbx_fill_abi_layout_info(SbxAbiLayoutInfo *info) {
   info->runtime_context_config_default_mix_amp_pct_offset = offsetof(SbxRuntimeContextConfig, default_mix_amp_pct);
   info->runtime_context_config_aux_tones_offset = offsetof(SbxRuntimeContextConfig, aux_tones);
   info->runtime_context_config_amp_adjust_offset = offsetof(SbxRuntimeContextConfig, amp_adjust);
+}
+
+void
+sbx_default_live_control_state(SbxLiveControlState *state) {
+  if (!state) return;
+  memset(state, 0, sizeof(*state));
 }
 
 const char *
@@ -8573,6 +8752,7 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->mv_kfs = 0;
   ctx->mv_eng = 0;
   ctx->mv_voice_count = 0;
+  sbx_default_tone_spec(&ctx->static_tone);
   memset(&ctx->curve_tone, 0, sizeof(ctx->curve_tone));
   ctx->curve_prog = 0;
   ctx->curve_duration_sec = 0.0;
@@ -8601,6 +8781,7 @@ sbx_context_create(const SbxEngineConfig *cfg) {
   ctx->telemetry_user = 0;
   memset(&ctx->telemetry_last, 0, sizeof(ctx->telemetry_last));
   ctx->telemetry_valid = 0;
+  ctx_clear_live_controls_internal(ctx);
   ctx_sync_custom_waves(ctx);
   set_ctx_error(ctx, NULL);
   return ctx;
@@ -8639,9 +8820,11 @@ sbx_context_set_tone(SbxContext *ctx, const SbxToneSpec *tone) {
   }
   ctx_clear_keyframes(ctx);
   ctx_clear_curve_source(ctx);
+  ctx->static_tone = ctx->eng->tone;
   ctx->source_mode = SBX_CTX_SRC_STATIC;
   ctx->loaded = 1;
   ctx->t_sec = 0.0;
+  ctx_clear_live_controls_internal(ctx);
   set_ctx_error(ctx, NULL);
   return SBX_OK;
 }
@@ -8819,6 +9002,7 @@ sbx_context_load_curve_program(SbxContext *ctx,
   ctx->source_mode = SBX_CTX_SRC_CURVE;
   ctx->loaded = 1;
   ctx->t_sec = 0.0;
+  ctx_clear_live_controls_internal(ctx);
   set_ctx_error(ctx, NULL);
   return SBX_OK;
 }
@@ -11179,7 +11363,12 @@ sbx_context_mix_mod_mul_at(SbxContext *ctx, double t_sec) {
 
 double
 sbx_context_mix_amp_effective_at(SbxContext *ctx, double t_sec) {
-  return sbx_context_mix_amp_at(ctx, t_sec) * sbx_context_mix_mod_mul_at(ctx, t_sec);
+  int idx;
+  if (!ctx) return 100.0;
+  idx = sbx_live_control_kind_index(SBX_LIVE_CONTROL_MIX_AMP_PCT);
+  if (idx >= 0 && ctx->live_ctrl[idx].active)
+    return sbx_live_control_slot_value_at(&ctx->live_ctrl[idx], t_sec, 0);
+  return ctx_mix_amp_effective_base_at(ctx, t_sec);
 }
 
 int
@@ -11416,6 +11605,120 @@ sbx_context_get_runtime_telemetry(SbxContext *ctx, SbxRuntimeTelemetry *out) {
   return rc;
 }
 
+int
+sbx_context_set_live_control(SbxContext *ctx, int kind, double value) {
+  int idx;
+  SbxLiveControlSlot *slot;
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!ctx->loaded) {
+    set_ctx_error(ctx, "no tone/program loaded");
+    return SBX_ENOTREADY;
+  }
+  idx = sbx_live_control_kind_index(kind);
+  if (idx < 0) {
+    set_ctx_error(ctx, "unsupported live control kind");
+    return SBX_EINVAL;
+  }
+  if (ctx_validate_live_control_value(ctx, kind, value) != SBX_OK)
+    return SBX_EINVAL;
+  slot = &ctx->live_ctrl[idx];
+  slot->active = 1;
+  slot->ramp_active = 0;
+  slot->immediate_value = value;
+  slot->start_value = value;
+  slot->target_value = value;
+  slot->start_time_sec = ctx->t_sec;
+  slot->end_time_sec = ctx->t_sec;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
+sbx_context_ramp_live_control(SbxContext *ctx,
+                              int kind,
+                              double target_value,
+                              double duration_sec) {
+  int idx;
+  double start_value = 0.0;
+  SbxLiveControlSlot *slot;
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  if (!ctx->loaded) {
+    set_ctx_error(ctx, "no tone/program loaded");
+    return SBX_ENOTREADY;
+  }
+  idx = sbx_live_control_kind_index(kind);
+  if (idx < 0) {
+    set_ctx_error(ctx, "unsupported live control kind");
+    return SBX_EINVAL;
+  }
+  if (!isfinite(duration_sec) || duration_sec < 0.0) {
+    set_ctx_error(ctx, "live ramp duration must be finite and >= 0");
+    return SBX_EINVAL;
+  }
+  if (ctx_validate_live_control_value(ctx, kind, target_value) != SBX_OK)
+    return SBX_EINVAL;
+  if (duration_sec == 0.0)
+    return sbx_context_set_live_control(ctx, kind, target_value);
+  if (ctx_eval_live_control_value(ctx, kind, ctx->t_sec, &start_value) != SBX_OK) {
+    set_ctx_error(ctx, "unable to evaluate current live control value");
+    return SBX_EINVAL;
+  }
+  slot = &ctx->live_ctrl[idx];
+  slot->active = 1;
+  slot->ramp_active = 1;
+  slot->immediate_value = start_value;
+  slot->start_value = start_value;
+  slot->target_value = target_value;
+  slot->start_time_sec = ctx->t_sec;
+  slot->end_time_sec = ctx->t_sec + duration_sec;
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+int
+sbx_context_get_live_control(const SbxContext *ctx,
+                             int kind,
+                             SbxLiveControlState *out) {
+  int idx;
+  const SbxLiveControlSlot *slot;
+  int ramping = 0;
+  if (!ctx || !out) return SBX_EINVAL;
+  sbx_default_live_control_state(out);
+  idx = sbx_live_control_kind_index(kind);
+  if (idx < 0) return SBX_EINVAL;
+  if (!ctx->loaded) return SBX_ENOTREADY;
+  slot = &ctx->live_ctrl[idx];
+  if (!slot->active) return SBX_OK;
+  out->active = 1;
+  out->current_value = sbx_live_control_slot_value_at(slot, ctx->t_sec, &ramping);
+  out->target_value = slot->target_value;
+  out->start_time_sec = slot->start_time_sec;
+  out->end_time_sec = slot->end_time_sec;
+  out->ramp_active = ramping;
+  return SBX_OK;
+}
+
+int
+sbx_context_clear_live_control(SbxContext *ctx, int kind) {
+  int idx;
+  if (!ctx || !ctx->eng) return SBX_EINVAL;
+  idx = sbx_live_control_kind_index(kind);
+  if (idx < 0) {
+    set_ctx_error(ctx, "unsupported live control kind");
+    return SBX_EINVAL;
+  }
+  memset(&ctx->live_ctrl[idx], 0, sizeof(ctx->live_ctrl[idx]));
+  set_ctx_error(ctx, NULL);
+  return SBX_OK;
+}
+
+void
+sbx_context_clear_live_controls(SbxContext *ctx) {
+  if (!ctx) return;
+  ctx_clear_live_controls_internal(ctx);
+  set_ctx_error(ctx, NULL);
+}
+
 size_t
 sbx_context_keyframe_count(const SbxContext *ctx) {
   if (!ctx || !ctx->kfs) return 0;
@@ -11589,7 +11892,9 @@ sbx_context_sample_tones_voice(SbxContext *ctx,
     for (i = 0; i < sample_count; i++) {
       double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
       double ts = sbx_lerp(t0_sec, t1_sec, u);
-      out_tones[i] = ctx->eng->tone;
+      out_tones[i] = ctx->static_tone;
+      if (ctx_apply_live_controls_to_tone(ctx, ts, &out_tones[i]) != SBX_OK)
+        return SBX_EINVAL;
       if (out_t_sec) out_t_sec[i] = ts;
     }
     set_ctx_error(ctx, NULL);
@@ -11605,6 +11910,8 @@ sbx_context_sample_tones_voice(SbxContext *ctx,
       double u = (sample_count <= 1) ? 0.0 : (double)i / (double)(sample_count - 1);
       double ts = sbx_lerp(t0_sec, t1_sec, u);
       if (ctx_eval_curve_tone(ctx, ts, &out_tones[i]) != SBX_OK)
+        return SBX_EINVAL;
+      if (ctx_apply_live_controls_to_tone(ctx, ts, &out_tones[i]) != SBX_OK)
         return SBX_EINVAL;
       if (out_t_sec) out_t_sec[i] = ts;
     }
@@ -11629,6 +11936,9 @@ sbx_context_sample_tones_voice(SbxContext *ctx,
     }
     ctx_eval_keyframed_tone_at(kfs, ctx->kf_styles, ctx->kf_count,
                                eval_t, &seg_saved, &out_tones[i]);
+    if (voice_index == 0 &&
+        ctx_apply_live_controls_to_tone(ctx, ts, &out_tones[i]) != SBX_OK)
+      return SBX_EINVAL;
     if (out_t_sec) out_t_sec[i] = ts;
   }
   if (voice_index == 0)
@@ -12093,10 +12403,11 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
     return SBX_ENOTREADY;
   }
 
-  if (ctx->source_mode == SBX_CTX_SRC_STATIC) {
+  if (ctx->source_mode == SBX_CTX_SRC_STATIC && !ctx_has_live_tone_controls(ctx)) {
     size_t tone_count = 0;
     t0_sec = ctx->t_sec;
-    tonev[tone_count++] = ctx->eng->tone;
+    ctx->eng->tone = ctx->static_tone;
+    tonev[tone_count++] = ctx->static_tone;
     for (i = 0; i < ctx->aux_count; i++)
       tonev[tone_count++] = ctx->aux_tones[i];
     ctx_compute_amp_adjust_gains(ctx, tonev, tone_count, gain_l, gain_r);
@@ -12174,7 +12485,15 @@ sbx_context_render_f32(SbxContext *ctx, float *out, size_t frames) {
       rc = ctx_eval_curve_tone(ctx, ctx->t_sec, &tone);
       if (rc != SBX_OK) return rc;
     } else {
-      ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
+      if (ctx->source_mode == SBX_CTX_SRC_STATIC)
+        tone = ctx->static_tone;
+      else
+        ctx_eval_keyframed_tone(ctx, ctx->t_sec, &tone);
+    }
+    if (ctx_apply_live_controls_to_tone(ctx, ctx->t_sec, &tone) != SBX_OK)
+      return SBX_EINVAL;
+    if (ctx->source_mode == SBX_CTX_SRC_STATIC) {
+      ctx->eng->tone = tone;
     }
     tonev[tone_count++] = tone;
     if (!have_first_tone) {
