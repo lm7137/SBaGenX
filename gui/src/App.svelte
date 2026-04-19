@@ -100,6 +100,9 @@
   let liveControlsBusy = false
   let selectedDiagnosticId: string | null = null
   let isPlaying = false
+  let playbackPositionSec = 0
+  let playbackDurationSec = 0
+  let playbackPollTimer: ReturnType<typeof setInterval> | null = null
   let liveCarrierHz = 200
   let liveBeatHz = 10
   let liveAmplitudePct = 100
@@ -319,7 +322,38 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
     return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s`
   }
 
+  function resetPlaybackProgress() {
+    playbackPositionSec = 0
+    playbackDurationSec = 0
+  }
+
+  function stopPlaybackProgressPolling() {
+    if (playbackPollTimer) {
+      clearInterval(playbackPollTimer)
+      playbackPollTimer = null
+    }
+  }
+
+  async function refreshPlaybackProgress() {
+    if (!isPlaying) return
+    try {
+      const snapshot = await getLivePreviewControls()
+      playbackPositionSec = Math.max(0, snapshot.timeSec)
+    } catch {
+      // Ignore transient polling errors; playback-state events remain authoritative.
+    }
+  }
+
+  function startPlaybackProgressPolling() {
+    stopPlaybackProgressPolling()
+    void refreshPlaybackProgress()
+    playbackPollTimer = setInterval(() => {
+      void refreshPlaybackProgress()
+    }, 250)
+  }
+
   function syncLiveProgramControls(snapshot: LiveControlSnapshot) {
+    playbackPositionSec = Math.max(0, snapshot.timeSec)
     liveCarrierHz = Number(snapshot.carrierHz.toFixed(3))
     liveBeatHz = Number(snapshot.beatHz.toFixed(3))
     liveAmplitudePct = Number(snapshot.amplitudePct.toFixed(3))
@@ -947,6 +981,9 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             )
           : await startProgramLivePreview(buildProgramRequest())
       isPlaying = true
+      playbackPositionSec = 0
+      playbackDurationSec = Math.max(0, result.durationSec)
+      startPlaybackProgressPolling()
       transportMessage = result.durationSec > 0 ? `live preview · ${formatDuration(result.durationSec)}` : 'live preview running'
       if (runtimeMode === 'program') {
         await refreshLiveProgramControls()
@@ -959,12 +996,14 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   }
 
   async function stopPlayback(updateMessage = true) {
+    stopPlaybackProgressPolling()
     try {
       await stopLivePreview()
     } catch {
       // Keep local UI state coherent even if the backend has already stopped.
     }
     isPlaying = false
+    resetPlaybackProgress()
     if (updateMessage) {
       transportMessage = 'playback stopped'
     }
@@ -1201,6 +1240,11 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
   $: sequenceMixLooperVisible =
     runtimeMode === 'sequence' &&
     (!!activeDocument?.mixPathOverride || sequenceDocumentHasPreambleMix(activeDocument))
+  $: playbackProgressVisible = isPlaying
+  $: playbackProgressKnown = playbackDurationSec > 0
+  $: playbackProgressPercent = playbackProgressKnown
+    ? Math.max(0, Math.min(100, (playbackPositionSec / playbackDurationSec) * 100))
+    : 0
 
   onMount(() => {
     try {
@@ -1222,19 +1266,31 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
         switch (payload.state) {
           case 'started':
             isPlaying = true
+            if ((payload.durationSec ?? 0) > 0) {
+              playbackDurationSec = payload.durationSec ?? 0
+            }
+            startPlaybackProgressPolling()
             break
           case 'finished':
             isPlaying = false
             transportBusy = false
+            stopPlaybackProgressPolling()
+            if (playbackDurationSec > 0) {
+              playbackPositionSec = playbackDurationSec
+            }
             transportMessage = 'preview finished'
             break
           case 'stopped':
             isPlaying = false
             transportBusy = false
+            stopPlaybackProgressPolling()
+            resetPlaybackProgress()
             break
           case 'error':
             isPlaying = false
             transportBusy = false
+            stopPlaybackProgressPolling()
+            resetPlaybackProgress()
             transportMessage = payload.message ?? 'live preview failed'
             break
         }
@@ -1299,6 +1355,7 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
       window.removeEventListener('keydown', onKeydown)
       unlistenPlaybackEvents?.()
       if (validationTimer) clearTimeout(validationTimer)
+      stopPlaybackProgressPolling()
     }
   })
 </script>
@@ -1474,6 +1531,24 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
             </div>
           </div>
 
+          {#if playbackProgressVisible}
+            <div class='playback-progress-strip'>
+              <div class='playback-progress-meta'>
+                <span class='playback-progress-label'>Playback</span>
+                <span class='playback-progress-time'>
+                  {formatDuration(playbackPositionSec)}
+                  {#if playbackProgressKnown}
+                    {' / '}
+                    {formatDuration(playbackDurationSec)}
+                  {/if}
+                </span>
+              </div>
+              <div class:indeterminate={!playbackProgressKnown} class='playback-progress-track'>
+                <div class='playback-progress-fill' style={`width:${playbackProgressPercent}%`}></div>
+              </div>
+            </div>
+          {/if}
+
           {#if sequenceMixLooperVisible && activeDocument}
             <div class='mix-config-row'>
               <label class='field mix-looper-field'>
@@ -1534,6 +1609,24 @@ carrier = c0 + (c1 - c0) * ramp(m, 0, T)
               {/if}
             </div>
           </div>
+
+          {#if playbackProgressVisible}
+            <div class='playback-progress-strip'>
+              <div class='playback-progress-meta'>
+                <span class='playback-progress-label'>Playback</span>
+                <span class='playback-progress-time'>
+                  {formatDuration(playbackPositionSec)}
+                  {#if playbackProgressKnown}
+                    {' / '}
+                    {formatDuration(playbackDurationSec)}
+                  {/if}
+                </span>
+              </div>
+              <div class:indeterminate={!playbackProgressKnown} class='playback-progress-track'>
+                <div class='playback-progress-fill' style={`width:${playbackProgressPercent}%`}></div>
+              </div>
+            </div>
+          {/if}
 
           <div class='program-panel-body'>
             <div class='program-kind-row'>
