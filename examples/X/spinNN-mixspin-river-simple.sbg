@@ -1,0 +1,22 @@
+## Simple spinNN-driven mixspin example using the bundled river1 mix track.
+##
+## This keeps the setup minimal:
+## - `spin00` provides the custom bipolar motion path
+## - no `customNN`
+## - no explicit waveform-strength shaping
+## - no additional tones, so the rotating river bed is heard on its own
+##
+## Assumes the installed `river1.ogg` asset is available alongside the program files:
+##   sbagenx -D examples/X/spinNN-mixspin-river-simple.sbg
+##   sbagenx examples/X/spinNN-mixspin-river-simple.sbg
+
+-m river1.ogg
+
+spin00: e=1 -100 -100 -80 -30 0 30 80 100 100 70 20 0 -20 -70
+
+simple-eddies: mix/80 spin00:mixspin:420+0.07/42
+simple-deep: mix/80 spin00:mixspin:520+0.05/48
+
+00:00 simple-eddies
+00:08:00 simple-deep ->
+00:16:00 simple-eddies
