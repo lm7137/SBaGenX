@@ -1,3 +1,6 @@
+3.9.0-alpha.15: Added GUI playback progress bars and current-position time displays for both sequence-file and built-in program live preview playback.
+3.9.0-alpha.15: Added examples/X/spinNN-mixspin-river-eddies.sbg as a fuller spinNN-driven mixspin demonstration using river2.ogg.
+3.9.0-alpha.15: Added examples/X/spinNN-mixspin-river-simple.sbg as a minimal mix-only spinNN-driven mixspin demonstration using river1.ogg.
 3.9.0-alpha.14: Added a first-pass sbagenxlib live-control API for carrier, beat, program amplitude, and mix amplitude overlays with immediate set/get, timed ramps, and clear/reset operations.
 3.9.0-alpha.14: Added a standalone live-control demo harness plus GUI preview controls for applying and ramping live carrier/beat/amplitude/mix overrides on running built-in program previews.
 3.9.0-alpha.14: Added spinNN support for mixspin so custom bipolar spin motion can drive mix rotation while waveform/customNN prefixes continue to shape effect strength.
