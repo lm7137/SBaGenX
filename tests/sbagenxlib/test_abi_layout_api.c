@@ -29,6 +29,7 @@ int main(void) {
   EXPECT_EQ(iso_envelope_spec_edge_mode_offset, offsetof(SbxIsoEnvelopeSpec, edge_mode));
   EXPECT_EQ(mix_fx_spec_size, sizeof(SbxMixFxSpec));
   EXPECT_EQ(mix_fx_spec_envelope_waveform_offset, offsetof(SbxMixFxSpec, envelope_waveform));
+  EXPECT_EQ(mix_fx_spec_motion_waveform_offset, offsetof(SbxMixFxSpec, motion_waveform));
   EXPECT_EQ(mix_fx_spec_amp_offset, offsetof(SbxMixFxSpec, amp));
   EXPECT_EQ(mix_fx_spec_mixam_mode_offset, offsetof(SbxMixFxSpec, mixam_mode));
   EXPECT_EQ(mix_fx_spec_mixam_floor_offset, offsetof(SbxMixFxSpec, mixam_floor));

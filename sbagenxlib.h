@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 44  /* public API contract revision */
+#define SBX_API_VERSION 45  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
@@ -98,6 +98,7 @@ typedef struct {
   int type;      /* SBX_MIXFX_* */
   int waveform;  /* SBX_WAVE_* */
   int envelope_waveform; /* SBX_ENV_WAVE_NONE or SBX_ENV_WAVE_CUSTOM_BASE + [0..99] */
+  int motion_waveform; /* 0 (default built-in motion) or SBX_WAVE_SPIN_BASE + [0..99] for mixspin */
   double carr;   /* mixspin width in microseconds */
   double res;    /* modulation/spin frequency in Hz */
   double amp;    /* 0..1 effect amount */
@@ -528,6 +529,7 @@ typedef struct {
   size_t iso_envelope_spec_edge_mode_offset;
   size_t mix_fx_spec_size;
   size_t mix_fx_spec_envelope_waveform_offset;
+  size_t mix_fx_spec_motion_waveform_offset;
   size_t mix_fx_spec_amp_offset;
   size_t mix_fx_spec_mixam_mode_offset;
   size_t mix_fx_spec_mixam_floor_offset;

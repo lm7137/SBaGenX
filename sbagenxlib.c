@@ -5175,6 +5175,7 @@ sbx_fill_abi_layout_info(SbxAbiLayoutInfo *info) {
   info->iso_envelope_spec_edge_mode_offset = offsetof(SbxIsoEnvelopeSpec, edge_mode);
   info->mix_fx_spec_size = sizeof(SbxMixFxSpec);
   info->mix_fx_spec_envelope_waveform_offset = offsetof(SbxMixFxSpec, envelope_waveform);
+  info->mix_fx_spec_motion_waveform_offset = offsetof(SbxMixFxSpec, motion_waveform);
   info->mix_fx_spec_amp_offset = offsetof(SbxMixFxSpec, amp);
   info->mix_fx_spec_mixam_mode_offset = offsetof(SbxMixFxSpec, mixam_mode);
   info->mix_fx_spec_mixam_floor_offset = offsetof(SbxMixFxSpec, mixam_floor);
@@ -6076,7 +6077,11 @@ sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_
   const char *p, *next;
   int n = 0;
   int waveform;
+  int motion_waveform = 0;
   int env_waveform = SBX_ENV_WAVE_NONE;
+  int saw_waveform_prefix = 0;
+  int saw_motion_waveform_prefix = 0;
+  int saw_env_prefix = 0;
   SbxMixFxSpec fx;
   double carr = 0.0, res = 0.0, amp_pct = 0.0;
   int rc = SBX_OK;
@@ -6091,17 +6096,31 @@ sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_
   p = skip_ws(spec);
   fx.waveform = default_waveform;
   fx.envelope_waveform = SBX_ENV_WAVE_NONE;
+  fx.motion_waveform = 0;
   for (;;) {
     int advanced = 0;
     if (sbx_parse_literal_env_prefix(p, &env_waveform, &next)) {
+      if (saw_env_prefix)
+        return SBX_EINVAL;
       p = next;
       fx.envelope_waveform = env_waveform;
+      saw_env_prefix = 1;
+      advanced = 1;
+    } else if (sbx_parse_spin_wave_prefix(p, &motion_waveform, &next)) {
+      if (saw_motion_waveform_prefix)
+        return SBX_EINVAL;
+      p = next;
+      fx.motion_waveform = motion_waveform;
+      saw_motion_waveform_prefix = 1;
       advanced = 1;
     } else {
       next = skip_optional_waveform_prefix(p, &waveform);
       if (next != p) {
+        if (saw_waveform_prefix)
+          return SBX_EINVAL;
         p = next;
         fx.waveform = waveform;
+        saw_waveform_prefix = 1;
         advanced = 1;
       }
     }
@@ -6180,8 +6199,13 @@ sbx_parse_mix_fx_spec(const char *spec, int default_waveform, SbxMixFxSpec *out_
 
   if (fx.waveform < SBX_WAVE_SINE || fx.waveform > SBX_WAVE_SAWTOOTH)
     return SBX_EINVAL;
+  if (fx.motion_waveform != 0 &&
+      sbx_spin_wave_index(fx.motion_waveform) < 0)
+    return SBX_EINVAL;
   if (fx.envelope_waveform != SBX_ENV_WAVE_NONE &&
       sbx_envelope_wave_custom_index(fx.envelope_waveform) < 0)
+    return SBX_EINVAL;
+  if (fx.motion_waveform != 0 && fx.type != SBX_MIXFX_SPIN)
     return SBX_EINVAL;
   if (fx.envelope_waveform != SBX_ENV_WAVE_NONE &&
       fx.type != SBX_MIXFX_SPIN &&
@@ -6519,10 +6543,14 @@ int
 sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz) {
   const char *wname;
   char eprefix[24];
+  char sprefix[24];
   char prefix[64];
   if (!fx || !out || out_sz == 0) return SBX_EINVAL;
   if (fx->type < SBX_MIXFX_SPIN || fx->type > SBX_MIXFX_AM) return SBX_EINVAL;
   if (fx->waveform < SBX_WAVE_SINE || fx->waveform > SBX_WAVE_SAWTOOTH) return SBX_EINVAL;
+  if (fx->motion_waveform != 0 &&
+      sbx_spin_wave_index(fx->motion_waveform) < 0)
+    return SBX_EINVAL;
   if (fx->envelope_waveform != SBX_ENV_WAVE_NONE &&
       sbx_envelope_wave_custom_index(fx->envelope_waveform) < 0)
     return SBX_EINVAL;
@@ -6534,17 +6562,34 @@ sbx_format_mix_fx_spec(const SbxMixFxSpec *fx, char *out, size_t out_sz) {
   wname = wave_name_for_tone(fx->waveform);
   if (!env_prefix_for_tone(fx->envelope_waveform, eprefix, sizeof(eprefix)))
     return SBX_EINVAL;
+  if (!spin_prefix_for_tone(fx->motion_waveform, sprefix, sizeof(sprefix)))
+    return SBX_EINVAL;
   if (fx->envelope_waveform != SBX_ENV_WAVE_NONE) {
-    if (fx->waveform == SBX_WAVE_SINE) {
+    if (fx->waveform == SBX_WAVE_SINE && fx->motion_waveform == 0) {
       if (!snprintf_checked(prefix, sizeof(prefix), "%s:", eprefix))
         return SBX_EINVAL;
-    } else {
+    } else if (fx->waveform == SBX_WAVE_SINE) {
+      if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:", eprefix, sprefix))
+        return SBX_EINVAL;
+    } else if (fx->motion_waveform == 0) {
       if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:", eprefix, wname))
+        return SBX_EINVAL;
+    } else {
+      if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:%s:", eprefix, wname, sprefix))
         return SBX_EINVAL;
     }
   } else {
-    if (!snprintf_checked(prefix, sizeof(prefix), "%s:", wname))
+    if (fx->motion_waveform != 0) {
+      if (fx->waveform == SBX_WAVE_SINE) {
+        if (!snprintf_checked(prefix, sizeof(prefix), "%s:", sprefix))
+          return SBX_EINVAL;
+      } else {
+        if (!snprintf_checked(prefix, sizeof(prefix), "%s:%s:", wname, sprefix))
+          return SBX_EINVAL;
+      }
+    } else if (!snprintf_checked(prefix, sizeof(prefix), "%s:", wname)) {
       return SBX_EINVAL;
+    }
   }
   switch (fx->type) {
     case SBX_MIXFX_SPIN:
@@ -10350,12 +10395,18 @@ sbx_context_get_mix_effect(const SbxContext *ctx, size_t index, SbxMixFxSpec *ou
 static int
 sbx_validate_mix_fx_spec_fields(const SbxMixFxSpec *spec) {
   int custom_env_idx;
+  int motion_idx;
   if (!spec) return SBX_EINVAL;
   if (spec->type == SBX_MIXFX_NONE) return SBX_OK;
   if (spec->type < SBX_MIXFX_NONE || spec->type > SBX_MIXFX_AM) return SBX_EINVAL;
   if (spec->waveform < SBX_WAVE_SINE || spec->waveform > SBX_WAVE_SAWTOOTH) return SBX_EINVAL;
   custom_env_idx = sbx_envelope_wave_custom_index(spec->envelope_waveform);
+  motion_idx = sbx_spin_wave_index(spec->motion_waveform);
   if (spec->envelope_waveform != SBX_ENV_WAVE_NONE && custom_env_idx < 0)
+    return SBX_EINVAL;
+  if (spec->motion_waveform != 0 && motion_idx < 0)
+    return SBX_EINVAL;
+  if (motion_idx >= 0 && spec->type != SBX_MIXFX_SPIN)
     return SBX_EINVAL;
   if (custom_env_idx >= 0 &&
       spec->type != SBX_MIXFX_SPIN &&
@@ -10508,6 +10559,7 @@ sbx_mixfx_state_assign_spec(SbxMixFxState *state, const SbxMixFxSpec *spec) {
   if (state->spec.type != spec->type ||
       state->spec.waveform != spec->waveform ||
       state->spec.envelope_waveform != spec->envelope_waveform ||
+      state->spec.motion_waveform != spec->motion_waveform ||
       (state->spec.type == SBX_MIXFX_AM &&
        (state->spec.mixam_mode != spec->mixam_mode ||
         state->spec.mixam_edge_mode != spec->mixam_edge_mode))) {
@@ -10524,6 +10576,7 @@ sbx_default_mix_fx_spec(SbxMixFxSpec *fx) {
   fx->type = SBX_MIXFX_NONE;
   fx->waveform = SBX_WAVE_SINE;
   fx->envelope_waveform = SBX_ENV_WAVE_NONE;
+  fx->motion_waveform = 0;
 }
 
 static void
@@ -10555,7 +10608,9 @@ sbx_interp_mix_fx_spec(const SbxMixFxSpec *a,
     out->amp *= sbx_dsp_clamp(1.0 - u, 0.0, 1.0);
     return;
   }
-  if (a->type == b->type && a->waveform == b->waveform) {
+  if (a->type == b->type &&
+      a->waveform == b->waveform &&
+      a->motion_waveform == b->motion_waveform) {
     *out = *a;
     out->carr = sbx_lerp(a->carr, b->carr, u);
     out->res = sbx_lerp(a->res, b->res, u);
@@ -10774,11 +10829,22 @@ sbx_apply_one_mix_effect(const SbxContext *ctx,
   sbx_mixfx_state_assign_spec(fx, spec);
   switch (fx->spec.type) {
     case SBX_MIXFX_SPIN: {
-      double wav, env, val, intensity, amplified, pos, fx_l, fx_r;
+      double env, val, intensity, amplified, pos, fx_l, fx_r;
+      double motion = 0.0;
+      double strength = 1.0;
       fx->phase = sbx_dsp_wrap_unit(fx->phase + fx->spec.res / sr);
-      wav = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
       env = sbx_mixfx_custom_env_at_phase(ctx, &fx->spec, fx->phase);
-      val = fx->spec.carr * 1.0e-6 * sr * wav * env;
+      if (fx->spec.motion_waveform != 0) {
+        if (!engine_spin_wave_sample(ctx->eng, fx->spec.motion_waveform, fx->phase, &motion))
+          motion = 0.0;
+        if (fx->spec.waveform != SBX_WAVE_SINE)
+          strength = 0.5 + 0.5 * sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
+        strength = sbx_dsp_clamp(strength, 0.0, 1.0) * env;
+      } else {
+        motion = sbx_wave_sample_unit_phase(fx->spec.waveform, fx->phase);
+        strength = env;
+      }
+      val = fx->spec.carr * 1.0e-6 * sr * motion * strength;
       intensity = 0.5 + fx->spec.amp * 3.5;
       amplified = sbx_dsp_clamp(val * intensity, -128.0, 127.0);
       pos = fabs(amplified);

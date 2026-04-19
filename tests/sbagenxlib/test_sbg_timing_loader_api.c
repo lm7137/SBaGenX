@@ -163,8 +163,9 @@ main(void) {
       "00:00:02 off\n";
   const char *sbg_custom_mix_text =
       "custom00: e=2 0 0.2 1 0.2 0\n"
+      "spin00: e=0 0 0 100 100 -100 -100\n"
       "pulse: mix/70 custom00:mixpulse:2/40 180+0/20\n"
-      "wash: mix/60 custom00:triangle:mixspin:350+3/25 180+0/15\n"
+      "wash: mix/60 custom00:triangle:spin00:mixspin:350+3/25 180+0/15\n"
       "beat: mix/55 custom00:mixbeat:3/25 180+0/15\n"
       "NOW pulse ==\n"
       "+00:00:02 wash ==\n"

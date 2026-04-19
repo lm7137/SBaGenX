@@ -244,6 +244,22 @@ int main(void) {
         fx.waveform != SBX_WAVE_TRIANGLE ||
         fx.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE)
       fail("custom mixspin parse value mismatch");
+    if (sbx_parse_mix_fx_spec("spin00:mixspin:400+6/40", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("spinNN mixspin parse failed");
+    if (fx.type != SBX_MIXFX_SPIN ||
+        fx.waveform != SBX_WAVE_SINE ||
+        fx.envelope_waveform != SBX_ENV_WAVE_NONE ||
+        fx.motion_waveform != SBX_WAVE_SPIN_BASE)
+      fail("spinNN mixspin parse value mismatch");
+    if (sbx_parse_mix_fx_spec("custom00:triangle:spin00:mixspin:400+6/40", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("custom waveform spinNN mixspin parse failed");
+    if (fx.type != SBX_MIXFX_SPIN ||
+        fx.waveform != SBX_WAVE_TRIANGLE ||
+        fx.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE ||
+        fx.motion_waveform != SBX_WAVE_SPIN_BASE)
+      fail("custom waveform spinNN mixspin parse value mismatch");
+    if (sbx_parse_mix_fx_spec("spin00:mixpulse:1/50", SBX_WAVE_SINE, &fx) != SBX_EINVAL)
+      fail("spinNN should be rejected for mixpulse");
     if (sbx_parse_mix_fx_spec("custom00:mixbeat:3/25", SBX_WAVE_SINE, &fx) != SBX_OK)
       fail("custom mixbeat parse failed");
     if (fx.type != SBX_MIXFX_BEAT ||
@@ -346,6 +362,18 @@ int main(void) {
     if (fx_rt.type != fx.type || fx_rt.waveform != fx.waveform ||
         fx_rt.envelope_waveform != fx.envelope_waveform)
       fail("custom mix fx format roundtrip mismatch");
+    if (sbx_parse_mix_fx_spec("custom00:triangle:spin00:mixspin:400+6/40", SBX_WAVE_SINE, &fx) != SBX_OK)
+      fail("spinNN custom mix fx parse for format failed");
+    if (sbx_format_mix_fx_spec(&fx, spec, sizeof(spec)) != SBX_OK)
+      fail("spinNN custom mix fx format failed");
+    if (strcmp(spec, "custom00:triangle:spin00:mixspin:400+6/40") != 0)
+      fail("spinNN custom mix fx format should preserve all prefixes");
+    if (sbx_parse_mix_fx_spec(spec, SBX_WAVE_SINE, &fx_rt) != SBX_OK)
+      fail("spinNN custom mix fx parse after format failed");
+    if (fx_rt.type != fx.type || fx_rt.waveform != fx.waveform ||
+        fx_rt.envelope_waveform != fx.envelope_waveform ||
+        fx_rt.motion_waveform != fx.motion_waveform)
+      fail("spinNN custom mix fx format roundtrip mismatch");
     if (sbx_parse_mix_fx_spec("mixam:7:d=0.6:a=0.2:r=0.2:e=2:f=0.1", SBX_WAVE_SINE, &fx) != SBX_OK)
       fail("mixam parse for format failed");
     if (sbx_format_mix_fx_spec(&fx, spec, sizeof(spec)) != SBX_OK)

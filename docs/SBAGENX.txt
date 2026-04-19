@@ -348,8 +348,9 @@ isochronic tones and `noisepulse`, the custom envelope replaces the
 default `-I` pulse shape for that tone.  For `noisebeat`, the custom
 envelope crossfades between centered mono noise and the fully
 beat-shifted stereo result.  For mix effects, the custom envelope
-modulates effect strength while preserving the underlying
-sine/explicit-waveform oscillator used by the effect.  The installer
+modulates effect strength while preserving the underlying motion source:
+the built-in sine/explicit waveform, or an explicit `spinNN` motion
+wave for `mixspin`.  The installer
 ships a rendered reference plot for the example above as:
 
 For the spin-noise family there is now a separate `spinNN` definition family:
@@ -367,8 +368,10 @@ This preserves the existing spin parameters:
   amplitude  output loudness
 
 while replacing the built-in sine/triangle/square/sawtooth motion shape with
-a custom bipolar one.  `spinNN` is specific to the spin-noise tones and is
-not used for `mixspin`, `mixpulse`, or `mixbeat`.
+a custom bipolar one.  `spinNN` is also supported for `mixspin`, where it
+controls the bipolar left/right motion path while any explicit waveform or
+`customNN` prefix continues to shape the effect strength.  It is not used for
+`mixpulse` or `mixbeat`.
 
 For new isochronic designs, `-I` is still the recommended first choice.
 Use `customNN` when you specifically want a nonstandard hand-shaped
@@ -2216,6 +2219,8 @@ Here are the different types:
   spinNN:bspin:<width>+<freq>/<amp>   # Brown spin with custom bipolar motion
   spinNN:wspin:<width>+<freq>/<amp>   # White spin with custom bipolar motion
   mixspin:<width>+<freq>/<intensity>  # Spinning effect on mix input
+  spinNN:mixspin:<width>+<freq>/<intensity>
+                                      # Mixspin with custom bipolar motion path
   mixpulse:<pulse>/<intensity>        # Pulse effect on mix input
   mixbeat:<beat>/<intensity>          # Hilbert-shifted binauralized mix
   mixam:<pulse|beat>                # Pure AM on mix input (envelope via -H)
@@ -2228,6 +2233,9 @@ Here are the different types:
   <waveform>:mixspin:<width>+<freq>/<intensity>
                                        # Mixspin with specific waveform
                                        # modulation
+  <waveform>:spinNN:mixspin:<width>+<freq>/<intensity>
+                                       # Mixspin with waveform strength shaping
+                                       # and custom bipolar motion
   <waveform>:mixpulse:<pulse>/<intensity>
                                        # Mixpulse with specific waveform
                                        # modulation
@@ -2381,6 +2389,15 @@ spatial effect where the sound appears to rotate around the listener's head.
 The mixspin effect must be used in conjunction with a mix/<amp> specification
 in the same tone set, as it processes the audio input rather than generating
 its own tones. Higher intensity values create more pronounced rotation effects.
+
+With `spinNN:mixspin:...`, the `spinNN` prefix replaces the built-in motion
+law with a custom bipolar motion shape.  Any ordinary waveform prefix or
+`customNN` prefix still modulates effect strength, so a form such as
+`custom00:triangle:spin00:mixspin:350+3/25` means:
+
+  - `spin00` controls the left/right motion path
+  - `triangle` shapes the motion intensity over the cycle
+  - `custom00` further gates that intensity with a custom unipolar envelope
 
 Waveforms can also be applied to mixspin effects to modulate the rotation 
 intensity. For example, triangle:mixspin:400+6.0/40 applies a triangle wave 

@@ -89,6 +89,7 @@ struct SbxMixFxSpec {
   type_: c_int,
   waveform: c_int,
   envelope_waveform: c_int,
+  motion_waveform: c_int,
   carr: f64,
   res: f64,
   amp: f64,
@@ -385,6 +386,7 @@ struct SbxAbiLayoutInfo {
   iso_envelope_spec_edge_mode_offset: usize,
   mix_fx_spec_size: usize,
   mix_fx_spec_envelope_waveform_offset: usize,
+  mix_fx_spec_motion_waveform_offset: usize,
   mix_fx_spec_amp_offset: usize,
   mix_fx_spec_mixam_mode_offset: usize,
   mix_fx_spec_mixam_floor_offset: usize,
@@ -616,7 +618,7 @@ type SbxRuntimeContextCreateFromCurveProgram = unsafe extern "C" fn(
   *mut *mut SbxContext,
 ) -> c_int;
 
-const EXPECTED_SBX_API_VERSION: i32 = 44;
+const EXPECTED_SBX_API_VERSION: i32 = 45;
 
 fn rust_abi_layout_info() -> SbxAbiLayoutInfo {
   SbxAbiLayoutInfo {
@@ -632,6 +634,7 @@ fn rust_abi_layout_info() -> SbxAbiLayoutInfo {
     iso_envelope_spec_edge_mode_offset: std::mem::offset_of!(SbxIsoEnvelopeSpec, edge_mode),
     mix_fx_spec_size: std::mem::size_of::<SbxMixFxSpec>(),
     mix_fx_spec_envelope_waveform_offset: std::mem::offset_of!(SbxMixFxSpec, envelope_waveform),
+    mix_fx_spec_motion_waveform_offset: std::mem::offset_of!(SbxMixFxSpec, motion_waveform),
     mix_fx_spec_amp_offset: std::mem::offset_of!(SbxMixFxSpec, amp),
     mix_fx_spec_mixam_mode_offset: std::mem::offset_of!(SbxMixFxSpec, mixam_mode),
     mix_fx_spec_mixam_floor_offset: std::mem::offset_of!(SbxMixFxSpec, mixam_floor),
