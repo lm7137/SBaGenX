@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SBaGenX GUI",
-  "version": "3.9.0-alpha.13",
+  "version": "3.9.0-alpha.14",
   "identifier": "org.sbagenx.gui",
   "build": {
     "frontendDist": "../dist",
