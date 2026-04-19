@@ -1,0 +1,22 @@
+## spinNN-driven mixspin example using the bundled river2 mix track.
+##
+## The spin00 waveform lingers near the edges, then crosses the center more
+## quickly, so the river feels less like a constant sinusoidal swirl and more
+## like broad eddies circling around the listener. The triangle waveform and
+## custom00 envelope still shape the strength of that motion.
+##
+## Assumes the installed `river2.ogg` asset is available alongside the program files:
+##   sbagenx -D examples/X/spinNN-mixspin-river-eddies.sbg
+##   sbagenx examples/X/spinNN-mixspin-river-eddies.sbg
+
+-m river2.ogg
+
+custom00: e=2 0 0.10 0.55 1 0.85 0.30 0
+spin00: e=1 -100 -100 -90 -55 -10 0 10 55 100 100 92 65 25 0 -25 -65 -92
+
+eddies: mix/82 custom00:triangle:spin00:mixspin:420+0.07/42 180+2.5/15
+eddies-deep: mix/82 custom00:triangle:spin00:mixspin:520+0.05/48 150+1.8/16
+
+00:00 eddies
+00:08:00 eddies-deep ->
+00:16:00 eddies
