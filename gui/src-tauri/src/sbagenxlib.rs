@@ -32,6 +32,7 @@ const SBX_TONE_MONAURAL: c_int = 2;
 const SBX_TONE_ISOCHRONIC: c_int = 3;
 const SBX_TONE_NOISE_PULSE: c_int = 11;
 const SBX_TONE_NOISE_BEAT: c_int = 12;
+const SBX_TONE_ORBIT_BEAT: c_int = 13;
 const SBX_TONE_SPIN_PINK: c_int = 7;
 const SBX_TONE_SPIN_BROWN: c_int = 8;
 const SBX_TONE_SPIN_WHITE: c_int = 9;
@@ -403,6 +404,9 @@ struct SbxAbiLayoutInfo {
   audio_writer_config_prefer_float_input_offset: usize,
   tone_spec_size: usize,
   tone_spec_amplitude_offset: usize,
+  tone_spec_orbit_hz_offset: usize,
+  tone_spec_orbit_distance_m_offset: usize,
+  tone_spec_orbit_envelope_mode_offset: usize,
   tone_spec_waveform_offset: usize,
   tone_spec_noise_waveform_offset: usize,
   tone_spec_iso_release_offset: usize,
@@ -462,6 +466,9 @@ struct SbxToneSpec {
   mode: c_int,
   carrier_hz: f64,
   beat_hz: f64,
+  orbit_hz: f64,
+  orbit_distance_m: f64,
+  orbit_envelope_mode: c_int,
   amplitude: f64,
   waveform: c_int,
   envelope_waveform: c_int,
@@ -618,7 +625,7 @@ type SbxRuntimeContextCreateFromCurveProgram = unsafe extern "C" fn(
   *mut *mut SbxContext,
 ) -> c_int;
 
-const EXPECTED_SBX_API_VERSION: i32 = 45;
+const EXPECTED_SBX_API_VERSION: i32 = 47;
 
 fn rust_abi_layout_info() -> SbxAbiLayoutInfo {
   SbxAbiLayoutInfo {
@@ -660,6 +667,12 @@ fn rust_abi_layout_info() -> SbxAbiLayoutInfo {
     ),
     tone_spec_size: std::mem::size_of::<SbxToneSpec>(),
     tone_spec_amplitude_offset: std::mem::offset_of!(SbxToneSpec, amplitude),
+    tone_spec_orbit_hz_offset: std::mem::offset_of!(SbxToneSpec, orbit_hz),
+    tone_spec_orbit_distance_m_offset: std::mem::offset_of!(SbxToneSpec, orbit_distance_m),
+    tone_spec_orbit_envelope_mode_offset: std::mem::offset_of!(
+      SbxToneSpec,
+      orbit_envelope_mode
+    ),
     tone_spec_waveform_offset: std::mem::offset_of!(SbxToneSpec, waveform),
     tone_spec_noise_waveform_offset: std::mem::offset_of!(SbxToneSpec, noise_waveform),
     tone_spec_iso_release_offset: std::mem::offset_of!(SbxToneSpec, iso_release),
@@ -1115,6 +1128,9 @@ impl LivePlaybackContext {
       mode: SBX_TONE_BINAURAL,
       carrier_hz: 0.0,
       beat_hz: 0.0,
+      orbit_hz: 0.0,
+      orbit_distance_m: 1.0,
+      orbit_envelope_mode: 0,
       amplitude: 0.0,
       waveform: SBX_WAVE_SINE,
       envelope_waveform: SBX_WAVE_SINE,
@@ -3768,6 +3784,9 @@ fn sample_context_beat_preview(
         mode: 0,
         carrier_hz: 0.0,
         beat_hz: 0.0,
+        orbit_hz: 0.0,
+        orbit_distance_m: 1.0,
+        orbit_envelope_mode: 0,
         amplitude: 0.0,
         waveform: 0,
         envelope_waveform: 0,
@@ -3883,6 +3902,7 @@ fn tone_mode_has_beat_preview(mode: c_int) -> bool {
       | SBX_TONE_ISOCHRONIC
       | SBX_TONE_NOISE_PULSE
       | SBX_TONE_NOISE_BEAT
+      | SBX_TONE_ORBIT_BEAT
       | SBX_TONE_SPIN_PINK
       | SBX_TONE_SPIN_BROWN
       | SBX_TONE_SPIN_WHITE
@@ -3903,6 +3923,9 @@ fn sample_context_iso_cycle(
     mode: 0,
     carrier_hz: 0.0,
     beat_hz: 0.0,
+    orbit_hz: 0.0,
+    orbit_distance_m: 1.0,
+    orbit_envelope_mode: 0,
     amplitude: 0.0,
     waveform: 0,
     envelope_waveform: 0,

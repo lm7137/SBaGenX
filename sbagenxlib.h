@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define SBX_API_VERSION 45  /* public API contract revision */
+#define SBX_API_VERSION 47  /* public API contract revision */
 #define SBX_MAX_AUX_TONES 16 /* max auxiliary overlay tones */
 #define SBX_MAX_AMP_ADJUST_POINTS 16 /* max -c frequency/gain breakpoints */
 #define SBX_PLOT_MAX_TICKS 64
@@ -46,7 +46,8 @@ typedef enum {
   SBX_TONE_SPIN_WHITE = 9,
   SBX_TONE_BELL = 10,
   SBX_TONE_NOISE_PULSE = 11,
-  SBX_TONE_NOISE_BEAT = 12
+  SBX_TONE_NOISE_BEAT = 12,
+  SBX_TONE_ORBIT_BEAT = 13
 } SbxToneMode;
 
 typedef enum {
@@ -68,6 +69,11 @@ typedef enum {
   SBX_NOISE_WAVE_NONE = 0,
   SBX_NOISE_WAVE_BASE = 2300 /* literal noiseNN spectrum id: + [0..99], valid only for noise and spin-noise tones */
 } SbxNoiseWaveform;
+
+typedef enum {
+  SBX_ORBIT_ENV_SINE = 0, /* monaural-style sinusoidal amplitude envelope */
+  SBX_ORBIT_ENV_ISO = 1   /* isochronic gate envelope, configurable via -I */
+} SbxOrbitEnvelopeMode;
 
 typedef enum {
   SBX_INTERP_LINEAR = 0,
@@ -161,6 +167,9 @@ typedef struct {
   SbxToneMode mode;
   double carrier_hz;
   double beat_hz;
+  double orbit_hz;  /* orbitbeat spatial orbit rate in Hz */
+  double orbit_distance_m; /* orbitbeat source distance in meters */
+  int orbit_envelope_mode; /* SBX_ORBIT_ENV_* for orbitbeat default envelope */
   double amplitude;  /* 0.0 .. 1.0 */
   int waveform;      /* SBX_WAVE_* carrier waveform, or SBX_WAVE_SPIN_BASE+[0..99] for spin tones */
   int envelope_waveform; /* SBX_ENV_WAVE_NONE or SBX_ENV_WAVE_* + [0..99] */
@@ -546,6 +555,9 @@ typedef struct {
   size_t audio_writer_config_prefer_float_input_offset;
   size_t tone_spec_size;
   size_t tone_spec_amplitude_offset;
+  size_t tone_spec_orbit_hz_offset;
+  size_t tone_spec_orbit_distance_m_offset;
+  size_t tone_spec_orbit_envelope_mode_offset;
   size_t tone_spec_waveform_offset;
   size_t tone_spec_noise_waveform_offset;
   size_t tone_spec_iso_release_offset;

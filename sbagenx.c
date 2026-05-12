@@ -8696,7 +8696,7 @@ sbx_handle_runtime_unsupported_extra(const char *prog_name, const SbxRuntimeExtr
       return;
    if (!opt_D)
       error("Unsupported extra tone-spec '%s' for %s sbagenxlib runtime"
-	    NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat/mixam, sbagenxlib tones (+/-/@/M, single tones), bell, spin/bspin/wspin, and white/pink/brown noise",
+	    NL "Supported extras: mix/<amp>, mixspin/mixpulse/mixbeat/mixam, sbagenxlib tones (+/-/@/M, single tones), orbitbeat, bell, spin/bspin/wspin, and white/pink/brown noise",
 	    spec->bad_token, prog_name ? prog_name : "sbagenx");
    warn("Unsupported extra tone-spec '%s' is preserved textually in -D output only (not renderable by sbagenxlib runtime)",
 	spec->bad_token);

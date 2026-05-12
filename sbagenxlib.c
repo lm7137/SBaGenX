@@ -86,6 +86,11 @@ extern int lame_close(lame_t gfp);
 #define SBX_NOISE_MIN_HZ 20.0
 #define SBX_NOISE_MAX_HZ 20000.0
 #define SBX_MIXBEAT_HILBERT_TAPS 31
+#define SBX_ORBIT_DELAY_SAMPLES 2048
+#define SBX_ORBIT_DEFAULT_DISTANCE_M 1.0
+#define SBX_ORBIT_MIN_DISTANCE_M 0.25
+#define SBX_ORBIT_MAX_DISTANCE_M 10.0
+#define SBX_ORBIT_MAX_ITD_SEC 0.00065
 #define SBX_CURVE_MAX_PARAMS 32
 #define SBX_CURVE_MAX_PIECES 64
 #define SBX_CURVE_NAME_MAX 64
@@ -185,6 +190,10 @@ struct SbxEngine {
   int noise_hist_pos_m;
   double noisebeat_hist[SBX_MIXBEAT_HILBERT_TAPS];
   int noisebeat_hist_pos;
+  double orbit_delay[SBX_ORBIT_DELAY_SAMPLES];
+  int orbit_delay_pos;
+  double orbit_lpf_l;
+  double orbit_lpf_r;
   char last_error[256];
 };
 
@@ -3482,6 +3491,8 @@ sbx_apply_immediate_iso_override(SbxToneSpec *tone,
   if (!tone || !cfg || !cfg->have_iso_override)
     return;
   if (tone->mode != SBX_TONE_ISOCHRONIC &&
+      !(tone->mode == SBX_TONE_ORBIT_BEAT &&
+        tone->orbit_envelope_mode == SBX_ORBIT_ENV_ISO) &&
       tone->mode != SBX_TONE_NOISE_PULSE)
     return;
   if (tone->envelope_waveform != SBX_ENV_WAVE_NONE)
@@ -3515,6 +3526,8 @@ sbx_apply_sequence_iso_override(SbxToneSpec *tone,
   if (!tone || !ctx || !ctx->have_seq_iso_override)
     return;
   if (tone->mode != SBX_TONE_ISOCHRONIC &&
+      !(tone->mode == SBX_TONE_ORBIT_BEAT &&
+        tone->orbit_envelope_mode == SBX_ORBIT_ENV_ISO) &&
       tone->mode != SBX_TONE_NOISE_PULSE)
     return;
   if (tone->envelope_waveform != SBX_ENV_WAVE_NONE)
@@ -3682,7 +3695,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   if (!tone) return SBX_EINVAL;
   if (err && err_sz) err[0] = 0;
 
-  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_NOISE_BEAT) {
+  if (tone->mode < SBX_TONE_NONE || tone->mode > SBX_TONE_ORBIT_BEAT) {
     if (err && err_sz) snprintf(err, err_sz, "%s", "unsupported tone mode");
     return SBX_EINVAL;
   }
@@ -3690,13 +3703,15 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   uses_carrier = (tone->mode == SBX_TONE_BINAURAL ||
                   tone->mode == SBX_TONE_MONAURAL ||
                   tone->mode == SBX_TONE_ISOCHRONIC ||
+                  tone->mode == SBX_TONE_ORBIT_BEAT ||
                   tone->mode == SBX_TONE_BELL ||
                   tone->mode == SBX_TONE_SPIN_PINK ||
                   tone->mode == SBX_TONE_SPIN_BROWN ||
                   tone->mode == SBX_TONE_SPIN_WHITE);
   strict_carrier_positive = (tone->mode == SBX_TONE_BINAURAL ||
                              tone->mode == SBX_TONE_MONAURAL ||
-                             tone->mode == SBX_TONE_ISOCHRONIC);
+                             tone->mode == SBX_TONE_ISOCHRONIC ||
+                             tone->mode == SBX_TONE_ORBIT_BEAT);
 
   /* Legacy .sbg files often use 0+0/0 as a silent placeholder voice lane. */
   if (tone->mode == SBX_TONE_BINAURAL &&
@@ -3710,6 +3725,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     tone->waveform = SBX_WAVE_SINE;
     tone->envelope_waveform = SBX_ENV_WAVE_NONE;
     tone->noise_waveform = SBX_NOISE_WAVE_NONE;
+    tone->orbit_envelope_mode = SBX_ORBIT_ENV_SINE;
     tone->duty_cycle = 0.403014;
     tone->iso_start = 0.048493;
     tone->iso_attack = 0.5;
@@ -3749,9 +3765,10 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
     if (custom_env_idx >= 0 &&
         tone->mode != SBX_TONE_BINAURAL &&
         tone->mode != SBX_TONE_ISOCHRONIC &&
+        tone->mode != SBX_TONE_ORBIT_BEAT &&
         tone->mode != SBX_TONE_NOISE_PULSE &&
         tone->mode != SBX_TONE_NOISE_BEAT) {
-      if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural, isochronic, noisepulse, or noisebeat tones");
+      if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural, isochronic, orbitbeat, noisepulse, or noisebeat tones");
       return SBX_EINVAL;
     }
     if (spin_wave_idx >= 0 && !tone_is_spin) {
@@ -3791,9 +3808,10 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   if (custom_env_idx >= 0 &&
       tone->mode != SBX_TONE_BINAURAL &&
       tone->mode != SBX_TONE_ISOCHRONIC &&
+      tone->mode != SBX_TONE_ORBIT_BEAT &&
       tone->mode != SBX_TONE_NOISE_PULSE &&
       tone->mode != SBX_TONE_NOISE_BEAT) {
-    if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural, isochronic, noisepulse, or noisebeat tones");
+    if (err && err_sz) snprintf(err, err_sz, "%s", "customNN envelopes are only valid for binaural, isochronic, orbitbeat, noisepulse, or noisebeat tones");
     return SBX_EINVAL;
   }
 
@@ -3842,6 +3860,7 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
 
   if (tone->mode == SBX_TONE_MONAURAL ||
       tone->mode == SBX_TONE_ISOCHRONIC ||
+      tone->mode == SBX_TONE_ORBIT_BEAT ||
       tone->mode == SBX_TONE_NOISE_PULSE ||
       tone->mode == SBX_TONE_NOISE_BEAT)
     tone->beat_hz = fabs(tone->beat_hz);
@@ -3851,12 +3870,15 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
   }
 
   if (tone->mode == SBX_TONE_ISOCHRONIC ||
+      tone->mode == SBX_TONE_ORBIT_BEAT ||
       tone->mode == SBX_TONE_NOISE_PULSE) {
     if (!isfinite(tone->beat_hz) || tone->beat_hz <= 0.0) {
       if (err && err_sz) snprintf(err, err_sz, "%s",
                                   tone->mode == SBX_TONE_NOISE_PULSE
                                       ? "noisepulse beat_hz must be > 0"
-                                      : "isochronic beat_hz must be > 0");
+                                      : (tone->mode == SBX_TONE_ORBIT_BEAT
+                                             ? "orbitbeat pulse beat_hz must be > 0"
+                                             : "isochronic beat_hz must be > 0"));
       return SBX_EINVAL;
     }
     if (!isfinite(tone->duty_cycle)) {
@@ -3887,6 +3909,29 @@ normalize_tone(SbxToneSpec *tone, char *err, size_t err_sz) {
       if (err && err_sz) snprintf(err, err_sz, "%s", "iso_edge_mode must be 0..3");
       return SBX_EINVAL;
     }
+  }
+
+  if (tone->mode == SBX_TONE_ORBIT_BEAT) {
+    if (!isfinite(tone->orbit_hz)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "orbitbeat orbit_hz must be finite");
+      return SBX_EINVAL;
+    }
+    if (tone->orbit_envelope_mode != SBX_ORBIT_ENV_SINE &&
+        tone->orbit_envelope_mode != SBX_ORBIT_ENV_ISO) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "orbitbeat envelope mode must be SBX_ORBIT_ENV_*");
+      return SBX_EINVAL;
+    }
+    if (!isfinite(tone->orbit_distance_m)) {
+      if (err && err_sz) snprintf(err, err_sz, "%s", "orbitbeat distance must be finite");
+      return SBX_EINVAL;
+    }
+    tone->orbit_distance_m = sbx_dsp_clamp(tone->orbit_distance_m,
+                                           SBX_ORBIT_MIN_DISTANCE_M,
+                                           SBX_ORBIT_MAX_DISTANCE_M);
+  } else {
+    tone->orbit_hz = 0.0;
+    tone->orbit_distance_m = SBX_ORBIT_DEFAULT_DISTANCE_M;
+    tone->orbit_envelope_mode = SBX_ORBIT_ENV_SINE;
   }
 
   if (tone->mode == SBX_TONE_NOISE_BEAT) {
@@ -4180,6 +4225,102 @@ engine_next_noise_sample_for_tone(SbxEngine *eng,
   return engine_next_noise_mono_for_mode(eng, tone ? tone->mode : SBX_TONE_PINK_NOISE);
 }
 
+static double
+engine_orbit_delay_read(const SbxEngine *eng, double delay_samples) {
+  double read_pos;
+  int i0, i1;
+  double frac;
+
+  if (!eng) return 0.0;
+  delay_samples = sbx_dsp_clamp(delay_samples, 0.0, (double)(SBX_ORBIT_DELAY_SAMPLES - 2));
+  read_pos = (double)eng->orbit_delay_pos - delay_samples;
+  while (read_pos < 0.0)
+    read_pos += (double)SBX_ORBIT_DELAY_SAMPLES;
+  while (read_pos >= (double)SBX_ORBIT_DELAY_SAMPLES)
+    read_pos -= (double)SBX_ORBIT_DELAY_SAMPLES;
+  i0 = (int)floor(read_pos);
+  frac = read_pos - (double)i0;
+  i1 = (i0 + 1) % SBX_ORBIT_DELAY_SAMPLES;
+  return eng->orbit_delay[i0] * (1.0 - frac) + eng->orbit_delay[i1] * frac;
+}
+
+static double
+engine_orbit_lowpass(double x, double *state, double cutoff_hz, double sr) {
+  double alpha;
+  if (!state || !(sr > 0.0)) return x;
+  cutoff_hz = sbx_dsp_clamp(cutoff_hz, 40.0, sr * 0.45);
+  alpha = 1.0 - exp(-SBX_TAU * cutoff_hz / sr);
+  alpha = sbx_dsp_clamp(alpha, 0.0, 1.0);
+  *state += alpha * (x - *state);
+  return *state;
+}
+
+static double
+engine_orbit_default_env(double phase_unit) {
+  phase_unit -= floor(phase_unit);
+  return 0.5 * (1.0 + cos(SBX_TAU * phase_unit));
+}
+
+static void
+engine_orbit_spatialize(SbxEngine *eng,
+                        double mono,
+                        double phase,
+                        double distance_m,
+                        double *out_l,
+                        double *out_r) {
+  double sr, az, lateral, rear, dist_norm, cue_strength;
+  double itd_sec, delay_l, delay_r;
+  double ild_db, gain_l, gain_r, gain_norm, distance_gain;
+  double cutoff_hz;
+  double l, r;
+
+  if (!eng || !out_l || !out_r) return;
+  sr = eng->cfg.sample_rate;
+  if (!(sr > 0.0)) {
+    *out_l = mono;
+    *out_r = mono;
+    return;
+  }
+
+  distance_m = sbx_dsp_clamp(distance_m,
+                             SBX_ORBIT_MIN_DISTANCE_M,
+                             SBX_ORBIT_MAX_DISTANCE_M);
+  az = sbx_dsp_wrap_cycle(phase, SBX_TAU);
+  lateral = sin(az);
+  rear = sbx_dsp_clamp(-cos(az), 0.0, 1.0);
+  dist_norm = (distance_m - 1.0) / (SBX_ORBIT_MAX_DISTANCE_M - 1.0);
+  dist_norm = sbx_dsp_clamp(dist_norm, 0.0, 1.0);
+  cue_strength = sbx_dsp_clamp(1.0 / sqrt(distance_m), 0.35, 1.45);
+
+  itd_sec = SBX_ORBIT_MAX_ITD_SEC * cue_strength * fabs(lateral);
+  delay_l = (lateral > 0.0) ? itd_sec * sr : 0.0;
+  delay_r = (lateral < 0.0) ? itd_sec * sr : 0.0;
+
+  eng->orbit_delay[eng->orbit_delay_pos] = mono;
+  l = engine_orbit_delay_read(eng, delay_l);
+  r = engine_orbit_delay_read(eng, delay_r);
+  eng->orbit_delay_pos = (eng->orbit_delay_pos + 1) % SBX_ORBIT_DELAY_SAMPLES;
+
+  ild_db = 7.0 * cue_strength * lateral;
+  gain_l = pow(10.0, -ild_db / 20.0);
+  gain_r = pow(10.0, ild_db / 20.0);
+  gain_norm = 1.0 / sqrt(0.5 * (gain_l * gain_l + gain_r * gain_r));
+  distance_gain = (distance_m < 1.0)
+                      ? (1.0 + (1.0 - distance_m) * 0.20)
+                      : (1.0 / (1.0 + (distance_m - 1.0) * 0.18));
+
+  cutoff_hz = 18000.0 - rear * 8500.0 - dist_norm * 7000.0;
+  cutoff_hz = sbx_dsp_clamp(cutoff_hz, 4500.0, sr * 0.45);
+
+  l = engine_orbit_lowpass(l * gain_l * gain_norm * distance_gain,
+                           &eng->orbit_lpf_l, cutoff_hz, sr);
+  r = engine_orbit_lowpass(r * gain_r * gain_norm * distance_gain,
+                           &eng->orbit_lpf_r, cutoff_hz, sr);
+
+  *out_l = l;
+  *out_r = r;
+}
+
 static void
 engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
   double sr = eng->cfg.sample_rate;
@@ -4252,6 +4393,39 @@ engine_render_sample(SbxEngine *eng, float *out_l, float *out_r) {
     }
 
     left = right = amp * env * carrier_or_noise;
+  } else if (eng->tone.mode == SBX_TONE_ORBIT_BEAT) {
+    double env = 0.0;
+    double pos;
+    double carrier;
+    double mono;
+    int custom_rc;
+    double inc = SBX_TAU * eng->tone.carrier_hz / sr;
+
+    carrier = engine_wave_runtime_sample(eng, eng->tone.waveform, eng->phase_l, inc);
+    eng->phase_l = sbx_dsp_wrap_cycle(eng->phase_l + inc, SBX_TAU);
+
+    eng->pulse_phase += eng->tone.beat_hz / sr;
+    while (eng->pulse_phase >= 1.0) eng->pulse_phase -= 1.0;
+    pos = eng->pulse_phase;
+
+    custom_rc = engine_custom_env_sample(eng, eng->tone.envelope_waveform, pos, &env);
+    if (custom_rc == 0) {
+      if (eng->tone.orbit_envelope_mode == SBX_ORBIT_ENV_ISO) {
+        env = sbx_dsp_iso_mod_factor_custom(pos,
+                                            eng->tone.iso_start,
+                                            eng->tone.duty_cycle,
+                                            eng->tone.iso_attack,
+                                            eng->tone.iso_release,
+                                            eng->tone.iso_edge_mode);
+      } else {
+        env = engine_orbit_default_env(pos);
+      }
+    }
+
+    mono = amp * env * carrier;
+    engine_orbit_spatialize(eng, mono, eng->phase_r,
+                            eng->tone.orbit_distance_m, &left, &right);
+    eng->phase_r = sbx_dsp_wrap_cycle(eng->phase_r + SBX_TAU * eng->tone.orbit_hz / sr, SBX_TAU);
   } else if (eng->tone.mode == SBX_TONE_NOISE_BEAT) {
     double mono, q, s, c, up, down, env, phase_unit;
 
@@ -4765,6 +4939,9 @@ sbx_interp_direct_tone(const SbxToneSpec *a,
   out->mode = a->mode;
   out->carrier_hz = sbx_lerp(a->carrier_hz, b->carrier_hz, u);
   out->beat_hz = sbx_lerp(a->beat_hz, b->beat_hz, u);
+  out->orbit_hz = sbx_lerp(a->orbit_hz, b->orbit_hz, u);
+  out->orbit_distance_m = sbx_lerp(a->orbit_distance_m, b->orbit_distance_m, u);
+  out->orbit_envelope_mode = a->orbit_envelope_mode;
   out->amplitude = sbx_lerp(a->amplitude, b->amplitude, u);
   out->waveform = a->waveform;
   out->envelope_waveform = a->envelope_waveform;
@@ -4788,6 +4965,9 @@ sbx_tone_needs_default_fade_through(const SbxToneSpec *a,
         fabs(a->beat_hz - b->beat_hz) > 1e-12)
       return 1;
   }
+  if (a->mode == SBX_TONE_ORBIT_BEAT &&
+      a->orbit_envelope_mode != b->orbit_envelope_mode)
+    return 1;
   return 0;
 }
 
@@ -5192,6 +5372,9 @@ sbx_fill_abi_layout_info(SbxAbiLayoutInfo *info) {
   info->audio_writer_config_prefer_float_input_offset = offsetof(SbxAudioWriterConfig, prefer_float_input);
   info->tone_spec_size = sizeof(SbxToneSpec);
   info->tone_spec_amplitude_offset = offsetof(SbxToneSpec, amplitude);
+  info->tone_spec_orbit_hz_offset = offsetof(SbxToneSpec, orbit_hz);
+  info->tone_spec_orbit_distance_m_offset = offsetof(SbxToneSpec, orbit_distance_m);
+  info->tone_spec_orbit_envelope_mode_offset = offsetof(SbxToneSpec, orbit_envelope_mode);
   info->tone_spec_waveform_offset = offsetof(SbxToneSpec, waveform);
   info->tone_spec_noise_waveform_offset = offsetof(SbxToneSpec, noise_waveform);
   info->tone_spec_iso_release_offset = offsetof(SbxToneSpec, iso_release);
@@ -5823,6 +6006,43 @@ sbx_parse_mixam_envelope_option_spec(const char *spec,
 }
 
 static int
+sbx_parse_orbitbeat_params(const char *params, double *out_distance_m) {
+  const char *p;
+
+  if (!out_distance_m) return SBX_EINVAL;
+  p = skip_ws(params);
+  if (!*p) return SBX_OK;
+
+  while (*p) {
+    const char *key;
+    size_t key_len;
+    char *endptr;
+    double val;
+
+    if (*p != ':') return SBX_EINVAL;
+    p++;
+    key = p;
+    while (*p && *p != '=' && *p != ':' && !isspace((unsigned char)*p)) p++;
+    key_len = (size_t)(p - key);
+    if (key_len == 0 || *p != '=') return SBX_EINVAL;
+    p++;
+    errno = 0;
+    val = strtod(p, &endptr);
+    if (endptr == p || errno == ERANGE || !isfinite(val)) return SBX_EINVAL;
+    if ((key_len == 1 && strncasecmp(key, "d", key_len) == 0) ||
+        (key_len == 8 && strncasecmp(key, "distance", key_len) == 0)) {
+      *out_distance_m = val;
+    } else {
+      return SBX_EINVAL;
+    }
+    p = skip_ws(endptr);
+    if (*p && *p != ':') return SBX_EINVAL;
+  }
+
+  return SBX_OK;
+}
+
+static int
 parse_tone_spec_with_default_waveform(const char *spec,
                                       int default_waveform,
                                       SbxToneSpec *out_tone) {
@@ -6002,6 +6222,34 @@ parse_tone_spec_with_default_waveform(const char *spec,
     out_tone->beat_hz = fabs(beat);
     out_tone->amplitude = amp_pct / 100.0;
     return SBX_OK;
+  }
+
+  // Orbit beat: orbitbeat:<carrier><+|@><pulse><orbit>/<amp>[:d=<meters>]
+  {
+    double orbit = 0.0;
+    double distance_m = SBX_ORBIT_DEFAULT_DISTANCE_M;
+    char pulse_mode = 0;
+    if (sscanf(p, "orbitbeat:%lf%c%lf%lf/%lf %n",
+               &carrier, &pulse_mode, &beat, &orbit, &amp_pct, &n) == 5) {
+      const char *tail = skip_ws(p + n);
+      if (sbx_parse_orbitbeat_params(tail, &distance_m) != SBX_OK)
+        return SBX_EINVAL;
+      if ((pulse_mode != '+' && pulse_mode != '@') ||
+          carrier <= 0.0 || !isfinite(carrier) ||
+          !isfinite(beat) || beat == 0.0 ||
+          !isfinite(orbit) ||
+          !isfinite(amp_pct) || amp_pct < 0.0)
+        return SBX_EINVAL;
+      out_tone->mode = SBX_TONE_ORBIT_BEAT;
+      out_tone->carrier_hz = carrier;
+      out_tone->beat_hz = fabs(beat);
+      out_tone->orbit_hz = orbit;
+      out_tone->orbit_distance_m = distance_m;
+      out_tone->orbit_envelope_mode =
+          (pulse_mode == '@') ? SBX_ORBIT_ENV_ISO : SBX_ORBIT_ENV_SINE;
+      out_tone->amplitude = amp_pct / 100.0;
+      return SBX_OK;
+    }
   }
 
   // Isochronic: <carrier>@<pulse>/<amp>
@@ -6724,6 +6972,21 @@ sbx_format_tone_spec(const SbxToneSpec *tone, char *out, size_t out_sz) {
         return SBX_EINVAL;
       return SBX_OK;
     }
+    case SBX_TONE_ORBIT_BEAT: {
+      double pulse = fabs(norm.beat_hz);
+      char pulse_mode = (norm.orbit_envelope_mode == SBX_ORBIT_ENV_ISO) ? '@' : '+';
+      if (fabs(norm.orbit_distance_m - SBX_ORBIT_DEFAULT_DISTANCE_M) > 1e-12) {
+        if (!snprintf_checked(out, out_sz, "%sorbitbeat:%g%c%g%+g/%g:d=%g",
+                              prefix, norm.carrier_hz, pulse_mode, pulse, norm.orbit_hz,
+                              amp_pct, norm.orbit_distance_m))
+          return SBX_EINVAL;
+      } else if (!snprintf_checked(out, out_sz, "%sorbitbeat:%g%c%g%+g/%g",
+                                   prefix, norm.carrier_hz, pulse_mode, pulse,
+                                   norm.orbit_hz, amp_pct)) {
+        return SBX_EINVAL;
+      }
+      return SBX_OK;
+    }
     case SBX_TONE_NOISE_PULSE: {
       double pulse = fabs(norm.beat_hz);
       if (norm.envelope_waveform != SBX_ENV_WAVE_NONE) {
@@ -6832,6 +7095,9 @@ sbx_default_tone_spec(SbxToneSpec *tone) {
   tone->mode = SBX_TONE_NONE;
   tone->carrier_hz = 200.0;
   tone->beat_hz = 10.0;
+  tone->orbit_hz = 0.08;
+  tone->orbit_distance_m = SBX_ORBIT_DEFAULT_DISTANCE_M;
+  tone->orbit_envelope_mode = SBX_ORBIT_ENV_SINE;
   tone->amplitude = 0.5;
   tone->waveform = SBX_WAVE_SINE;
   tone->envelope_waveform = SBX_ENV_WAVE_NONE;
@@ -7873,6 +8139,10 @@ sbx_engine_reset(SbxEngine *eng) {
   eng->noise_hist_pos_m = 0;
   memset(eng->noisebeat_hist, 0, sizeof(eng->noisebeat_hist));
   eng->noisebeat_hist_pos = 0;
+  memset(eng->orbit_delay, 0, sizeof(eng->orbit_delay));
+  eng->orbit_delay_pos = 0;
+  eng->orbit_lpf_l = 0.0;
+  eng->orbit_lpf_r = 0.0;
   eng->bell_env = 0.0;
   eng->bell_tick = 0;
   eng->bell_tick_period = (int)(eng->cfg.sample_rate / 20.0);

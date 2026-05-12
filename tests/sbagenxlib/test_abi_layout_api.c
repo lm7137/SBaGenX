@@ -46,6 +46,9 @@ int main(void) {
   EXPECT_EQ(audio_writer_config_prefer_float_input_offset, offsetof(SbxAudioWriterConfig, prefer_float_input));
   EXPECT_EQ(tone_spec_size, sizeof(SbxToneSpec));
   EXPECT_EQ(tone_spec_amplitude_offset, offsetof(SbxToneSpec, amplitude));
+  EXPECT_EQ(tone_spec_orbit_hz_offset, offsetof(SbxToneSpec, orbit_hz));
+  EXPECT_EQ(tone_spec_orbit_distance_m_offset, offsetof(SbxToneSpec, orbit_distance_m));
+  EXPECT_EQ(tone_spec_orbit_envelope_mode_offset, offsetof(SbxToneSpec, orbit_envelope_mode));
   EXPECT_EQ(tone_spec_waveform_offset, offsetof(SbxToneSpec, waveform));
   EXPECT_EQ(tone_spec_noise_waveform_offset, offsetof(SbxToneSpec, noise_waveform));
   EXPECT_EQ(tone_spec_iso_release_offset, offsetof(SbxToneSpec, iso_release));

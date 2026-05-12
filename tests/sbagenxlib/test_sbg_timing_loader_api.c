@@ -122,6 +122,12 @@ main(void) {
       "custom00: 0 0.25 1 0.25\n"
       "base: custom00:180@4/20\n"
       "NOW base\n";
+  const char *sbg_orbitbeat_text =
+      "custom00: e=0 0 0 1 1 0 0\n"
+      "near: custom00:orbitbeat:220+4+0.25/25:d=0.5\n"
+      "far: custom00:orbitbeat:180+2+0.125/20:d=5\n"
+      "NOW near\n"
+      "+00:00:04 far ->\n";
   const char *sbg_custom_integer_envelope_text =
       "custom00: e=2 0 60 50 70 40 80 20 80 0 100 20 70 50 55 45 60 30 60 35 55 45 55 20 0\n"
       "custom01: e=2 0 50 60 40 45 40 70 40 50 40 55 40 60 30 100 0 85 80 0\n"
@@ -431,6 +437,52 @@ main(void) {
   if (!(abs_sum_window(buf, (size_t)(0.15 * cfg.sample_rate), (size_t)(0.35 * cfg.sample_rate)) >
         abs_sum_window(buf, 0, (size_t)(0.05 * cfg.sample_rate)) * 4.0))
     fail("customNN isochronic render should honor zero-based custom envelope");
+
+  rc = sbx_context_load_sbg_timing_text(ctx, sbg_orbitbeat_text, 0);
+  if (rc != SBX_OK) fail("orbitbeat timing load failed");
+  if (sbx_context_get_keyframe(ctx, 0, &kf) != SBX_OK)
+    fail("orbitbeat first keyframe retrieval failed");
+  if (kf.tone.mode != SBX_TONE_ORBIT_BEAT ||
+      kf.tone.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE ||
+      kf.tone.waveform != SBX_WAVE_TRIANGLE ||
+      kf.tone.orbit_envelope_mode != SBX_ORBIT_ENV_SINE ||
+      fabs(kf.tone.carrier_hz - 220.0) > 1e-6 ||
+      fabs(kf.tone.beat_hz - 4.0) > 1e-6 ||
+      fabs(kf.tone.orbit_hz - 0.25) > 1e-9 ||
+      fabs(kf.tone.orbit_distance_m - 0.5) > 1e-9)
+    fail("orbitbeat first keyframe should preserve customNN, waveform, pulse, orbit, and distance");
+  {
+    char spec_buf[128];
+    if (sbx_format_tone_spec(&kf.tone, spec_buf, sizeof(spec_buf)) != SBX_OK)
+      fail("orbitbeat tone format failed");
+    if (strcmp(spec_buf, "custom00:triangle:orbitbeat:220+4+0.25/25:d=0.5") != 0)
+      fail("orbitbeat formatted tone should round-trip customNN, waveform, and distance");
+  }
+  if (sbx_context_get_keyframe(ctx, 1, &kf) != SBX_OK)
+    fail("orbitbeat second keyframe retrieval failed");
+  if (kf.tone.mode != SBX_TONE_ORBIT_BEAT ||
+      fabs(kf.tone.orbit_hz - 0.125) > 1e-9 ||
+      fabs(kf.tone.orbit_distance_m - 5.0) > 1e-9)
+    fail("orbitbeat second keyframe should preserve orbit and distance");
+  if (sbx_context_sample_tones(ctx, 2.0, 2.0, 1, NULL, &kf.tone) != SBX_OK)
+    fail("orbitbeat transition sample failed");
+  if (kf.tone.mode != SBX_TONE_ORBIT_BEAT ||
+      fabs(kf.tone.carrier_hz - 200.0) > 1e-6 ||
+      fabs(kf.tone.beat_hz - 3.0) > 1e-6 ||
+      fabs(kf.tone.orbit_hz - 0.1875) > 1e-9 ||
+      fabs(kf.tone.orbit_distance_m - 2.75) > 1e-9 ||
+      fabs(kf.tone.amplitude - 0.225) > 1e-9)
+    fail("orbitbeat compatible tone sets should interpolate directly");
+  free(buf);
+  frames = (size_t)(1.1 * cfg.sample_rate);
+  buf = (float *)calloc(frames * 2, sizeof(float));
+  if (!buf) fail("alloc failed (orbitbeat)");
+  if (sbx_context_render_f32(ctx, buf, frames) != SBX_OK)
+    fail("orbitbeat timing render failed");
+  if (!(abs_sum_window(buf, (size_t)(0.20 * cfg.sample_rate), (size_t)(0.75 * cfg.sample_rate)) > 1e-3))
+    fail("orbitbeat timing render should produce non-zero energy");
+  if (!(stereo_diff_window(buf, (size_t)(0.20 * cfg.sample_rate), (size_t)(0.75 * cfg.sample_rate)) > 1e-3))
+    fail("orbitbeat timing render should produce stereo movement");
 
   rc = sbx_context_load_sbg_timing_text(ctx, sbg_custom_integer_envelope_text, 0);
   if (rc != SBX_OK) fail("integer customNN named timing load failed");

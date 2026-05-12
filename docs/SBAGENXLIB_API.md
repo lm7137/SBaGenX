@@ -72,9 +72,12 @@ Core Concepts
 - `SbxContext`: higher-level runtime object with load state (tone, keyframes,
   sequence data, aux tones, mix effects, mix amplitude profile, clock).
 - `SbxToneSpec`: canonical tone description across binaural/monaural/isochronic/
-  noise/bell/spin modes. For isochronic tones it now carries the full runtime
-  envelope (`duty_cycle`, `iso_start`, `iso_attack`, `iso_release`,
-  `iso_edge_mode`), not just duty. It also now carries
+  orbitbeat/noise/bell/spin modes. For isochronic/noisepulse tones it carries the
+  full runtime envelope (`duty_cycle`, `iso_start`, `iso_attack`,
+  `iso_release`, `iso_edge_mode`), not just duty. For `orbitbeat` it carries
+  `orbit_hz`, `orbit_distance_m`, and `orbit_envelope_mode`; `+` selects the
+  sinusoidal monaural-style default envelope, `@` selects an isochronic gate,
+  and `customNN` can replace either built-in envelope. It also now carries
   `envelope_waveform`, which can reference either legacy `waveNN` envelopes
   or literal `customNN` envelopes stored on the context. `customNN`
   definitions may optionally declare `e=0..3` smoothing on the definition
@@ -659,6 +662,8 @@ Supported tone forms include:
 - binaural: `<carrier>+<beat>/<amp>` and `<carrier>-<beat>/<amp>`
 - monaural: `<carrier>M<beat>/<amp>`
 - isochronic: `<carrier>@<pulse>/<amp>`
+- orbitbeat: `orbitbeat:<carrier>+<pulse><orbit>/<amp>[:d=<meters>]`
+- orbitbeat, isochronic-gated: `orbitbeat:<carrier>@<pulse><orbit>/<amp>[:d=<meters>]`
 - bell: `bell<carrier>/<amp>`
 - noise: `white/<amp>`, `pink/<amp>`, `brown/<amp>`
 - spin noise: `spin:<width-us><spin-hz>/<amp>`, `bspin:...`, `wspin:...`

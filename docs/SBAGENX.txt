@@ -342,10 +342,12 @@ global min/max recentering.  Example:
   00:00 base
 
 `customNN` currently supports binaural tones, isochronic tones,
-`noisepulse`, `noisebeat`, and the compatible mix-effect envelopes
+`orbitbeat`, `noisepulse`, `noisebeat`, and the compatible mix-effect envelopes
 `mixpulse`, `mixspin`, and `mixbeat` on the `sbagenxlib` path.  For
-isochronic tones and `noisepulse`, the custom envelope replaces the
-default `-I` pulse shape for that tone.  For `noisebeat`, the custom
+isochronic tones and `noisepulse`, the custom envelope replaces the default
+`-I` pulse shape for that tone.  For `orbitbeat`, the custom envelope replaces
+the selected built-in pulse envelope, whether sinusoidal (`+`) or isochronic
+(`@`).  For `noisebeat`, the custom
 envelope crossfades between centered mono noise and the fully
 beat-shifted stereo result.  For mix effects, the custom envelope
 modulates effect strength while preserving the underlying motion source:
@@ -2204,6 +2206,10 @@ Here are the different types:
   noiseNN/<amp>                       # Custom spectral noise (32 fixed log bands, dB values)
   noisepulse:<pulse>/<amp>            # Pulsed pink-noise bed
   noisebeat:<beat>/<amp>              # Hilbert-shifted binauralized noise bed
+  orbitbeat:<carrier>+<pulse><orbit>/<amp>[:d=<meters>]
+                                      # Sinusoidally pulsed carrier on a horizontal orbit
+  orbitbeat:<carrier>@<pulse><orbit>/<amp>[:d=<meters>]
+                                      # Isochronic-gated carrier on a horizontal orbit
   mix/<amp>                           # Soundtrack input mix
   <carrier><sign><freq>/<amp>         # Binaural tones
   <carrier>/<amp>                      # Sine-wave (a binaural tone with
@@ -2315,6 +2321,8 @@ explicit waveform specifications will use the global setting (default: sine).
 The waveform specification can be applied to:
 - Binaural beats (<carrier><sign><freq>/<amp>)
 - Isochronic tones (<carrier>@<pulse>/<amp>)
+- Orbitbeat tones (orbitbeat:<carrier>+<pulse><orbit>/<amp> or
+  orbitbeat:<carrier>@<pulse><orbit>/<amp>)
 - Simple tones (<carrier>/<amp>)
 - Mixspin effects (triangle:mixspin:<width>+<freq>/<intensity>)
 - Mixpulse effects (square:mixpulse:<pulse>/<intensity>)
@@ -2339,6 +2347,38 @@ as with other tone types. For example, 300@10/20 generates a 300Hz tone
 that pulses at 10Hz with an amplitude of 20%. Unlike binaural beats, 
 isochronic tones can be effective even when not using headphones, as they
 don't rely on the brain combining two slightly different frequencies.
+
+The orbitbeat tone is an SBaGenX tone-generator extension that creates a
+mono carrier, applies a beat-rate amplitude envelope, then spatializes it
+around the listener in the horizontal ear-level plane:
+
+  orbitbeat:<carrier>+<pulse><orbit>/<amp>[:d=<meters>]
+  orbitbeat:<carrier>@<pulse><orbit>/<amp>[:d=<meters>]
+
+The <carrier> is the tone frequency in Hz, <pulse> is the beat-envelope
+rate in Hz, <orbit> is the signed orbit rate in Hz, and <amp> is the
+amplitude on the normal 0-100 scale.  The separator between <carrier> and
+<pulse> selects the envelope: `+` uses the default smooth sinusoidal
+monaural-style envelope, while `@` uses an isochronic gate configurable with
+`-I` / `--iso-params` when no `customNN:` envelope is present.  Positive
+and negative orbit values reverse the direction of travel.  Because the
+orbit rate itself is signed, a clockwise sinusoidal example has two plus
+signs: one for the envelope separator and one for the positive orbit rate.
+The optional `d=` or `distance=` parameter sets the approximate source
+distance in meters:
+
+  near:    orbitbeat:220+4+0.08/25:d=0.6
+  gate:    orbitbeat:220@4+0.08/25:d=0.6
+  far:     orbitbeat:180+2.5+0.04/20:distance=4
+  reverse: orbitbeat:220+4-0.08/25
+
+Distance defaults to 1.0m and is clamped internally to the range 0.25m to
+10.0m.  It is a perceptual distance control, not a room simulator: it changes
+overall level, stereo cue strength, delay scaling, and high-frequency damping
+in the internal HRTF-style approximation.  `customNN:` may be used to replace
+either built-in envelope shape.  Compatible `orbitbeat` tone sets interpolate
+directly, so carrier, pulse, orbit rate, distance, and amplitude can all move
+smoothly over a sequence transition.
 
 The white noise generates a random signal with equal energy at all frequencies.
 It can be used for masking background sounds or as a meditation aid. The

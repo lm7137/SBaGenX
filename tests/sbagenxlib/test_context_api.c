@@ -124,6 +124,27 @@ int main(void) {
         fabs(t.beat_hz - 4.0) > 1e-9 ||
         fabs(t.amplitude - 0.20) > 1e-9)
       fail("custom noisebeat tone parse mismatch");
+    if (sbx_parse_tone_spec("custom00:triangle:orbitbeat:220+4+0.08/25:d=2.5", &t) != SBX_OK)
+      fail("parse custom orbitbeat tone failed");
+    if (t.mode != SBX_TONE_ORBIT_BEAT ||
+        t.envelope_waveform != SBX_ENV_WAVE_CUSTOM_BASE ||
+        t.waveform != SBX_WAVE_TRIANGLE ||
+        t.orbit_envelope_mode != SBX_ORBIT_ENV_SINE ||
+        fabs(t.carrier_hz - 220.0) > 1e-9 ||
+        fabs(t.beat_hz - 4.0) > 1e-9 ||
+        fabs(t.orbit_hz - 0.08) > 1e-9 ||
+        fabs(t.orbit_distance_m - 2.5) > 1e-9 ||
+        fabs(t.amplitude - 0.25) > 1e-9)
+      fail("custom orbitbeat tone parse mismatch");
+    if (sbx_parse_tone_spec("orbitbeat:220@4-0.08/25:distance=3", &t) != SBX_OK)
+      fail("parse distance alias orbitbeat tone failed");
+    if (t.mode != SBX_TONE_ORBIT_BEAT ||
+        t.orbit_envelope_mode != SBX_ORBIT_ENV_ISO ||
+        fabs(t.orbit_hz + 0.08) > 1e-9 ||
+        fabs(t.orbit_distance_m - 3.0) > 1e-9)
+      fail("distance alias orbitbeat tone parse mismatch");
+    if (sbx_parse_tone_spec("orbitbeat:220+4+0.08/25:room=0.3", &t) != SBX_EINVAL)
+      fail("unsupported orbitbeat parameter should be rejected");
   }
   {
     double sec = 0.0;
@@ -209,6 +230,21 @@ int main(void) {
       fail("format custom noisebeat tone failed");
     if (strcmp(spec, "custom00:noise00:triangle:noisebeat:4/20") != 0)
       fail("format custom noisebeat tone should preserve prefixes");
+    if (sbx_parse_tone_spec("custom00:triangle:orbitbeat:220+4+0.08/25:d=2.5", &in) != SBX_OK)
+      fail("parse custom orbitbeat tone for format failed");
+    if (sbx_format_tone_spec(&in, spec, sizeof(spec)) != SBX_OK)
+      fail("format custom orbitbeat tone failed");
+    if (strcmp(spec, "custom00:triangle:orbitbeat:220+4+0.08/25:d=2.5") != 0)
+      fail("format custom orbitbeat tone should preserve prefixes and distance");
+    if (sbx_parse_tone_spec(spec, &out) != SBX_OK)
+      fail("parse custom orbitbeat tone roundtrip failed");
+    if (out.mode != in.mode ||
+        out.envelope_waveform != in.envelope_waveform ||
+        out.waveform != in.waveform ||
+        out.orbit_envelope_mode != in.orbit_envelope_mode ||
+        fabs(out.orbit_hz - in.orbit_hz) > 1e-9 ||
+        fabs(out.orbit_distance_m - in.orbit_distance_m) > 1e-9)
+      fail("custom orbitbeat tone roundtrip mismatch");
   }
   {
     SbxToneSpec t;
@@ -899,6 +935,93 @@ int main(void) {
     fail("spin render output appears silent");
   if (!has_stereo_difference(buf, frames))
     fail("spin render should produce L/R differences");
+
+  {
+    const size_t orbit_frames = (size_t)(cfg.sample_rate * 1.0);
+    const size_t env_frames = (size_t)(cfg.sample_rate * 0.6);
+    float *orbit_env = (float *)calloc(env_frames * 2, sizeof(float));
+    float *orbit_near = (float *)calloc(orbit_frames * 2, sizeof(float));
+    float *orbit_far = (float *)calloc(orbit_frames * 2, sizeof(float));
+    double near_energy, far_energy;
+    if (!orbit_env || !orbit_near || !orbit_far)
+      fail("alloc failed (orbitbeat)");
+
+    if (sbx_context_load_tone_spec(ctx, "orbitbeat:220+2+0/40:d=1") != SBX_OK)
+      fail("load default-envelope orbitbeat tone spec failed");
+    if (sbx_context_render_f32(ctx, orbit_env, env_frames) != SBX_OK)
+      fail("render default-envelope orbitbeat failed");
+    if (!(rms_left_window(orbit_env, (size_t)(0.01 * cfg.sample_rate), (size_t)(0.05 * cfg.sample_rate)) >
+          rms_left_window(orbit_env, (size_t)(0.12 * cfg.sample_rate), (size_t)(0.16 * cfg.sample_rate)) * 1.3))
+      fail("orbitbeat default envelope should be sinusoidal with an initial monaural-style maximum");
+
+    sbx_context_reset(ctx);
+    if (sbx_context_load_tone_spec(ctx, "orbitbeat:220@2+0/40:d=1") != SBX_OK)
+      fail("load isochronic-envelope orbitbeat tone spec failed");
+    memset(orbit_env, 0, env_frames * 2 * sizeof(float));
+    if (sbx_context_render_f32(ctx, orbit_env, env_frames) != SBX_OK)
+      fail("render isochronic-envelope orbitbeat failed");
+    if (!(rms_left_window(orbit_env, (size_t)(0.12 * cfg.sample_rate), (size_t)(0.16 * cfg.sample_rate)) >
+          rms_left_window(orbit_env, (size_t)(0.01 * cfg.sample_rate), (size_t)(0.05 * cfg.sample_rate)) * 1.3))
+      fail("orbitbeat @ envelope should use isochronic-style gating");
+
+    {
+      SbxIsoEnvelopeSpec iso_override;
+      sbx_default_iso_envelope_spec(&iso_override);
+      iso_override.start = 0.0;
+      iso_override.duty = 0.10;
+      iso_override.attack = 0.0;
+      iso_override.release = 0.0;
+      iso_override.edge_mode = 0;
+      if (sbx_context_set_sequence_iso_override(ctx, &iso_override) != SBX_OK)
+        fail("set orbitbeat sequence iso override failed");
+      if (sbx_context_load_sbg_timing_text(ctx,
+            "00:00 orbitbeat:220@2+0/40:d=1\n"
+            "00:01 -\n", 0) != SBX_OK)
+        fail("load overridden @ orbitbeat timing failed");
+      memset(orbit_env, 0, env_frames * 2 * sizeof(float));
+      if (sbx_context_render_f32(ctx, orbit_env, env_frames) != SBX_OK)
+        fail("render overridden @ orbitbeat failed");
+      if (!(rms_left_window(orbit_env, (size_t)(0.01 * cfg.sample_rate), (size_t)(0.04 * cfg.sample_rate)) >
+            rms_left_window(orbit_env, (size_t)(0.12 * cfg.sample_rate), (size_t)(0.16 * cfg.sample_rate)) * 1.3))
+        fail("orbitbeat @ envelope should honor sequence iso overrides");
+
+      if (sbx_context_load_sbg_timing_text(ctx,
+            "00:00 orbitbeat:220+2+0/40:d=1\n"
+            "00:01 -\n", 0) != SBX_OK)
+        fail("load overridden + orbitbeat timing failed");
+      memset(orbit_env, 0, env_frames * 2 * sizeof(float));
+      if (sbx_context_render_f32(ctx, orbit_env, env_frames) != SBX_OK)
+        fail("render overridden + orbitbeat failed");
+      if (!(rms_left_window(orbit_env, (size_t)(0.01 * cfg.sample_rate), (size_t)(0.05 * cfg.sample_rate)) >
+            rms_left_window(orbit_env, (size_t)(0.12 * cfg.sample_rate), (size_t)(0.16 * cfg.sample_rate)) * 1.3))
+        fail("orbitbeat + envelope should ignore sequence iso overrides");
+      if (sbx_context_set_sequence_iso_override(ctx, NULL) != SBX_OK)
+        fail("clear orbitbeat sequence iso override failed");
+    }
+
+    sbx_context_reset(ctx);
+    if (sbx_context_load_tone_spec(ctx, "orbitbeat:220+4+1/30:d=0.5") != SBX_OK)
+      fail("load near orbitbeat tone spec failed");
+    if (sbx_context_render_f32(ctx, orbit_near, orbit_frames) != SBX_OK)
+      fail("render near orbitbeat failed");
+    if (!has_energy(orbit_near, orbit_frames * 2))
+      fail("orbitbeat render output appears silent");
+    if (!has_stereo_difference(orbit_near, orbit_frames))
+      fail("orbitbeat render should produce L/R differences");
+
+    sbx_context_reset(ctx);
+    if (sbx_context_load_tone_spec(ctx, "orbitbeat:220+4+1/30:d=8") != SBX_OK)
+      fail("load far orbitbeat tone spec failed");
+    if (sbx_context_render_f32(ctx, orbit_far, orbit_frames) != SBX_OK)
+      fail("render far orbitbeat failed");
+    near_energy = total_abs(orbit_near, orbit_frames * 2);
+    far_energy = total_abs(orbit_far, orbit_frames * 2);
+    if (!(near_energy > far_energy * 2.0))
+      fail("orbitbeat distance should attenuate far source");
+    free(orbit_env);
+    free(orbit_near);
+    free(orbit_far);
+  }
 
   {
     const size_t spin_frames = (size_t)(cfg.sample_rate * 4.0);
