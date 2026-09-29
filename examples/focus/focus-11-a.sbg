@@ -1,0 +1,21 @@
+## Focus 11 - older FLAC measured sustained state
+## Ground-truth analysis window: 06:54-12:27
+##
+## Persistent measured binaural systems:
+##   169.35-4.00  => L 167.35 / R 171.35 Hz (right high)
+##   408.60+7.40  => L 412.30 / R 404.90 Hz (left high)
+##
+## The broadband bed is approximately pink-like. Amplitudes are conservative
+## audition values preserving the measured hierarchy while totaling 100.
+-SE
+-r 44100
+-R 1000
+-F 15000
+
+off: -
+focus11_old: pink/47 169.35-4.00/25 408.60+7.40/28
+
+00:00:00 off ->
+00:00:15 focus11_old
+00:29:45 focus11_old ->
+00:30:00 off
