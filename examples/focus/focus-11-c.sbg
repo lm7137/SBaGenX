@@ -1,0 +1,21 @@
+## Focus 11 + Gamma + Pink Bed - SBaGenX
+## Source-derived Focus-11 state window: 16:00-27:00
+##
+## Gamma center/sideband structure is reconstructed from the supplied recording.
+## pink/30 restores the broadband noise bed missing from the previous audition.
+## Total tone-set amplitude is kept <= 100 to avoid clipping.
+-SE
+-r 48000
+-R 1000
+-F 15000
+
+off: -
+
+## Alternate: includes the intermittent measured 175/179-Hz binaural pair.
+## pink/30 + remaining components = 99 total amplitude units.
+f11_gamma_theta_pink: pink/30 177-4/8 256.869/8 256.869+80/2 256.869-80/2 323.625/18 323.625+80/4 323.625-80/4 384.875/15 384.875+80/4 384.875-80/4
+
+00:00:00 off ->
+00:00:15 f11_gamma_theta_pink
+00:29:45 f11_gamma_theta_pink ->
+00:30:00 off
